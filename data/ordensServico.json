@@ -1,0 +1,76 @@
+[
+  {
+    "id": "f939ef86-18b2-4679-b1ec-a597ddd600c1",
+    "numeroOS": 1,
+    "clienteId": "550e8400-e29b-41d4-a716-446655440001",
+    "clienteNome": "Maria Santos",
+    "aparelhoId": "48f4bf34-1c87-4b9f-814d-529613e1ce5d",
+    "aparelhoMarca": "asd",
+    "aparelhoModelo": "asd",
+    "imei": "123123123123123",
+    "defeito": "sad",
+    "checklist": [],
+    "servicosARealizarQuais": "asd",
+    "pecasUtilizadas": [
+      {
+        "pecaId": "a840dc1d-63f0-42a6-8e2d-b1d2575d7309",
+        "pecaNome": "Tela",
+        "quantidade": 1,
+        "valorUnitario": 111,
+        "valorTotal": 111
+      }
+    ],
+    "tecnicoId": "",
+    "tecnicoNome": "",
+    "prioridade": "normal",
+    "status": "aguardando_pecas",
+    "custoPecas": 111,
+    "maoDeObra": 23123,
+    "custoTotal": 23234,
+    "precoVenda": 123123,
+    "lucro": 99889,
+    "margemLucro": 429.93,
+    "dataEntrada": "2026-01-28T01:04:45.690Z",
+    "observacoes": "asd",
+    "ativo": false
+  },
+  {
+    "id": "011c9c24-8b2a-483d-a3ec-b56b1e879a84",
+    "numeroOS": 2,
+    "clienteId": "2c7e0093-ed57-497e-9e21-c94675e380c0",
+    "clienteNome": "Larissa",
+    "aparelhoId": "e46f0a44-aafc-474f-ae4f-a14deebf91eb",
+    "aparelhoMarca": "",
+    "aparelhoModelo": "",
+    "imei": "",
+    "defeito": "Aparelho não carrega",
+    "checklist": [],
+    "servicosARealizarQuais": "Troca do C.I de Carga",
+    "pecasUtilizadas": [
+      {
+        "pecaId": "5c2c0135-21ed-4edc-b0b7-083be9146ff0",
+        "pecaNome": "C.I de Carga Poco X3",
+        "quantidade": 1,
+        "valorUnitario": 42,
+        "valorTotal": 42
+      }
+    ],
+    "tecnicoId": "085bca82-3ee6-4e1b-99c1-a92abb94371b",
+    "tecnicoNome": "Guilherme Messias",
+    "prioridade": "normal",
+    "status": "aguardando_pecas",
+    "custoPecas": 42,
+    "maoDeObra": 0,
+    "custoTotal": 42,
+    "precoVenda": 180,
+    "lucro": 138,
+    "margemLucro": 328.57,
+    "dataEntrada": "2026-01-28T18:56:53.218Z",
+    "observacoes": "Aguardando chegar",
+    "ativo": true,
+    "fotosEntrada": [],
+    "fotosSaida": [],
+    "dataConclusao": "2026-01-28T18:57:41.601Z",
+    "dataRetirada": "2026-01-28T18:57:57.732Z"
+  }
+]

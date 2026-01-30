@@ -1,0 +1,22 @@
+[
+  {
+    "id": "c650e17f-e500-4806-9168-afdc33debbf4",
+    "email": "admin@phonecenter.com",
+    "senha": "$2b$10$S95tmAOM.k/UPgPY1//Zd.mHPXedTHG7xcIMtPZaKtBr34bw9uSnO",
+    "nome": "Administrador",
+    "role": "admin",
+    "ativo": true,
+    "dataCadastro": "2026-01-28T13:42:29.726Z",
+    "ultimoAcesso": "2026-01-28T13:42:29.813Z"
+  },
+  {
+    "id": "6a1a3b2a-3063-4e9e-8195-1f06793912cd",
+    "email": "messiasgmgc@gmail.com",
+    "senha": "$2b$10$rxPDZMuplwA/m/SuicEKNujOOnNlFkr3hcivUHqiaWI2ktOgkX28a",
+    "nome": "Guilherme Messias",
+    "role": "operador",
+    "ativo": true,
+    "dataCadastro": "2026-01-28T14:01:10.945Z",
+    "ultimoAcesso": "2026-01-28T19:38:13.895Z"
+  }
+]

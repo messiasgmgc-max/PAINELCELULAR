@@ -1,0 +1,33 @@
+[
+  {
+    "codigoUnico": "TELA01",
+    "nome": "Tela",
+    "custoPeca": 11100,
+    "vendaPeca": 11100001.11,
+    "estoque": 4,
+    "estoqueMinimo": 5,
+    "estoqueMaximo": 100,
+    "ativo": true,
+    "id": "a840dc1d-63f0-42a6-8e2d-b1d2575d7309",
+    "margem": 99900.01,
+    "dataCadastro": "2026-01-28T01:04:25.043Z",
+    "descricao": "",
+    "fornecedor": "",
+    "localizacao": "",
+    "codigoBarras": "",
+    "compatibilidade": ""
+  },
+  {
+    "codigoUnico": "CI",
+    "nome": "C.I de Carga Poco X3",
+    "custoPeca": 4200,
+    "vendaPeca": 4200,
+    "estoque": 0,
+    "estoqueMinimo": 5,
+    "estoqueMaximo": 100,
+    "ativo": true,
+    "id": "5c2c0135-21ed-4edc-b0b7-083be9146ff0",
+    "margem": 0,
+    "dataCadastro": "2026-01-28T18:51:19.587Z"
+  }
+]

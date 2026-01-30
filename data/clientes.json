@@ -1,0 +1,67 @@
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "nome": "João Silva",
+    "email": "joao@example.com",
+    "telefone": "(11) 98765-4321",
+    "cpf": "123.456.789-00",
+    "endereco": "Rua das Flores, 123",
+    "cidade": "São Paulo",
+    "estado": "SP",
+    "cep": "01234-567",
+    "dataCadastro": "2026-01-27T10:00:00.000Z",
+    "ativo": true
+  },
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "nome": "Maria Santos",
+    "email": "maria@example.com",
+    "telefone": "(11) 99876-5432",
+    "cpf": "987.654.321-00",
+    "endereco": "Av. Paulista, 1000",
+    "cidade": "São Paulo",
+    "estado": "SP",
+    "cep": "01311-100",
+    "dataCadastro": "2026-01-26T14:30:00.000Z",
+    "ativo": true
+  },
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440002",
+    "nome": "Pedro Oliveira",
+    "email": "pedro@example.com",
+    "telefone": "(21) 97654-3210",
+    "cpf": "456.789.123-00",
+    "endereco": "Rua do Ouvidor, 50",
+    "cidade": "Rio de Janeiro",
+    "estado": "RJ",
+    "cep": "20040-020",
+    "dataCadastro": "2026-01-25T09:15:00.000Z",
+    "ativo": true
+  },
+  {
+    "nome": "Guilherme",
+    "email": "messiasgmgc@gmail.com",
+    "telefone": "31993586377",
+    "cpf": "02057356655",
+    "endereco": "Rua José de Alencar 251",
+    "cidade": "BETIM",
+    "estado": "MG",
+    "cep": "32655040",
+    "ativo": true,
+    "id": "d6591cfe-0eec-4ed0-8d01-3ac87b032f5e",
+    "dataCadastro": "2026-01-28T00:29:28.792Z"
+  },
+  {
+    "nome": "Larissa",
+    "email": "sem@email.com",
+    "telefone": "31972321544",
+    "cpf": "",
+    "endereco": "",
+    "cidade": "",
+    "estado": "",
+    "cep": "",
+    "ativo": true,
+    "id": "2c7e0093-ed57-497e-9e21-c94675e380c0",
+    "dataCadastro": "2026-01-28T18:50:06.932Z"
+  }
+]
