@@ -8,7 +8,7 @@ import { useAparelhos } from '@/hooks/useAparelhos';
 import { usePecas } from '@/hooks/usePecas';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, GripVertical, Camera, MessageCircle } from 'lucide-react';
 import { OrdemServico, PecaUtilizada, Tecnico, Peca } from '@/lib/db/types';
@@ -466,7 +466,7 @@ export function OrdensTab() {
           <input
             type="text"
             placeholder="Buscar por #OS, cliente, aparelho ou defeito..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+            className="input-glass pl-10"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -479,7 +479,7 @@ export function OrdensTab() {
 
       {/* Formulário */}
       {showForm && (
-        <Card className="p-6 space-y-4 border-2">
+        <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
               {editingId ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço'}
@@ -498,7 +498,7 @@ export function OrdensTab() {
                     name="clienteId"
                     value={formData.clienteId}
                     onChange={(e) => handleSelectChange('clienteId', e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                    className="input-glass"
                   >
                     <option value="">Selecionar cliente</option>
                     {clientes.map(c => (
@@ -518,7 +518,7 @@ export function OrdensTab() {
                     name="aparelhoId"
                     value={formData.aparelhoId}
                     onChange={(e) => handleSelectChange('aparelhoId', e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                    className="input-glass"
                   >
                     <option value="">Nenhum aparelho</option>
                     {aparelhos.filter(a => a.clienteId === formData.clienteId).map(a => (
@@ -542,7 +542,7 @@ export function OrdensTab() {
                   name="tecnicoId"
                   value={formData.tecnicoId}
                   onChange={(e) => handleSelectChange('tecnicoId', e.target.value)}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 >
                   <option value="">Selecionar técnico</option>
                   {tecnicos.map(t => (
@@ -563,7 +563,7 @@ export function OrdensTab() {
                 value={formData.defeito}
                 onChange={handleInputChange}
                 rows={3}
-                className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                className="input-glass"
                 required
               />
             </div>
@@ -576,7 +576,7 @@ export function OrdensTab() {
                 value={formData.servicosARealizarQuais}
                 onChange={handleInputChange}
                 rows={3}
-                className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                className="input-glass"
               />
             </div>
 
@@ -588,7 +588,7 @@ export function OrdensTab() {
                 <select
                   value={pecaSelecionada}
                   onChange={(e) => setPecaSelecionada(e.target.value)}
-                  className="flex-1 p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass flex-1"
                 >
                   <option value="">Selecionar peça</option>
                   {pecas.filter(p => p.estoque > 0).map(p => (
@@ -604,7 +604,7 @@ export function OrdensTab() {
                   value={quantidadePeca}
                   onChange={(e) => setQuantidadePeca(parseInt(e.target.value) || 1)}
                   placeholder="Qtd"
-                  className="w-20 p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass w-20"
                 />
 
                 <Button type="button" onClick={handleAddPeca} variant="outline">
@@ -643,7 +643,7 @@ export function OrdensTab() {
                   value={formData.maoDeObra}
                   onChange={handleInputChange}
                   placeholder="0.00"
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 />
               </div>
 
@@ -656,7 +656,7 @@ export function OrdensTab() {
                   value={formData.precoVenda}
                   onChange={handleInputChange}
                   placeholder="0.00"
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 />
               </div>
             </div>
@@ -668,7 +668,7 @@ export function OrdensTab() {
                   name="prioridade"
                   value={formData.prioridade}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 >
                   <option value="normal">Normal</option>
                   <option value="urgente">Urgente</option>
@@ -682,7 +682,7 @@ export function OrdensTab() {
                   name="status"
                   value={formData.status}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 >
                   <option value="aguardando_pecas">Aguardando Peças</option>
                   <option value="em_andamento">Em Andamento</option>
@@ -727,7 +727,7 @@ export function OrdensTab() {
                 value={formData.observacoes}
                 onChange={handleInputChange}
                 rows={2}
-                className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                className="input-glass"
               />
             </div>
 
@@ -738,19 +738,19 @@ export function OrdensTab() {
             </div>
 
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1">{editingId ? 'Atualizar' : 'Criar'} OS</Button>
+              <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">{editingId ? 'Atualizar' : 'Criar'} OS</Button>
               <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); setFormData(INITIAL_FORM); setSelectedPecas([]); }}>
                 Cancelar
               </Button>
             </div>
           </form>
-        </Card>
+        </GlassCard>
       )}
 
       {/* Modal Novo Cliente */}
       {showModalNovoCliente && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-black border border-gray-700 rounded-lg p-6 w-96 space-y-4 shadow-lg">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold text-white">Novo Cliente</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowModalNovoCliente(false)}>
@@ -760,33 +760,33 @@ export function OrdensTab() {
             <form onSubmit={handleCreateCliente} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Nome *</label>
-                <input type="text" value={formNovoCliente.nome} onChange={(e) => setFormNovoCliente({...formNovoCliente, nome: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" required />
+                <input type="text" value={formNovoCliente.nome} onChange={(e) => setFormNovoCliente({...formNovoCliente, nome: e.target.value})} className="input-glass" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Telefone *</label>
-                <input type="tel" value={formNovoCliente.telefone} onChange={(e) => setFormNovoCliente({...formNovoCliente, telefone: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" required />
+                <input type="tel" value={formNovoCliente.telefone} onChange={(e) => setFormNovoCliente({...formNovoCliente, telefone: e.target.value})} className="input-glass" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Email</label>
-                <input type="email" value={formNovoCliente.email} onChange={(e) => setFormNovoCliente({...formNovoCliente, email: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" />
+                <input type="email" value={formNovoCliente.email} onChange={(e) => setFormNovoCliente({...formNovoCliente, email: e.target.value})} className="input-glass" />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">CPF</label>
-                <input type="text" value={formNovoCliente.cpf} onChange={(e) => setFormNovoCliente({...formNovoCliente, cpf: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" />
+                <input type="text" value={formNovoCliente.cpf} onChange={(e) => setFormNovoCliente({...formNovoCliente, cpf: e.target.value})} className="input-glass" />
               </div>
               <div className="flex gap-2">
                 <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Salvar</Button>
                 <Button type="button" variant="outline" onClick={() => setShowModalNovoCliente(false)}>Cancelar</Button>
               </div>
             </form>
-          </div>
+          </GlassCard>
         </div>
       )}
 
       {/* Modal Novo Técnico */}
       {showModalNovaTecnico && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-black border border-gray-700 rounded-lg p-6 w-96 space-y-4 shadow-lg">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold text-white">Novo Técnico</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowModalNovaTecnico(false)}>
@@ -802,7 +802,7 @@ export function OrdensTab() {
                   value={formNovaTecnico.nome}
                   onChange={(e) => setFormNovaTecnico({...formNovaTecnico, nome: e.target.value})}
                   placeholder="Nome do técnico"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -814,7 +814,7 @@ export function OrdensTab() {
                   value={formNovaTecnico.telefone}
                   onChange={(e) => setFormNovaTecnico({...formNovaTecnico, telefone: e.target.value})}
                   placeholder="(11) 98765-4321"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -826,7 +826,7 @@ export function OrdensTab() {
                   value={formNovaTecnico.email}
                   onChange={(e) => setFormNovaTecnico({...formNovaTecnico, email: e.target.value})}
                   placeholder="email@example.com"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                 />
               </div>
 
@@ -837,23 +837,23 @@ export function OrdensTab() {
                   value={formNovaTecnico.especialidade}
                   onChange={(e) => setFormNovaTecnico({...formNovaTecnico, especialidade: e.target.value})}
                   placeholder="Ex: Tela, Bateria, Placa"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                 />
               </div>
 
               <div className="flex gap-2">
-                <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Criar Técnico</Button>
+                <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">Criar Técnico</Button>
                 <Button type="button" variant="outline" onClick={() => setShowModalNovaTecnico(false)}>Cancelar</Button>
               </div>
             </form>
-          </div>
+          </GlassCard>
         </div>
       )}
 
       {/* Modal Nova Peça */}
       {showModalNovaPeca && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-black border border-gray-700 rounded-lg p-6 w-96 space-y-4 shadow-lg">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold text-white">Nova Peça</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowModalNovaPeca(false)}>
@@ -869,7 +869,7 @@ export function OrdensTab() {
                   value={formNovaPeca.codigoUnico}
                   onChange={(e) => setFormNovaPeca({...formNovaPeca, codigoUnico: e.target.value})}
                   placeholder="Código único"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -881,7 +881,7 @@ export function OrdensTab() {
                   value={formNovaPeca.nome}
                   onChange={(e) => setFormNovaPeca({...formNovaPeca, nome: e.target.value})}
                   placeholder="Nome da peça"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -894,7 +894,7 @@ export function OrdensTab() {
                   value={formNovaPeca.custoPeca}
                   onChange={(e) => setFormNovaPeca({...formNovaPeca, custoPeca: e.target.value})}
                   placeholder="0.00"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -907,24 +907,24 @@ export function OrdensTab() {
                   value={formNovaPeca.vendaPeca}
                   onChange={(e) => setFormNovaPeca({...formNovaPeca, vendaPeca: e.target.value})}
                   placeholder="0.00"
-                  className="w-full p-2 bg-gray-900 border border-gray-600 text-white placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
 
               <div className="flex gap-2">
-                <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Criar Peça</Button>
+                <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">Criar Peça</Button>
                 <Button type="button" variant="outline" onClick={() => setShowModalNovaPeca(false)}>Cancelar</Button>
               </div>
             </form>
-          </div>
+          </GlassCard>
         </div>
       )}
 
       {/* Modal Novo Aparelho (OS) */}
       {showModalNovoAparelho && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-black border border-gray-700 rounded-lg p-6 w-96 space-y-4 shadow-lg">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
             <div className="flex justify-between items-center">
               <h3 className="text-lg font-semibold text-white">Novo Aparelho (Cliente)</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowModalNovoAparelho(false)}>
@@ -934,26 +934,26 @@ export function OrdensTab() {
             <form onSubmit={handleCreateAparelho} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Marca *</label>
-                <input type="text" value={formNovoAparelho.marca} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, marca: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" required />
+                <input type="text" value={formNovoAparelho.marca} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, marca: e.target.value})} className="input-glass" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Modelo *</label>
-                <input type="text" value={formNovoAparelho.modelo} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, modelo: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" required />
+                <input type="text" value={formNovoAparelho.modelo} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, modelo: e.target.value})} className="input-glass" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">IMEI</label>
-                <input type="text" value={formNovoAparelho.imei} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, imei: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" />
+                <input type="text" value={formNovoAparelho.imei} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, imei: e.target.value})} className="input-glass" />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Cor</label>
-                <input type="text" value={formNovoAparelho.cor} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, cor: e.target.value})} className="w-full p-2 bg-gray-900 border border-gray-600 text-white rounded-lg" />
+                <input type="text" value={formNovoAparelho.cor} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, cor: e.target.value})} className="input-glass" />
               </div>
               <div className="flex gap-2">
                 <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Salvar</Button>
                 <Button type="button" variant="outline" onClick={() => setShowModalNovoAparelho(false)}>Cancelar</Button>
               </div>
             </form>
-          </div>
+          </GlassCard>
         </div>
       )}
 
@@ -968,8 +968,8 @@ export function OrdensTab() {
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className={`bg-gray-50 dark:bg-slate-900 rounded-lg p-4 border-2 transition-all min-h-96 ${
-                      snapshot.isDraggingOver ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-slate-800'
+                    className={`bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-[2rem] p-4 border-2 transition-all min-h-96 ${
+                      snapshot.isDraggingOver ? 'border-blue-400 bg-blue-50/20 dark:bg-blue-900/20' : 'border-white/10'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-4 pb-3 border-b-2 border-gray-200">
@@ -987,10 +987,10 @@ export function OrdensTab() {
                             <div
                               ref={provided.innerRef}
                               {...provided.draggableProps}
-                              className={`bg-white dark:bg-slate-800 rounded-lg p-3 border transition-all ${
+                              className={`bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-3 border transition-all ${
                                 snapshot.isDragging
                                   ? 'border-blue-500 shadow-lg ring-2 ring-blue-300'
-                                  : 'border-gray-200 dark:border-slate-700 hover:border-blue-400'
+                                  : 'border-white/20 hover:border-blue-400'
                               } group cursor-move`}
                             >
                               <div className="flex gap-2 items-start">
@@ -1080,8 +1080,8 @@ export function OrdensTab() {
               <div
                 ref={provided.innerRef}
                 {...provided.droppableProps}
-                className={`bg-gray-50 dark:bg-slate-900 rounded-lg p-4 border-2 transition-all min-h-[100px] ${
-                  snapshot.isDraggingOver ? 'border-purple-400 bg-purple-50 dark:bg-purple-900/20' : 'border-gray-200 dark:border-slate-800'
+                className={`bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-[2rem] p-4 border-2 transition-all min-h-[100px] ${
+                  snapshot.isDraggingOver ? 'border-purple-400 bg-purple-50/20 dark:bg-purple-900/20' : 'border-white/10'
                 }`}
               >
                 <div className="space-y-2">
@@ -1091,10 +1091,10 @@ export function OrdensTab() {
                         <div
                           ref={provided.innerRef}
                           {...provided.draggableProps}
-                          className={`bg-white dark:bg-slate-800 rounded-lg p-3 border transition-all flex flex-col sm:flex-row sm:items-center gap-4 ${
+                          className={`bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-3 border transition-all flex flex-col sm:flex-row sm:items-center gap-4 ${
                             snapshot.isDragging
                               ? 'border-purple-500 shadow-lg ring-2 ring-purple-300'
-                              : 'border-gray-200 dark:border-slate-700 hover:border-purple-300'
+                              : 'border-white/20 hover:border-purple-300'
                           } group`}
                         >
                           <div {...provided.dragHandleProps} className="flex-shrink-0 text-gray-400 cursor-move">
@@ -1147,9 +1147,9 @@ export function OrdensTab() {
       </DragDropContext>
 
       {ordensFiltradas.length === 0 && !showForm && (
-        <Card className="p-8 text-center text-gray-500">
+        <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
           <p>Nenhuma ordem de serviço encontrada</p>
-        </Card>
+        </GlassCard>
       )}
     </div>
   );

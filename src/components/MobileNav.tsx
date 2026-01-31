@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   BarChart3,
   Users,
@@ -16,6 +16,8 @@ import {
   Settings,
   ChevronRight,
   Lock,
+  ChevronLeft,
+  LayoutGrid,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -42,9 +44,11 @@ const TABS: Tab[] = [
 interface MobileNavProps {
   currentTab: string;
   onTabChange: (tabId: string) => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-export function MobileNav({ currentTab, onTabChange }: MobileNavProps) {
+export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onToggleCollapse }: MobileNavProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { usuario } = useAuth();
 
@@ -56,10 +60,77 @@ export function MobileNav({ currentTab, onTabChange }: MobileNavProps) {
 
   return (
     <>
-      {/* Botão Menu Hambúrguer - Fixo no canto superior esquerdo */}
+      {/* Sidebar Vertical - Desktop (Sempre Aberta) */}
+      <aside 
+        className={cn(
+          "fixed left-0 top-0 h-screen z-40 hidden md:flex flex-col transition-all duration-300 ease-in-out",
+          "glass backdrop-blur-2xl border-r border-white/20 shadow-2xl",
+          isCollapsed ? "w-20" : "w-64"
+        )}
+      >
+        {/* Header da Sidebar com Botão de Minimizar */}
+        <div className="p-6 flex items-center justify-between border-b border-white/10">
+          {!isCollapsed && (
+            <div className="flex flex-col">
+              <span className="font-bold text-lg text-blue-600">Menu</span>
+              <span className="text-[10px] uppercase tracking-wider text-gray-500">Navegação</span>
+            </div>
+          )}
+          <button 
+            onClick={onToggleCollapse}
+            className={cn(
+              "p-2 hover:bg-white/10 rounded-xl transition-colors text-gray-500",
+              isCollapsed && "mx-auto"
+            )}
+          >
+            {isCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+          </button>
+        </div>
+
+        {/* Lista de Abas */}
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2 no-scrollbar">
+          {tabsToRender.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              className={cn(
+                "w-full flex items-center gap-3 p-3 rounded-2xl transition-all duration-200 group",
+                currentTab === tab.id
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                  : "text-gray-500 hover:bg-white/10 hover:text-gray-900 dark:hover:text-gray-200"
+              )}
+              title={isCollapsed ? tab.label : ""}
+            >
+              <div className={cn(
+                "flex-shrink-0 transition-transform duration-200 group-hover:scale-110",
+                currentTab === tab.id ? "text-white" : "text-gray-400 group-hover:text-blue-500"
+              )}>
+                {tab.icon}
+              </div>
+              {!isCollapsed && (
+                <span className="font-bold text-sm whitespace-nowrap">{tab.label}</span>
+              )}
+              {!isCollapsed && currentTab === tab.id && (
+                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white" />
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer da Sidebar */}
+        {!isCollapsed && (
+          <div className="p-6 border-t border-white/10">
+            <p className="text-[10px] text-center text-gray-400 font-medium">
+              Phone Center &copy; {new Date().getFullYear()}
+            </p>
+          </div>
+        )}
+      </aside>
+
+      {/* Botão Menu Hambúrguer - Apenas Mobile */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed top-3.5 left-4 z-50 p-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-gray-200 dark:border-slate-800 rounded-full shadow-md hover:bg-gray-100 dark:hover:bg-slate-800 transition-all active:scale-95"
+        className="md:hidden fixed top-3.5 left-4 z-50 p-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-gray-200 dark:border-slate-800 rounded-full shadow-md hover:bg-gray-100 dark:hover:bg-slate-800 transition-all active:scale-95"
         aria-label="Abrir menu"
       >
         <Menu className="w-5 h-5 text-gray-700 dark:text-gray-300" />

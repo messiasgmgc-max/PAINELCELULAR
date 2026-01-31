@@ -293,7 +293,7 @@ export function VendasTab() {
     value: vendasFiltradas.filter(v => v.metodo === metodo).reduce((sum, v) => sum + v.valor, 0),
   })).filter(d => d.value > 0);
 
-  const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
+  const COLORS = ['#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff'];
 
   const handleNovoClienteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -498,10 +498,10 @@ export function VendasTab() {
         {/* Modal PDV Completo */}
         {showPOS && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
-            <div className="glass w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] rounded-none sm:rounded-3xl shadow-2xl flex flex-col border border-white/20">
+            <div className="glass w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] rounded-none sm:rounded-[2.5rem] shadow-2xl flex flex-col border border-white/20 overflow-hidden">
               
               {/* Header do PDV */}
-              <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/10 backdrop-blur-md sticky top-0 z-10">
+              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/20 dark:bg-white/5 backdrop-blur-xl sticky top-0 z-20">
                 <div className="flex items-center gap-2">
                   <ShoppingCart className="w-6 h-6 text-blue-600" />
                   <h2 className="text-xl font-bold">{editingId ? 'Editar Venda' : 'Nova Venda'}</h2>
@@ -511,30 +511,32 @@ export function VendasTab() {
                 </Button>
               </div>
 
+              {/* Resumo Fixo (Cards) - Liquid Glass */}
+              <div className="p-4 bg-white/10 dark:bg-black/20 backdrop-blur-md border-b border-white/10 z-10">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">📦 Valor Produtos</p>
+                    <p className="text-lg font-bold">R$ {subtotalCarrinho.toFixed(2)}</p>
+                  </GlassCard>
+                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">💰 Pagamentos</p>
+                    <p className="text-lg font-bold">R$ {posPagamento.valorPago.toFixed(2)}</p>
+                  </GlassCard>
+                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">📉 Saldo</p>
+                    <p className="text-lg font-bold">R$ {saldo.toFixed(2)}</p>
+                  </GlassCard>
+                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">💵 Troco</p>
+                    <p className="text-lg font-bold">R$ {troco.toFixed(2)}</p>
+                  </GlassCard>
+                </div>
+              </div>
+
               <div className="flex-1 overflow-y-auto p-4 space-y-6">
                 
-                {/* Resumo Flutuante (Cards) */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sticky top-0 z-10 bg-white/40 dark:bg-black/40 backdrop-blur-xl p-2 rounded-xl border border-white/20 shadow-lg">
-                  <div className="bg-blue-50/50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100/50 dark:border-blue-800/50">
-                    <p className="text-xs text-blue-600 dark:text-blue-400 font-bold uppercase">📦 Valor Produtos</p>
-                    <p className="text-lg font-bold">R$ {subtotalCarrinho.toFixed(2)}</p>
-                  </div>
-                  <div className="bg-green-50/50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100/50 dark:border-green-800/50">
-                    <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase">💰 Pagamentos</p>
-                    <p className="text-lg font-bold">R$ {posPagamento.valorPago.toFixed(2)}</p>
-                  </div>
-                  <div className="bg-red-50/50 dark:bg-red-900/20 p-3 rounded-lg border border-red-100/50 dark:border-red-800/50">
-                    <p className="text-xs text-red-600 dark:text-red-400 font-bold uppercase">📉 Saldo</p>
-                    <p className="text-lg font-bold">R$ {saldo.toFixed(2)}</p>
-                  </div>
-                  <div className="bg-amber-50/50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100/50 dark:border-amber-800/50">
-                    <p className="text-xs text-amber-600 dark:text-amber-400 font-bold uppercase">💵 Troco</p>
-                    <p className="text-lg font-bold">R$ {troco.toFixed(2)}</p>
-                  </div>
-                </div>
-
                 {/* Seção 1: Dados da Venda */}
-                <GlassCard className="bg-white/50 dark:bg-black/50">
+                <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
                   <div className="pb-3 mb-3 border-b border-white/10">
                     <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <User className="w-4 h-4" /> Dados da Venda
@@ -599,7 +601,7 @@ export function VendasTab() {
                 </GlassCard>
 
                 {/* Seção 2: Itens da Venda */}
-                <GlassCard className="bg-white/50 dark:bg-black/50">
+                <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
                   <div className="pb-3 mb-3 border-b border-white/10">
                     <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <ShoppingCart className="w-4 h-4" /> Itens da Venda
@@ -747,7 +749,7 @@ export function VendasTab() {
                 </GlassCard>
 
                 {/* Seção 3: Pagamento */}
-                <GlassCard className="bg-white/50 dark:bg-black/50">
+                <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
                   <div className="pb-3 mb-3 border-b border-white/10">
                     <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <CreditCard className="w-4 h-4" /> Dados do Pagamento
@@ -822,7 +824,7 @@ export function VendasTab() {
               </div>
 
               {/* Footer Ações */}
-              <div className="p-4 border-t border-white/10 bg-white/10 backdrop-blur-md flex justify-end gap-3 sticky bottom-0">
+              <div className="p-6 border-t border-white/10 bg-white/20 dark:bg-white/5 backdrop-blur-xl flex justify-end gap-3 sticky bottom-0 z-20">
                 <Button variant="outline" onClick={() => { setShowPOS(false); resetPOS(); }} className="gap-2 bg-white/50 hover:bg-white/80 border-white/20">
                   <Ban className="w-4 h-4" /> Cancelar
                 </Button>
@@ -836,7 +838,7 @@ export function VendasTab() {
 
         {/* Cards de Resumo */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <GlassCard hoverEffect={true}>
+          <GlassCard hoverEffect={true} className="rounded-3xl">
             <div className="flex flex-row items-center justify-between pb-2">
               <h3 className="text-xs sm:text-sm font-medium">Total Vendido</h3>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -849,7 +851,7 @@ export function VendasTab() {
             </div>
           </GlassCard>
 
-          <GlassCard hoverEffect={true}>
+          <GlassCard hoverEffect={true} className="rounded-3xl">
             <div className="flex flex-row items-center justify-between pb-2">
               <h3 className="text-xs sm:text-sm font-medium">Lucro Total</h3>
               <TrendingUp className="h-4 w-4 text-green-600" />
@@ -864,7 +866,7 @@ export function VendasTab() {
             </div>
           </GlassCard>
 
-          <GlassCard hoverEffect={true}>
+          <GlassCard hoverEffect={true} className="rounded-3xl">
             <div className="flex flex-row items-center justify-between pb-2">
               <h3 className="text-xs sm:text-sm font-medium">Pagas</h3>
               <Badge variant="default" className="text-xs">{resumoVendas.vendPago}</Badge>
@@ -875,7 +877,7 @@ export function VendasTab() {
             </div>
           </GlassCard>
 
-          <GlassCard hoverEffect={true}>
+          <GlassCard hoverEffect={true} className="rounded-3xl">
             <div className="flex flex-row items-center justify-between pb-2">
               <h3 className="text-xs sm:text-sm font-medium">Pendentes</h3>
               <Badge variant="secondary" className="text-xs">{resumoVendas.vendPendente}</Badge>
@@ -890,7 +892,7 @@ export function VendasTab() {
         {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* Gráfico de Vendas por Período */}
-          <GlassCard>
+          <GlassCard className="rounded-3xl">
             <div className="pb-4 border-b border-white/10 mb-4">
               <h3 className="text-base sm:text-lg font-bold">Vendas por Período</h3>
               <p className="text-xs sm:text-sm text-muted-foreground">Últimos 12 meses</p>
@@ -914,7 +916,7 @@ export function VendasTab() {
           </GlassCard>
 
           {/* Gráfico de Métodos de Pagamento */}
-          <GlassCard>
+          <GlassCard className="rounded-3xl">
             <div className="pb-4 border-b border-white/10 mb-4">
               <h3 className="text-base sm:text-lg font-bold">Métodos de Pagamento</h3>
               <p className="text-xs sm:text-sm text-muted-foreground">Distribuição por método</p>
@@ -953,40 +955,42 @@ export function VendasTab() {
         </div>
 
         {/* Filtros */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-          <input
-            type="text"
-            placeholder="Filtrar por cliente..."
-            value={filtroCliente}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroCliente(e.target.value)}
-            className="input-glass h-10 sm:h-auto"
-          />
-          <select
-            className="input-glass h-10 sm:h-auto"
-            value={filtroStatus}
-            onChange={(e) => setFiltroStatus(e.target.value)}
-          >
-            <option value="">Todos os status</option>
-            <option value="pago">Pago</option>
-            <option value="pendente">Pendente</option>
-            <option value="cancelado">Cancelado</option>
-          </select>
-          <select
-            className="input-glass h-10 sm:h-auto"
-            value={filtroMetodo}
-            onChange={(e) => setFiltroMetodo(e.target.value)}
-          >
-            <option value="">Todos os métodos</option>
-            <option value="dinheiro">Dinheiro</option>
-            <option value="cartao_credito">Cartão Crédito</option>
-            <option value="cartao_debito">Cartão Débito</option>
-            <option value="pix">PIX</option>
-            <option value="boleto">Boleto</option>
-          </select>
-        </div>
+        <GlassCard className="p-4 rounded-3xl">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <input
+              type="text"
+              placeholder="Filtrar por cliente..."
+              value={filtroCliente}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroCliente(e.target.value)}
+              className="input-glass h-10 sm:h-auto"
+            />
+            <select
+              className="input-glass h-10 sm:h-auto"
+              value={filtroStatus}
+              onChange={(e) => setFiltroStatus(e.target.value)}
+            >
+              <option value="">Todos os status</option>
+              <option value="pago">Pago</option>
+              <option value="pendente">Pendente</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+            <select
+              className="input-glass h-10 sm:h-auto"
+              value={filtroMetodo}
+              onChange={(e) => setFiltroMetodo(e.target.value)}
+            >
+              <option value="">Todos os métodos</option>
+              <option value="dinheiro">Dinheiro</option>
+              <option value="cartao_credito">Cartão Crédito</option>
+              <option value="cartao_debito">Cartão Débito</option>
+              <option value="pix">PIX</option>
+              <option value="boleto">Boleto</option>
+            </select>
+          </div>
+        </GlassCard>
 
         {/* Tabela de Vendas */}
-        <GlassCard>
+        <GlassCard className="rounded-3xl">
           <div className="pb-4 border-b border-white/10 mb-4">
             <h3 className="text-base sm:text-lg font-bold">Vendas Registradas</h3>
             <p className="text-xs sm:text-sm text-muted-foreground">{vendasFiltradas.length} vendas</p>
@@ -1080,13 +1084,13 @@ export function VendasTab() {
       {/* Modal Novo Cliente */}
       {showNovoCliente && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
-            <div className="flex flex-row items-center justify-between mb-4">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
               <h3 className="text-lg font-bold">Novo Cliente</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoCliente(false)}><X className="w-4 h-4" /></Button>
             </div>
-            <div>
-              <form onSubmit={handleNovoClienteSubmit} className="space-y-3">
+            <div className="p-6">
+              <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
                 <input type="text" placeholder="Nome *" required className="input-glass" value={novoClienteData.nome} onChange={e => setNovoClienteData({...novoClienteData, nome: e.target.value})} />
                 <input type="tel" placeholder="Telefone *" required className="input-glass" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
                 <input type="email" placeholder="Email" className="input-glass" value={novoClienteData.email} onChange={e => setNovoClienteData({...novoClienteData, email: e.target.value})} />
@@ -1101,13 +1105,13 @@ export function VendasTab() {
       {/* Modal Novo Aparelho */}
       {showNovoAparelho && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
-            <div className="flex flex-row items-center justify-between mb-4">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
               <h3 className="text-lg font-bold">Novo Aparelho</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoAparelho(false)}><X className="w-4 h-4" /></Button>
             </div>
-            <div>
-              <form onSubmit={handleNovoAparelhoSubmit} className="space-y-3">
+            <div className="p-6">
+              <form onSubmit={handleNovoAparelhoSubmit} className="space-y-4">
                 <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
                 <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
                 <input type="text" placeholder="IMEI" className="input-glass" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value})} />

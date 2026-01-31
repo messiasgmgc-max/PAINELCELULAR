@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -63,10 +63,8 @@ export function ConfiguracoesTab() {
         if (data) {
           setNomeLoja(data.nome || '');
           setSubtituloLoja(data.subtitulo || '');
-          // Assumindo que existe um campo logo_url ou similar na tabela lojas
-          // Se não existir, precisará ser criado. Vou usar 'logo_url' como exemplo.
-          // setLogoLoja(data.logo_url);
-          // setPreviewLogo(data.logo_url);
+          setLogoLoja(data.logo_url || null);
+          setPreviewLogo(data.logo_url || null);
         }
       } catch (err) {
         console.error("Erro ao carregar dados da loja", err);
@@ -111,30 +109,57 @@ export function ConfiguracoesTab() {
     alert('Configurações da empresa salvas com sucesso!');
   };
 
-  const handleSalvarLojaConfig = async () => {
-    if (!usuario?.lojaId) return;
-
+  const handleSalvarNomeLoja = async () => {
+    if (!usuario?.lojaId || !nomeLoja) return;
     try {
-      // Atualizar nome da loja
       const { error } = await supabase
         .from('lojas')
-        .update({ 
-          nome: nomeLoja,
-          subtitulo: subtituloLoja
-          // logo_url: logoLoja // Implementar upload de imagem para Storage do Supabase depois
-        })
+        .update({ nome: nomeLoja })
+        .eq('id', usuario.lojaId);
+      if (error) throw error;
+      atualizarNomeLoja(nomeLoja);
+      alert('Nome da loja atualizado com sucesso!');
+    } catch (error: any) {
+      console.error('Erro ao salvar nome:', error);
+      alert(`Erro ao salvar nome: ${error.message}`);
+    }
+  };
+
+  const handleSalvarSubtituloLoja = async () => {
+    if (!usuario?.lojaId) return;
+    try {
+      const { error } = await supabase
+        .from('lojas')
+        .update({ subtitulo: subtituloLoja })
+        .eq('id', usuario.lojaId);
+      if (error) throw error;
+      alert('Subtítulo atualizado com sucesso!');
+    } catch (error: any) {
+      console.error('Erro ao salvar subtítulo:', error);
+      alert(`Erro ao salvar subtítulo: ${error.message}`);
+    }
+  };
+
+  const handleSalvarLogoLoja = async () => {
+    if (!usuario?.lojaId || !logoLoja) {
+      alert('Selecione uma logo primeiro');
+      return;
+    }
+    try {
+      // Nota: Idealmente você usaria Supabase Storage. 
+      // Aqui estamos salvando a string base64 no campo logo_url
+      const { error } = await supabase
+        .from('lojas')
+        .update({ logo_url: logoLoja })
         .eq('id', usuario.lojaId);
 
       if (error) throw error;
 
-      // Atualizar contexto local se necessário
-      atualizarNomeLoja(nomeLoja);
-      if (logoLoja) atualizarLogoLoja(logoLoja);
-
-      alert('Configurações da loja salvas com sucesso!');
+      atualizarLogoLoja(logoLoja);
+      alert('Logo atualizada com sucesso!');
     } catch (error: any) {
-      console.error('Erro ao salvar loja:', JSON.stringify(error, null, 2));
-      alert(`Erro ao salvar configurações da loja: ${error.message || 'Verifique o console para detalhes'}`);
+      console.error('Erro ao salvar logo:', error);
+      alert(`Erro ao salvar logo: ${error.message}`);
     }
   };
 
@@ -200,17 +225,17 @@ export function ConfiguracoesTab() {
 
         {/* Tabs */}
         <Tabs defaultValue="empresa" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-2 h-auto">
-            <TabsTrigger value="empresa" className="text-xs sm:text-sm py-2">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-2 h-auto bg-white/10 dark:bg-white/5 backdrop-blur-xl border border-white/10 p-1.5 rounded-[2rem] mb-6">
+            <TabsTrigger value="empresa" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Empresa
             </TabsTrigger>
-            <TabsTrigger value="notificacoes" className="text-xs sm:text-sm py-2">
+            <TabsTrigger value="notificacoes" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Notificações
             </TabsTrigger>
-            <TabsTrigger value="seguranca" className="text-xs sm:text-sm py-2">
+            <TabsTrigger value="seguranca" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Segurança
             </TabsTrigger>
-            <TabsTrigger value="dados" className="text-xs sm:text-sm py-2">
+            <TabsTrigger value="dados" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Dados
             </TabsTrigger>
           </TabsList>
@@ -219,14 +244,14 @@ export function ConfiguracoesTab() {
           <TabsContent value="empresa">
             <div className="space-y-4 sm:space-y-6">
               {/* Configurar Logo e Nome da Loja */}
-              <Card className="border-2 border-blue-200 bg-blue-50 dark:bg-blue-950/50 dark:border-blue-800">
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg text-blue-900 dark:text-blue-300">Logo e Nome da Loja</CardTitle>
-                  <CardDescription className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
+              <GlassCard className="border-2 border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800 rounded-3xl">
+                <div className="pb-4 border-b border-white/10 mb-4">
+                  <h3 className="text-base sm:text-lg font-bold text-blue-900 dark:text-blue-300">Logo e Nome da Loja</h3>
+                  <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
                     Customize o nome e logo que aparecem no topo do sistema
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                  </p>
+                </div>
+                <div>
                   <div className="space-y-4 sm:space-y-6">
                     {/* Preview da Logo */}
                     <div className="flex items-center gap-4">
@@ -265,55 +290,65 @@ export function ConfiguracoesTab() {
                         <p className="text-xs text-gray-500 mt-2">
                           PNG ou JPG, máximo 25MB
                         </p>
+                        <Button 
+                          onClick={handleSalvarLogoLoja}
+                          size="sm"
+                          className="mt-2 bg-blue-600 hover:bg-blue-700 h-8"
+                        >
+                          Aplicar Logo
+                        </Button>
                       </div>
                     </div>
 
                     {/* Nome da Loja */}
-                    <div>
+                    <div className="flex flex-col gap-2">
                       <label className="text-sm font-medium">Nome da Loja</label>
-                      <input
-                        type="text"
-                        value={nomeLoja}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNomeLoja(e.target.value)}
-                        placeholder="ex: Phone Center, Celular Store..."
-                        className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={nomeLoja}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNomeLoja(e.target.value)}
+                          placeholder="ex: Phone Center, Celular Store..."
+                          className="input-glass flex-1"
+                        />
+                        <Button onClick={handleSalvarNomeLoja} className="bg-blue-600 hover:bg-blue-700">
+                          Aplicar
+                        </Button>
+                      </div>
                       <p className="text-xs text-gray-500 mt-2">
                         Deixe em branco para voltar ao padrão (Phone Center)
                       </p>
                     </div>
 
                     {/* Subtítulo da Loja */}
-                    <div>
+                    <div className="flex flex-col gap-2">
                       <label className="text-sm font-medium">Subtítulo do Cabeçalho</label>
-                      <input
-                        type="text"
-                        value={subtituloLoja}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubtituloLoja(e.target.value)}
-                        placeholder="ex: Sistema de Gestão"
-                        className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={subtituloLoja}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSubtituloLoja(e.target.value)}
+                          placeholder="ex: Sistema de Gestão"
+                          className="input-glass flex-1"
+                        />
+                        <Button onClick={handleSalvarSubtituloLoja} className="bg-blue-600 hover:bg-blue-700">
+                          Aplicar
+                        </Button>
+                      </div>
                     </div>
-
-                    <Button 
-                      onClick={handleSalvarLojaConfig}
-                      className="w-full h-10 sm:h-auto bg-blue-600 hover:bg-blue-700"
-                    >
-                      Salvar Logo e Nome da Loja
-                    </Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </GlassCard>
 
               {/* Informações da Empresa */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg">Informações da Empresa</CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
+              <GlassCard className="rounded-3xl">
+                <div className="pb-4 border-b border-white/10 mb-4">
+                  <h3 className="text-base sm:text-lg font-bold">Informações da Empresa</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
                     Configure os dados da sua empresa
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                  </p>
+                </div>
+                <div>
                   <div className="space-y-4 sm:space-y-6">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div>
@@ -322,7 +357,7 @@ export function ConfiguracoesTab() {
                           type="text"
                           value={nomeEmpresa}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNomeEmpresa(e.target.value)}
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                       <div>
@@ -332,7 +367,7 @@ export function ConfiguracoesTab() {
                           value={cnpj}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCnpj(e.target.value)}
                           placeholder="00.000.000/0000-00"
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                     </div>
@@ -345,7 +380,7 @@ export function ConfiguracoesTab() {
                           value={telefoneEmpresa}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTelefoneEmpresa(e.target.value)}
                           placeholder="(11) 99999-9999"
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                       <div>
@@ -354,7 +389,7 @@ export function ConfiguracoesTab() {
                           type="email"
                           value={emailEmpresa}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmailEmpresa(e.target.value)}
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                     </div>
@@ -366,7 +401,7 @@ export function ConfiguracoesTab() {
                         value={enderecoEmpresa}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEnderecoEmpresa(e.target.value)}
                         placeholder="Rua, número, complemento"
-                        className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                        className="input-glass mt-2"
                       />
                     </div>
 
@@ -377,21 +412,21 @@ export function ConfiguracoesTab() {
                       Salvar Configurações
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </GlassCard>
             </div>
           </TabsContent>
 
           {/* Notificações */}
           <TabsContent value="notificacoes">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base sm:text-lg">Preferências de Notificações</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
+            <GlassCard className="rounded-3xl">
+              <div className="pb-4 border-b border-white/10 mb-4">
+                <h3 className="text-base sm:text-lg font-bold">Preferências de Notificações</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground">
                   Configure como você quer ser notificado
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+                </p>
+              </div>
+              <div>
                 <div className="space-y-4 sm:space-y-6">
                   {/* Canais de Notificação */}
                   <div className="border-b dark:border-slate-700 pb-4 sm:pb-6">
@@ -460,20 +495,20 @@ export function ConfiguracoesTab() {
                     Salvar Preferências
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </GlassCard>
           </TabsContent>
 
           {/* Segurança */}
           <TabsContent value="seguranca">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base sm:text-lg">Segurança</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
+            <GlassCard className="rounded-3xl">
+              <div className="pb-4 border-b border-white/10 mb-4">
+                <h3 className="text-base sm:text-lg font-bold">Segurança</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground">
                   Gerencie a segurança da sua conta
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+                </p>
+              </div>
+              <div>
                 <div className="space-y-4 sm:space-y-6">
                   {/* Usuário Logado */}
                   <div className="bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
@@ -498,7 +533,7 @@ export function ConfiguracoesTab() {
                           type="password"
                           value={senhaAtual}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSenhaAtual(e.target.value)}
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                       <div>
@@ -507,7 +542,7 @@ export function ConfiguracoesTab() {
                           type="password"
                           value={novaSenha}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNovaSenha(e.target.value)}
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                       <div>
@@ -516,7 +551,7 @@ export function ConfiguracoesTab() {
                           type="password"
                           value={confirmarSenha}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmarSenha(e.target.value)}
-                          className="border dark:border-slate-700 dark:bg-slate-800 rounded px-3 py-2 mt-2 h-10 sm:h-auto text-sm w-full"
+                          className="input-glass mt-2"
                         />
                       </div>
                     </div>
@@ -537,22 +572,22 @@ export function ConfiguracoesTab() {
                     Sair da Conta
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </GlassCard>
           </TabsContent>
 
           {/* Dados */}
           <TabsContent value="dados">
             <div className="space-y-4 sm:space-y-6">
               {/* Backup */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg">Backup de Dados</CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
+              <GlassCard className="rounded-3xl">
+                <div className="pb-4 border-b border-white/10 mb-4">
+                  <h3 className="text-base sm:text-lg font-bold">Backup de Dados</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
                     Faça backup de todos os seus dados
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                  </p>
+                </div>
+                <div>
                   <div className="space-y-4">
                     {ultimoBackup && (
                       <div className="bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-800 rounded-lg p-3 sm:p-4">
@@ -569,18 +604,18 @@ export function ConfiguracoesTab() {
                       {backup ? 'Fazendo backup...' : 'Fazer Backup Agora'}
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </GlassCard>
 
               {/* Exportar Dados */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base sm:text-lg">Exportar Dados</CardTitle>
-                  <CardDescription className="text-xs sm:text-sm">
+              <GlassCard className="rounded-3xl">
+                <div className="pb-4 border-b border-white/10 mb-4">
+                  <h3 className="text-base sm:text-lg font-bold">Exportar Dados</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
                     Exporte todos os seus dados em formato CSV
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                  </p>
+                </div>
+                <div>
                   <div className="space-y-3 sm:space-y-4">
                     <div className="text-xs sm:text-sm text-muted-foreground">
                       <p>Escolha quais dados exportar:</p>
@@ -610,8 +645,8 @@ export function ConfiguracoesTab() {
                       Exportar para CSV
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </GlassCard>
             </div>
           </TabsContent>
         </Tabs>

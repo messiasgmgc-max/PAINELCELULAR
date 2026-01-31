@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { X, Plus, Download, Edit2, Search, AlertCircle, Trash2, Phone, Mail } from 'lucide-react';
 import { Tecnico } from '@/lib/db/types';
@@ -143,7 +143,7 @@ export function TecnicosTab() {
           <input
             type="text"
             placeholder="Buscar por nome, email, telefone ou especialidade..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+            className="input-glass pl-10"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -160,7 +160,7 @@ export function TecnicosTab() {
 
       {/* Formulário */}
       {showForm && (
-        <Card className="p-6 space-y-4 border-2">
+        <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
               {editingId ? 'Editar Técnico' : 'Novo Técnico'}
@@ -180,7 +180,7 @@ export function TecnicosTab() {
                   placeholder="Nome completo"
                   value={formData.nome}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -192,7 +192,7 @@ export function TecnicosTab() {
                   placeholder="(11) 98765-4321"
                   value={formData.telefone}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -204,7 +204,7 @@ export function TecnicosTab() {
                   placeholder="email@example.com"
                   value={formData.email}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 />
               </div>
               <div>
@@ -215,7 +215,7 @@ export function TecnicosTab() {
                   placeholder="123.456.789-00"
                   value={formData.cpf}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 />
               </div>
               <div className="md:col-span-2">
@@ -226,24 +226,24 @@ export function TecnicosTab() {
                   placeholder="Ex: Tela, Bateria, Placa, Reparo Geral"
                   value={formData.especialidade}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 />
               </div>
             </div>
             <div className="flex gap-2">
-              <Button type="submit" className="flex-1">{editingId ? 'Atualizar' : 'Criar'} Técnico</Button>
+              <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">{editingId ? 'Atualizar' : 'Criar'} Técnico</Button>
               <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '' }); }}>
                 Cancelar
               </Button>
             </div>
           </form>
-        </Card>
+        </GlassCard>
       )}
 
       {/* Lista de Técnicos */}
       <div className="space-y-3">
         {tecnicosFiltrados.map((tecnico) => (
-          <Card key={tecnico.id} className="p-4 hover:shadow-lg transition-shadow group">
+          <GlassCard key={tecnico.id} className="p-4 hover:shadow-lg transition-shadow group rounded-2xl">
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
@@ -301,20 +301,20 @@ export function TecnicosTab() {
                 </Button>
               </div>
             </div>
-          </Card>
+          </GlassCard>
         ))}
       </div>
 
       {tecnicosFiltrados.length === 0 && !showForm && (
-        <Card className="p-8 text-center text-gray-500">
+        <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
           <p>{searchTerm ? 'Nenhum técnico encontrado' : 'Nenhum técnico cadastrado'}</p>
-        </Card>
+        </GlassCard>
       )}
 
       {loading && (
-        <Card className="p-8 text-center text-gray-500">
+        <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
           <p>Carregando técnicos...</p>
-        </Card>
+        </GlassCard>
       )}
     </div>
   );

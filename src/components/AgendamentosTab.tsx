@@ -5,7 +5,7 @@ import { useAgendamentos } from '@/hooks/useAgendamentos';
 import { useClientes } from '@/hooks/useClientes';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Clock, Phone, User } from 'lucide-react';
 import { Agendamento } from '@/lib/db/types';
@@ -145,7 +145,7 @@ export function AgendamentosTab() {
           <input
             type="text"
             placeholder="Buscar por cliente, telefone ou aparelho..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+            className="input-glass pl-10"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -158,7 +158,7 @@ export function AgendamentosTab() {
 
       {/* Formulário */}
       {showForm && (
-        <Card className="p-6 space-y-4 border-2">
+        <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
               {editingId ? 'Editar Agendamento' : 'Novo Agendamento'}
@@ -176,7 +176,7 @@ export function AgendamentosTab() {
                   name="clienteId"
                   value={formData.clienteId}
                   onChange={(e) => handleClienteChange(e.target.value)}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                   required
                 >
                   <option value="">Selecionar cliente</option>
@@ -193,7 +193,7 @@ export function AgendamentosTab() {
                   name="data"
                   value={formData.data}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -207,7 +207,7 @@ export function AgendamentosTab() {
                   name="telefone"
                   value={formData.telefone}
                   readOnly
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg bg-gray-100 dark:bg-slate-800 text-foreground"
+                  className="input-glass bg-white/10"
                 />
               </div>
 
@@ -217,7 +217,7 @@ export function AgendamentosTab() {
                   name="tecnicoId"
                   value={formData.tecnicoId}
                   onChange={(e) => handleTecnicoChange(e.target.value)}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 >
                   <option value="">Selecionar técnico</option>
                   {tecnicos.map(t => (
@@ -235,7 +235,7 @@ export function AgendamentosTab() {
                 placeholder="Ex: iPhone 13 Pro Preto"
                 value={formData.aparelhoDescricao}
                 onChange={handleInputChange}
-                className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                className="input-glass"
               />
             </div>
 
@@ -247,7 +247,7 @@ export function AgendamentosTab() {
                 value={formData.descricao}
                 onChange={handleInputChange}
                 rows={3}
-                className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                className="input-glass"
                 required
               />
             </div>
@@ -259,7 +259,7 @@ export function AgendamentosTab() {
                   name="status"
                   value={formData.status}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 >
                   <option value="agendado">Agendado</option>
                   <option value="confirmado">Confirmado</option>
@@ -276,7 +276,7 @@ export function AgendamentosTab() {
                   placeholder="Observações adicionais"
                   value={formData.observacoes}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground"
+                  className="input-glass"
                 />
               </div>
             </div>
@@ -290,14 +290,14 @@ export function AgendamentosTab() {
               </Button>
             </div>
           </form>
-        </Card>
+        </GlassCard>
       )}
 
       {/* Listagem */}
       <div className="grid grid-cols-1 gap-3">
         {agendamentosFiltrados.length > 0 ? (
           agendamentosFiltrados.map(agendamento => (
-            <Card key={agendamento.id} className="p-4 border-l-4 border-l-blue-500 hover:shadow-md transition-shadow group">
+            <GlassCard key={agendamento.id} className="p-4 border-l-4 border-l-blue-500 hover:shadow-md transition-shadow group rounded-2xl">
               <div className="flex gap-4">
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-2">
@@ -357,12 +357,12 @@ export function AgendamentosTab() {
                   </Button>
                 </div>
               </div>
-            </Card>
+            </GlassCard>
           ))
         ) : (
-          <Card className="p-8 text-center text-gray-500">
+          <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
             <p>Nenhum agendamento encontrado</p>
-          </Card>
+          </GlassCard>
         )}
       </div>
     </div>

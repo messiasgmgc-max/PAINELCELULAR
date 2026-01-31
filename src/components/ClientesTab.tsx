@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
 import { Users, X, Plus, Download, Edit2, Search } from "lucide-react";
 import { useClientes } from "@/hooks/useClientes";
@@ -192,12 +192,12 @@ export function ClientesTab() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
+      <GlassCard className="rounded-3xl">
+        <div className="pb-4 border-b border-white/10 mb-4">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
-              <CardTitle>Clientes Cadastrados</CardTitle>
-              <p className="text-sm text-muted-foreground">
+              <h3 className="text-base sm:text-lg font-bold">Clientes Cadastrados</h3>
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 Gerencie seus clientes e dados pessoais ({clientes.length} total)
               </p>
             </div>
@@ -216,8 +216,8 @@ export function ClientesTab() {
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        </div>
+        <div className="space-y-4">
           {/* Barra de Busca */}
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -226,14 +226,14 @@ export function ClientesTab() {
               placeholder="Buscar por nome, email ou telefone..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+              className="input-glass pl-10"
             />
           </div>
 
           {/* Formulário de Novo/Editar Cliente */}
           {showForm && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
-              <div className="flex items-center justify-between mb-4">
+            <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
+              <div className="flex items-center justify-between mb-6">
                 <h3 className="font-semibold">
                   {editingId ? "Editar Cliente" : "Adicionar Novo Cliente"}
                 </h3>
@@ -255,7 +255,7 @@ export function ClientesTab() {
                     value={formData.nome}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="email"
@@ -264,7 +264,7 @@ export function ClientesTab() {
                     value={formData.email}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -277,7 +277,7 @@ export function ClientesTab() {
                     value={formData.telefone}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -285,7 +285,7 @@ export function ClientesTab() {
                     placeholder="CPF (opcional)"
                     value={formData.cpf}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -296,7 +296,7 @@ export function ClientesTab() {
                   placeholder="Endereço (opcional)"
                   value={formData.endereco}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                  className="input-glass"
                 />
 
                 {/* Linha 4: Cidade, Estado e CEP */}
@@ -307,7 +307,7 @@ export function ClientesTab() {
                     placeholder="Cidade (opcional)"
                     value={formData.cidade}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -316,7 +316,7 @@ export function ClientesTab() {
                     value={formData.estado}
                     onChange={handleInputChange}
                     maxLength={2}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -324,7 +324,7 @@ export function ClientesTab() {
                     placeholder="CEP (opcional)"
                     value={formData.cep}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -337,7 +337,7 @@ export function ClientesTab() {
                   >
                     Cancelar
                   </Button>
-                  <Button type="submit" disabled={loading}>
+                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
                     {loading
                       ? editingId
                         ? "Atualizando..."
@@ -354,7 +354,7 @@ export function ClientesTab() {
                   </p>
                 )}
               </form>
-            </div>
+            </GlassCard>
           )}
 
           {/* Lista de Clientes */}
@@ -423,8 +423,8 @@ export function ClientesTab() {
               Carregando...
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </GlassCard>
     </div>
   );
 }

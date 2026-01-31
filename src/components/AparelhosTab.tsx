@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
 import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
@@ -439,12 +439,12 @@ export function AparelhosTab() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
+      <GlassCard className="rounded-3xl">
+        <div className="pb-4 border-b border-white/10 mb-4">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
-              <CardTitle>Aparelhos Cadastrados</CardTitle>
-              <p className="text-sm text-muted-foreground">
+              <h3 className="text-base sm:text-lg font-bold">Aparelhos Cadastrados</h3>
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 Gerencie seus aparelhos e gere certificados ({aparelhos.length} total)
               </p>
             </div>
@@ -466,8 +466,8 @@ export function AparelhosTab() {
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        </div>
+        <div className="space-y-4">
           {/* Barra de Busca */}
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -476,14 +476,14 @@ export function AparelhosTab() {
               placeholder="Buscar por marca, modelo, IMEI ou cliente..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+              className="input-glass pl-10"
             />
           </div>
 
           {/* Formulário de Novo/Editar Aparelho */}
           {showForm && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
-              <div className="flex items-center justify-between mb-4">
+            <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
+              <div className="flex items-center justify-between mb-6">
                 <h3 className="font-semibold">
                   {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
                 </h3>
@@ -505,7 +505,7 @@ export function AparelhosTab() {
                     value={formData.marca}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -514,7 +514,7 @@ export function AparelhosTab() {
                     value={formData.modelo}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -529,7 +529,7 @@ export function AparelhosTab() {
                       onChange={handleIMEIChange}
                       maxLength={15}
                       inputMode="numeric"
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <p className="text-xs text-muted-foreground mt-1">
                       {formData.imei.length}/15 dígitos
@@ -541,7 +541,7 @@ export function AparelhosTab() {
                     placeholder="Número de Série (opcional)"
                     value={formData.numeroSerie}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -553,13 +553,13 @@ export function AparelhosTab() {
                     placeholder="Cor (ex: Preto, Branco) (opcional)"
                     value={formData.cor}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <select
                     name="capacidade"
                     value={formData.capacidade}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground"
+                    className="input-glass"
                   >
                     {romOptions.map((rom) => (
                       <option key={rom} value={rom}>
@@ -575,7 +575,7 @@ export function AparelhosTab() {
                     name="condicao"
                     value={formData.condicao}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground"
+                    className="input-glass"
                   >
                     <option value="novo">🆕 Novo</option>
                     <option value="seminovo">⭐ Seminovo</option>
@@ -589,7 +589,7 @@ export function AparelhosTab() {
                       placeholder="Preço em R$"
                       value={formatarPreco(formData.preco)}
                       onChange={handlePrecoChange}
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                   </div>
                 </div>
@@ -610,7 +610,7 @@ export function AparelhosTab() {
                           cliente: clienteSelecionado?.nome || "",
                         }));
                       }}
-                      className="flex-1 px-3 py-2 border rounded-md bg-background text-foreground"
+                      className="input-glass flex-1"
                     >
                       <option value="">Selecione um cliente (opcional)</option>
                       {clientes.map((cliente) => (
@@ -622,7 +622,7 @@ export function AparelhosTab() {
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
+                      size="icon"
                       onClick={() => setShowNovoClientePopup(true)}
                       title="Adicionar novo cliente"
                     >
@@ -638,7 +638,7 @@ export function AparelhosTab() {
                   value={formData.descricao}
                   onChange={handleInputChange}
                   rows={3}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                  className="input-glass"
                 />
 
                 {/* Acessórios */}
@@ -648,7 +648,7 @@ export function AparelhosTab() {
                   value={formData.acessorios}
                   onChange={handleInputChange}
                   rows={2}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                  className="input-glass"
                 />
 
                 {/* Observações */}
@@ -658,7 +658,7 @@ export function AparelhosTab() {
                   value={formData.observacoes}
                   onChange={handleInputChange}
                   rows={2}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                  className="input-glass"
                 />
 
                 {/* Botões */}
@@ -670,7 +670,7 @@ export function AparelhosTab() {
                   >
                     Cancelar
                   </Button>
-                  <Button type="submit" disabled={loading}>
+                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
                     {loading
                       ? editingId
                         ? "Atualizando..."
@@ -687,26 +687,25 @@ export function AparelhosTab() {
                   </p>
                 )}
               </form>
-            </div>
+            </GlassCard>
           )}
 
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-              <Card className="w-full max-w-md">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Adicionar Novo Cliente</CardTitle>
-                    <button
-                      onClick={() => setShowNovoClientePopup(false)}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleNovoClienteSubmit} className="space-y-3">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
+                <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+                  <h3 className="text-lg font-bold">Adicionar Novo Cliente</h3>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setShowNovoClientePopup(false)}
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="p-6">
+                  <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
                     <input
                       type="text"
                       placeholder="Nome *"
@@ -718,7 +717,7 @@ export function AparelhosTab() {
                         }))
                       }
                       required
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="email"
@@ -731,7 +730,7 @@ export function AparelhosTab() {
                         }))
                       }
                       required
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="tel"
@@ -744,7 +743,7 @@ export function AparelhosTab() {
                         }))
                       }
                       required
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="text"
@@ -756,7 +755,7 @@ export function AparelhosTab() {
                           cpf: e.target.value,
                         }))
                       }
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="text"
@@ -768,7 +767,7 @@ export function AparelhosTab() {
                           endereco: e.target.value,
                         }))
                       }
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="text"
@@ -780,7 +779,7 @@ export function AparelhosTab() {
                           cidade: e.target.value,
                         }))
                       }
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="text"
@@ -792,7 +791,7 @@ export function AparelhosTab() {
                           estado: e.target.value,
                         }))
                       }
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                     <input
                       type="text"
@@ -804,7 +803,7 @@ export function AparelhosTab() {
                           cep: e.target.value,
                         }))
                       }
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
 
                     <div className="flex gap-2 justify-end pt-2">
@@ -815,11 +814,11 @@ export function AparelhosTab() {
                       >
                         Cancelar
                       </Button>
-                      <Button type="submit">Adicionar Cliente</Button>
+                      <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Adicionar Cliente</Button>
                     </div>
                   </form>
-                </CardContent>
-              </Card>
+                </div>
+              </GlassCard>
             </div>
           )}
 
@@ -901,18 +900,18 @@ export function AparelhosTab() {
               Carregando...
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </GlassCard>
 
       {/* Modal de Saídas */}
       {showSaidas && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col">
-            <CardHeader className="flex flex-row items-center justify-between border-b">
-              <CardTitle className="flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</CardTitle>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-4xl max-h-[90vh] flex flex-col !p-0 rounded-[2.5rem] overflow-hidden">
+            <div className="p-6 border-b border-white/10 flex flex-row items-center justify-between bg-white/10">
+              <h3 className="text-lg font-bold flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)}><X className="h-5 w-5" /></Button>
-            </CardHeader>
-            <CardContent className="overflow-y-auto p-0">
+            </div>
+            <div className="overflow-y-auto p-6">
               <div className="divide-y">
                 {saidas.length === 0 ? (
                   <p className="p-8 text-center text-muted-foreground">Nenhuma saída registrada.</p>
@@ -932,8 +931,8 @@ export function AparelhosTab() {
                   ))
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
       )}
     </div>

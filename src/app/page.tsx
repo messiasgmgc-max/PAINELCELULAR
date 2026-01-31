@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
@@ -26,9 +27,10 @@ import {
 
 export default function Home() {
   const { usuario, logout, loading } = useAuth();
-  const { config, atualizarNomeLoja } = useStoreConfig();
+  const { config, atualizarNomeLoja, atualizarLogoLoja } = useStoreConfig();
   
   const [currentTab, setCurrentTab] = useState('dashboard');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [subtitulo, setSubtitulo] = useState('Sistema de Gestão');
 
@@ -46,15 +48,16 @@ export default function Home() {
   useEffect(() => {
     const fetchLoja = async () => {
       if (usuario?.lojaId) {
-        const { data } = await supabase.from('lojas').select('nome, subtitulo').eq('id', usuario.lojaId).single();
+        const { data } = await supabase.from('lojas').select('nome, subtitulo, logo_url').eq('id', usuario.lojaId).single();
         if (data) {
           if (data.subtitulo) setSubtitulo(data.subtitulo);
           if (data.nome) atualizarNomeLoja(data.nome);
+          if (data.logo_url) atualizarLogoLoja(data.logo_url);
         }
       }
     };
     fetchLoja();
-  }, [usuario?.lojaId, atualizarNomeLoja]);
+  }, [usuario?.lojaId, atualizarNomeLoja, atualizarLogoLoja]);
 
   console.debug('Dashboard: render check', { loading, usuario: usuario?.email });
 
@@ -91,8 +94,11 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header - Mobile optimized */}
-      <header className="border-b border-white/20 bg-white/30 dark:bg-black/30 backdrop-blur-md sticky top-0 z-30 h-16">
-        <div className="px-4 h-full relative flex items-center justify-between">
+      <header className={cn(
+        "sticky top-0 z-30 h-20 transition-all duration-300 flex items-center px-4",
+        isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
+      )}>
+        <div className="w-full h-14 glass backdrop-blur-md rounded-2xl border border-white/20 flex items-center justify-between px-4 shadow-lg relative">
             {/* Spacer para o botão do menu (esquerda) */}
             <div className="w-10" />
 
@@ -155,10 +161,18 @@ export default function Home() {
       </header>
 
       {/* Mobile Navigation - acima do conteúdo */}
-      <MobileNav currentTab={currentTab} onTabChange={setCurrentTab} />
+      <MobileNav 
+        currentTab={currentTab} 
+        onTabChange={setCurrentTab} 
+        isCollapsed={isSidebarCollapsed} 
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+      />
 
       {/* Main Content - flex-1 para ocupar espaço */}
-      <main className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6 w-full pb-24 sm:pb-6">
+      <main className={cn(
+        "flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6 pb-24 sm:pb-6 transition-all duration-300",
+        isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
+      )}>
         {renderCurrentTab()}
       </main>
     </div>

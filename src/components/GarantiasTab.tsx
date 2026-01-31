@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useGarantias } from '@/hooks/useGarantias';
 import { useOrdensServico } from '@/hooks/useOrdensServico';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Clock, Shield, AlertTriangle } from 'lucide-react';
 import { Garantia } from '@/lib/db/types';
@@ -193,18 +193,18 @@ export function GarantiasTab() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-4 border-l-4 border-l-blue-500">
+        <GlassCard className="p-4 border-l-4 border-l-blue-500 rounded-2xl">
           <p className="text-sm text-gray-600">Total de Garantias</p>
           <p className="text-2xl font-bold text-blue-600">{garantias.length}</p>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-green-500">
+        </GlassCard>
+        <GlassCard className="p-4 border-l-4 border-l-green-500 rounded-2xl">
           <p className="text-sm text-gray-600">Garantias Vigentes</p>
           <p className="text-2xl font-bold text-green-600">{garantiasVigentes.length}</p>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-red-500">
+        </GlassCard>
+        <GlassCard className="p-4 border-l-4 border-l-red-500 rounded-2xl">
           <p className="text-sm text-gray-600">Garantias Expiradas</p>
           <p className="text-2xl font-bold text-red-600">{garantiasExpiradas.length}</p>
-        </Card>
+        </GlassCard>
       </div>
 
       <div className="flex gap-2 flex-wrap items-center mb-4">
@@ -213,7 +213,7 @@ export function GarantiasTab() {
           <input
             type="text"
             placeholder="Buscar por cliente, aparelho ou OS..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-glass pl-10"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -222,7 +222,7 @@ export function GarantiasTab() {
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value as any)}
-          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input-glass w-auto"
         >
           <option value="todas">Todas</option>
           <option value="vigentes">Vigentes</option>
@@ -237,7 +237,7 @@ export function GarantiasTab() {
 
       {/* Formulário */}
       {showForm && (
-        <Card className="p-6 space-y-4 border-2">
+        <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
               {editingId ? 'Editar Garantia' : 'Nova Garantia'}
@@ -255,7 +255,7 @@ export function GarantiasTab() {
                   name="osId"
                   value={formData.osId}
                   onChange={(e) => handleOsChange(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 >
                   <option value="">Selecionar OS</option>
@@ -274,7 +274,7 @@ export function GarantiasTab() {
                   name="dataInicio"
                   value={formData.dataInicio}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -288,7 +288,7 @@ export function GarantiasTab() {
                   name="diasGarantia"
                   value={formData.diasGarantia}
                   onChange={handleInputChange}
-                  className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-glass"
                   required
                 />
               </div>
@@ -299,7 +299,7 @@ export function GarantiasTab() {
                   type="text"
                   value={formData.clienteNome}
                   readOnly
-                  className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100"
+                  className="input-glass bg-white/10"
                 />
               </div>
             </div>
@@ -310,7 +310,7 @@ export function GarantiasTab() {
                 type="text"
                 value={formData.aparelhoDescricao}
                 readOnly
-                className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100"
+                className="input-glass bg-white/10"
               />
             </div>
 
@@ -322,7 +322,7 @@ export function GarantiasTab() {
                 value={formData.descricao}
                 onChange={handleInputChange}
                 rows={2}
-                className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="input-glass"
               />
             </div>
 
@@ -354,7 +354,7 @@ export function GarantiasTab() {
                 <select
                   value={novoHistorico.acao}
                   onChange={(e) => setNovoHistorico(prev => ({ ...prev, acao: e.target.value }))}
-                  className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+                  className="input-glass flex-1 text-sm"
                 >
                   <option value="">Selecionar ação</option>
                   <option value="Troca">Troca</option>
@@ -367,7 +367,7 @@ export function GarantiasTab() {
                   placeholder="Descrição (opcional)"
                   value={novoHistorico.descricao}
                   onChange={(e) => setNovoHistorico(prev => ({ ...prev, descricao: e.target.value }))}
-                  className="flex-1 p-2 border border-gray-300 rounded-lg text-sm"
+                  className="input-glass flex-1 text-sm"
                 />
                 <Button
                   type="button"
@@ -389,7 +389,7 @@ export function GarantiasTab() {
               </Button>
             </div>
           </form>
-        </Card>
+        </GlassCard>
       )}
 
       {/* Listagem */}
@@ -400,7 +400,7 @@ export function GarantiasTab() {
             const isVigente = diasRestantes > 0;
 
             return (
-              <Card
+              <GlassCard
                 key={garantia.id}
                 className={`p-4 border-l-4 hover:shadow-md transition-shadow group ${
                   isVigente ? 'border-l-green-500' : 'border-l-red-500'
@@ -473,13 +473,13 @@ export function GarantiasTab() {
                     </Button>
                   </div>
                 </div>
-              </Card>
+              </GlassCard>
             );
           })
         ) : (
-          <Card className="p-8 text-center text-gray-500">
+          <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
             <p>Nenhuma garantia encontrada</p>
-          </Card>
+          </GlassCard>
         )}
       </div>
     </div>

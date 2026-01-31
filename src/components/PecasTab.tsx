@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
 import { X, Plus, Download, Edit2, Search, Package, AlertCircle } from "lucide-react";
 import { usePecas } from "@/hooks/usePecas";
@@ -227,12 +227,12 @@ export function PecasTab() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
+      <GlassCard className="rounded-3xl">
+        <div className="pb-4 border-b border-white/10 mb-4">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
-              <CardTitle>Peças em Estoque</CardTitle>
-              <p className="text-sm text-muted-foreground">
+              <h3 className="text-base sm:text-lg font-bold">Peças em Estoque</h3>
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 Gerencie peças e componentes ({pecas.length} total)
               </p>
             </div>
@@ -251,8 +251,8 @@ export function PecasTab() {
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        </div>
+        <div className="space-y-4">
           {/* Barra de Busca */}
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -261,14 +261,14 @@ export function PecasTab() {
               placeholder="Buscar por nome, código ou fornecedor..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+              className="input-glass pl-10"
             />
           </div>
 
           {/* Formulário */}
           {showForm && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
-              <div className="flex items-center justify-between mb-4">
+            <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
+              <div className="flex items-center justify-between mb-6">
                 <h3 className="font-semibold">
                   {editingId ? "Editar Peça" : "Nova Peça"}
                 </h3>
@@ -290,7 +290,7 @@ export function PecasTab() {
                     value={formData.codigoUnico}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -299,7 +299,7 @@ export function PecasTab() {
                     value={formData.nome}
                     onChange={handleInputChange}
                     required
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -313,7 +313,7 @@ export function PecasTab() {
                       placeholder="R$ 0,00"
                       value={formatarPreco(formData.custoPeca)}
                       onChange={handlePrecoChange}
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                   </div>
                   <div>
@@ -324,7 +324,7 @@ export function PecasTab() {
                       placeholder="R$ 0,00"
                       value={formatarPreco(formData.vendaPeca)}
                       onChange={handlePrecoChange}
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                      className="input-glass"
                     />
                   </div>
                 </div>
@@ -339,7 +339,7 @@ export function PecasTab() {
                       value={formData.estoque}
                       onChange={handleInputChange}
                       min="0"
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
+                      className="input-glass"
                     />
                   </div>
                   <div>
@@ -350,7 +350,7 @@ export function PecasTab() {
                       value={formData.estoqueMinimo}
                       onChange={handleInputChange}
                       min="0"
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
+                      className="input-glass"
                     />
                   </div>
                   <div>
@@ -361,7 +361,7 @@ export function PecasTab() {
                       value={formData.estoqueMaximo}
                       onChange={handleInputChange}
                       min="0"
-                      className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
+                      className="input-glass"
                     />
                   </div>
                 </div>
@@ -373,7 +373,7 @@ export function PecasTab() {
                   value={formData.descricao}
                   onChange={handleInputChange}
                   rows={2}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                  className="input-glass"
                 />
 
                 {/* Fornecedor e Localização */}
@@ -384,7 +384,7 @@ export function PecasTab() {
                     placeholder="Fornecedor (opcional)"
                     value={formData.fornecedor}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -392,7 +392,7 @@ export function PecasTab() {
                     placeholder="Localização Física (opcional)"
                     value={formData.localizacao}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -404,7 +404,7 @@ export function PecasTab() {
                     placeholder="Código de Barras (opcional)"
                     value={formData.codigoBarras}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                   <input
                     type="text"
@@ -412,7 +412,7 @@ export function PecasTab() {
                     placeholder="Compatibilidade (ex: iPhone 13) (opcional)"
                     value={formData.compatibilidade}
                     onChange={handleInputChange}
-                    className="px-3 py-2 border rounded-md bg-background text-foreground placeholder-muted-foreground"
+                    className="input-glass"
                   />
                 </div>
 
@@ -421,7 +421,7 @@ export function PecasTab() {
                   <Button type="button" variant="outline" onClick={handleCancel}>
                     Cancelar
                   </Button>
-                  <Button type="submit" disabled={loading}>
+                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
                     {loading
                       ? editingId
                         ? "Atualizando..."
@@ -436,7 +436,7 @@ export function PecasTab() {
                   <p className="text-sm text-red-600 dark:text-red-400">Erro: {error}</p>
                 )}
               </form>
-            </div>
+            </GlassCard>
           )}
 
           {/* Lista de Peças */}
@@ -519,8 +519,8 @@ export function PecasTab() {
           {loading && !showForm && (
             <p className="text-sm text-muted-foreground text-center">Carregando...</p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </GlassCard>
     </div>
   );
 }
