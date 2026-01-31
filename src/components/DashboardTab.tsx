@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useOrdensServico } from '@/hooks/useOrdensServico';
 import { usePecas } from '@/hooks/usePecas';
 import { useTecnicos } from '@/hooks/useTecnicos';
-import { Card } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, Users, Zap, Package, DollarSign, Target, Calendar, ShoppingBag, Wrench } from 'lucide-react';
@@ -190,7 +190,7 @@ export function DashboardTab() {
   return (
     <div className="space-y-6">
       {/* Filtro de Data */}
-      <div className="flex flex-col sm:flex-row gap-4 items-end sm:items-center bg-white dark:bg-slate-900 p-4 rounded-lg border shadow-sm">
+      <GlassCard className="flex flex-col sm:flex-row gap-4 items-end sm:items-center">
         <div className="flex items-center gap-2 text-blue-600 font-medium">
           <Calendar className="w-5 h-5" />
           <span>Período:</span>
@@ -215,32 +215,32 @@ export function DashboardTab() {
             />
           </div>
         </div>
-      </div>
+      </GlassCard>
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Faturamento Geral */}
-        <Card className="p-6 space-y-2 border-2 border-blue-100 dark:border-blue-900 bg-card dark:bg-slate-950">
+        <GlassCard className="space-y-2" hoverEffect={true}>
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-muted-foreground">Faturamento Geral</p>
             <DollarSign className="w-5 h-5 text-blue-600" />
           </div>
           <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">R$ {kpis.totalReceita.toFixed(2).replace('.', ',')}</p>
           <p className="text-xs text-muted-foreground">OS + Vendas</p>
-        </Card>
+        </GlassCard>
 
         {/* Lucro Geral */}
-        <Card className="p-6 space-y-2 border-2 border-green-100 dark:border-green-900 bg-card dark:bg-slate-950">
+        <GlassCard className="space-y-2" hoverEffect={true}>
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-muted-foreground">Lucro Líquido</p>
             <TrendingUp className="w-5 h-5 text-green-600" />
           </div>
           <p className="text-2xl font-bold text-green-600 dark:text-green-400">R$ {kpis.totalLucro.toFixed(2).replace('.', ',')}</p>
           <p className="text-xs text-muted-foreground">Margem Global: {kpis.margemLucro}%</p>
-        </Card>
+        </GlassCard>
 
         {/* Serviços (OS) */}
-        <Card className="p-6 space-y-2 border-2 border-purple-100 dark:border-purple-900 bg-card dark:bg-slate-950">
+        <GlassCard className="space-y-2" hoverEffect={true}>
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-muted-foreground">Serviços (OS)</p>
             <Wrench className="w-5 h-5 text-purple-600" />
@@ -250,10 +250,10 @@ export function DashboardTab() {
             <span>Lucro: R$ {kpis.osLucro.toFixed(2)}</span>
             <span>{kpis.osEntregue} / {kpis.osCount} Entregues</span>
           </div>
-        </Card>
+        </GlassCard>
 
         {/* Vendas */}
-        <Card className="p-6 space-y-2 border-2 border-amber-100 dark:border-amber-900 bg-card dark:bg-slate-950">
+        <GlassCard className="space-y-2" hoverEffect={true}>
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-muted-foreground">Vendas Diretas</p>
             <ShoppingBag className="w-5 h-5 text-amber-600" />
@@ -263,13 +263,13 @@ export function DashboardTab() {
             <span>Lucro: R$ {kpis.vendasLucro.toFixed(2)}</span>
             <span>{kpis.vendasCount} Vendas</span>
           </div>
-        </Card>
+        </GlassCard>
       </div>
 
       {/* Gráficos */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Comparativo OS vs Vendas */}
-        <Card className="p-4 lg:col-span-2 border-2">
+        <GlassCard className="lg:col-span-2">
           <h3 className="text-sm font-semibold mb-4">Desempenho Financeiro (OS vs Vendas)</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData}>
@@ -312,10 +312,10 @@ export function DashboardTab() {
               />
             </LineChart>
           </ResponsiveContainer>
-        </Card>
+        </GlassCard>
 
         {/* Status das OS - Gráfico de Pizza */}
-        <Card className="p-4 border-2">
+        <GlassCard>
           <h3 className="text-sm font-semibold mb-4">Status das OS</h3>
           <div className="flex flex-col sm:flex-row items-center gap-4">
             <div className="w-full sm:w-1/2 h-[250px]">
@@ -350,13 +350,13 @@ export function DashboardTab() {
               ))}
             </div>
           </div>
-        </Card>
+        </GlassCard>
       </div>
 
       {/* Top Técnicos e Peças */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Top Técnicos */}
-        <Card className="p-6 space-y-4 border-2">
+        <GlassCard className="space-y-4">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Users className="w-4 h-4 text-blue-600" />
             Top 5 Técnicos
@@ -380,10 +380,10 @@ export function DashboardTab() {
               <p className="text-sm text-gray-500">Nenhum dado disponível</p>
             )}
           </div>
-        </Card>
+        </GlassCard>
 
         {/* Top Peças */}
-        <Card className="p-6 space-y-4 border-2">
+        <GlassCard className="space-y-4">
           <h3 className="text-sm font-semibold flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-600" />
             Top 5 Peças
@@ -407,14 +407,14 @@ export function DashboardTab() {
               <p className="text-sm text-gray-500">Nenhum dado disponível</p>
             )}
           </div>
-        </Card>
+        </GlassCard>
       </div>
 
       {/* Aviso se não há dados */}
       {ordensServico.length === 0 && (
-        <Card className="p-8 text-center text-gray-500 border-2 border-dashed">
+        <GlassCard className="text-center text-gray-500">
           <p className="text-sm">Nenhuma ordem de serviço registrada. Os gráficos aparecerão quando houver dados.</p>
-        </Card>
+        </GlassCard>
       )}
     </div>
   );

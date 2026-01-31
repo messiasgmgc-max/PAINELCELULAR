@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -481,15 +481,15 @@ export function VendasTab() {
         {/* Header com Botão */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">Vendas</h1>
-            <p className="text-sm text-muted-foreground">Controle de vendas e faturamento</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Vendas</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Controle de vendas e faturamento</p>
           </div>
           <Button 
             onClick={() => {
               setShowPOS(true);
               if (editingId) setEditingId(null);
             }}
-            className="w-full sm:w-auto h-10 sm:h-auto"
+            className="btn-ios w-full sm:w-auto flex items-center justify-center gap-2 h-auto"
           >
             + Nova Venda
           </Button>
@@ -497,11 +497,11 @@ export function VendasTab() {
 
         {/* Modal PDV Completo */}
         {showPOS && (
-          <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
-            <div className="bg-white dark:bg-slate-950 w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] rounded-none sm:rounded-xl shadow-2xl flex flex-col border dark:border-slate-800">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
+            <div className="glass w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] rounded-none sm:rounded-3xl shadow-2xl flex flex-col border border-white/20">
               
               {/* Header do PDV */}
-              <div className="p-4 border-b flex justify-between items-center bg-slate-50 dark:bg-slate-900 sticky top-0 z-10">
+              <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/10 backdrop-blur-md sticky top-0 z-10">
                 <div className="flex items-center gap-2">
                   <ShoppingCart className="w-6 h-6 text-blue-600" />
                   <h2 className="text-xl font-bold">{editingId ? 'Editar Venda' : 'Nova Venda'}</h2>
@@ -514,35 +514,35 @@ export function VendasTab() {
               <div className="flex-1 overflow-y-auto p-4 space-y-6">
                 
                 {/* Resumo Flutuante (Cards) */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sticky top-0 z-10 bg-white/95 dark:bg-slate-950/95 backdrop-blur py-2 border-b">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sticky top-0 z-10 bg-white/40 dark:bg-black/40 backdrop-blur-xl p-2 rounded-xl border border-white/20 shadow-lg">
+                  <div className="bg-blue-50/50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100/50 dark:border-blue-800/50">
                     <p className="text-xs text-blue-600 dark:text-blue-400 font-bold uppercase">📦 Valor Produtos</p>
                     <p className="text-lg font-bold">R$ {subtotalCarrinho.toFixed(2)}</p>
                   </div>
-                  <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100 dark:border-green-800">
+                  <div className="bg-green-50/50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100/50 dark:border-green-800/50">
                     <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase">💰 Pagamentos</p>
                     <p className="text-lg font-bold">R$ {posPagamento.valorPago.toFixed(2)}</p>
                   </div>
-                  <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg border border-red-100 dark:border-red-800">
+                  <div className="bg-red-50/50 dark:bg-red-900/20 p-3 rounded-lg border border-red-100/50 dark:border-red-800/50">
                     <p className="text-xs text-red-600 dark:text-red-400 font-bold uppercase">📉 Saldo</p>
                     <p className="text-lg font-bold">R$ {saldo.toFixed(2)}</p>
                   </div>
-                  <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100 dark:border-amber-800">
+                  <div className="bg-amber-50/50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100/50 dark:border-amber-800/50">
                     <p className="text-xs text-amber-600 dark:text-amber-400 font-bold uppercase">💵 Troco</p>
                     <p className="text-lg font-bold">R$ {troco.toFixed(2)}</p>
                   </div>
                 </div>
 
                 {/* Seção 1: Dados da Venda */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-bold uppercase text-gray-500 flex items-center gap-2">
+                <GlassCard className="bg-white/50 dark:bg-black/50">
+                  <div className="pb-3 mb-3 border-b border-white/10">
+                    <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <User className="w-4 h-4" /> Dados da Venda
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
                     <select 
-                      className="border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                      className="input-glass"
                       value={posDados.tipoVenda}
                       onChange={e => setPosDados({...posDados, tipoVenda: e.target.value})}
                     >
@@ -553,7 +553,7 @@ export function VendasTab() {
 
                 <div className="flex gap-2">
                   <select
-                      className="border rounded p-2 text-sm flex-1 bg-background text-foreground dark:border-slate-700"
+                      className="input-glass flex-1"
                       value={posDados.clienteId}
                     onChange={(e) => {
                       const cliente = clientes.find(c => c.id === e.target.value);
@@ -565,13 +565,13 @@ export function VendasTab() {
                       <option key={c.id} value={c.id}>{c.nome}</option>
                     ))}
                   </select>
-                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoCliente(true)}>
+                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoCliente(true)} className="h-full aspect-square bg-white/50 backdrop-blur">
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
 
                     <select 
-                      className="border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                      className="input-glass"
                       value={posDados.vendedor}
                       onChange={e => setPosDados({...posDados, vendedor: e.target.value})}
                     >
@@ -580,7 +580,7 @@ export function VendasTab() {
                     </select>
 
                     <select 
-                      className="border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                      className="input-glass"
                       value={posDados.tipoEntrega}
                       onChange={e => setPosDados({...posDados, tipoEntrega: e.target.value})}
                     >
@@ -591,27 +591,27 @@ export function VendasTab() {
 
                     <input 
                       type="date" 
-                      className="border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                      className="input-glass"
                       value={posDados.dataVenda}
                       onChange={e => setPosDados({...posDados, dataVenda: e.target.value})}
                     />
-                  </CardContent>
-                </Card>
+                  </div>
+                </GlassCard>
 
                 {/* Seção 2: Itens da Venda */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-bold uppercase text-gray-500 flex items-center gap-2">
+                <GlassCard className="bg-white/50 dark:bg-black/50">
+                  <div className="pb-3 mb-3 border-b border-white/10">
+                    <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <ShoppingCart className="w-4 h-4" /> Itens da Venda
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
+                    </h3>
+                  </div>
+                  <div className="space-y-4">
                     {/* Input de Item */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-gray-50 dark:bg-slate-900 p-3 rounded-lg">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-white/30 dark:bg-black/30 p-3 rounded-xl border border-white/10">
                       <div className="md:col-span-4 flex gap-2">
                 <div className="flex gap-2">
                   <select
-                            className="border rounded p-2 text-sm flex-1 bg-background text-foreground dark:border-slate-700"
+                            className="input-glass flex-1"
                             value={posItem.aparelhoId}
                     onChange={(e) => {
                       const aparelho = aparelhos.find(a => a.id === e.target.value);
@@ -629,22 +629,22 @@ export function VendasTab() {
                       <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco}</option>
                     ))}
                   </select>
-                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)}>
+                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-full aspect-square bg-white/50 backdrop-blur">
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
 
               <div className="md:col-span-1">
-                <label className="text-xs text-gray-500">Qtd</label>
-                <input type="number" min="1" className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700" value={posItem.quantidade} onChange={e => setPosItem({...posItem, quantidade: parseInt(e.target.value)})} />
+                <label className="text-xs text-gray-500 ml-1">Qtd</label>
+                <input type="number" min="1" className="input-glass" value={posItem.quantidade} onChange={e => setPosItem({...posItem, quantidade: parseInt(e.target.value)})} />
               </div>
 
               <div className="md:col-span-2">
-                <label className="text-xs text-gray-500">Valor (R$)</label>
+                <label className="text-xs text-gray-500 ml-1">Valor (R$)</label>
                 <input
                   type="number"
-                  className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                  className="input-glass"
                   value={posItem.valorExibir}
                   onChange={e => setPosItem({...posItem, valorExibir: parseFloat(e.target.value)})}
                 />
@@ -652,13 +652,13 @@ export function VendasTab() {
 
                       <div className="md:col-span-2 flex gap-1">
                         <div className="flex-1">
-                          <label className="text-xs text-gray-500">Desconto</label>
-                          <input type="number" className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value)})} />
+                          <label className="text-xs text-gray-500 ml-1">Desconto</label>
+                          <input type="number" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value)})} />
                         </div>
-                        <div className="w-14">
-                          <label className="text-xs text-gray-500">Tipo</label>
+                        <div className="w-16">
+                          <label className="text-xs text-gray-500 ml-1">Tipo</label>
                 <select
-                            className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                            className="input-glass px-1"
                             value={posItem.tipoDesconto}
                             onChange={e => setPosItem({...posItem, tipoDesconto: e.target.value as any})}
                 >
@@ -669,21 +669,21 @@ export function VendasTab() {
               </div>
 
                       <div className="md:col-span-2">
-                        <label className="text-xs text-gray-500">Obs</label>
-                        <input type="text" className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700" value={posItem.observacao} onChange={e => setPosItem({...posItem, observacao: e.target.value})} />
+                        <label className="text-xs text-gray-500 ml-1">Obs</label>
+                        <input type="text" className="input-glass" value={posItem.observacao} onChange={e => setPosItem({...posItem, observacao: e.target.value})} />
                       </div>
 
                       <div className="md:col-span-1">
-                        <Button onClick={handleAddItem} className="w-full h-10 bg-blue-600 hover:bg-blue-700">
+                        <Button onClick={handleAddItem} className="w-full h-[46px] bg-blue-600 hover:bg-blue-700 rounded-xl shadow-lg shadow-blue-500/20">
                           <Plus className="w-4 h-4" />
                         </Button>
                       </div>
                     </div>
 
                     {/* Tabela de Itens */}
-                    <div className="border rounded-lg overflow-hidden">
+                    <div className="border border-white/10 rounded-xl overflow-hidden">
                       <table className="w-full text-sm">
-                        <thead className="bg-gray-100 dark:bg-slate-900 text-xs uppercase text-gray-500">
+                        <thead className="bg-white/20 dark:bg-black/20 text-xs uppercase text-gray-500">
                           <tr>
                             <th className="p-3 text-left">Produto</th>
                             <th className="p-3 text-center">Qtd</th>
@@ -693,9 +693,9 @@ export function VendasTab() {
                             <th className="p-3 text-center">Ação</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-white/10">
                           {carrinho.map(item => (
-                            <tr key={item.id}>
+                            <tr key={item.id} className="hover:bg-white/5">
                               <td className="p-3">{item.descricao} <span className="text-xs text-gray-400 block">{item.observacao}</span></td>
                               <td className="p-3 text-center">{item.quantidade}</td>
                               <td className="p-3 text-right">R$ {item.valorExibir.toFixed(2)}</td>
@@ -712,7 +712,7 @@ export function VendasTab() {
                             <tr><td colSpan={6} className="p-4 text-center text-gray-400">Nenhum item adicionado</td></tr>
                           )}
                         </tbody>
-                        <tfoot className="bg-gray-50 dark:bg-slate-900 font-bold">
+                        <tfoot className="bg-white/10 dark:bg-black/10 font-bold">
                           <tr>
                             <td colSpan={4} className="p-3 text-right">Subtotal:</td>
                             <td className="p-3 text-right">R$ {subtotalCarrinho.toFixed(2)}</td>
@@ -723,41 +723,41 @@ export function VendasTab() {
                     </div>
 
                     {/* Desconto Total */}
-                    <div className="flex justify-end items-center gap-2 bg-gray-50 dark:bg-slate-900 p-2 rounded">
+                    <div className="flex justify-end items-center gap-2 bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10">
                       <span className="text-sm font-medium">Desconto Total:</span>
                       <input 
                         type="number" 
-                        className="w-24 border rounded p-1 text-sm text-right bg-background text-foreground dark:border-slate-700" 
+                        className="w-24 input-glass py-1 h-8 text-right" 
                         value={posPagamento.descontoGlobal} 
                         onChange={e => setPosPagamento({...posPagamento, descontoGlobal: parseFloat(e.target.value)})} 
                       />
-                      <div className="flex border rounded overflow-hidden dark:border-slate-700">
+                      <div className="flex border border-white/20 rounded-lg overflow-hidden">
                         <button 
-                          className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === 'R$' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 dark:text-foreground'}`}
+                          className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === 'R$' ? 'bg-blue-600 text-white' : 'bg-white/50 dark:bg-black/50'}`}
                           onClick={() => setPosPagamento({...posPagamento, tipoDescontoGlobal: 'R$'})}
                         >R$</button>
                         <button 
-                          className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === '%' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-800 dark:text-foreground'}`}
+                          className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === '%' ? 'bg-blue-600 text-white' : 'bg-white/50 dark:bg-black/50'}`}
                           onClick={() => setPosPagamento({...posPagamento, tipoDescontoGlobal: '%'})}
                         >%</button>
                       </div>
-                      <button onClick={() => setPosPagamento({...posPagamento, descontoGlobal: 0})} className="text-xs text-red-500 underline">Limpar</button>
+                      <button onClick={() => setPosPagamento({...posPagamento, descontoGlobal: 0})} className="text-xs text-red-500 underline ml-2">Limpar</button>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </GlassCard>
 
                 {/* Seção 3: Pagamento */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-bold uppercase text-gray-500 flex items-center gap-2">
+                <GlassCard className="bg-white/50 dark:bg-black/50">
+                  <div className="pb-3 mb-3 border-b border-white/10">
+                    <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <CreditCard className="w-4 h-4" /> Dados do Pagamento
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                     <div>
-                      <label className="text-xs text-gray-500">Forma Pagamento</label>
+                      <label className="text-xs text-gray-500 ml-1">Forma Pagamento</label>
                       <select 
-                        className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                        className="input-glass"
                         value={posPagamento.metodo}
                         onChange={e => setPosPagamento({...posPagamento, metodo: e.target.value as any})}
                       >
@@ -769,9 +769,9 @@ export function VendasTab() {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500">Parcelas</label>
+                      <label className="text-xs text-gray-500 ml-1">Parcelas</label>
                       <select 
-                        className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700"
+                        className="input-glass"
                         value={posPagamento.parcelas}
                         onChange={e => setPosPagamento({...posPagamento, parcelas: parseInt(e.target.value)})}
                       >
@@ -779,53 +779,54 @@ export function VendasTab() {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500">Valor Pago (R$)</label>
+                      <label className="text-xs text-gray-500 ml-1">Valor Pago (R$)</label>
                       <input 
                         type="number" 
-                        className="w-full border rounded p-2 text-sm font-bold text-green-600 bg-background dark:border-slate-700" 
+                        className="input-glass font-bold text-green-600" 
                         value={posPagamento.valorPago} 
                         onChange={e => setPosPagamento({...posPagamento, valorPago: parseFloat(e.target.value)})} 
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500">Garantia</label>
+                      <label className="text-xs text-gray-500 ml-1">Garantia</label>
                       <input 
                         type="text" 
-                        className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700" 
+                        className="input-glass" 
                         value={posPagamento.garantia} 
                         onChange={e => setPosPagamento({...posPagamento, garantia: e.target.value})} 
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="text-xs text-gray-500">Detalhes / Obs Pagamento</label>
+                      <label className="text-xs text-gray-500 ml-1">Detalhes / Obs Pagamento</label>
                       <input 
                         type="text" 
-                        className="w-full border rounded p-2 text-sm bg-background text-foreground dark:border-slate-700" 
+                        className="input-glass" 
                         value={posPagamento.detalhes} 
                         onChange={e => setPosPagamento({...posPagamento, detalhes: e.target.value})} 
                       />
                     </div>
-                    <div className="flex items-end">
+                    <div className="flex items-end mb-2">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input 
                           type="checkbox" 
                           checked={posPagamento.usarCredito} 
                           onChange={e => setPosPagamento({...posPagamento, usarCredito: e.target.checked})} 
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         Usar Crédito Cliente
                       </label>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </GlassCard>
 
               </div>
 
               {/* Footer Ações */}
-              <div className="p-4 border-t bg-slate-50 dark:bg-slate-900 flex justify-end gap-3 sticky bottom-0">
-                <Button variant="outline" onClick={() => { setShowPOS(false); resetPOS(); }} className="gap-2">
+              <div className="p-4 border-t border-white/10 bg-white/10 backdrop-blur-md flex justify-end gap-3 sticky bottom-0">
+                <Button variant="outline" onClick={() => { setShowPOS(false); resetPOS(); }} className="gap-2 bg-white/50 hover:bg-white/80 border-white/20">
                   <Ban className="w-4 h-4" /> Cancelar
                 </Button>
-                <Button onClick={handleFinalizarVenda} className="bg-green-600 hover:bg-green-700 gap-2 w-full sm:w-auto">
+                <Button onClick={handleFinalizarVenda} className="bg-green-600 hover:bg-green-700 gap-2 w-full sm:w-auto shadow-lg shadow-green-500/20">
                   <Save className="w-4 h-4" /> FINALIZAR VENDA
               </Button>
               </div>
@@ -835,87 +836,90 @@ export function VendasTab() {
 
         {/* Cards de Resumo */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium">Total Vendido</CardTitle>
+          <GlassCard hoverEffect={true}>
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-xs sm:text-sm font-medium">Total Vendido</h3>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div>
               <div className="text-xl sm:text-2xl font-bold">
                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(resumoVendas.totalVendido)}
               </div>
               <p className="text-xs text-muted-foreground mt-1">{resumoVendas.quantidade} vendas</p>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium">Lucro Total</CardTitle>
+          <GlassCard hoverEffect={true}>
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-xs sm:text-sm font-medium">Lucro Total</h3>
               <TrendingUp className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div>
               <div className="text-xl sm:text-2xl font-bold text-green-600">
                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(resumoVendas.totalLucro)}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {resumoVendas.totalVendido > 0 ? ((resumoVendas.totalLucro / resumoVendas.totalVendido) * 100).toFixed(1) : 0}% de margem
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium">Pagas</CardTitle>
+          <GlassCard hoverEffect={true}>
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-xs sm:text-sm font-medium">Pagas</h3>
               <Badge variant="default" className="text-xs">{resumoVendas.vendPago}</Badge>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div>
               <div className="text-2xl font-bold">{resumoVendas.vendPago}</div>
               <p className="text-xs text-muted-foreground mt-1">Confirmadas</p>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium">Pendentes</CardTitle>
+          <GlassCard hoverEffect={true}>
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-xs sm:text-sm font-medium">Pendentes</h3>
               <Badge variant="secondary" className="text-xs">{resumoVendas.vendPendente}</Badge>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div>
               <div className="text-2xl font-bold">{resumoVendas.vendPendente}</div>
               <p className="text-xs text-muted-foreground mt-1">À receber</p>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
 
         {/* Gráficos */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* Gráfico de Vendas por Período */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base sm:text-lg">Vendas por Período</CardTitle>
-              <CardDescription className="text-xs sm:text-sm">Últimos 12 meses</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <GlassCard>
+            <div className="pb-4 border-b border-white/10 mb-4">
+              <h3 className="text-base sm:text-lg font-bold">Vendas por Período</h3>
+              <p className="text-xs sm:text-sm text-muted-foreground">Últimos 12 meses</p>
+            </div>
+            <div>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={vendasPorPeriodo}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="periodo" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip formatter={(value: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((value || 0))} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                  <XAxis dataKey="periodo" tick={{ fontSize: 12 }} stroke="rgba(150,150,150,0.5)" />
+                  <YAxis tick={{ fontSize: 12 }} stroke="rgba(150,150,150,0.5)" />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    formatter={(value: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((value || 0))} 
+                  />
                   <Legend />
-                  <Line type="monotone" dataKey="total" stroke="#3b82f6" name="Vendido" />
-                  <Line type="monotone" dataKey="lucro" stroke="#10b981" name="Lucro" />
+                  <Line type="monotone" dataKey="total" stroke="#3b82f6" name="Vendido" strokeWidth={3} dot={{r: 4}} />
+                  <Line type="monotone" dataKey="lucro" stroke="#10b981" name="Lucro" strokeWidth={3} dot={{r: 4}} />
                 </LineChart>
               </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
 
           {/* Gráfico de Métodos de Pagamento */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base sm:text-lg">Métodos de Pagamento</CardTitle>
-              <CardDescription className="text-xs sm:text-sm">Distribuição por método</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <GlassCard>
+            <div className="pb-4 border-b border-white/10 mb-4">
+              <h3 className="text-base sm:text-lg font-bold">Métodos de Pagamento</h3>
+              <p className="text-xs sm:text-sm text-muted-foreground">Distribuição por método</p>
+            </div>
+            <div>
               {dadosPizza.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
@@ -933,7 +937,10 @@ export function VendasTab() {
                         <Cell key={`cell-${index}`} fill={color} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((value || 0))} />
+                    <Tooltip 
+                       contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                       formatter={(value: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((value || 0))} 
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
@@ -941,8 +948,8 @@ export function VendasTab() {
                   Sem dados de pagamento
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
 
         {/* Filtros */}
@@ -952,10 +959,10 @@ export function VendasTab() {
             placeholder="Filtrar por cliente..."
             value={filtroCliente}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroCliente(e.target.value)}
-            className="border rounded px-3 py-2 h-10 sm:h-auto text-sm bg-background text-foreground dark:border-slate-700"
+            className="input-glass h-10 sm:h-auto"
           />
           <select
-            className="border rounded px-3 py-2 h-10 sm:h-auto text-sm bg-background text-foreground dark:border-slate-700"
+            className="input-glass h-10 sm:h-auto"
             value={filtroStatus}
             onChange={(e) => setFiltroStatus(e.target.value)}
           >
@@ -965,7 +972,7 @@ export function VendasTab() {
             <option value="cancelado">Cancelado</option>
           </select>
           <select
-            className="border rounded px-3 py-2 h-10 sm:h-auto text-sm bg-background text-foreground dark:border-slate-700"
+            className="input-glass h-10 sm:h-auto"
             value={filtroMetodo}
             onChange={(e) => setFiltroMetodo(e.target.value)}
           >
@@ -979,31 +986,31 @@ export function VendasTab() {
         </div>
 
         {/* Tabela de Vendas */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base sm:text-lg">Vendas Registradas</CardTitle>
-            <CardDescription className="text-xs sm:text-sm">{vendasFiltradas.length} vendas</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <GlassCard>
+          <div className="pb-4 border-b border-white/10 mb-4">
+            <h3 className="text-base sm:text-lg font-bold">Vendas Registradas</h3>
+            <p className="text-xs sm:text-sm text-muted-foreground">{vendasFiltradas.length} vendas</p>
+          </div>
+          <div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-b">
-                  <tr className="text-xs sm:text-sm">
-                    <th className="text-left py-3 px-2">Cliente</th>
+                <thead className="border-b border-white/10">
+                  <tr className="text-xs sm:text-sm text-left">
+                    <th className="py-3 px-2">Cliente</th>
                     <th className="text-left py-3 px-2 hidden sm:table-cell">Aparelho</th>
                     <th className="text-right py-3 px-2">Valor</th>
                     <th className="text-right py-3 px-2 hidden sm:table-cell">Lucro</th>
-                    <th className="text-left py-3 px-2 hidden sm:table-cell">Método</th>
-                    <th className="text-left py-3 px-2">Status</th>
+                    <th className="py-3 px-2 hidden sm:table-cell">Método</th>
+                    <th className="py-3 px-2">Status</th>
                     <th className="text-right py-3 px-2">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
                   {vendasFiltradas.map((venda) => (
-                    <tr key={venda.id} className="border-b last:border-0 text-xs sm:text-sm">
-                      <td className="py-3 px-2">{venda.clienteNome}</td>
-                      <td className="py-3 px-2 hidden sm:table-cell">{venda.itens && venda.itens.length > 0 ? `${venda.itens.length} itens` : venda.descricao}</td>
-                      <td className="py-3 px-2 text-right font-medium">
+                    <tr key={venda.id} className="border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors">
+                      <td className="py-3 px-2 font-medium">{venda.clienteNome}</td>
+                      <td className="py-3 px-2 hidden sm:table-cell text-muted-foreground">{venda.itens && venda.itens.length > 0 ? `${venda.itens.length} itens` : venda.descricao}</td>
+                      <td className="py-3 px-2 text-right font-bold">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}
                       </td>
                       <td className="py-3 px-2 text-right hidden sm:table-cell text-green-600 font-medium">
@@ -1026,7 +1033,7 @@ export function VendasTab() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleEdit(venda)}
-                            className="h-8 text-xs"
+                            className="h-8 text-xs hover:bg-white/10"
                           >
                             Editar
                           </Button>
@@ -1034,7 +1041,7 @@ export function VendasTab() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleDelete(venda.id)}
-                            className="h-8 text-xs text-red-600"
+                            className="h-8 text-xs text-red-500 hover:bg-red-500/10"
                           >
                             Excluir
                           </Button>
@@ -1042,7 +1049,7 @@ export function VendasTab() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleGerarNota(venda)}
-                            className="h-8 text-xs text-blue-600"
+                            className="h-8 text-xs text-blue-600 hover:bg-blue-500/10"
                           >
                             <Printer className="w-3 h-3 mr-1" /> Nota
                           </Button>
@@ -1050,7 +1057,7 @@ export function VendasTab() {
                             variant="ghost"
                             size="sm"
                             onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}
-                            className="h-8 text-xs text-green-600"
+                            className="h-8 text-xs text-green-600 hover:bg-green-500/10"
                           >
                             <MessageCircle className="w-3 h-3" />
                           </Button>
@@ -1066,48 +1073,48 @@ export function VendasTab() {
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </GlassCard>
       </div>
 
       {/* Modal Novo Cliente */}
       {showNovoCliente && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md bg-background text-foreground">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Novo Cliente</CardTitle>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
+            <div className="flex flex-row items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Novo Cliente</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoCliente(false)}><X className="w-4 h-4" /></Button>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div>
               <form onSubmit={handleNovoClienteSubmit} className="space-y-3">
-                <input type="text" placeholder="Nome *" required className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoClienteData.nome} onChange={e => setNovoClienteData({...novoClienteData, nome: e.target.value})} />
-                <input type="tel" placeholder="Telefone *" required className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
-                <input type="email" placeholder="Email" className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoClienteData.email} onChange={e => setNovoClienteData({...novoClienteData, email: e.target.value})} />
-                <input type="text" placeholder="CPF" className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoClienteData.cpf} onChange={e => setNovoClienteData({...novoClienteData, cpf: e.target.value})} />
-                <Button type="submit" className="w-full">Cadastrar Cliente</Button>
+                <input type="text" placeholder="Nome *" required className="input-glass" value={novoClienteData.nome} onChange={e => setNovoClienteData({...novoClienteData, nome: e.target.value})} />
+                <input type="tel" placeholder="Telefone *" required className="input-glass" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
+                <input type="email" placeholder="Email" className="input-glass" value={novoClienteData.email} onChange={e => setNovoClienteData({...novoClienteData, email: e.target.value})} />
+                <input type="text" placeholder="CPF" className="input-glass" value={novoClienteData.cpf} onChange={e => setNovoClienteData({...novoClienteData, cpf: e.target.value})} />
+                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">Cadastrar Cliente</Button>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
       )}
 
       {/* Modal Novo Aparelho */}
       {showNovoAparelho && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md bg-background text-foreground">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Novo Aparelho</CardTitle>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
+            <div className="flex flex-row items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Novo Aparelho</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoAparelho(false)}><X className="w-4 h-4" /></Button>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div>
               <form onSubmit={handleNovoAparelhoSubmit} className="space-y-3">
-                <input type="text" placeholder="Marca *" required className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
-                <input type="text" placeholder="Modelo *" required className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
-                <input type="text" placeholder="IMEI" className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value})} />
+                <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
+                <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
+                <input type="text" placeholder="IMEI" className="input-glass" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value})} />
                 <input 
                   type="text" 
                   placeholder="Preço Venda (R$)" 
-                  className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700" 
+                  className="input-glass" 
                   value={novoAparelhoData.preco} 
                   onChange={e => {
                     const v = e.target.value.replace(/\D/g, '');
@@ -1116,7 +1123,7 @@ export function VendasTab() {
                   }} 
                 />
                 <select 
-                  className="w-full border p-2 rounded bg-background text-foreground dark:border-slate-700"
+                  className="input-glass"
                   value={novoAparelhoData.condicao}
                   onChange={e => setNovoAparelhoData({...novoAparelhoData, condicao: e.target.value as any})}
                 >
@@ -1124,10 +1131,10 @@ export function VendasTab() {
                   <option value="seminovo">Seminovo</option>
                   <option value="usado">Usado</option>
                 </select>
-                <Button type="submit" className="w-full">Cadastrar Aparelho</Button>
+                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">Cadastrar Aparelho</Button>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
       )}
     </div>

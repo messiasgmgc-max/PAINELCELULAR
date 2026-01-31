@@ -3,8 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { GlassCard } from "@/components/GlassCard";
 import { Plus, Store, Users, Trash2, Key, Save, X, Building2, Edit2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -191,28 +190,28 @@ export default function SuperAdminTab() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold">Painel Super Admin</h2>
-          <p className="text-muted-foreground">Gerenciamento de Lojas e Acessos</p>
+          <h2 className="text-2xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Painel Super Admin</h2>
+          <p className="text-slate-600 dark:text-slate-300 font-medium">Gerenciamento de Lojas e Acessos</p>
         </div>
-        <Button onClick={() => setShowNovaLoja(true)}>
-          <Plus className="w-4 h-4 mr-2" /> Nova Loja
+        <Button onClick={() => setShowNovaLoja(true)} className="btn-ios flex items-center gap-2 h-auto">
+          <Plus className="w-5 h-5" /> Nova Loja
         </Button>
       </div>
 
       {/* Modal Nova Loja */}
       {showNovaLoja && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Criar Nova Loja</CardTitle>
-              <CardDescription>Defina os dados da nova unidade</CardDescription>
-            </CardHeader>
-            <CardContent>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
+            <div className="pb-4 border-b border-white/10 mb-4">
+              <h3 className="text-lg font-bold">Criar Nova Loja</h3>
+              <p className="text-sm text-muted-foreground">Defina os dados da nova unidade</p>
+            </div>
+            <div>
               <form onSubmit={handleCriarLoja} className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Nome da Loja</label>
+                  <label className="text-sm font-medium ml-1">Nome da Loja</label>
                   <input 
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={novaLojaData.nome}
                     onChange={e => setNovaLojaData({...novaLojaData, nome: e.target.value})}
                     placeholder="Ex: Phone Center Centro"
@@ -220,39 +219,39 @@ export default function SuperAdminTab() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Telefone</label>
+                  <label className="text-sm font-medium ml-1">Telefone</label>
                   <input 
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={novaLojaData.telefone}
                     onChange={e => setNovaLojaData({...novaLojaData, telefone: e.target.value})}
                     placeholder="(00) 00000-0000"
                   />
                 </div>
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setShowNovaLoja(false)}>Cancelar</Button>
-                  <Button type="submit">Criar Loja</Button>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="ghost" onClick={() => setShowNovaLoja(false)} className="hover:bg-white/10">Cancelar</Button>
+                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20">Criar Loja</Button>
                 </div>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
       )}
 
       {/* Modal Novo Acesso */}
       {showNovoAcesso && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Novo Acesso</CardTitle>
-              <CardDescription>Adicionar usuário para a loja</CardDescription>
-            </CardHeader>
-            <CardContent>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
+            <div className="pb-4 border-b border-white/10 mb-4">
+              <h3 className="text-lg font-bold">Novo Acesso</h3>
+              <p className="text-sm text-muted-foreground">Adicionar usuário para a loja</p>
+            </div>
+            <div>
               <form onSubmit={handleCriarAcesso} className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Email de Login</label>
+                  <label className="text-sm font-medium ml-1">Email de Login</label>
                   <input 
                     type="email"
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={novoAcessoData.email}
                     onChange={e => setNovoAcessoData({...novoAcessoData, email: e.target.value})}
                     placeholder="usuario@loja.com"
@@ -260,10 +259,10 @@ export default function SuperAdminTab() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Senha Inicial</label>
+                  <label className="text-sm font-medium ml-1">Senha Inicial</label>
                   <input 
                     type="text"
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={novoAcessoData.password}
                     onChange={e => setNovoAcessoData({...novoAcessoData, password: e.target.value})}
                     placeholder="Senha provisória"
@@ -273,9 +272,9 @@ export default function SuperAdminTab() {
                   </p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Função (Role)</label>
+                  <label className="text-sm font-medium ml-1">Função (Role)</label>
                   <select 
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={novoAcessoData.role}
                     onChange={e => setNovoAcessoData({...novoAcessoData, role: e.target.value})}
                   >
@@ -285,40 +284,40 @@ export default function SuperAdminTab() {
                     <option value="vendedor">Vendedor</option>
                   </select>
                 </div>
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setShowNovoAcesso(null)}>Cancelar</Button>
-                  <Button type="submit">Adicionar Acesso</Button>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="ghost" onClick={() => setShowNovoAcesso(null)} className="hover:bg-white/10">Cancelar</Button>
+                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20">Adicionar Acesso</Button>
                 </div>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
       )}
 
       {/* Modal Editar Acesso */}
       {editingAcesso && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Editar Acesso</CardTitle>
-              <CardDescription>Alterar permissões do usuário</CardDescription>
-            </CardHeader>
-            <CardContent>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
+            <div className="pb-4 border-b border-white/10 mb-4">
+              <h3 className="text-lg font-bold">Editar Acesso</h3>
+              <p className="text-sm text-muted-foreground">Alterar permissões do usuário</p>
+            </div>
+            <div>
               <form onSubmit={handleUpdateAcesso} className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Email de Login</label>
+                  <label className="text-sm font-medium ml-1">Email de Login</label>
                   <input 
                     type="email"
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={editingAcesso.email}
                     onChange={e => setEditingAcesso({...editingAcesso, email: e.target.value})}
                     required
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">Função (Role)</label>
+                  <label className="text-sm font-medium ml-1">Função (Role)</label>
                   <select 
-                    className="w-full border rounded p-2 bg-background"
+                    className="input-glass"
                     value={editingAcesso.role}
                     onChange={e => setEditingAcesso({...editingAcesso, role: e.target.value})}
                   >
@@ -328,13 +327,13 @@ export default function SuperAdminTab() {
                     <option value="vendedor">Vendedor</option>
                   </select>
                 </div>
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setEditingAcesso(null)}>Cancelar</Button>
-                  <Button type="submit">Salvar Alterações</Button>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="ghost" onClick={() => setEditingAcesso(null)} className="hover:bg-white/10">Cancelar</Button>
+                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20">Salvar Alterações</Button>
                 </div>
               </form>
-            </CardContent>
-          </Card>
+            </div>
+          </GlassCard>
         </div>
       )}
 
@@ -343,20 +342,21 @@ export default function SuperAdminTab() {
         {lojas.map(loja => {
           const lojaAcessos = acessos.filter(a => a.loja_id === loja.id);
           return (
-            <Card key={loja.id} className="relative group">
-              <CardHeader className="pb-2">
+            <GlassCard key={loja.id} className="relative group hover:bg-white/40 dark:hover:bg-black/40 transition-colors" hoverEffect={true}>
+              <div className="pb-2 mb-2 border-b border-white/10">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-2">
                     <Building2 className="w-5 h-5 text-blue-600" />
-                    <CardTitle className="text-lg">{loja.nome}</CardTitle>
+                    <h3 className="text-lg font-bold">{loja.nome}</h3>
                   </div>
-                  <Button variant="ghost" size="icon" className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeletarLoja(loja.id)}>
+                  <Button variant="ghost" size="icon" className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/10" onClick={() => handleDeletarLoja(loja.id)}>
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
-                <CardDescription>{loja.telefone || 'Sem telefone'}</CardDescription>
-              </CardHeader>
-              <CardContent>
+                <p className="text-sm text-muted-foreground">{loja.telefone || 'Sem telefone'}</p>
+              </div>
+              
+              <div>
                 <div className="space-y-4">
                   <div>
                     <div className="flex justify-between items-center mb-2">
@@ -364,25 +364,25 @@ export default function SuperAdminTab() {
                         <Users className="w-4 h-4" /> Acessos ({lojaAcessos.length}/5)
                       </span>
                       {lojaAcessos.length < 5 && (
-                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowNovoAcesso(loja.id)}>
+                        <Button variant="ghost" size="sm" className="h-6 text-xs hover:bg-white/20" onClick={() => setShowNovoAcesso(loja.id)}>
                           <Plus className="w-3 h-3 mr-1" /> Adicionar
                         </Button>
                       )}
                     </div>
-                    <div className="space-y-1 bg-muted/50 p-2 rounded-md min-h-[50px]">
+                    <div className="space-y-1 bg-white/20 dark:bg-black/20 p-2 rounded-xl min-h-[50px] border border-white/5">
                       {lojaAcessos.length > 0 ? (
                         lojaAcessos.map(acesso => (
-                          <div key={acesso.id} className="text-xs flex items-center gap-2 p-1 bg-background rounded border">
+                          <div key={acesso.id} className="text-xs flex items-center gap-2 p-2 bg-white/40 dark:bg-white/5 rounded-lg border border-white/10">
                             <Key className="w-3 h-3 text-gray-400" />
                             <div className="flex-1 min-w-0">
                               <div className="truncate font-medium">{acesso.email}</div>
                               <div className="text-[10px] text-muted-foreground">{acesso.role}</div>
                             </div>
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEditingAcesso(acesso)}>
+                              <Button variant="ghost" size="icon" className="h-6 w-6 hover:bg-white/20" onClick={() => setEditingAcesso(acesso)}>
                                 <Edit2 className="w-3 h-3" />
                               </Button>
-                              <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => handleDeleteAcesso(acesso.id)}>
+                              <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:bg-red-500/10" onClick={() => handleDeleteAcesso(acesso.id)}>
                                 <Trash2 className="w-3 h-3" />
                               </Button>
                             </div>
@@ -393,21 +393,21 @@ export default function SuperAdminTab() {
                       )}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground pt-2 border-t">
+                  <div className="text-xs text-muted-foreground pt-2 border-t border-white/10">
                     ID: {loja.id}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </GlassCard>
           );
         })}
       </div>
       
       {lojas.length === 0 && !loading && (
-        <div className="text-center py-12 text-muted-foreground">
+        <GlassCard className="text-center py-12 text-muted-foreground">
           <Store className="w-12 h-12 mx-auto mb-4 opacity-20" />
           <p>Nenhuma loja cadastrada.</p>
-        </div>
+        </GlassCard>
       )}
     </div>
   );

@@ -75,10 +75,10 @@ export function MobileNav({ currentTab, onTabChange }: MobileNavProps) {
           />
 
           {/* Conteúdo da Sidebar */}
-          <div className="relative w-[80%] max-w-[300px] h-full bg-white dark:bg-slate-950 shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-gray-200 dark:border-slate-800">
+          <div className="relative w-[80%] max-w-[300px] h-full bg-white/80 dark:bg-black/80 backdrop-blur-xl shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-white/20">
             
             {/* Cabeçalho do Menu */}
-            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/50 dark:bg-slate-900/50">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between bg-white/10 dark:bg-white/5">
               <div>
                 <h2 className="font-bold text-lg text-gray-900 dark:text-white">Menu</h2>
                 <p className="text-xs text-gray-500">Navegação</p>
@@ -103,8 +103,8 @@ export function MobileNav({ currentTab, onTabChange }: MobileNavProps) {
                   className={cn(
                     "w-full flex items-center gap-4 px-5 py-4 text-left transition-all border-l-4",
                     currentTab === tab.id
-                      ? "border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400"
-                      : "border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-900 dark:hover:text-gray-200"
+                      ? "border-blue-600 bg-blue-50/50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 backdrop-blur-sm"
+                      : "border-transparent text-gray-600 hover:bg-white/20 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
                   )}
                 >
                   <span className={cn(
@@ -120,7 +120,7 @@ export function MobileNav({ currentTab, onTabChange }: MobileNavProps) {
             </div>
             
             {/* Rodapé do Menu */}
-            <div className="p-4 border-t border-gray-100 dark:border-slate-800 bg-gray-50/30 dark:bg-slate-900/30">
+            <div className="p-4 border-t border-white/10 bg-white/5 dark:bg-white/5">
               <p className="text-xs text-center text-gray-400">
                 Phone Center &copy; {new Date().getFullYear()}
               </p>
