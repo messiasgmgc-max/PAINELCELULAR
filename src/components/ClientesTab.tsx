@@ -191,32 +191,34 @@ export function ClientesTab() {
   };
 
   return (
-    <div className="space-y-4">
-      <GlassCard className="rounded-3xl">
-        <div className="pb-4 border-b border-white/10 mb-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div>
-              <h3 className="text-base sm:text-lg font-bold">Clientes Cadastrados</h3>
-              <p className="text-xs sm:text-sm text-muted-foreground">
-                Gerencie seus clientes e dados pessoais ({clientes.length} total)
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={handleExportCSV}
-                disabled={clientes.length === 0}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Exportar CSV
-              </Button>
-              <Button onClick={() => setShowForm(!showForm)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Novo Cliente
-              </Button>
-            </div>
+    <div className="flex-1 flex justify-center pt-2 pb-8 transition-all duration-300">
+      <div className="space-y-4 w-full max-w-6xl px-4 sm:px-8">
+        {/* Cabeçalho Separado */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-2">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Clientes</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">
+              Gerencie seus clientes e dados pessoais ({clientes.length} total)
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={handleExportCSV}
+              disabled={clientes.length === 0}
+              className="h-9 text-xs sm:text-sm"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Exportar
+            </Button>
+            <Button onClick={() => setShowForm(!showForm)} className="h-9 text-xs sm:text-sm">
+              <Plus className="mr-2 h-4 w-4" />
+              Novo
+            </Button>
           </div>
         </div>
+
+        <GlassCard className="rounded-[2.5rem]">
         <div className="space-y-4">
           {/* Barra de Busca */}
           <div className="relative">
@@ -425,6 +427,7 @@ export function ClientesTab() {
           )}
         </div>
       </GlassCard>
+      </div>
     </div>
   );
 }

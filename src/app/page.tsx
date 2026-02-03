@@ -15,6 +15,7 @@ import { DashboardTab } from '@/components/DashboardTab';
 import { AgendamentosTab } from '@/components/AgendamentosTab';
 import { GarantiasTab } from '@/components/GarantiasTab';
 import { VendasTab } from '@/components/VendasTab';
+import { WhatsappTab } from '@/components/WhatsappTab';
 import { ConfiguracoesTab } from '@/components/ConfiguracoesTab';
 import { MobileNav } from '@/components/MobileNav';
 import SuperAdminTab from '@/components/SuperAdminTab';
@@ -82,6 +83,8 @@ export default function Home() {
         return <GarantiasTab />;
       case 'vendas':
         return <VendasTab />;
+      case 'whatsapp':
+        return <WhatsappTab />;
       case 'configuracoes':
         return <ConfiguracoesTab />;
       case 'superadmin':
@@ -95,7 +98,7 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       {/* Header - Mobile optimized */}
       <header className={cn(
-        "sticky top-0 z-30 h-20 transition-all duration-300 flex items-center px-4",
+        "relative z-30 h-20 transition-all duration-300 flex items-center px-4",
         isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
       )}>
         <div className="w-full h-14 glass backdrop-blur-md rounded-2xl border border-white/20 flex items-center justify-between px-4 shadow-lg relative">
@@ -170,7 +173,7 @@ export default function Home() {
 
       {/* Main Content - flex-1 para ocupar espaço */}
       <main className={cn(
-        "flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6 pb-24 sm:pb-6 transition-all duration-300",
+        "flex-1 px-4 py-4 sm:px-6 sm:py-6 pb-24 sm:pb-6 transition-all duration-300",
         isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
       )}>
         {renderCurrentTab()}

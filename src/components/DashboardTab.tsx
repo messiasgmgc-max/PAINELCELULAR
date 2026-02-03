@@ -15,6 +15,7 @@ export function DashboardTab() {
   const { pecas, fetchPecas } = usePecas();
   const { tecnicos, fetchTecnicos } = useTecnicos();
 
+  const [isMounted, setIsMounted] = useState(false);
   const [vendas, setVendas] = useState<any[]>([]);
   
   // Função auxiliar para pegar data local YYYY-MM-DD
@@ -33,6 +34,7 @@ export function DashboardTab() {
   });
 
   useEffect(() => {
+    setIsMounted(true);
     fetchOrdensServico();
     fetchPecas();
     fetchTecnicos();
@@ -186,6 +188,8 @@ export function DashboardTab() {
   }, [ordensServico]);
 
   const colors = ['#EF4444', '#F97316', '#EAB308', '#3B82F6', '#10B981'];
+
+  if (!isMounted) return null;
 
   return (
     <div className="space-y-6">

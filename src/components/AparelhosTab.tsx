@@ -4,10 +4,11 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2 } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { Aparelho } from "@/lib/db/types";
+import { supabase } from "@/lib/supabaseClient";
 
 export function AparelhosTab() {
   const {
@@ -23,8 +24,11 @@ export function AparelhosTab() {
   const { clientes, fetchClientes, criarCliente } = useClientes();
 
   const [showForm, setShowForm] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [supplierListText, setSupplierListText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [formData, setFormData] = useState({
@@ -38,7 +42,7 @@ export function AparelhosTab() {
     preco: "",
     descricao: "",
     cliente: "",
-    clienteId: "",
+    clienteId: null as string | null,
     acessorios: "",
     observacoes: "",
   });
@@ -58,6 +62,7 @@ export function AparelhosTab() {
 
   // Carregar dados ao montar
   useEffect(() => {
+    setIsMounted(true);
     fetchAparelhos();
     fetchClientes();
   }, [fetchAparelhos, fetchClientes]);
@@ -125,7 +130,7 @@ export function AparelhosTab() {
       preco: String(aparelho.preco * 100), // Converter para centavos
       descricao: aparelho.descricao || "",
       cliente: aparelho.cliente || "",
-      clienteId: aparelho.clienteId || "",
+      clienteId: aparelho.clienteId || null,
       acessorios: aparelho.acessorios || "",
       observacoes: aparelho.observacoes || "",
     });
@@ -233,6 +238,209 @@ export function AparelhosTab() {
     link.click();
     document.body.removeChild(link);
   };
+
+  const handleDeleteEstoque = async () => {
+    if (aparelhos.length === 0) {
+      alert("O estoque já está vazio.");
+      return;
+    }
+
+    const currentLojaId = aparelhos[0].loja_id;
+
+    const confirmacao = confirm("⚠️ ATENÇÃO: Isso apagará TODOS os aparelhos desta loja permanentemente. Esta ação não pode ser desfeita.\n\nDeseja continuar?");
+    
+    if (confirmacao) {
+      try {
+        const { error } = await supabase
+          .from('aparelhos')
+          .delete()
+          .eq('loja_id', currentLojaId);
+
+        if (error) throw error;
+
+        alert("Estoque deletado com sucesso!");
+        await fetchAparelhos();
+      } catch (err: any) {
+        console.error("Erro ao deletar estoque:", err);
+        alert(`Erro ao deletar estoque: ${err.message}`);
+      }
+    }
+  };
+
+  const processarListaFornecedor = async () => {
+    if (!supplierListText.trim()) return;
+
+    // Captura o ID da loja atual a partir de um aparelho existente
+    const currentLojaId = aparelhos.length > 0 ? aparelhos[0].loja_id : null;
+
+    if (!currentLojaId) {
+      alert("Erro: Não foi possível identificar o ID da loja. Cadastre ao menos um aparelho manualmente primeiro.");
+      return;
+    }
+
+    const lines = supplierListText.split('\n');
+    let currentBrand = "Apple";
+    let currentModel = "";
+    let currentCapacity = "";
+    let currentCondition: "novo" | "seminovo" | "usado" | "danificado" = "seminovo";
+    let pendingColors: string[] = [];
+    
+    // Objeto para agrupar preços: { "Marca|Modelo|Capacidade|Condicao|Cor": [preços] }
+    const groupedData: Record<string, number[]> = {};
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      // Detectar seção
+      if (line.toUpperCase().includes("NOVOS LACRADOS")) {
+        currentCondition = "novo";
+        continue;
+      }
+      if (line.toUpperCase().includes("SEMI NOVOS")) {
+        currentCondition = "seminovo";
+        continue;
+      }
+
+      // Detectar modelo e capacidade
+      const modelMatch = line.match(/^[📲📱]\s*\*?([^*🇺🇸%]+)\*?/iu);
+      if (modelMatch) {
+        let fullModel = modelMatch[1].replace(/\*/g, '').trim();
+        // Remove emojis remanescentes do nome do modelo para garantir que o cadastro fique limpo e compatível com o script
+        fullModel = fullModel.replace(/\p{Extended_Pictographic}/gu, '').trim();
+        const capMatch = fullModel.match(/(\d+\s*(?:GB|TB))/i);
+        if (capMatch) {
+          currentCapacity = capMatch[1].toUpperCase().replace(/\s/g, "");
+          currentModel = fullModel.replace(capMatch[0], "").trim();
+        } else {
+          currentModel = fullModel;
+          currentCapacity = "N/A";
+        }
+        pendingColors = []; // Reset colors for new model
+        continue;
+      }
+
+      // Detectar cor em linha separada (ex: 🔵BLUE)
+      const colorOnlyMatch = line.match(/^[\u26aa\u26ab\ud83d\udd35\ud83d\udfe0\ud83c\udf38\ud83d\udfe2\ud83d\udfe1\ud83d\udfe3\ud83d\udc2a\ud83d\udc2d\ud83d\udd18\ud83d\udfe4\ud83d\udfe5\ud83d\udfe6\ud83d\udfe7\ud83d\udfe8\ud83d\udfe9\ud83d\udfea\ud83d\udfeb]\s*([A-Z\s/]+)$/i);
+      if (colorOnlyMatch && !line.match(/\d/)) {
+        pendingColors.push(colorOnlyMatch[1].trim());
+        continue;
+      }
+
+      // Detectar preço
+      const priceMatch = line.match(/(?:💰|💵|R\$|[\u26aa\u26ab\ud83d\udd35\ud83d\udfe0\ud83c\udf38\ud83d\udfe2\ud83d\udfe1\ud83d\udfe3\ud83d\udc2a\ud83d\udc2d\ud83d\udd18])\s*(?:R\$)?\s*(?:\d+%\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{3,})/i);
+      
+      if (priceMatch && currentModel) {
+        let rawPrice = priceMatch[1].replace(/\./g, '').replace(',', '.');
+        let costPrice = parseFloat(rawPrice);
+        
+        if (!isNaN(costPrice)) {
+          // Clona as cores pendentes ou detecta a cor da linha
+          const colorsToProcess = [...pendingColors];
+          if (colorsToProcess.length === 0) {
+            let detectedColor = "N/A";
+            if (line.includes("⚫")) detectedColor = "Preto";
+            else if (line.includes("⚪")) detectedColor = "Branco/Prata";
+            else if (line.includes("🔵")) detectedColor = "Azul";
+            else if (line.includes("🟡")) detectedColor = "Dourado/Amarelo";
+            else if (line.includes("🔴")) detectedColor = "Vermelho";
+            else if (line.includes("🟣")) detectedColor = "Roxo";
+            else if (line.includes("🟢")) detectedColor = "Verde";
+            else if (line.includes("🩷")) detectedColor = "Rosa";
+            else if (line.includes("🩶")) detectedColor = "Cinza";
+            else if (line.includes("🔘")) detectedColor = "Space Gray/Titanium";
+            else if (line.includes("🐪")) detectedColor = "Desert/Natural";
+            else if (line.includes("🏜️")) detectedColor = "Desert";
+            colorsToProcess.push(detectedColor);
+          }
+
+          // Agrupa os preços por chave única
+          for (const cor of colorsToProcess) {
+            const key = `${currentBrand}|${currentModel}|${currentCapacity}|${currentCondition}|${cor}`;
+            if (!groupedData[key]) groupedData[key] = [];
+            groupedData[key].push(costPrice);
+          }
+          
+          pendingColors = [];
+        }
+      }
+    }
+
+    // Função para calcular o preço representativo (Lógica do WhatsApp Engine)
+    const getRepresentativePrice = (prices: number[]) => {
+      if (prices.length === 0) return 0;
+      const sortedPrices = [...prices].sort((a, b) => b - a);
+      const counts: Record<number, number> = {};
+      prices.forEach(p => counts[p] = (counts[p] || 0) + 1);
+      const maxFreq = Math.max(...Object.values(counts));
+      const modes = Object.keys(counts)
+        .filter(p => counts[Number(p)] === maxFreq)
+        .map(Number)
+        .sort((a, b) => b - a);
+      const bestMode = modes[0];
+
+      if (maxFreq > 1) return bestMode;
+      if (prices.length >= 3) {
+        const topHalf = sortedPrices.slice(0, Math.ceil(prices.length / 2));
+        return topHalf.reduce((a, b) => a + b, 0) / topHalf.length;
+      }
+      return sortedPrices[0];
+    };
+
+    const aparelhosParaCriar: any[] = [];
+    for (const [key, prices] of Object.entries(groupedData)) {
+      const [marca, modelo, capacidade, condicao, cor] = key.split('|');
+      const representativePrice = getRepresentativePrice(prices);
+      const finalPrice = representativePrice + 300;
+
+      aparelhosParaCriar.push({
+        loja_id: currentLojaId,
+        marca,
+        modelo,
+        imei: "",
+        numeroSerie: "",
+        cor,
+        capacidade,
+        condicao,
+        preco: finalPrice,
+        descricao: "",
+        cliente: "",
+        clienteId: null,
+        acessorios: "",
+        observacoes: `Importado via Lista em ${new Date().toLocaleDateString()} (Baseado em ${prices.length} itens)`,
+        ativo: true
+      });
+    }
+
+    if (aparelhosParaCriar.length === 0) {
+      alert("Nenhum aparelho identificado na lista. Verifique o formato.");
+      return;
+    }
+
+    if (confirm(`Identificados ${aparelhosParaCriar.length} modelos únicos por cor. Deseja cadastrar todos com margem de R$ 300,00?`)) {
+      console.log("🚀 Iniciando cadastro em massa...", aparelhosParaCriar);
+
+      try {
+        // Realiza o insert de todos os aparelhos em uma única chamada ao banco
+        const { error: bulkError } = await supabase
+          .from('aparelhos')
+          .insert(aparelhosParaCriar);
+
+        if (bulkError) throw bulkError;
+
+        alert(`Sucesso! ${aparelhosParaCriar.length} aparelhos foram cadastrados de uma vez.`);
+      } catch (err: any) {
+        console.error("❌ Erro no cadastro em massa:", err);
+        alert(`Erro ao cadastrar: ${err.message || 'Erro desconhecido'}`);
+      }
+
+      setShowSupplierModal(false);
+      setSupplierListText("");
+      await fetchAparelhos();
+    }
+  };
+
+  if (!isMounted) return null;
 
   const handleGenerateCertificate = async (aparelho: Aparelho) => {
     try {
@@ -358,7 +566,7 @@ export function AparelhosTab() {
       preco: "",
       descricao: "",
       cliente: "",
-      clienteId: "",
+      clienteId: null,
       acessorios: "",
       observacoes: "",
     });
@@ -460,6 +668,12 @@ export function AparelhosTab() {
                 <Download className="mr-2 h-4 w-4" />
                 Exportar CSV
               </Button>
+              <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50">
+                <List className="h-4 w-4" /> Lista de Fornecedor
+              </Button>
+              <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50">
+                <Trash2 className="h-4 w-4" /> Deletar Estoque
+              </Button>
               <Button onClick={() => setShowForm(!showForm)}>
                 <Plus className="mr-2 h-4 w-4" />
                 Novo Aparelho
@@ -479,216 +693,6 @@ export function AparelhosTab() {
               className="input-glass pl-10"
             />
           </div>
-
-          {/* Formulário de Novo/Editar Aparelho */}
-          {showForm && (
-            <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-semibold">
-                  {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
-                </h3>
-                <button
-                  onClick={handleCancel}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Linha 1: Marca e Modelo */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="marca"
-                    placeholder="Marca *"
-                    value={formData.marca}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="modelo"
-                    placeholder="Modelo *"
-                    value={formData.modelo}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Linha 2: IMEI (limitado a 15 números) e Série */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <input
-                      type="text"
-                      name="imei"
-                      placeholder="IMEI (15 dígitos máximo)"
-                      value={formData.imei}
-                      onChange={handleIMEIChange}
-                      maxLength={15}
-                      inputMode="numeric"
-                      className="input-glass"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formData.imei.length}/15 dígitos
-                    </p>
-                  </div>
-                  <input
-                    type="text"
-                    name="numeroSerie"
-                    placeholder="Número de Série (opcional)"
-                    value={formData.numeroSerie}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Linha 3: Cor e Capacidade (Selecionável) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="cor"
-                    placeholder="Cor (ex: Preto, Branco) (opcional)"
-                    value={formData.cor}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                  <select
-                    name="capacidade"
-                    value={formData.capacidade}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  >
-                    {romOptions.map((rom) => (
-                      <option key={rom} value={rom}>
-                        💾 {rom}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Linha 4: Condição e Preço (Formatado) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <select
-                    name="condicao"
-                    value={formData.condicao}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  >
-                    <option value="novo">🆕 Novo</option>
-                    <option value="seminovo">⭐ Seminovo</option>
-                    <option value="usado">♻️ Usado</option>
-                    <option value="danificado">⚠️ Danificado</option>
-                  </select>
-                  <div>
-                    <input
-                      type="text"
-                      name="preco"
-                      placeholder="Preço em R$"
-                      value={formatarPreco(formData.preco)}
-                      onChange={handlePrecoChange}
-                      className="input-glass"
-                    />
-                  </div>
-                </div>
-
-                {/* Cliente com opção de adicionar novo */}
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <select
-                      name="cliente"
-                      value={formData.clienteId}
-                      onChange={(e) => {
-                        const clienteSelecionado = clientes.find(
-                          (c) => c.id === e.target.value
-                        );
-                        setFormData((prev) => ({
-                          ...prev,
-                          clienteId: e.target.value,
-                          cliente: clienteSelecionado?.nome || "",
-                        }));
-                      }}
-                      className="input-glass flex-1"
-                    >
-                      <option value="">Selecione um cliente (opcional)</option>
-                      {clientes.map((cliente) => (
-                        <option key={cliente.id} value={cliente.id}>
-                          {cliente.nome} ({cliente.telefone})
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setShowNovoClientePopup(true)}
-                      title="Adicionar novo cliente"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Descrição */}
-                <textarea
-                  name="descricao"
-                  placeholder="Descrição do aparelho (opcional)"
-                  value={formData.descricao}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="input-glass"
-                />
-
-                {/* Acessórios */}
-                <textarea
-                  name="acessorios"
-                  placeholder="Acessórios inclusos (opcional) - ex: Carregador, Fone, Capa"
-                  value={formData.acessorios}
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="input-glass"
-                />
-
-                {/* Observações */}
-                <textarea
-                  name="observacoes"
-                  placeholder="Observações adicionais (opcional)"
-                  value={formData.observacoes}
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="input-glass"
-                />
-
-                {/* Botões */}
-                <div className="flex gap-2 justify-end pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCancel}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                    {loading
-                      ? editingId
-                        ? "Atualizando..."
-                        : "Salvando..."
-                      : editingId
-                      ? "Atualizar Aparelho"
-                      : "Salvar Aparelho"}
-                  </Button>
-                </div>
-
-                {error && (
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    Erro: {error}
-                  </p>
-                )}
-              </form>
-            </GlassCard>
-          )}
 
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
@@ -837,14 +841,14 @@ export function AparelhosTab() {
                   className="flex items-start justify-between gap-4 border-b pb-4 last:border-0 hover:bg-muted/30 p-2 rounded transition-colors"
                 >
                   <div className="flex-1 space-y-1 min-w-0">
-                    <p className="text-sm font-semibold">
+                    <div className="text-sm font-semibold">
                       {condicaoEmoji(aparelho.condicao)} {aparelho.marca} {aparelho.modelo}
                       {aparelho.clienteId && (
                         <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700 border-yellow-200">
                           MANUTENÇÃO - {aparelho.cliente}
                         </Badge>
                       )}
-                    </p>
+                    </div>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                       {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
                       {aparelho.capacidade && <span>💾 {aparelho.capacidade}</span>}
@@ -902,6 +906,219 @@ export function AparelhosTab() {
           )}
         </div>
       </GlassCard>
+
+      {/* Modal de Novo/Editar Aparelho */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-3xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 flex flex-col max-h-[95vh]">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <h3 className="text-lg font-bold">
+                {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
+              </h3>
+              <Button variant="ghost" size="icon" onClick={handleCancel}>
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Linha 1: Marca e Modelo */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    name="marca"
+                    placeholder="Marca *"
+                    value={formData.marca}
+                    onChange={handleInputChange}
+                    required
+                    className="input-glass"
+                  />
+                  <input
+                    type="text"
+                    name="modelo"
+                    placeholder="Modelo *"
+                    value={formData.modelo}
+                    onChange={handleInputChange}
+                    required
+                    className="input-glass"
+                  />
+                </div>
+
+                {/* Linha 2: IMEI e Série */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <input
+                      type="text"
+                      name="imei"
+                      placeholder="IMEI (15 dígitos máximo)"
+                      value={formData.imei}
+                      onChange={handleIMEIChange}
+                      maxLength={15}
+                      inputMode="numeric"
+                      className="input-glass"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {formData.imei.length}/15 dígitos
+                    </p>
+                  </div>
+                  <input
+                    type="text"
+                    name="numeroSerie"
+                    placeholder="Número de Série (opcional)"
+                    value={formData.numeroSerie}
+                    onChange={handleInputChange}
+                    className="input-glass"
+                  />
+                </div>
+
+                {/* Linha 3: Cor e Capacidade */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    name="cor"
+                    placeholder="Cor (ex: Preto, Branco) (opcional)"
+                    value={formData.cor}
+                    onChange={handleInputChange}
+                    className="input-glass"
+                  />
+                  <select
+                    name="capacidade"
+                    value={formData.capacidade}
+                    onChange={handleInputChange}
+                    className="input-glass"
+                  >
+                    {romOptions.map((rom) => (
+                      <option key={rom} value={rom}>
+                        💾 {rom}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Linha 4: Condição e Preço */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <select
+                    name="condicao"
+                    value={formData.condicao}
+                    onChange={handleInputChange}
+                    className="input-glass"
+                  >
+                    <option value="novo">🆕 Novo</option>
+                    <option value="seminovo">⭐ Seminovo</option>
+                    <option value="usado">♻️ Usado</option>
+                    <option value="danificado">⚠️ Danificado</option>
+                  </select>
+                  <input
+                    type="text"
+                    name="preco"
+                    placeholder="Preço em R$"
+                    value={formatarPreco(formData.preco)}
+                    onChange={handlePrecoChange}
+                    className="input-glass"
+                  />
+                </div>
+
+                {/* Cliente */}
+                <div className="flex gap-2">
+                  <select
+                    name="cliente"
+                    value={formData.clienteId || ""}
+                    onChange={(e) => {
+                      const clienteSelecionado = clientes.find((c) => c.id === e.target.value);
+                      setFormData((prev) => ({
+                        ...prev,
+                        clienteId: e.target.value,
+                        cliente: clienteSelecionado?.nome || "",
+                      }));
+                    }}
+                    className="input-glass flex-1"
+                  >
+                    <option value="">Selecione um cliente (opcional)</option>
+                    {clientes.map((cliente) => (
+                      <option key={cliente.id} value={cliente.id}>
+                        {cliente.nome} ({cliente.telefone})
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setShowNovoClientePopup(true)}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <textarea
+                  name="descricao"
+                  placeholder="Descrição do aparelho (opcional)"
+                  value={formData.descricao}
+                  onChange={handleInputChange}
+                  rows={2}
+                  className="input-glass"
+                />
+
+                <textarea
+                  name="acessorios"
+                  placeholder="Acessórios inclusos (opcional)"
+                  value={formData.acessorios}
+                  onChange={handleInputChange}
+                  rows={2}
+                  className="input-glass"
+                />
+
+                <textarea
+                  name="observacoes"
+                  placeholder="Observações adicionais (opcional)"
+                  value={formData.observacoes}
+                  onChange={handleInputChange}
+                  rows={2}
+                  className="input-glass"
+                />
+
+                <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                  <Button type="button" variant="outline" onClick={handleCancel}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
+                    {loading ? "Processando..." : editingId ? "Atualizar Aparelho" : "Salvar Aparelho"}
+                  </Button>
+                </div>
+
+                {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+              </form>
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
+      {/* Modal Lista de Fornecedor */}
+      {showSupplierModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <GlassCard className="w-full max-w-2xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <div>
+                <h3 className="text-lg font-bold">Importar Lista de Fornecedor</h3>
+                <p className="text-xs text-muted-foreground">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowSupplierModal(false)}><X className="h-5 w-5" /></Button>
+            </div>
+            <div className="p-6 space-y-4">
+              <textarea
+                className="input-glass w-full h-96 font-mono text-xs"
+                placeholder="Cole a lista aqui..."
+                value={supplierListText}
+                onChange={(e) => setSupplierListText(e.target.value)}
+              />
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setShowSupplierModal(false)}>Cancelar</Button>
+                <Button onClick={processarListaFornecedor} className="bg-blue-600 hover:bg-blue-700" disabled={!supplierListText.trim()}>Processar e Cadastrar</Button>
+              </div>
+            </div>
+          </GlassCard>
+        </div>
+      )}
 
       {/* Modal de Saídas */}
       {showSaidas && (
