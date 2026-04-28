@@ -34,6 +34,8 @@ export default function Home() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [subtitulo, setSubtitulo] = useState('Sistema de Gestão');
+  const [headerNomeLoja, setHeaderNomeLoja] = useState('');
+  const [headerLogoLoja, setHeaderLogoLoja] = useState<string | null>(null);
 
   // Persistir a aba atual para não voltar ao dashboard ao recarregar
   useEffect(() => {
@@ -47,18 +49,30 @@ export default function Home() {
   }, [currentTab, isInitialized]);
 
   useEffect(() => {
+    // Atualiza via store (configuracoes) caso seja alterado em tempo real na aba Configurações
+    if (config.nomeLoja) setHeaderNomeLoja(config.nomeLoja);
+    if (config.logoLoja !== undefined) setHeaderLogoLoja(config.logoLoja);
+  }, [config.nomeLoja, config.logoLoja]);
+
+  useEffect(() => {
     const fetchLoja = async () => {
       if (usuario?.lojaId) {
         const { data } = await supabase.from('lojas').select('nome, subtitulo, logo_url').eq('id', usuario.lojaId).single();
         if (data) {
           if (data.subtitulo) setSubtitulo(data.subtitulo);
-          if (data.nome) atualizarNomeLoja(data.nome);
-          if (data.logo_url) atualizarLogoLoja(data.logo_url);
+          if (data.nome) {
+            setHeaderNomeLoja(data.nome); // Força visualização real time do BD
+            atualizarNomeLoja(data.nome);
+          }
+          if (data.logo_url) {
+            setHeaderLogoLoja(data.logo_url);
+            atualizarLogoLoja(data.logo_url);
+          }
         }
       }
     };
     fetchLoja();
-  }, [usuario?.lojaId, atualizarNomeLoja, atualizarLogoLoja]);
+  }, [usuario?.lojaId]); // Dependências limpas para não dar loop com o cache
 
   console.debug('Dashboard: render check', { loading, usuario: usuario?.email });
 
@@ -107,10 +121,10 @@ export default function Home() {
 
             {/* Logo e Título - Centralizado Absolutamente */}
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
-              {config.logoLoja ? (
+              {headerLogoLoja ? (
                 <img
-                  src={config.logoLoja}
-                  alt={config.nomeLoja}
+                  src={headerLogoLoja}
+                  alt={headerNomeLoja || 'Logo da loja'}
                   className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-cover flex-shrink-0"
                 />
               ) : (
@@ -119,7 +133,7 @@ export default function Home() {
                 </div>
               )}
               <div className="flex flex-col items-center sm:items-start">
-                <h1 className="text-base sm:text-xl font-bold truncate leading-none">{config.nomeLoja}</h1>
+                <h1 className="text-base sm:text-xl font-bold truncate leading-none">{headerNomeLoja || 'Phone Center'}</h1>
                 <p className="text-[10px] sm:text-xs text-muted-foreground truncate leading-none mt-0.5 hidden sm:block">{subtitulo}</p>
               </div>
             </div>

@@ -205,6 +205,9 @@ async function startBot(lojaId: string) {
             finalPrice = sortedPrices[0];
           }
 
+          // Adiciona a comissão de R$ 300,00
+          finalPrice += 300;
+
           const [modelName, capacity, cor] = model.split('|');
           const displayModel = `${modelName} ${capacity} (${cor})`;
           console.log(`📊 [${i + 1}/${entries.length}] Modelo: ${displayModel} | Preços: ${prices.length} | Final: R$ ${finalPrice.toFixed(2)}`);
@@ -216,7 +219,7 @@ async function startBot(lojaId: string) {
               contato: senderName,
               mensagem: `Extraído da lista: ${displayModel}`,
               peca: displayModel,
-              preco: finalPrice
+              preco: finalPrice+300
             });
             if (logError) console.error(`❌ Erro ao inserir log para ${displayModel}:`, logError.message);
 

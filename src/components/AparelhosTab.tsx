@@ -40,6 +40,7 @@ export function AparelhosTab() {
     capacidade: "64GB" as string,
     condicao: "seminovo" as "novo" | "seminovo" | "usado" | "danificado",
     preco: "",
+    custo: "",
     descricao: "",
     cliente: "",
     clienteId: null as string | null,
@@ -107,6 +108,18 @@ export function AparelhosTab() {
     }));
   };
 
+  const handleCustoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valor = e.target.value.replace(/\D/g, "");
+    const custoNum = valor ? parseInt(valor) / 100 : 0;
+    const vendaValor = valor ? String(Math.round((custoNum + 300) * 100)) : "";
+    
+    setFormData((prev) => ({
+      ...prev,
+      custo: valor,
+      preco: valor ? vendaValor : prev.preco,
+    }));
+  };
+
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
@@ -127,7 +140,8 @@ export function AparelhosTab() {
       cor: aparelho.cor || "",
       capacidade: aparelho.capacidade || "64GB",
       condicao: aparelho.condicao,
-      preco: String(aparelho.preco * 100), // Converter para centavos
+      preco: String(Math.round(aparelho.preco * 100)),
+      custo: String(Math.round(((aparelho as any).custo || 0) * 100)),
       descricao: aparelho.descricao || "",
       cliente: aparelho.cliente || "",
       clienteId: aparelho.clienteId || null,
@@ -146,17 +160,20 @@ export function AparelhosTab() {
     }
 
     const precoNumerico = formData.preco ? parseInt(formData.preco) / 100 : 0;
+    const custoNumerico = formData.custo ? parseInt(formData.custo) / 100 : 0;
 
     if (editingId) {
       await atualizarAparelho(editingId, {
         ...formData,
         preco: precoNumerico,
+        custo: custoNumerico,
         ativo: true,
       });
     } else {
       await criarAparelho({
         ...formData,
         preco: precoNumerico,
+        custo: custoNumerico,
         ativo: true,
       });
     }
@@ -403,6 +420,7 @@ export function AparelhosTab() {
         capacidade,
         condicao,
         preco: finalPrice,
+        custo: representativePrice,
         descricao: "",
         cliente: "",
         clienteId: null,
@@ -564,6 +582,7 @@ export function AparelhosTab() {
       capacidade: "64GB",
       condicao: "seminovo",
       preco: "",
+      custo: "",
       descricao: "",
       cliente: "",
       clienteId: null,
@@ -863,9 +882,12 @@ export function AparelhosTab() {
                   </div>
 
                   <div className="flex flex-col items-end gap-2">
-                    <Badge variant="default">
-                      R$ {aparelho.preco.toFixed(2).replace(".", ",")}
-                    </Badge>
+                    <div className="text-right">
+                      <p className="text-[10px] text-muted-foreground">Custo: R$ {((aparelho as any).custo || 0).toFixed(2).replace(".", ",")}</p>
+                      <Badge variant="default">
+                        R$ {aparelho.preco.toFixed(2).replace(".", ",")}
+                      </Badge>
+                    </div>
                     <p className="text-xs text-muted-foreground whitespace-nowrap">
                       {new Date(aparelho.dataCadastro).toLocaleDateString(
                         "pt-BR"
@@ -996,26 +1018,43 @@ export function AparelhosTab() {
                 </div>
 
                 {/* Linha 4: Condição e Preço */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <select
-                    name="condicao"
-                    value={formData.condicao}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  >
-                    <option value="novo">🆕 Novo</option>
-                    <option value="seminovo">⭐ Seminovo</option>
-                    <option value="usado">♻️ Usado</option>
-                    <option value="danificado">⚠️ Danificado</option>
-                  </select>
-                  <input
-                    type="text"
-                    name="preco"
-                    placeholder="Preço em R$"
-                    value={formatarPreco(formData.preco)}
-                    onChange={handlePrecoChange}
-                    className="input-glass"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Condição</label>
+                    <select
+                      name="condicao"
+                      value={formData.condicao}
+                      onChange={handleInputChange}
+                      className="input-glass"
+                    >
+                      <option value="novo">🆕 Novo</option>
+                      <option value="seminovo">⭐ Seminovo</option>
+                      <option value="usado">♻️ Usado</option>
+                      <option value="danificado">⚠️ Danificado</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Preço de Custo</label>
+                    <input
+                      type="text"
+                      name="custo"
+                      placeholder="R$ 0,00"
+                      value={formatarPreco(formData.custo)}
+                      onChange={handleCustoChange}
+                      className="input-glass"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Preço de Venda</label>
+                    <input
+                      type="text"
+                      name="preco"
+                      placeholder="R$ 0,00"
+                      value={formatarPreco(formData.preco)}
+                      onChange={handlePrecoChange}
+                      className="input-glass"
+                    />
+                  </div>
                 </div>
 
                 {/* Cliente */}

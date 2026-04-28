@@ -7,11 +7,11 @@ import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { usePecas } from '@/hooks/usePecas';
 import { useTecnicos } from '@/hooks/useTecnicos';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, Trash2, Edit2, Plus, Search, X, GripVertical, Camera, MessageCircle } from 'lucide-react';
-import { OrdemServico, PecaUtilizada, Tecnico, Peca } from '@/lib/db/types';
+import { AlertCircle, Trash2, Edit2, Plus, Search, X, GripVertical, Camera, MessageCircle, Printer, FileText, FileCheck } from 'lucide-react';
 
 const STATUS_MAP: Record<string, { label: string; emoji: string; color: string }> = {
   aguardando_pecas: { label: 'Aguardando Peças', emoji: '📦', color: 'bg-yellow-100 text-yellow-800' },
@@ -85,6 +85,7 @@ const StrictModeDroppable = ({ children, ...props }: DroppableProps) => {
 
 export function OrdensTab() {
   const { ordensServico, loading, error, fetchOrdensServico } = useOrdensServico();
+  const { config } = useStoreConfig();
   const { criarOrdemServico, atualizarOrdemServico, deletarOrdemServico } = useOrdensServico();
   const { clientes, fetchClientes, criarCliente } = useClientes();
   const { aparelhos, fetchAparelhos, criarAparelho } = useAparelhos();
@@ -451,6 +452,199 @@ export function OrdensTab() {
     window.open(`https://wa.me/55${phone}?text=Olá ${clienteNome}, referente a sua OS #${osNumero}...`, '_blank');
   };
 
+  const handleGerarOSTermica = (ordem: OrdemServico) => {
+    const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 150px; display: block; margin: 0 auto 10px auto;" />` : '';
+
+    const pecasTermicaHtml = ordem.pecasUtilizadas && ordem.pecasUtilizadas.length > 0 
+      ? ordem.pecasUtilizadas.map(p => `
+          <tr>
+            <td style="padding: 2px 0;">${p.quantidade}x ${p.pecaNome}</td>
+            <td style="text-align: right; padding: 2px 0;">R$ ${p.valorTotal.toFixed(2).replace('.', ',')}</td>
+          </tr>
+        `).join('')
+      : '';
+
+    const osHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Ordem de Serviço #${ordem.numeroOS}</title>
+        <style>
+          body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; margin: 0; padding: 20px; max-width: 300px; }
+          @media print { body { max-width: 100%; padding: 0; } @page { margin: 5mm; } }
+          .text-center { text-align: center; } .text-right { text-align: right; } .font-bold { font-weight: bold; }
+          .divider { border-top: 1px dashed #000; margin: 10px 0; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+          td { padding: 2px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="text-center">
+          ${logoHtml}
+          <h2 style="margin: 0; font-size: 16px;">${config.nomeLoja || 'PHONE CENTER'}</h2>
+          <p style="margin: 2px 0;">Assistência Técnica</p>
+        </div>
+        <div class="divider"></div>
+        <p style="margin: 2px 0;"><strong>ORDEM DE SERVIÇO #${ordem.numeroOS}</strong></p>
+        <p style="margin: 2px 0;">Data: ${new Date(ordem.dataEntrada).toLocaleString('pt-BR')}</p>
+        <p style="margin: 2px 0;">Cliente: ${ordem.clienteNome}</p>
+        <p style="margin: 2px 0;">Aparelho: ${ordem.aparelhoMarca} ${ordem.aparelhoModelo}</p>
+        <div class="divider"></div>
+        <p style="margin: 2px 0;"><strong>Defeito:</strong> ${ordem.defeito}</p>
+        ${ordem.servicosARealizarQuais ? `<p style="margin: 2px 0;"><strong>Serviços:</strong> ${ordem.servicosARealizarQuais}</p>` : ''}
+        <div class="divider"></div>
+        <table>
+          <thead><tr><th style="text-align: left;">Peças/Serviços</th><th style="text-align: right;">Total</th></tr></thead>
+          <tbody>
+          ${pecasTermicaHtml}
+          <tr><td>Mão de Obra</td><td style="text-align: right;">R$ ${ordem.maoDeObra.toFixed(2).replace('.', ',')}</td></tr>
+          </tbody>
+        </table>
+        <div class="divider"></div>
+        <p class="text-right font-bold" style="font-size: 14px;">TOTAL: R$ ${ordem.precoVenda.toFixed(2).replace('.', ',')}</p>
+        <div class="divider"></div>
+        <p class="text-center font-bold" style="margin-bottom: 5px;">TERMOS DE GARANTIA</p>
+        <p style="font-size: 10px; margin: 0; text-align: justify;">Garantia de 90 dias. Não cobre mau uso, quedas, contato com líquidos ou abertura por terceiros. Aparelhos não retirados após 90 dias poderão ser vendidos para custear o serviço.</p>
+        <div class="divider"></div>
+        <br><br>
+        <div style="border-top: 1px solid #000; text-align: center; font-size: 10px; padding-top: 5px;">Assinatura do Cliente</div>
+        <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+      </body>
+      </html>
+    `;
+    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    if (printWindow) { printWindow.document.write(osHtml); printWindow.document.close(); } 
+    else { alert("Por favor, permita pop-ups para gerar a ordem de serviço."); }
+  };
+
+  const handleGerarOSA4 = (ordem: OrdemServico) => {
+    const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 200px; display: block; margin: 0 auto 10px auto;" />` : '';
+
+    const pecasHtml = ordem.pecasUtilizadas && ordem.pecasUtilizadas.length > 0 
+      ? ordem.pecasUtilizadas.map(p => `
+          <tr>
+            <td style="padding: 6px; border: 1px solid #ddd;">${p.pecaNome}</td>
+            <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">${p.quantidade}</td>
+            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">R$ ${(p.valorUnitario || 0).toFixed(2).replace('.', ',')}</td>
+            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">R$ ${p.valorTotal.toFixed(2).replace('.', ',')}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="4" style="padding: 8px; text-align: center; border: 1px solid #ddd;">Nenhuma peça registrada</td></tr>';
+
+    const osHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Ordem de Serviço #${ordem.numeroOS}</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 13px; color: #333; margin: 0; padding: 20px; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+          .header h1 { margin: 0; color: #1e3a8a; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 15px; }
+          .box { border: 1px solid #ccc; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+          .box-title { font-weight: bold; background: #f3f4f6; padding: 6px; margin: -10px -10px 10px -10px; border-bottom: 1px solid #ccc; border-radius: 4px 4px 0 0; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+          th { background: #f3f4f6; font-weight: bold; text-align: left; padding: 6px; border: 1px solid #ddd; }
+          .totals { font-size: 15px; }
+          .signature { margin-top: 60px; display: flex; justify-content: space-around; }
+          .sign-line { border-top: 1px solid #000; width: 40%; text-align: center; padding-top: 5px; }
+          @media print { body { padding: 0; margin: 10mm; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${logoHtml}
+          <h1>${config.nomeLoja || 'PHONE CENTER'}</h1>
+          <p style="margin: 5px 0 0 0;">Assistência Técnica Especializada</p>
+          <h2 style="margin: 10px 0 0 0;">ORDEM DE SERVIÇO Nº ${ordem.numeroOS}</h2>
+        </div>
+        <div class="row">
+          <div style="width: 48%;">
+            <div class="box">
+              <div class="box-title">Dados do Cliente</div>
+              <p style="margin:4px 0;"><strong>Nome:</strong> ${ordem.clienteNome}</p>
+              <p style="margin:4px 0;"><strong>Data Entrada:</strong> ${new Date(ordem.dataEntrada).toLocaleDateString('pt-BR')}</p>
+            </div>
+          </div>
+          <div style="width: 48%;">
+            <div class="box">
+              <div class="box-title">Dados do Aparelho</div>
+              <p style="margin:4px 0;"><strong>Modelo:</strong> ${ordem.aparelhoMarca} ${ordem.aparelhoModelo}</p>
+              <p style="margin:4px 0;"><strong>IMEI/Série:</strong> ${ordem.imei || 'Não informado'}</p>
+            </div>
+          </div>
+        </div>
+        <div class="box"><div class="box-title">Relato do Problema / Defeito</div><p style="margin:0; white-space: pre-wrap;">${ordem.defeito}</p></div>
+        <div class="box"><div class="box-title">Serviços Realizados</div><p style="margin:0; white-space: pre-wrap;">${ordem.servicosARealizarQuais || 'Em análise...'}</p></div>
+        <div class="box">
+          <div class="box-title">Peças e Valores Estimados</div>
+          <table><thead><tr><th>Descrição da Peça/Serviço</th><th style="text-align: center;">Qtd</th><th style="text-align: right;">V. Unit</th><th style="text-align: right;">Total</th></tr></thead><tbody>${pecasHtml}</tbody></table>
+          <div class="row totals"><div></div>
+            <div style="width: 250px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Peças:</span><span>R$ ${ordem.custoPecas.toFixed(2).replace('.', ',')}</span></div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Mão de Obra:</span><span>R$ ${ordem.maoDeObra.toFixed(2).replace('.', ',')}</span></div>
+              <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 18px; border-top: 1px solid #000; padding-top: 5px;"><span>TOTAL:</span><span>R$ ${ordem.precoVenda.toFixed(2).replace('.', ',')}</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="box"><div class="box-title">Termos de Serviço e Garantia</div><ul style="margin: 0; padding-left: 20px; font-size: 11px; line-height: 1.4;"><li>A garantia dos serviços prestados é de 90 dias, conforme Código de Defesa do Consumidor.</li><li>A garantia não cobre danos por mau uso, quedas, contato com líquidos ou abertura por terceiros.</li><li>Aparelhos não retirados após 90 dias da comunicação de conclusão poderão ser descartados ou vendidos para custear o serviço.</li></ul></div>
+        <div class="signature"><div class="sign-line">Assinatura do Cliente<br><small>${ordem.clienteNome}</small></div><div class="sign-line">Técnico Responsável<br><small>${ordem.tecnicoNome || config.nomeLoja || 'Phone Center'}</small></div></div>
+        <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+      </body>
+      </html>
+    `;
+    const printWindow = window.open('', '_blank');
+    if (printWindow) { printWindow.document.write(osHtml); printWindow.document.close(); } 
+    else { alert("Por favor, permita pop-ups para gerar a ordem de serviço."); }
+  };
+
+  const handleGerarTermoRetirada = (ordem: OrdemServico) => {
+    const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 200px; display: block; margin: 0 auto 10px auto;" />` : '';
+    
+    const termoHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Termo de Retirada - OS #${ordem.numeroOS}</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 14px; color: #333; margin: 0; padding: 40px; line-height: 1.6; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+          .header h1 { margin: 0; color: #1e3a8a; }
+          .content { margin-bottom: 40px; text-align: justify; }
+          .details { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background: #f9fafb; }
+          .signature-area { margin-top: 80px; text-align: center; }
+          .sign-line { border-top: 1px solid #000; width: 60%; margin: 0 auto; padding-top: 5px; }
+          @media print { body { padding: 0; margin: 15mm; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          ${logoHtml}
+          <h1>${config.nomeLoja || 'PHONE CENTER'}</h1>
+          <h2 style="margin: 10px 0 0 0;">TERMO DE RETIRADA DE APARELHO</h2>
+          <p style="margin: 5px 0 0 0;">Ordem de Serviço Nº ${ordem.numeroOS}</p>
+        </div>
+        <div class="content">
+          <p>Eu, <strong>${ordem.clienteNome}</strong>, declaro ter recebido o aparelho descrito abaixo, o qual foi deixado para assistência técnica/orçamento na data de ${new Date(ordem.dataEntrada).toLocaleDateString('pt-BR')}.</p>
+          <div class="details">
+            <p style="margin: 5px 0;"><strong>Aparelho:</strong> ${ordem.aparelhoMarca} ${ordem.aparelhoModelo}</p>
+            <p style="margin: 5px 0;"><strong>IMEI/Série:</strong> ${ordem.imei || 'Não informado'}</p>
+            <p style="margin: 5px 0;"><strong>Serviços Realizados:</strong> ${ordem.servicosARealizarQuais || 'Não aplicável'}</p>
+          </div>
+          <p>Declaro que recebi o aparelho nas seguintes condições: testado, em perfeito estado de funcionamento (conforme os serviços contratados), ou nas mesmas condições em que foi deixado caso o serviço não tenha sido realizado.</p>
+          <p>Estou ciente e de acordo com os termos de garantia fornecidos para os serviços executados (se houver), não havendo nada a reclamar no presente momento.</p>
+          <p style="margin-top: 30px;">Data de retirada: ___ / ___ / ______</p>
+        </div>
+        <div class="signature-area"><div class="sign-line">Assinatura de <strong>${ordem.clienteNome}</strong></div><p style="font-size: 12px; color: #666; margin-top: 5px;">Documento de Identificação: _______________________</p></div>
+        <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+      </body>
+      </html>
+    `;
+    const printWindow = window.open('', '_blank');
+    if (printWindow) { printWindow.document.write(termoHtml); printWindow.document.close(); } 
+    else { alert("Por favor, permita pop-ups para gerar o termo."); }
+  };
+
   return (
     <div className="space-y-4">
       {error && (
@@ -751,34 +945,36 @@ export function OrdensTab() {
       {showModalNovoCliente && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-white">Novo Cliente</h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowModalNovoCliente(false)}>
-                <X className="w-4 h-4 text-gray-400" />
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <h3 className="text-lg font-bold">Novo Cliente</h3>
+              <Button variant="ghost" size="icon" onClick={() => setShowModalNovoCliente(false)}>
+                <X className="w-5 h-5" />
               </Button>
             </div>
-            <form onSubmit={handleCreateCliente} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Nome *</label>
-                <input type="text" value={formNovoCliente.nome} onChange={(e) => setFormNovoCliente({...formNovoCliente, nome: e.target.value})} className="input-glass" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Telefone *</label>
-                <input type="tel" value={formNovoCliente.telefone} onChange={(e) => setFormNovoCliente({...formNovoCliente, telefone: e.target.value})} className="input-glass" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Email</label>
-                <input type="email" value={formNovoCliente.email} onChange={(e) => setFormNovoCliente({...formNovoCliente, email: e.target.value})} className="input-glass" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">CPF</label>
-                <input type="text" value={formNovoCliente.cpf} onChange={(e) => setFormNovoCliente({...formNovoCliente, cpf: e.target.value})} className="input-glass" />
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Salvar</Button>
-                <Button type="button" variant="outline" onClick={() => setShowModalNovoCliente(false)}>Cancelar</Button>
-              </div>
-            </form>
+            <div className="p-6">
+              <form onSubmit={handleCreateCliente} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Nome *</label>
+                  <input type="text" value={formNovoCliente.nome} onChange={(e) => setFormNovoCliente({...formNovoCliente, nome: e.target.value})} className="input-glass" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Telefone *</label>
+                  <input type="tel" value={formNovoCliente.telefone} onChange={(e) => setFormNovoCliente({...formNovoCliente, telefone: e.target.value})} className="input-glass" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Email</label>
+                  <input type="email" value={formNovoCliente.email} onChange={(e) => setFormNovoCliente({...formNovoCliente, email: e.target.value})} className="input-glass" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">CPF</label>
+                  <input type="text" value={formNovoCliente.cpf} onChange={(e) => setFormNovoCliente({...formNovoCliente, cpf: e.target.value})} className="input-glass" />
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="outline" onClick={() => setShowModalNovoCliente(false)}>Cancelar</Button>
+                  <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Salvar Cliente</Button>
+                </div>
+              </form>
+            </div>
           </GlassCard>
         </div>
       )}
@@ -787,65 +983,62 @@ export function OrdensTab() {
       {showModalNovaTecnico && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-white">Novo Técnico</h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowModalNovaTecnico(false)}>
-                <X className="w-4 h-4 text-gray-400" />
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <h3 className="text-lg font-bold">Novo Técnico</h3>
+              <Button variant="ghost" size="icon" onClick={() => setShowModalNovaTecnico(false)}>
+                <X className="w-5 h-5" />
               </Button>
             </div>
-
-            <form onSubmit={handleCreateTecnico} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Nome *</label>
-                <input
-                  type="text"
-                  value={formNovaTecnico.nome}
-                  onChange={(e) => setFormNovaTecnico({...formNovaTecnico, nome: e.target.value})}
-                  placeholder="Nome do técnico"
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Telefone *</label>
-                <input
-                  type="tel"
-                  value={formNovaTecnico.telefone}
-                  onChange={(e) => setFormNovaTecnico({...formNovaTecnico, telefone: e.target.value})}
-                  placeholder="(11) 98765-4321"
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Email</label>
-                <input
-                  type="email"
-                  value={formNovaTecnico.email}
-                  onChange={(e) => setFormNovaTecnico({...formNovaTecnico, email: e.target.value})}
-                  placeholder="email@example.com"
-                  className="input-glass"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Especialidade</label>
-                <input
-                  type="text"
-                  value={formNovaTecnico.especialidade}
-                  onChange={(e) => setFormNovaTecnico({...formNovaTecnico, especialidade: e.target.value})}
-                  placeholder="Ex: Tela, Bateria, Placa"
-                  className="input-glass"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">Criar Técnico</Button>
-                <Button type="button" variant="outline" onClick={() => setShowModalNovaTecnico(false)}>Cancelar</Button>
-              </div>
-            </form>
+            <div className="p-6">
+              <form onSubmit={handleCreateTecnico} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Nome *</label>
+                  <input
+                    type="text"
+                    value={formNovaTecnico.nome}
+                    onChange={(e) => setFormNovaTecnico({...formNovaTecnico, nome: e.target.value})}
+                    placeholder="Nome del técnico"
+                    className="input-glass"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Telefone *</label>
+                  <input
+                    type="tel"
+                    value={formNovaTecnico.telefone}
+                    onChange={(e) => setFormNovaTecnico({...formNovaTecnico, telefone: e.target.value})}
+                    placeholder="(11) 98765-4321"
+                    className="input-glass"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={formNovaTecnico.email}
+                    onChange={(e) => setFormNovaTecnico({...formNovaTecnico, email: e.target.value})}
+                    placeholder="email@example.com"
+                    className="input-glass"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Especialidade</label>
+                  <input
+                    type="text"
+                    value={formNovaTecnico.especialidade}
+                    onChange={(e) => setFormNovaTecnico({...formNovaTecnico, especialidade: e.target.value})}
+                    placeholder="Ex: Tela, Bateria, Placa"
+                    className="input-glass"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="outline" onClick={() => setShowModalNovaTecnico(false)}>Cancelar</Button>
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">Criar Técnico</Button>
+                </div>
+              </form>
+            </div>
           </GlassCard>
         </div>
       )}
@@ -854,69 +1047,68 @@ export function OrdensTab() {
       {showModalNovaPeca && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-white">Nova Peça</h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowModalNovaPeca(false)}>
-                <X className="w-4 h-4 text-gray-400" />
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <h3 className="text-lg font-bold">Nova Peça</h3>
+              <Button variant="ghost" size="icon" onClick={() => setShowModalNovaPeca(false)}>
+                <X className="w-5 h-5" />
               </Button>
             </div>
-
-            <form onSubmit={handleCreatePeca} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Código *</label>
-                <input
-                  type="text"
-                  value={formNovaPeca.codigoUnico}
-                  onChange={(e) => setFormNovaPeca({...formNovaPeca, codigoUnico: e.target.value})}
-                  placeholder="Código único"
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Nome *</label>
-                <input
-                  type="text"
-                  value={formNovaPeca.nome}
-                  onChange={(e) => setFormNovaPeca({...formNovaPeca, nome: e.target.value})}
-                  placeholder="Nome da peça"
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Custo (R$) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formNovaPeca.custoPeca}
-                  onChange={(e) => setFormNovaPeca({...formNovaPeca, custoPeca: e.target.value})}
-                  placeholder="0.00"
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Venda (R$) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formNovaPeca.vendaPeca}
-                  onChange={(e) => setFormNovaPeca({...formNovaPeca, vendaPeca: e.target.value})}
-                  placeholder="0.00"
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">Criar Peça</Button>
-                <Button type="button" variant="outline" onClick={() => setShowModalNovaPeca(false)}>Cancelar</Button>
-              </div>
-            </form>
+            <div className="p-6">
+              <form onSubmit={handleCreatePeca} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Código *</label>
+                  <input
+                    type="text"
+                    value={formNovaPeca.codigoUnico}
+                    onChange={(e) => setFormNovaPeca({...formNovaPeca, codigoUnico: e.target.value})}
+                    placeholder="Código único"
+                    className="input-glass"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Nome *</label>
+                  <input
+                    type="text"
+                    value={formNovaPeca.nome}
+                    onChange={(e) => setFormNovaPeca({...formNovaPeca, nome: e.target.value})}
+                    placeholder="Nome da peça"
+                    className="input-glass"
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Custo (R$) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formNovaPeca.custoPeca}
+                      onChange={(e) => setFormNovaPeca({...formNovaPeca, custoPeca: e.target.value})}
+                      placeholder="0.00"
+                      className="input-glass"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Venda (R$) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formNovaPeca.vendaPeca}
+                      onChange={(e) => setFormNovaPeca({...formNovaPeca, vendaPeca: e.target.value})}
+                      placeholder="0.00"
+                      className="input-glass"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="outline" onClick={() => setShowModalNovaPeca(false)}>Cancelar</Button>
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">Criar Peça</Button>
+                </div>
+              </form>
+            </div>
           </GlassCard>
         </div>
       )}
@@ -925,34 +1117,38 @@ export function OrdensTab() {
       {showModalNovoAparelho && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-white">Novo Aparelho (Cliente)</h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowModalNovoAparelho(false)}>
-                <X className="w-4 h-4 text-gray-400" />
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <h3 className="text-lg font-bold">Novo Aparelho (Cliente)</h3>
+              <Button variant="ghost" size="icon" onClick={() => setShowModalNovoAparelho(false)}>
+                <X className="w-5 h-5" />
               </Button>
             </div>
-            <form onSubmit={handleCreateAparelho} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Marca *</label>
-                <input type="text" value={formNovoAparelho.marca} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, marca: e.target.value})} className="input-glass" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Modelo *</label>
-                <input type="text" value={formNovoAparelho.modelo} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, modelo: e.target.value})} className="input-glass" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">IMEI</label>
-                <input type="text" value={formNovoAparelho.imei} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, imei: e.target.value})} className="input-glass" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Cor</label>
-                <input type="text" value={formNovoAparelho.cor} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, cor: e.target.value})} className="input-glass" />
-              </div>
-              <div className="flex gap-2">
-                <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Salvar</Button>
-                <Button type="button" variant="outline" onClick={() => setShowModalNovoAparelho(false)}>Cancelar</Button>
-              </div>
-            </form>
+            <div className="p-6">
+              <form onSubmit={handleCreateAparelho} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Marca *</label>
+                    <input type="text" value={formNovoAparelho.marca} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, marca: e.target.value})} className="input-glass" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Modelo *</label>
+                    <input type="text" value={formNovoAparelho.modelo} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, modelo: e.target.value})} className="input-glass" required />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">IMEI</label>
+                  <input type="text" value={formNovoAparelho.imei} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, imei: e.target.value})} className="input-glass" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Cor</label>
+                  <input type="text" value={formNovoAparelho.cor} onChange={(e) => setFormNovoAparelho({...formNovoAparelho, cor: e.target.value})} className="input-glass" />
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button type="button" variant="outline" onClick={() => setShowModalNovoAparelho(false)}>Cancelar</Button>
+                  <Button type="submit" className="flex-1 bg-green-600 hover:bg-green-700">Salvar Aparelho</Button>
+                </div>
+              </form>
+            </div>
           </GlassCard>
         </div>
       )}
@@ -1036,6 +1232,15 @@ export function OrdensTab() {
                                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <Button size="sm" variant="outline" className="flex-1 text-green-600" onClick={() => openWhatsApp(ordem.clienteNome, ordem.numeroOS.toString())}>
                                       <MessageCircle className="w-3 h-3" />
+                                    </Button>
+                                    <Button size="sm" variant="outline" className="flex-1 text-slate-600" onClick={() => handleGerarOSTermica(ordem)} title="Imprimir OS (Térmica)">
+                                      <Printer className="w-3 h-3" />
+                                    </Button>
+                                    <Button size="sm" variant="outline" className="flex-1 text-blue-600" onClick={() => handleGerarOSA4(ordem)} title="Imprimir OS (A4)">
+                                      <FileText className="w-3 h-3" />
+                                    </Button>
+                                    <Button size="sm" variant="outline" className="flex-1 text-amber-600" onClick={() => handleGerarTermoRetirada(ordem)} title="Termo de Retirada">
+                                      <FileCheck className="w-3 h-3" />
                                     </Button>
                                     <Button size="sm" variant="outline" className="flex-1" onClick={() => handleEdit(ordem)}>
                                       <Edit2 className="w-3 h-3" />
@@ -1123,6 +1328,15 @@ export function OrdensTab() {
                           <div className="flex gap-2 justify-end sm:justify-start">
                             <Button size="sm" variant="outline" className="text-green-600" onClick={() => openWhatsApp(ordem.clienteNome, ordem.numeroOS.toString())}>
                               <MessageCircle className="w-4 h-4" />
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-slate-600" onClick={() => handleGerarOSTermica(ordem)} title="Imprimir OS (Térmica)">
+                              <Printer className="w-4 h-4" />
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-blue-600" onClick={() => handleGerarOSA4(ordem)} title="Imprimir OS (A4)">
+                              <FileText className="w-4 h-4" />
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-amber-600" onClick={() => handleGerarTermoRetirada(ordem)} title="Termo de Retirada">
+                              <FileCheck className="w-4 h-4" />
                             </Button>
                             <Button size="sm" variant="outline" onClick={() => handleEdit(ordem)}>
                               <Edit2 className="w-4 h-4" />

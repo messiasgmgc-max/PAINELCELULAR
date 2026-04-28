@@ -5,12 +5,13 @@ import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText } from 'lucide-react';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Venda, VendaItem } from '@/lib/db/types';
 
 interface VendasPorPeriodo {
@@ -23,6 +24,7 @@ interface VendasPorPeriodo {
 
 export function VendasTab() {
   const { usuario } = useAuth();
+  const { config } = useStoreConfig();
   const { clientes, fetchClientes, criarCliente } = useClientes();
   const { aparelhos, fetchAparelhos, criarAparelho } = useAparelhos();
   const { tecnicos, fetchTecnicos } = useTecnicos();
@@ -86,7 +88,7 @@ export function VendasTab() {
 
   // Estados para formulários rápidos
   const [novoClienteData, setNovoClienteData] = useState({ nome: '', email: '', telefone: '', cpf: '' });
-  const [novoAparelhoData, setNovoAparelhoData] = useState({ marca: '', modelo: '', imei: '', preco: '', condicao: 'seminovo' as const });
+  const [novoAparelhoData, setNovoAparelhoData] = useState({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' as const });
 
   useEffect(() => {
     if (usuario?.lojaId) {
@@ -317,9 +319,11 @@ export function VendasTab() {
       return;
     }
     const precoNum = parseFloat(novoAparelhoData.preco.replace(/\D/g, '')) / 100 || 0;
+    const custoNum = parseFloat(novoAparelhoData.custo.replace(/\D/g, '')) / 100 || 0;
     const aparelho = await criarAparelho({
       ...novoAparelhoData,
       preco: precoNum,
+      custo: custoNum,
       ativo: true,
       capacidade: 'N/A',
       cor: 'N/A'
@@ -330,10 +334,10 @@ export function VendasTab() {
         aparelhoId: aparelho.id,
         descricao: `${aparelho.marca} ${aparelho.modelo}`,
         valorExibir: aparelho.preco,
-        valorInterno: 0 // Assumindo 0 pois cadastro rápido não tem custo
+        valorInterno: aparelho.custo || 0
       }));
       setShowNovoAparelho(false);
-      setNovoAparelhoData({ marca: '', modelo: '', imei: '', preco: '', condicao: 'seminovo' });
+      setNovoAparelhoData({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' });
       await fetchAparelhos();
     }
   };
@@ -386,88 +390,158 @@ export function VendasTab() {
   const troco = Math.max(0, posPagamento.valorPago - totalFinal);
   const saldo = Math.max(0, totalFinal - posPagamento.valorPago);
 
-  const handleGerarNota = async (venda: Venda) => {
+  const handleGerarCupomTermico = async (venda: Venda) => {
     try {
-      const html2pdf = (await import("html2pdf.js")).default;
-      
-      // Preparar linhas da tabela
+      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 150px; margin: 0 auto 10px auto; display: block;" />` : '';
+
       const itensHtml = venda.itens && venda.itens.length > 0 
         ? venda.itens.map(item => `
             <tr>
-              <td style="padding: 5px;">${item.descricao} <span style="font-size: 10px;">(${item.quantidade}x)</span></td>
-              <td style="text-align: right; padding: 5px;">${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.total)}</td>
+              <td style="padding: 5px 0; border-bottom: 1px dashed #eee;">
+                ${item.descricao} <br>
+                <small style="color: #666;">${item.quantidade}x R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</small>
+              </td>
+              <td style="text-align: right; padding: 5px 0; border-bottom: 1px dashed #eee;">
+                R$ ${item.total.toFixed(2).replace('.', ',')}
+              </td>
             </tr>
           `).join('')
         : `<tr>
-             <td style="padding: 5px;">${venda.descricao || 'Produto Genérico'}</td>
-             <td style="text-align: right; padding: 5px;">${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</td>
+             <td style="padding: 5px 0; border-bottom: 1px dashed #eee;">${venda.descricao || 'Produto Genérico'}</td>
+             <td style="text-align: right; padding: 5px 0; border-bottom: 1px dashed #eee;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
            </tr>`;
 
-      const element = document.createElement("div");
-      element.innerHTML = `
-        <div style="font-family: 'Courier New', Courier, monospace; padding: 20px; max-width: 800px; margin: 0 auto; color: #000; background-color: #fff;">
-          <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 20px;">
-            <h2 style="margin: 0; font-size: 24px;">PHONE CENTER</h2>
-            <p style="margin: 5px 0;">Assistência Técnica e Vendas</p>
-            <p style="margin: 5px 0;">CNPJ: 00.000.000/0000-00</p>
-            <p style="margin: 5px 0;">(11) 99999-9999</p>
+      const cupomHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Comprovante de Venda #${venda.id.slice(-6).toUpperCase()}</title>
+          <style>
+            body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; margin: 0; padding: 20px; max-width: 300px; }
+            @media print { body { max-width: 100%; padding: 0; } @page { margin: 5mm; } }
+            .text-center { text-align: center; } .text-right { text-align: right; } .font-bold { font-weight: bold; }
+            .divider { border-top: 1px dashed #000; margin: 10px 0; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="text-center">
+            ${logoHtml}
+            <h2 style="margin: 0; font-size: 16px;">${config.nomeLoja || 'PHONE CENTER'}</h2>
+            <p style="margin: 2px 0;">Assistência e Vendas</p>
           </div>
-
-          <div style="margin-bottom: 20px;">
-            <p><strong>COMPROVANTE DE VENDA #${venda.id.slice(-6)}</strong></p>
-            <p>Data: ${new Date(venda.dataPagamento).toLocaleDateString('pt-BR')}</p>
-            <p>Cliente: ${venda.clienteNome}</p>
-          </div>
-
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-            <tr style="border-bottom: 1px dashed #000;">
-              <th style="text-align: left; padding: 5px;">Item</th>
-              <th style="text-align: right; padding: 5px;">Valor</th>
-            </tr>
+          <div class="divider"></div>
+          <p style="margin: 2px 0;"><strong>RECIBO #${venda.id.slice(-6).toUpperCase()}</strong></p>
+          <p style="margin: 2px 0;">Data: ${new Date(venda.dataPagamento).toLocaleString('pt-BR')}</p>
+          <p style="margin: 2px 0;">Cliente: ${venda.clienteNome}</p>
+          <p style="margin: 2px 0;">Pagt: ${venda.metodo.toUpperCase().replace('_', ' ')}</p>
+          <div class="divider"></div>
+          <table>
+            <thead><tr><th style="text-align: left;">Item</th><th style="text-align: right;">Total</th></tr></thead>
+            <tbody>
             ${itensHtml}
+            </tbody>
           </table>
-
-          <div style="text-align: right; margin-bottom: 30px; border-top: 1px dashed #000; padding-top: 10px;">
-            <p style="font-size: 18px; font-weight: bold;">TOTAL: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</p>
-            <p style="font-size: 12px;">Forma de Pagamento: ${venda.metodo.toUpperCase().replace('_', ' ')}</p>
-          </div>
-
-          <div style="border: 1px solid #000; padding: 15px; font-size: 12px; margin-bottom: 30px;">
-            <p style="font-weight: bold; text-align: center; margin-top: 0;">TERMOS DE GARANTIA</p>
-            <p>1. A garantia é válida por <strong>${venda.garantia || '90 dias'}</strong> a partir desta data.</p>
-            <p>2. A garantia cobre defeitos de fabricação e funcionamento.</p>
-            <p>3. A garantia NÃO cobre:</p>
-            <ul style="margin: 5px 0; padding-left: 20px;">
-              <li>Danos causados por líquidos ou oxidação;</li>
-              <li>Quedas, trincas ou mau uso;</li>
-              <li>Sinais de abertura por terceiros.</li>
-            </ul>
-            <p>4. Obrigatória a apresentação deste comprovante.</p>
-          </div>
-
-          <div style="margin-top: 50px; text-align: center;">
-            <div style="border-top: 1px solid #000; width: 60%; margin: 0 auto 5px auto;"></div>
-            <p>Assinatura do Cliente</p>
-          </div>
           
-          <div style="text-align: center; margin-top: 30px; font-size: 10px;">
-            <p>Obrigado pela preferência!</p>
-          </div>
-        </div>
+          <p class="text-right font-bold" style="font-size: 14px;">TOTAL: R$ ${venda.valor.toFixed(2).replace('.', ',')}</p>
+          ${venda.descontoTotal > 0 ? `<p class="text-right" style="margin: 2px 0;">Desconto: R$ ${venda.descontoTotal.toFixed(2).replace('.', ',')}</p>` : ''}
+          <div class="divider"></div>
+          <p class="text-center font-bold" style="margin-bottom: 5px;">TERMOS DE GARANTIA</p>
+          <p style="font-size: 10px; margin: 0;">Válida por ${venda.garantia || '90 dias'}. Não cobre mau uso, quedas, contato com líquidos ou abertura por terceiros. Obrigatório a apresentação deste.</p>
+          <div class="divider"></div>
+          <p class="text-center" style="font-size: 11px;">Obrigado pela preferência!</p>
+          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+        </body>
+        </html>
       `;
 
-      const options = {
-        margin: 10,
-        filename: `nota_venda_${venda.id}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, backgroundColor: "#ffffff" },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-
-      html2pdf().set(options).from(element).save();
+      const printWindow = window.open('', '_blank', 'width=400,height=600');
+      if (printWindow) {
+        printWindow.document.write(cupomHtml);
+        printWindow.document.close();
+      } else {
+        alert("Por favor, permita pop-ups no navegador para imprimir o comprovante.");
+      }
     } catch (err) {
       console.error("Erro ao gerar nota:", err);
-      alert("Erro ao gerar nota PDF.");
+      alert("Erro ao gerar comprovante de venda.");
+    }
+  };
+
+  const handleGerarReciboA4 = async (venda: Venda) => {
+    try {
+      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 250px; display: block; margin: 0 auto 10px auto;" />` : '';
+
+      const itensHtmlA4 = venda.itens && venda.itens.length > 0 
+        ? venda.itens.map(item => `
+            <tr>
+              <td style="padding: 8px; border: 1px solid #ddd;">${item.descricao} <br><small style="color: #666;">${item.observacao || ''}</small></td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.quantidade}</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">R$ ${item.total.toFixed(2).replace('.', ',')}</td>
+            </tr>
+          `).join('')
+        : `<tr>
+             <td style="padding: 8px; border: 1px solid #ddd;">${venda.descricao || 'Produto Genérico'}</td>
+             <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">1</td>
+             <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
+             <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
+           </tr>`;
+
+      const cupomHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Recibo de Venda #${venda.id.slice(-6).toUpperCase()}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 13px; color: #333; margin: 0; padding: 20px; }
+            .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+            .header h1 { margin: 0; color: #1e3a8a; }
+            .row { display: flex; justify-content: space-between; margin-bottom: 15px; }
+            .box { border: 1px solid #ccc; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+            .box-title { font-weight: bold; background: #f3f4f6; padding: 6px; margin: -10px -10px 10px -10px; border-bottom: 1px solid #ccc; border-radius: 4px 4px 0 0; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+            th { background: #f3f4f6; font-weight: bold; text-align: left; padding: 6px; border: 1px solid #ddd; }
+            .totals { font-size: 15px; }
+            .signature { margin-top: 60px; display: flex; justify-content: space-around; }
+            .sign-line { border-top: 1px solid #000; width: 40%; text-align: center; padding-top: 5px; }
+            @media print { body { padding: 0; margin: 10mm; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            ${logoHtml}
+            <h1>${config.nomeLoja || 'PHONE CENTER'}</h1>
+            <p style="margin: 5px 0 0 0;">Comprovante de Venda</p>
+            <h2 style="margin: 10px 0 0 0;">RECIBO Nº ${venda.id.slice(-6).toUpperCase()}</h2>
+          </div>
+          <div class="row">
+            <div style="width: 48%;"><div class="box"><div class="box-title">Dados do Cliente</div><p style="margin:4px 0;"><strong>Nome:</strong> ${venda.clienteNome}</p><p style="margin:4px 0;"><strong>Data:</strong> ${new Date(venda.dataPagamento).toLocaleDateString('pt-BR')}</p></div></div>
+            <div style="width: 48%;"><div class="box"><div class="box-title">Dados da Venda</div><p style="margin:4px 0;"><strong>Vendedor:</strong> ${venda.vendedor || 'Não informado'}</p><p style="margin:4px 0;"><strong>Pagamento:</strong> ${venda.metodo.toUpperCase().replace('_', ' ')}</p></div></div>
+          </div>
+          <div class="box">
+            <div class="box-title">Itens da Venda</div>
+            <table><thead><tr><th>Produto/Serviço</th><th style="text-align: center;">Qtd</th><th style="text-align: right;">V. Unit</th><th style="text-align: right;">Total</th></tr></thead><tbody>${itensHtmlA4}</tbody></table>
+            <div class="row totals"><div></div>
+              <div style="width: 250px;">
+                ${venda.descontoTotal > 0 ? `<div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Desconto:</span><span>R$ ${venda.descontoTotal.toFixed(2).replace('.', ',')}</span></div>` : ''}
+                <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 18px; border-top: 1px solid #000; padding-top: 5px;"><span>TOTAL:</span><span>R$ ${venda.valor.toFixed(2).replace('.', ',')}</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="box"><div class="box-title">Termos de Garantia</div><ul style="margin: 0; padding-left: 20px; font-size: 11px; line-height: 1.4;"><li>A garantia dos produtos é válida por ${venda.garantia || '90 dias'}, conforme Código de Defesa do Consumidor.</li><li>A garantia não cobre danos por mau uso, quedas, contato com líquidos ou abertura por terceiros.</li><li>É obrigatória a apresentação deste recibo para acionar a garantia.</li></ul></div>
+          <div class="signature"><div class="sign-line">Assinatura do Cliente<br><small>${venda.clienteNome}</small></div><div class="sign-line">Assinatura do Vendedor<br><small>${venda.vendedor || config.nomeLoja || 'Phone Center'}</small></div></div>
+          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+        </body>
+        </html>
+      `;
+
+      const printWindow = window.open('', '_blank');
+      if (printWindow) { printWindow.document.write(cupomHtml); printWindow.document.close(); } 
+      else { alert("Por favor, permita pop-ups no navegador para imprimir o comprovante."); }
+    } catch (err) {
+      console.error("Erro ao gerar nota:", err);
+      alert("Erro ao gerar comprovante de venda.");
     }
   };
 
@@ -622,7 +696,7 @@ export function VendasTab() {
                         aparelhoId: e.target.value, 
                                 descricao: aparelho ? `${aparelho.marca} ${aparelho.modelo}` : '',
                                 valorExibir: aparelho ? aparelho.preco : 0,
-                                valorInterno: 0 // Assumindo 0 ou buscar custo se disponível
+                                valorInterno: aparelho ? (aparelho as any).custo || 0 : 0
                       });
                     }}
                   >
@@ -643,16 +717,26 @@ export function VendasTab() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="text-xs text-gray-500 ml-1">Valor (R$)</label>
+                <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Custo (R$)</label>
                 <input
                   type="number"
-                  className="input-glass"
+                  className="input-glass border-blue-500/30"
+                  value={posItem.valorInterno}
+                  onChange={e => setPosItem({...posItem, valorInterno: parseFloat(e.target.value)})}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Venda (R$)</label>
+                <input
+                  type="number"
+                  className="input-glass border-green-500/30"
                   value={posItem.valorExibir}
                   onChange={e => setPosItem({...posItem, valorExibir: parseFloat(e.target.value)})}
                 />
                       </div>
 
-                      <div className="md:col-span-2 flex gap-1">
+                      <div className="md:col-span-1 flex gap-1">
                         <div className="flex-1">
                           <label className="text-xs text-gray-500 ml-1">Desconto</label>
                           <input type="number" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value)})} />
@@ -670,7 +754,7 @@ export function VendasTab() {
                         </div>
               </div>
 
-                      <div className="md:col-span-2">
+                      <div className="md:col-span-1">
                         <label className="text-xs text-gray-500 ml-1">Obs</label>
                         <input type="text" className="input-glass" value={posItem.observacao} onChange={e => setPosItem({...posItem, observacao: e.target.value})} />
                       </div>
@@ -689,6 +773,7 @@ export function VendasTab() {
                           <tr>
                             <th className="p-3 text-left">Produto</th>
                             <th className="p-3 text-center">Qtd</th>
+                            <th className="p-3 text-right">Custo Unit.</th>
                             <th className="p-3 text-right">Vlr Unit.</th>
                             <th className="p-3 text-right">Desc.</th>
                             <th className="p-3 text-right">Total</th>
@@ -700,6 +785,7 @@ export function VendasTab() {
                             <tr key={item.id} className="hover:bg-white/5">
                               <td className="p-3">{item.descricao} <span className="text-xs text-gray-400 block">{item.observacao}</span></td>
                               <td className="p-3 text-center">{item.quantidade}</td>
+                              <td className="p-3 text-right text-blue-500">R$ {item.valorInterno.toFixed(2)}</td>
                               <td className="p-3 text-right">R$ {item.valorExibir.toFixed(2)}</td>
                               <td className="p-3 text-right text-red-500">
                                 {item.desconto > 0 ? `-${item.tipoDesconto === 'R$' ? 'R$' : ''}${item.desconto}${item.tipoDesconto === '%' ? '%' : ''}` : '-'}
@@ -711,7 +797,7 @@ export function VendasTab() {
                             </tr>
                           ))}
                           {carrinho.length === 0 && (
-                            <tr><td colSpan={6} className="p-4 text-center text-gray-400">Nenhum item adicionado</td></tr>
+                            <tr><td colSpan={7} className="p-4 text-center text-gray-400">Nenhum item adicionado</td></tr>
                           )}
                         </tbody>
                         <tfoot className="bg-white/10 dark:bg-black/10 font-bold">
@@ -1052,10 +1138,20 @@ export function VendasTab() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleGerarNota(venda)}
-                            className="h-8 text-xs text-blue-600 hover:bg-blue-500/10"
+                            onClick={() => handleGerarCupomTermico(venda)}
+                            className="h-8 text-xs text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            title="Cupom Térmico"
                           >
-                            <Printer className="w-3 h-3 mr-1" /> Nota
+                            <Printer className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleGerarReciboA4(venda)}
+                            className="h-8 text-xs text-blue-600 hover:bg-blue-500/10"
+                            title="Recibo A4"
+                          >
+                            <FileText className="w-3 h-3" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -1115,17 +1211,43 @@ export function VendasTab() {
                 <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
                 <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
                 <input type="text" placeholder="IMEI" className="input-glass" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value})} />
-                <input 
-                  type="text" 
-                  placeholder="Preço Venda (R$)" 
-                  className="input-glass" 
-                  value={novoAparelhoData.preco} 
-                  onChange={e => {
-                    const v = e.target.value.replace(/\D/g, '');
-                    const formatted = (parseInt(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-                    setNovoAparelhoData({...novoAparelhoData, preco: v ? `R$ ${formatted}` : ''});
-                  }} 
-                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Preço Custo</label>
+                    <input 
+                      type="text" 
+                      placeholder="R$ 0,00" 
+                      className="input-glass" 
+                      value={novoAparelhoData.custo} 
+                      onChange={e => {
+                        const v = e.target.value.replace(/\D/g, '');
+                        if (!v) {
+                          setNovoAparelhoData({...novoAparelhoData, custo: ''});
+                          return;
+                        }
+                        const custoNum = parseInt(v) / 100;
+                        const vendaNum = custoNum + 300;
+                        const formattedCusto = `R$ ${custoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                        const formattedVenda = `R$ ${vendaNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                        setNovoAparelhoData({...novoAparelhoData, custo: formattedCusto, preco: formattedVenda});
+                      }} 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Preço Venda</label>
+                    <input 
+                      type="text" 
+                      placeholder="R$ 0,00" 
+                      className="input-glass" 
+                      value={novoAparelhoData.preco} 
+                      onChange={e => {
+                        const v = e.target.value.replace(/\D/g, '');
+                        const formatted = (parseInt(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                        setNovoAparelhoData({...novoAparelhoData, preco: v ? `R$ ${formatted}` : ''});
+                      }} 
+                    />
+                  </div>
+                </div>
                 <select 
                   className="input-glass"
                   value={novoAparelhoData.condicao}

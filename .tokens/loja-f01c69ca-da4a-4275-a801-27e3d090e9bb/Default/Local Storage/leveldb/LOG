@@ -1,21 +1,6 @@
-2026/02/02-12:09:19.656 4c04 Reusing MANIFEST C:\Users\Ivan\DESENV\PAINELCELULAR\.tokens\loja-f01c69ca-da4a-4275-a801-27e3d090e9bb\Default\Local Storage\leveldb/MANIFEST-000001
-2026/02/02-12:09:19.660 4c04 Recovering log #12
-2026/02/02-12:09:19.662 4c04 Reusing old log C:\Users\Ivan\DESENV\PAINELCELULAR\.tokens\loja-f01c69ca-da4a-4275-a801-27e3d090e9bb\Default\Local Storage\leveldb/000012.log 
-2026/02/02-12:47:19.776 5aa0 Level-0 table #16: started
-2026/02/02-12:47:19.779 5aa0 Level-0 table #16: 13562 bytes OK
-2026/02/02-12:47:19.781 5aa0 Delete type=0 #12
-2026/02/02-13:57:19.778 5aa0 Level-0 table #18: started
-2026/02/02-13:57:19.782 5aa0 Level-0 table #18: 13956 bytes OK
-2026/02/02-13:57:19.783 5aa0 Delete type=0 #15
-2026/02/02-13:57:19.783 5aa0 Compacting 4@0 + 1@1 files
-2026/02/02-13:57:19.787 5aa0 Generated table #19@0: 48 keys, 4818 bytes
-2026/02/02-13:57:19.787 5aa0 Compacted 4@0 + 1@1 files => 4818 bytes
-2026/02/02-13:57:19.787 5aa0 compacted to: files[ 0 1 1 0 0 0 0 ]
-2026/02/02-13:57:19.788 5aa0 Delete type=2 #7
-2026/02/02-13:57:19.788 5aa0 Delete type=2 #10
-2026/02/02-13:57:19.788 5aa0 Delete type=2 #13
-2026/02/02-13:57:19.788 5aa0 Delete type=2 #16
-2026/02/02-13:57:19.788 5aa0 Delete type=2 #18
-2026/02/02-15:04:19.781 5aa0 Level-0 table #21: started
-2026/02/02-15:04:19.785 5aa0 Level-0 table #21: 13726 bytes OK
-2026/02/02-15:04:19.786 5aa0 Delete type=0 #17
+2026/02/03-08:30:57.257 748c Reusing MANIFEST C:\Users\Ivan\DESENV\PAINELCELULAR\.tokens\loja-f01c69ca-da4a-4275-a801-27e3d090e9bb\Default\Local Storage\leveldb/MANIFEST-000001
+2026/02/03-08:30:57.261 748c Recovering log #20
+2026/02/03-08:30:57.263 748c Reusing old log C:\Users\Ivan\DESENV\PAINELCELULAR\.tokens\loja-f01c69ca-da4a-4275-a801-27e3d090e9bb\Default\Local Storage\leveldb/000020.log 
+2026/02/03-09:05:57.357 6ff4 Level-0 table #24: started
+2026/02/03-09:05:57.361 6ff4 Level-0 table #24: 15011 bytes OK
+2026/02/03-09:05:57.362 6ff4 Delete type=0 #20

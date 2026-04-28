@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X } from 'lucide-react';
+import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
+import { useColorTheme, ColorTheme } from '@/components/ThemeProvider';
 
 interface Configuracao {
   id: string;
@@ -23,6 +24,7 @@ interface Configuracao {
 export function ConfiguracoesTab() {
   const { usuario, logout } = useAuth();
   const { config, atualizarNomeLoja, atualizarLogoLoja, removerLogo } = useStoreConfig();
+  const { colorTheme, setColorTheme } = useColorTheme();
   
   const [nomeEmpresa, setNomeEmpresa] = useState('Phone Center');
   const [telefoneEmpresa, setTelefoneEmpresa] = useState('');
@@ -119,6 +121,7 @@ export function ConfiguracoesTab() {
       if (error) throw error;
       atualizarNomeLoja(nomeLoja);
       alert('Nome da loja atualizado com sucesso!');
+      window.location.reload();
     } catch (error: any) {
       console.error('Erro ao salvar nome:', error);
       alert(`Erro ao salvar nome: ${error.message}`);
@@ -157,6 +160,7 @@ export function ConfiguracoesTab() {
 
       atualizarLogoLoja(logoLoja);
       alert('Logo atualizada com sucesso!');
+      window.location.reload();
     } catch (error: any) {
       console.error('Erro ao salvar logo:', error);
       alert(`Erro ao salvar logo: ${error.message}`);
@@ -243,6 +247,37 @@ export function ConfiguracoesTab() {
           {/* Configurações da Empresa */}
           <TabsContent value="empresa">
             <div className="space-y-4 sm:space-y-6">
+
+              {/* Tema e Aparência */}
+              <GlassCard className="border-2 border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800 rounded-3xl">
+                <div className="pb-4 border-b border-white/10 mb-4">
+                  <h3 className="text-base sm:text-lg font-bold text-blue-900 dark:text-blue-300 flex items-center gap-2">
+                    <Palette className="w-5 h-5" /> Aparência e Temas
+                  </h3>
+                  <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
+                    Escolha a paleta de cores principal do sistema. Temas customizados ativam o modo escuro automaticamente.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {[
+                    { id: 'padrao', name: 'Padrão (Azul)', color: '#2563eb' },
+                    { id: 'black-white', name: 'Black & White', color: '#1f2937' },
+                    { id: 'purple', name: 'Roxo Escuro', color: '#9333ea' },
+                    { id: 'red-black', name: 'Vermelho & Preto', color: '#dc2626' },
+                    { id: 'green-black', name: 'Verde & Preto', color: '#059669' },
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setColorTheme(t.id as ColorTheme)}
+                      className={`p-3 sm:p-4 rounded-2xl flex items-center gap-3 border-2 transition-all ${colorTheme === t.id ? 'border-blue-600 bg-white/20 shadow-lg' : 'border-transparent bg-white/5 hover:bg-white/10'}`}
+                    >
+                      <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full shadow-md border border-white/20 flex-shrink-0" style={{ backgroundColor: t.color }} />
+                      <span className="font-medium text-sm text-left leading-tight">{t.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </GlassCard>
+
               {/* Configurar Logo e Nome da Loja */}
               <GlassCard className="border-2 border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800 rounded-3xl">
                 <div className="pb-4 border-b border-white/10 mb-4">

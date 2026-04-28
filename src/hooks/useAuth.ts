@@ -115,9 +115,8 @@ export function useAuth() {
     console.debug('useAuth: redirect check', { loading, usuario: !!usuario, pathname });
     if (loading) return; // evita redirecionamento enquanto checa sessão
 
-    if (usuario && pathname === '/login') {
-      router.replace('/');
-    } else if (!usuario && pathname !== '/login') {
+    // Mantém apenas a proteção de rotas privadas: se não tem usuário e não está no login, joga pro login.
+    if (!usuario && pathname !== '/login') {
       router.replace('/login');
     }
   }, [usuario, loading, pathname, router]);
