@@ -201,17 +201,17 @@ export function ClientesTab() {
               Gerencie seus clientes e dados pessoais ({clientes.length} total)
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <Button
               variant="outline"
               onClick={handleExportCSV}
               disabled={clientes.length === 0}
-              className="h-9 text-xs sm:text-sm"
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
             >
               <Download className="mr-2 h-4 w-4" />
               Exportar
             </Button>
-            <Button onClick={() => setShowForm(!showForm)} className="h-9 text-xs sm:text-sm">
+            <Button onClick={() => setShowForm(!showForm)} className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap">
               <Plus className="mr-2 h-4 w-4" />
               Novo
             </Button>

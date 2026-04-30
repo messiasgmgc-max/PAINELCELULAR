@@ -73,8 +73,8 @@ export default function LoginPage() {
   const loading = authLoading;
 
   return (
-    <main className={`flex min-h-screen items-center justify-center relative bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)] transition-all duration-700 ${isSuccess ? 'p-0' : 'px-4 py-12'}`}>
-      <section className={`flex flex-col items-center justify-center relative transition-all duration-700 ease-in-out ${isSuccess ? 'w-[100vw] h-[100vh] max-w-full gap-0' : 'max-w-md w-full gap-6'}`}>
+    <main className={`flex items-center justify-center relative bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)] transition-all duration-700 ${isSuccess ? 'p-0 fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none touch-none' : 'min-h-[100dvh] px-4 py-12'}`}>
+      <section className={`flex flex-col items-center justify-center relative transition-all duration-700 ease-in-out ${isSuccess ? 'w-screen h-[100dvh] max-w-full gap-0' : 'max-w-md w-full gap-6'}`}>
         <header className={`flex flex-col items-center gap-1 relative self-stretch w-full transition-all duration-500 ${isSuccess ? 'h-0 opacity-0 overflow-hidden scale-90' : 'h-auto opacity-100 scale-100'}`}>
           <div className="flex w-12 h-12 items-center justify-center relative bg-[#155cfb] rounded-[10px] shadow-lg shadow-blue-500/30">
             <Smartphone className="text-white w-6 h-6" />

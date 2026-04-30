@@ -462,111 +462,127 @@ export function AparelhosTab() {
 
   const handleGenerateCertificate = async (aparelho: Aparelho) => {
     try {
-      const html2pdf = (await import("html2pdf.js")).default;
-
-      const element = document.createElement("div");
-      element.innerHTML = `
-        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; width: 100%; background: linear-gradient(135deg, #5a67d8 0%, #667eea 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center;">
-          <div style="background: white; padding: 50px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); max-width: 800px; width: 100%;">
-            <div style="text-align: center; margin-bottom: 40px; border-bottom: 3px solid #5a67d8; padding-bottom: 20px;">
-              <h1 style="color: #5a67d8; margin: 0; font-size: 36px; font-weight: bold;">📱 CERTIFICADO DO APARELHO</h1>
-              <p style="color: #666; margin: 10px 0 0 0; font-size: 14px;">Documento de Registro e Autenticação</p>
+      const certificadoHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Certificado - ${aparelho.marca} ${aparelho.modelo}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #fff; color: #333; }
+            .container { padding: 40px; max-width: 800px; margin: 0 auto; border: 1px solid #eee; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+            .header { text-align: center; margin-bottom: 40px; border-bottom: 3px solid #5a67d8; padding-bottom: 20px; }
+            .header h1 { color: #5a67d8; margin: 0; font-size: 32px; font-weight: bold; }
+            .header p { color: #666; margin: 10px 0 0 0; font-size: 14px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+            .card { background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; }
+            .card-title { color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase; }
+            .card-value { margin: 0; font-size: 18px; font-weight: bold; }
+            .card-mono { font-family: 'Courier New', monospace; font-size: 16px; }
+            .section { background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #5a67d8; }
+            .section-warning { background: #fef3c7; border-left-color: #f59e0b; }
+            .section-warning .section-title { color: #d97706; }
+            .section-title { color: #5a67d8; font-weight: bold; margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; }
+            .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #eee; }
+            .footer p { color: #999; margin: 5px 0; font-size: 12px; }
+            @media print {
+              body { background: white; padding: 0; }
+              .container { padding: 20px; width: 100%; max-width: 100%; border: none; box-shadow: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📱 CERTIFICADO DO APARELHO</h1>
+              <p>Documento de Registro e Autenticação</p>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Marca</p>
-                <p style="color: #333; margin: 0; font-size: 20px; font-weight: bold;">${aparelho.marca}</p>
+            <div class="grid">
+              <div class="card">
+                <p class="card-title">Marca</p>
+                <p class="card-value">${aparelho.marca}</p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Modelo</p>
-                <p style="color: #333; margin: 0; font-size: 20px; font-weight: bold;">${aparelho.modelo}</p>
+              <div class="card">
+                <p class="card-title">Modelo</p>
+                <p class="card-value">${aparelho.modelo}</p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">IMEI</p>
-                <p style="color: #333; margin: 0; font-size: 16px; font-family: 'Courier New', monospace;">${aparelho.imei || "Não informado"}</p>
+              <div class="card">
+                <p class="card-title">IMEI</p>
+                <p class="card-value card-mono">${aparelho.imei || "Não informado"}</p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Série</p>
-                <p style="color: #333; margin: 0; font-size: 16px; font-family: 'Courier New', monospace;">${aparelho.numeroSerie || "Não informado"}</p>
+              <div class="card">
+                <p class="card-title">Série</p>
+                <p class="card-value card-mono">${aparelho.numeroSerie || "Não informado"}</p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Cor</p>
-                <p style="color: #333; margin: 0; font-size: 16px;">${aparelho.cor || "Não informado"}</p>
+              <div class="card">
+                <p class="card-title">Cor</p>
+                <p class="card-value">${aparelho.cor || "Não informado"}</p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Capacidade</p>
-                <p style="color: #333; margin: 0; font-size: 16px;">${aparelho.capacidade || "Não informado"}</p>
+              <div class="card">
+                <p class="card-title">Capacidade</p>
+                <p class="card-value">${aparelho.capacidade || "Não informado"}</p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Condição</p>
-                <p style="color: #333; margin: 0; font-size: 16px;">
+              <div class="card">
+                <p class="card-title">Condição</p>
+                <p class="card-value">
                   ${aparelho.condicao === "novo" ? "🆕 Novo" : aparelho.condicao === "seminovo" ? "⭐ Seminovo" : aparelho.condicao === "usado" ? "♻️ Usado" : "⚠️ Danificado"}
                 </p>
               </div>
-              <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0;">
-                <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Valor</p>
-                <p style="color: #333; margin: 0; font-size: 18px; font-weight: bold;">R$ ${aparelho.preco.toFixed(2).replace(".", ",")}</p>
+              <div class="card">
+                <p class="card-title">Valor</p>
+                <p class="card-value">R$ ${aparelho.preco.toFixed(2).replace(".", ",")}</p>
               </div>
             </div>
 
             ${aparelho.descricao ? `
-            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #5a67d8;">
-              <p style="color: #5a67d8; font-weight: bold; margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase;">Descrição</p>
-              <p style="color: #333; margin: 0; line-height: 1.6;">${aparelho.descricao}</p>
+            <div class="section">
+              <p class="section-title">Descrição</p>
+              <p style="margin: 0; line-height: 1.6;">${aparelho.descricao}</p>
             </div>
             ` : ""}
 
             ${aparelho.cliente ? `
-            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #5a67d8;">
-              <p style="color: #5a67d8; font-weight: bold; margin: 0 0 5px 0; font-size: 12px; text-transform: uppercase;">Cliente Proprietário</p>
-              <p style="color: #333; margin: 0; font-size: 16px;">${aparelho.cliente}</p>
+            <div class="section">
+              <p class="section-title">Cliente Proprietário</p>
+              <p style="margin: 0; font-size: 16px;">${aparelho.cliente}</p>
             </div>
             ` : ""}
 
             ${aparelho.acessorios ? `
-            <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #5a67d8;">
-              <p style="color: #5a67d8; font-weight: bold; margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase;">Acessórios Inclusos</p>
-              <p style="color: #333; margin: 0; line-height: 1.6;">${aparelho.acessorios}</p>
+            <div class="section">
+              <p class="section-title">Acessórios Inclusos</p>
+              <p style="margin: 0; line-height: 1.6;">${aparelho.acessorios}</p>
             </div>
             ` : ""}
 
             ${aparelho.observacoes ? `
-            <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #f59e0b;">
-              <p style="color: #d97706; font-weight: bold; margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase;">📝 Observações</p>
-              <p style="color: #333; margin: 0; line-height: 1.6;">${aparelho.observacoes}</p>
+            <div class="section section-warning">
+              <p class="section-title">📝 Observações</p>
+              <p style="margin: 0; line-height: 1.6;">${aparelho.observacoes}</p>
             </div>
             ` : ""}
 
-            <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #eee;">
-              <p style="color: #999; margin: 5px 0; font-size: 12px;">
-                📅 Registrado em: ${new Date(aparelho.dataCadastro).toLocaleDateString("pt-BR", { 
-                  year: "numeric", 
-                  month: "long", 
-                  day: "numeric" 
-                })}
-              </p>
-              <p style="color: #999; margin: 5px 0; font-size: 12px;">
-                ID do Sistema: <span style="font-family: 'Courier New', monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 4px;">${aparelho.id}</span>
-              </p>
+            <div class="footer">
+              <p>📅 Registrado em: ${new Date(aparelho.dataCadastro).toLocaleDateString("pt-BR", { year: "numeric", month: "long", day: "numeric" })}</p>
+              <p>ID do Sistema: <span style="font-family: 'Courier New', monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 4px;">${aparelho.id}</span></p>
               <p style="color: #5a67d8; margin: 10px 0 0 0; font-size: 11px; font-weight: bold; text-transform: uppercase;">Este é um documento de registro eletrônico autenticado</p>
             </div>
           </div>
-        </div>
+          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+        </body>
+        </html>
       `;
 
-      const options = {
-        margin: [0, 0, 0, 0] as [number, number, number, number],
-        filename: `certificado_${aparelho.marca}_${aparelho.modelo}_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.pdf`,
-        image: { type: "png" as const, quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: "#ffffff" },
-        jsPDF: { orientation: "portrait" as const, unit: "mm" as const, format: "a4" as const },
-      };
-
-      html2pdf().set(options).from(element).save();
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(certificadoHtml);
+        printWindow.document.close();
+      } else {
+        alert("Por favor, permita pop-ups para gerar o certificado.");
+      }
     } catch (err) {
       console.error("Erro ao gerar PDF:", err);
-      alert("Erro ao gerar PDF. Verifique o console para mais detalhes.");
+      alert("Erro ao gerar o documento.");
     }
   };
 
@@ -668,32 +684,39 @@ export function AparelhosTab() {
     <div className="space-y-4">
       <GlassCard className="rounded-3xl">
         <div className="pb-4 border-b border-white/10 mb-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div>
-              <h3 className="text-base sm:text-lg font-bold">Aparelhos Cadastrados</h3>
-              <p className="text-xs sm:text-sm text-muted-foreground">
-                Gerencie seus aparelhos e gere certificados ({aparelhos.length} total)
-              </p>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center justify-between w-full sm:w-auto">
+              <div>
+                <h3 className="text-base sm:text-lg font-bold">Aparelhos Cadastrados</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Gerencie seus aparelhos e gere certificados ({aparelhos.length} total)
+                </p>
+              </div>
+              <Button size="sm" onClick={() => setShowForm(!showForm)} className="sm:hidden flex items-center gap-1 shrink-0 ml-4">
+                <Plus className="h-4 w-4" />
+                Novo
+              </Button>
             </div>
-            <div className="flex gap-2">
-              <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2">
+            <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap">
                 <History className="h-4 w-4" /> Saídas
               </Button>
               <Button
                 variant="outline"
                 onClick={handleExportCSV}
                 disabled={aparelhos.length === 0}
+                className="shrink-0 whitespace-nowrap"
               >
                 <Download className="mr-2 h-4 w-4" />
                 Exportar CSV
               </Button>
-              <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50">
+              <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap">
                 <List className="h-4 w-4" /> Lista de Fornecedor
               </Button>
-              <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50">
+              <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50 shrink-0 whitespace-nowrap">
                 <Trash2 className="h-4 w-4" /> Deletar Estoque
               </Button>
-              <Button onClick={() => setShowForm(!showForm)}>
+              <Button onClick={() => setShowForm(!showForm)} className="hidden sm:flex shrink-0 whitespace-nowrap">
                 <Plus className="mr-2 h-4 w-4" />
                 Novo Aparelho
               </Button>

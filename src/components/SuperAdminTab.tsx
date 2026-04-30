@@ -188,12 +188,12 @@ export default function SuperAdminTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Painel Super Admin</h2>
           <p className="text-slate-600 dark:text-slate-300 font-medium">Gerenciamento de Lojas e Acessos</p>
         </div>
-        <Button onClick={() => setShowNovaLoja(true)} className="btn-ios flex items-center gap-2 h-auto">
+        <Button onClick={() => setShowNovaLoja(true)} className="btn-ios w-full sm:w-auto flex items-center justify-center gap-2 h-auto shrink-0 whitespace-nowrap">
           <Plus className="w-5 h-5" /> Nova Loja
         </Button>
       </div>

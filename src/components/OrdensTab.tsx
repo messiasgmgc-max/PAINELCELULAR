@@ -523,13 +523,13 @@ export function OrdensTab() {
     const pecasHtml = ordem.pecasUtilizadas && ordem.pecasUtilizadas.length > 0 
       ? ordem.pecasUtilizadas.map(p => `
           <tr>
-            <td style="padding: 6px; border: 1px solid #ddd;">${p.pecaNome}</td>
-            <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">${p.quantidade}</td>
-            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">R$ ${(p.valorUnitario || 0).toFixed(2).replace('.', ',')}</td>
-            <td style="padding: 6px; border: 1px solid #ddd; text-align: right;">R$ ${p.valorTotal.toFixed(2).replace('.', ',')}</td>
+            <td>${p.pecaNome}</td>
+            <td style="text-align: center;">${p.quantidade}</td>
+            <td style="text-align: right;">R$ ${(p.valorUnitario || 0).toFixed(2).replace('.', ',')}</td>
+            <td style="text-align: right;">R$ ${p.valorTotal.toFixed(2).replace('.', ',')}</td>
           </tr>
         `).join('')
-      : '<tr><td colspan="4" style="padding: 8px; text-align: center; border: 1px solid #ddd;">Nenhuma peça registrada</td></tr>';
+      : '<tr><td colspan="4" style="text-align: center; font-style: italic;">Nenhuma peça registrada</td></tr>';
 
     const osHtml = `
       <!DOCTYPE html>
@@ -537,58 +537,108 @@ export function OrdensTab() {
       <head>
         <title>Ordem de Serviço #${ordem.numeroOS}</title>
         <style>
-          body { font-family: Arial, sans-serif; font-size: 13px; color: #333; margin: 0; padding: 20px; }
-          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-          .header h1 { margin: 0; color: #1e3a8a; }
-          .row { display: flex; justify-content: space-between; margin-bottom: 15px; }
-          .box { border: 1px solid #ccc; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-          .box-title { font-weight: bold; background: #f3f4f6; padding: 6px; margin: -10px -10px 10px -10px; border-bottom: 1px solid #ccc; border-radius: 4px 4px 0 0; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-          th { background: #f3f4f6; font-weight: bold; text-align: left; padding: 6px; border: 1px solid #ddd; }
-          .totals { font-size: 15px; }
+          * { box-sizing: border-box; }
+          @media print { 
+            @page { size: A4 portrait; margin: 10mm; }
+            body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; color-adjust: exact; }
+            .box { page-break-inside: avoid; }
+            tr { page-break-inside: avoid; }
+          }
+        body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 0 auto; padding: 20px; line-height: 1.4; max-width: 800px; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
+          .header h1 { margin: 0; color: #1e3a8a; font-size: 22px; text-transform: uppercase; }
+          .header p { margin: 5px 0 0 0; color: #555; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 15px; width: 100%; }
+          .col-6 { width: 48%; }
+          .box { border: 1px solid #ccc; padding: 12px; border-radius: 6px; margin-bottom: 15px; background: #fff; width: 100%; }
+          .box-title { font-weight: bold; background: #f3f4f6; padding: 8px 12px; margin: -12px -12px 12px -12px; border-bottom: 1px solid #ccc; border-radius: 6px 6px 0 0; color: #1e3a8a; text-transform: uppercase; font-size: 11px; }
+          table { width: 100%; max-width: 100%; border-collapse: collapse; margin-bottom: 0; }
+          th, td { border: 1px solid #ccc; padding: 8px; text-align: left; word-break: break-word; }
+          th { background: #f3f4f6; font-weight: bold; color: #333; }
           .signature { margin-top: 60px; display: flex; justify-content: space-around; }
-          .sign-line { border-top: 1px solid #000; width: 40%; text-align: center; padding-top: 5px; }
-          @media print { body { padding: 0; margin: 10mm; } }
+          .sign-line { border-top: 1px solid #000; width: 40%; text-align: center; padding-top: 8px; font-weight: bold; }
         </style>
       </head>
       <body>
         <div class="header">
           ${logoHtml}
           <h1>${config.nomeLoja || 'PHONE CENTER'}</h1>
-          <p style="margin: 5px 0 0 0;">Assistência Técnica Especializada</p>
-          <h2 style="margin: 10px 0 0 0;">ORDEM DE SERVIÇO Nº ${ordem.numeroOS}</h2>
+          <p>Assistência Técnica Especializada</p>
+          <h2 style="margin: 10px 0 0 0; font-size: 16px;">ORDEM DE SERVIÇO Nº ${ordem.numeroOS}</h2>
         </div>
+        
         <div class="row">
-          <div style="width: 48%;">
-            <div class="box">
+          <div class="col-6">
+            <div class="box" style="height: 100%;">
               <div class="box-title">Dados do Cliente</div>
               <p style="margin:4px 0;"><strong>Nome:</strong> ${ordem.clienteNome}</p>
               <p style="margin:4px 0;"><strong>Data Entrada:</strong> ${new Date(ordem.dataEntrada).toLocaleDateString('pt-BR')}</p>
             </div>
           </div>
-          <div style="width: 48%;">
-            <div class="box">
+          <div class="col-6">
+            <div class="box" style="height: 100%;">
               <div class="box-title">Dados do Aparelho</div>
               <p style="margin:4px 0;"><strong>Modelo:</strong> ${ordem.aparelhoMarca} ${ordem.aparelhoModelo}</p>
               <p style="margin:4px 0;"><strong>IMEI/Série:</strong> ${ordem.imei || 'Não informado'}</p>
             </div>
           </div>
         </div>
-        <div class="box"><div class="box-title">Relato do Problema / Defeito</div><p style="margin:0; white-space: pre-wrap;">${ordem.defeito}</p></div>
-        <div class="box"><div class="box-title">Serviços Realizados</div><p style="margin:0; white-space: pre-wrap;">${ordem.servicosARealizarQuais || 'Em análise...'}</p></div>
+
+        <div class="box">
+          <div class="box-title">Relato do Problema / Defeito</div>
+          <p style="margin:0; white-space: pre-wrap; color: #444;">${ordem.defeito}</p>
+        </div>
+        
+        <div class="box">
+          <div class="box-title">Serviços Realizados</div>
+          <p style="margin:0; white-space: pre-wrap; color: #444;">${ordem.servicosARealizarQuais || 'Em análise...'}</p>
+        </div>
+        
         <div class="box">
           <div class="box-title">Peças e Valores Estimados</div>
-          <table><thead><tr><th>Descrição da Peça/Serviço</th><th style="text-align: center;">Qtd</th><th style="text-align: right;">V. Unit</th><th style="text-align: right;">Total</th></tr></thead><tbody>${pecasHtml}</tbody></table>
-          <div class="row totals"><div></div>
-            <div style="width: 250px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Peças:</span><span>R$ ${ordem.custoPecas.toFixed(2).replace('.', ',')}</span></div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Mão de Obra:</span><span>R$ ${ordem.maoDeObra.toFixed(2).replace('.', ',')}</span></div>
-              <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 18px; border-top: 1px solid #000; padding-top: 5px;"><span>TOTAL:</span><span>R$ ${ordem.precoVenda.toFixed(2).replace('.', ',')}</span></div>
-            </div>
-          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Descrição da Peça/Serviço</th>
+                <th style="text-align: center; width: 10%;">Qtd</th>
+                <th style="text-align: right; width: 20%;">V. Unit</th>
+                <th style="text-align: right; width: 20%;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pecasHtml}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3" style="text-align: right; font-weight: bold; border-top: 2px solid #ccc;">Total de Peças:</td>
+                <td style="text-align: right; border-top: 2px solid #ccc;">R$ ${ordem.custoPecas.toFixed(2).replace('.', ',')}</td>
+              </tr>
+              <tr>
+                <td colspan="3" style="text-align: right; font-weight: bold;">Mão de Obra:</td>
+                <td style="text-align: right;">R$ ${ordem.maoDeObra.toFixed(2).replace('.', ',')}</td>
+              </tr>
+              <tr>
+                <td colspan="3" style="text-align: right; font-weight: bold; font-size: 15px; color: #1e3a8a;">TOTAL FINAL:</td>
+                <td style="text-align: right; font-weight: bold; font-size: 15px; color: #1e3a8a;">R$ ${ordem.precoVenda.toFixed(2).replace('.', ',')}</td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
-        <div class="box"><div class="box-title">Termos de Serviço e Garantia</div><ul style="margin: 0; padding-left: 20px; font-size: 11px; line-height: 1.4;"><li>A garantia dos serviços prestados é de 90 dias, conforme Código de Defesa do Consumidor.</li><li>A garantia não cobre danos por mau uso, quedas, contato com líquidos ou abertura por terceiros.</li><li>Aparelhos não retirados após 90 dias da comunicação de conclusão poderão ser descartados ou vendidos para custear o serviço.</li></ul></div>
-        <div class="signature"><div class="sign-line">Assinatura do Cliente<br><small>${ordem.clienteNome}</small></div><div class="sign-line">Técnico Responsável<br><small>${ordem.tecnicoNome || config.nomeLoja || 'Phone Center'}</small></div></div>
+
+        <div class="box">
+          <div class="box-title">Termos de Serviço e Garantia</div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 11px; line-height: 1.5; color: #555;">
+            <li>A garantia dos serviços prestados é de 90 dias, conforme Código de Defesa do Consumidor.</li>
+            <li>A garantia não cobre danos por mau uso, quedas, contato com líquidos ou abertura por terceiros.</li>
+            <li>Aparelhos não retirados após 90 dias da comunicação de conclusão poderão ser descartados ou vendidos para custear o serviço.</li>
+          </ul>
+        </div>
+
+        <div class="signature">
+          <div class="sign-line">Assinatura do Cliente<br><small style="font-weight: normal; font-size: 11px;">${ordem.clienteNome}</small></div>
+          <div class="sign-line">Técnico Responsável<br><small style="font-weight: normal; font-size: 11px;">${ordem.tecnicoNome || config.nomeLoja || 'Phone Center'}</small></div>
+        </div>
+        
         <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
       </body>
       </html>
@@ -607,7 +657,7 @@ export function OrdensTab() {
       <head>
         <title>Termo de Retirada - OS #${ordem.numeroOS}</title>
         <style>
-          body { font-family: Arial, sans-serif; font-size: 14px; color: #333; margin: 0; padding: 40px; line-height: 1.6; }
+          body { font-family: Arial, sans-serif; font-size: 14px; color: #333; margin: 0 auto; padding: 40px; line-height: 1.6; max-width: 800px; }
           .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
           .header h1 { margin: 0; color: #1e3a8a; }
           .content { margin-bottom: 40px; text-align: justify; }
@@ -654,8 +704,8 @@ export function OrdensTab() {
         </div>
       )}
 
-      <div className="flex gap-2 mb-4">
-        <div className="flex-1 relative">
+      <div className="flex flex-col sm:flex-row gap-4 mb-4">
+        <div className="w-full sm:flex-1 relative">
           <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
           <input
             type="text"
@@ -665,10 +715,12 @@ export function OrdensTab() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <Button onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData(INITIAL_FORM); setSelectedPecas([]); }}>
-          <Plus className="w-4 h-4 mr-2" />
-          Nova OS
-        </Button>
+        <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData(INITIAL_FORM); setSelectedPecas([]); }} className="shrink-0 whitespace-nowrap">
+            <Plus className="w-4 h-4 mr-2" />
+            Nova OS
+          </Button>
+        </div>
       </div>
 
       {/* Formulário */}

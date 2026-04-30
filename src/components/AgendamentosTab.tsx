@@ -139,8 +139,8 @@ export function AgendamentosTab() {
         </div>
       )}
 
-      <div className="flex gap-2 mb-4">
-        <div className="flex-1 relative">
+      <div className="flex flex-col sm:flex-row gap-4 mb-4">
+        <div className="w-full sm:flex-1 relative">
           <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
           <input
             type="text"
@@ -150,10 +150,12 @@ export function AgendamentosTab() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <Button onClick={() => { setShowForm(!showForm); setEditingId(null); }}>
-          <Plus className="w-4 h-4 mr-2" />
-          Novo Agendamento
-        </Button>
+        <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="shrink-0 whitespace-nowrap">
+            <Plus className="w-4 h-4 mr-2" />
+            Novo Agendamento
+          </Button>
+        </div>
       </div>
 
       {/* Formulário */}

@@ -207,8 +207,8 @@ export function GarantiasTab() {
         </GlassCard>
       </div>
 
-      <div className="flex gap-2 flex-wrap items-center mb-4">
-        <div className="flex-1 relative">
+      <div className="flex flex-col sm:flex-row gap-4 mb-4">
+        <div className="w-full sm:flex-1 relative">
           <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
           <input
             type="text"
@@ -219,20 +219,22 @@ export function GarantiasTab() {
           />
         </div>
         
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as any)}
-          className="input-glass w-auto"
-        >
-          <option value="todas">Todas</option>
-          <option value="vigentes">Vigentes</option>
-          <option value="expiradas">Expiradas</option>
-        </select>
+        <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as any)}
+            className="input-glass w-auto shrink-0"
+          >
+            <option value="todas">Todas</option>
+            <option value="vigentes">Vigentes</option>
+            <option value="expiradas">Expiradas</option>
+          </select>
 
-        <Button onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }}>
-          <Plus className="w-4 h-4 mr-2" />
-          Nova Garantia
-        </Button>
+          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }} className="shrink-0 whitespace-nowrap">
+            <Plus className="w-4 h-4 mr-2" />
+            Nova Garantia
+          </Button>
+        </div>
       </div>
 
       {/* Formulário */}
