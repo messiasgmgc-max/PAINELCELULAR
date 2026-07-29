@@ -23,7 +23,7 @@ interface Configuracao {
 
 export function ConfiguracoesTab() {
   const { usuario, logout } = useAuth();
-  const { config, atualizarNomeLoja, atualizarLogoLoja, removerLogo } = useStoreConfig();
+  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarDadosEmpresa, removerLogo } = useStoreConfig();
   const { colorTheme, setColorTheme } = useColorTheme();
   
   const [nomeEmpresa, setNomeEmpresa] = useState('Phone Center');
@@ -100,13 +100,12 @@ export function ConfiguracoesTab() {
   };
 
   const handleSalvarConfiguracoes = () => {
-    // Salvar configurações da empresa
-    console.log('Configurações salvas:', {
-      nomeEmpresa,
-      telefoneEmpresa,
-      enderecoEmpresa,
-      emailEmpresa,
-      cnpj,
+    atualizarDadosEmpresa({
+      nomeLoja: nomeEmpresa || config.nomeLoja,
+      telefoneLoja: telefoneEmpresa,
+      enderecoLoja: enderecoEmpresa,
+      emailLoja: emailEmpresa,
+      cnpjLoja: cnpj,
     });
     alert('Configurações da empresa salvas com sucesso!');
   };
@@ -214,8 +213,88 @@ export function ConfiguracoesTab() {
     }
   };
 
-  const handleExportarDados = () => {
-    alert('Dados exportados com sucesso!');
+  const toCSV = (rows: any[]) => {
+    if (!rows.length) return '';
+
+    const headers = Object.keys(rows[0]);
+    const escapeValue = (value: any) => {
+      const stringValue = value == null ? '' : String(value).replace(/\r?\n/g, ' ');
+      return /[",\n]/.test(stringValue) ? `"${stringValue.replace(/"/g, '""')}"` : stringValue;
+    };
+
+    const headerLine = headers.map(escapeValue).join(',');
+    const bodyLines = rows.map((row) => headers.map((header) => escapeValue((row as any)[header])).join(','));
+    return [headerLine, ...bodyLines].join('\n');
+  };
+
+  const downloadCsv = (filename: string, rows: any[]) => {
+    const csv = toCSV(rows);
+    if (!csv) return;
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportarDados = async () => {
+    try {
+      const exportarClientes = document.getElementById('export-clientes') as HTMLInputElement | null;
+      const exportarOS = document.getElementById('export-os') as HTMLInputElement | null;
+      const exportarPecas = document.getElementById('export-pecas') as HTMLInputElement | null;
+      const exportarVendas = document.getElementById('export-vendas') as HTMLInputElement | null;
+
+      const incluirClientes = exportarClientes?.checked ?? true;
+      const incluirOS = exportarOS?.checked ?? true;
+      const incluirPecas = exportarPecas?.checked ?? true;
+      const incluirVendas = exportarVendas?.checked ?? true;
+
+      const downloads: Array<{ filename: string; rows: any[] }> = [];
+
+      if (incluirClientes && usuario?.lojaId) {
+        const { data, error } = await supabase.from('clientes').select('*');
+        if (error) throw error;
+        const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.lojaId === usuario.lojaId || row.loja_id === usuario.lojaId);
+        downloads.push({ filename: `clientes_${new Date().toISOString().slice(0, 10)}.csv`, rows });
+      }
+
+      if (incluirOS && usuario?.lojaId) {
+        const { data, error } = await supabase.from('ordens_servico').select('*');
+        if (error) throw error;
+        const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.lojaId === usuario.lojaId || row.loja_id === usuario.lojaId);
+        downloads.push({ filename: `ordens_servico_${new Date().toISOString().slice(0, 10)}.csv`, rows });
+      }
+
+      if (incluirPecas && usuario?.lojaId) {
+        const { data, error } = await supabase.from('pecas').select('*');
+        if (error) throw error;
+        const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.lojaId === usuario.lojaId || row.loja_id === usuario.lojaId);
+        downloads.push({ filename: `pecas_${new Date().toISOString().slice(0, 10)}.csv`, rows });
+      }
+
+      if (incluirVendas && usuario?.lojaId) {
+        const { data, error } = await supabase.from('vendas').select('*');
+        if (error) throw error;
+        const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.loja_id === usuario.lojaId || row.lojaId === usuario.lojaId);
+        downloads.push({ filename: `vendas_${new Date().toISOString().slice(0, 10)}.csv`, rows });
+      }
+
+      if (!downloads.length) {
+        alert('Nenhum dado selecionado para exportar.');
+        return;
+      }
+
+      downloads.forEach(({ filename, rows }) => downloadCsv(filename, rows));
+      alert('Exportação concluída com sucesso.');
+    } catch (error: any) {
+      console.error('Erro ao exportar dados:', error);
+      alert(`Erro ao exportar dados: ${error?.message || 'Erro desconhecido'}`);
+    }
   };
 
   return (

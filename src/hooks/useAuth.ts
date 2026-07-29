@@ -7,6 +7,7 @@ import { SessaoUsuario } from '@/lib/db/types';
 export function useAuth() {
   const [usuario, setUsuario] = useState<SessaoUsuario | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -44,14 +45,13 @@ export function useAuth() {
 
     const carregarSessao = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session ?? null;
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
 
         if (!mounted) return;
 
         if (session?.user) {
           const usuarioMontado = await montarUsuario(session);
-          // Se falhar ao buscar no banco (ex: tabela vazia), usa o básico do Auth
           setUsuario(usuarioMontado || {
             id: session.user.id,
             email: session.user.email ?? '',
@@ -60,13 +60,34 @@ export function useAuth() {
             lojaId: session.user.user_metadata?.lojaId
           });
         } else {
-          setUsuario(null);
+          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          if (userError) {
+            console.warn('getUser sem sessão ativa:', userError.message);
+          }
+
+          if (!mounted) return;
+
+          if (user) {
+            const usuarioMontado = await montarUsuario({ user } as any);
+            setUsuario(usuarioMontado || {
+              id: user.id,
+              email: user.email ?? '',
+              nome: user.user_metadata?.nome ?? user.email?.split('@')[0] ?? 'Usuário',
+              role: (user.user_metadata?.role as SessaoUsuario['role']) ?? 'operador',
+              lojaId: user.user_metadata?.lojaId
+            });
+          } else {
+            setUsuario(null);
+          }
         }
       } catch (error) {
         console.error('Erro ao carregar sessão:', error);
         setUsuario(null);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          setAuthReady(true);
+        }
       }
     };
 
@@ -75,32 +96,32 @@ export function useAuth() {
     // Escutar mudanças na autenticação
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       console.debug('onAuthStateChange', _event, session);
+      if (!mounted) return;
+
       if (session?.user) {
-        // Sincronizar cookie para o middleware (opcional, mas recomendado para o futuro)
         document.cookie = `sessao_usuario=${session.access_token}; path=/; max-age=86400; SameSite=Lax`;
-        
         const usuarioMontado = await montarUsuario(session);
         setUsuario(usuarioMontado || {
-            id: session.user.id,
-            email: session.user.email ?? '',
-            nome: session.user.user_metadata?.nome ?? session.user.email?.split('@')[0] ?? 'Usuário',
-            role: (session.user.user_metadata?.role as SessaoUsuario['role']) ?? 'operador',
-            lojaId: session.user.user_metadata?.lojaId
-          });
+          id: session.user.id,
+          email: session.user.email ?? '',
+          nome: session.user.user_metadata?.nome ?? session.user.email?.split('@')[0] ?? 'Usuário',
+          role: (session.user.user_metadata?.role as SessaoUsuario['role']) ?? 'operador',
+          lojaId: session.user.user_metadata?.lojaId
+        });
       } else {
         document.cookie = `sessao_usuario=; path=/; max-age=0;`;
         setUsuario(null);
       }
+
       setLoading(false);
+      setAuthReady(true);
     });
 
     return () => {
       mounted = false;
-      // unsubscribe safe
       try {
         listener?.subscription?.unsubscribe?.();
       } catch (e) {
-        // algumas versões retornam unsubscribe diretamente
         try {
           listener?.unsubscribe?.();
         } catch (err) {
@@ -110,16 +131,15 @@ export function useAuth() {
     };
   }, [montarUsuario]);
 
-  // Redirecionamento automático de segurança: Se estiver logado e na tela de login, sai dela.
+  // Redirecionamento automático de segurança: só ocorre após a sessão ser validada.
   useEffect(() => {
-    console.debug('useAuth: redirect check', { loading, usuario: !!usuario, pathname });
-    if (loading) return; // evita redirecionamento enquanto checa sessão
+    console.debug('useAuth: redirect check', { authReady, loading, usuario: !!usuario, pathname });
+    if (!authReady || loading) return;
 
-    // Mantém apenas a proteção de rotas privadas: se não tem usuário e não está no login, joga pro login.
-    if (!usuario && pathname !== '/login') {
+    if (!usuario && pathname !== '/login' && !pathname.startsWith('/api/')) {
       router.replace('/login');
     }
-  }, [usuario, loading, pathname, router]);
+  }, [authReady, usuario, loading, pathname, router]);
 
   const login = useCallback(async (email: string, senha: string) => {
     try {
@@ -175,6 +195,7 @@ export function useAuth() {
   return {
     usuario,
     loading,
+    authReady,
     autenticado: !!usuario,
     login,
     logout,

@@ -392,79 +392,87 @@ export function VendasTab() {
 
   const handleGerarCupomTermico = async (venda: Venda) => {
     try {
-      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 150px; margin: 0 auto 10px auto; display: block;" />` : '';
+      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 48px; max-width: 120px; margin: 0 auto 8px auto; display: block;" />` : '';
+      const itensHtml = (venda.itens && venda.itens.length > 0 ? venda.itens : [{ descricao: venda.descricao || 'Produto/serviço', quantidade: 1, valorExibir: venda.valor, total: venda.valor, desconto: venda.descontoTotal || 0, observacao: '' }])
+        .map(item => `
+          <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #222;">
+            <div style="display: flex; justify-content: space-between; gap: 8px; font-weight: 600;">
+              <span>${item.descricao}</span>
+              <span>R$ ${item.total.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div style="font-size: 10px; color: #444; margin-top: 3px;">
+              ${item.quantidade}x R$ ${item.valorExibir.toFixed(2).replace('.', ',')} ${(item.desconto > 0 ? `| Desc. R$ ${item.desconto.toFixed(2).replace('.', ',')}` : '')}
+            </div>
+            ${item.observacao ? `<div style="font-size: 10px; color: #666; margin-top: 2px;">${item.observacao}</div>` : ''}
+          </div>
+        `).join('');
 
-      const itensHtml = venda.itens && venda.itens.length > 0 
-        ? venda.itens.map(item => `
-            <tr>
-              <td style="padding: 5px 0; border-bottom: 1px dashed #eee;">
-                ${item.descricao} <br>
-                <small style="color: #666;">${item.quantidade}x R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</small>
-              </td>
-              <td style="text-align: right; padding: 5px 0; border-bottom: 1px dashed #eee;">
-                R$ ${item.total.toFixed(2).replace('.', ',')}
-              </td>
-            </tr>
-          `).join('')
-        : `<tr>
-             <td style="padding: 5px 0; border-bottom: 1px dashed #eee;">${venda.descricao || 'Produto Genérico'}</td>
-             <td style="text-align: right; padding: 5px 0; border-bottom: 1px dashed #eee;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
-           </tr>`;
+      const qrData = encodeURIComponent(`Recibo:${venda.id};Data:${new Date(venda.dataPagamento).toLocaleDateString('pt-BR')};Cliente:${venda.clienteNome || 'N/A'};Valor:R$${(venda.valor || 0).toFixed(2)};Garantia:${venda.garantia || '90 dias'}`);
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${qrData}`;
 
       const cupomHtml = `
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Comprovante de Venda #${venda.id.slice(-6).toUpperCase()}</title>
+          <meta charset="utf-8" />
+          <title>Recibo de Venda #${venda.id.slice(-6).toUpperCase()}</title>
           <style>
-            body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; margin: 0; padding: 20px; max-width: 300px; }
-            @media print { body { max-width: 100%; padding: 0; } @page { margin: 5mm; } }
-            .text-center { text-align: center; } .text-right { text-align: right; } .font-bold { font-weight: bold; }
-            .divider { border-top: 1px dashed #000; margin: 10px 0; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+            body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; margin: 0; padding: 12px; width: 100%; max-width: 320px; }
+            @page { size: 80mm auto; margin: 3mm; }
+            @media print { body { padding: 0; } }
+            .center { text-align: center; }
+            .bold { font-weight: 700; }
+            .divider { border-top: 1px dashed #000; margin: 8px 0; }
+            .small { font-size: 10px; }
           </style>
         </head>
         <body>
-          <div class="text-center">
+          <div class="center">
             ${logoHtml}
-            <h2 style="margin: 0; font-size: 16px;">${config.nomeLoja || 'PHONE CENTER'}</h2>
-            <p style="margin: 2px 0;">Assistência e Vendas</p>
+            <div class="bold" style="font-size: 16px;">${config.nomeLoja || 'PHONE CENTER'}</div>
+            <div class="small">Assistência Técnica e Vendas</div>
           </div>
           <div class="divider"></div>
-          <p style="margin: 2px 0;"><strong>RECIBO #${venda.id.slice(-6).toUpperCase()}</strong></p>
-          <p style="margin: 2px 0;">Data: ${new Date(venda.dataPagamento).toLocaleString('pt-BR')}</p>
-          <p style="margin: 2px 0;">Cliente: ${venda.clienteNome}</p>
-          <p style="margin: 2px 0;">Pagt: ${venda.metodo.toUpperCase().replace('_', ' ')}</p>
+          <div class="bold">RECIBO DE VENDA</div>
+          <div class="small">Nº ${venda.id.slice(-6).toUpperCase()}</div>
+          <div class="small">Data: ${new Date(venda.dataPagamento).toLocaleString('pt-BR')}</div>
+          <div class="small">Cliente: ${venda.clienteNome || 'Não informado'}</div>
+          <div class="small">Vendedor: ${venda.vendedor || 'Não informado'}</div>
+          <div class="small">Forma de Pagto: ${venda.metodo ? venda.metodo.toUpperCase().replace('_', ' ') : 'NÃO INFORMADO'}</div>
           <div class="divider"></div>
-          <table>
-            <thead><tr><th style="text-align: left;">Item</th><th style="text-align: right;">Total</th></tr></thead>
-            <tbody>
-            ${itensHtml}
-            </tbody>
-          </table>
-          
-          <p class="text-right font-bold" style="font-size: 14px;">TOTAL: R$ ${venda.valor.toFixed(2).replace('.', ',')}</p>
-          ${venda.descontoTotal > 0 ? `<p class="text-right" style="margin: 2px 0;">Desconto: R$ ${venda.descontoTotal.toFixed(2).replace('.', ',')}</p>` : ''}
+          ${itensHtml}
           <div class="divider"></div>
-          <p class="text-center font-bold" style="margin-bottom: 5px;">TERMOS DE GARANTIA</p>
-          <p style="font-size: 10px; margin: 0;">Válida por ${venda.garantia || '90 dias'}. Não cobre mau uso, quedas, contato com líquidos ou abertura por terceiros. Obrigatório a apresentação deste.</p>
+          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700;">
+            <span>TOTAL</span>
+            <span>R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</span>
+          </div>
+          ${(venda.descontoTotal && venda.descontoTotal > 0) ? `<div class="small" style="text-align: right;">Desconto: R$ ${venda.descontoTotal.toFixed(2).replace('.', ',')}</div>` : ''}
           <div class="divider"></div>
-          <p class="text-center" style="font-size: 11px;">Obrigado pela preferência!</p>
-          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+          <div class="center" style="margin-bottom: 8px;">
+            <img src="${qrCodeUrl}" alt="QR Code" style="width: 120px; height: 120px; object-fit: contain; margin: 0 auto;" />
+            <div class="small">Validação de garantia</div>
+          </div>
+          <div class="bold center">GARANTIA</div>
+          <div class="small center">Válida por ${venda.garantia || '90 dias'} a partir da data da compra.</div>
+          <div class="small center">Não pode molhar. Não pode abrir o aparelho.</div>
+          <div class="small center">Apresente este recibo para qualquer atendimento de garantia.</div>
+          <div class="divider"></div>
+          <div class="center small">Obrigado pela preferência!</div>
+          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } }</script>
         </body>
         </html>
       `;
 
-      const printWindow = window.open('', '_blank', 'width=400,height=600');
+      const printWindow = window.open('', '_blank', 'width=380,height=700');
       if (printWindow) {
         printWindow.document.write(cupomHtml);
         printWindow.document.close();
       } else {
-        alert("Por favor, permita pop-ups no navegador para imprimir o comprovante.");
+        alert('Por favor, permita pop-ups para imprimir o comprovante.');
       }
     } catch (err) {
-      console.error("Erro ao gerar nota:", err);
-      alert("Erro ao gerar comprovante de venda.");
+      console.error('Erro ao gerar recibo térmico:', err);
+      alert('Erro ao gerar comprovante de venda.');
     }
   };
 
@@ -493,22 +501,28 @@ export function VendasTab() {
              <td style="text-align: right;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
            </tr>`;
 
+      const valorTotalVenda = ((venda as any).valorTotal || venda.valor || 0);
+
       const conteudoHtml = `
         <!DOCTYPE html>
         <html>
         <head>
           <title>Recibo de Venda</title>
           <style>
-            /* Remove cabeçalhos e rodapés automáticos do navegador na impressão */
+            @page { size: A4 portrait; margin: 1.5cm; }
             @media print {
-              @page { margin: 0; } 
-              body { margin: 1cm; -webkit-print-color-adjust: exact; color-adjust: exact; }
+              body { margin: 0; -webkit-print-color-adjust: exact; color-adjust: exact; }
             }
-            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
+            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-            th, td { border: 1px solid #000; padding: 4px; text-align: left; }
-            .no-border, .no-border td { border: none; }
-            .section-title { background-color: #e0e0e0; font-weight: bold; text-align: center; }
+            th, td { border: 1px solid #000; padding: 5px; text-align: left; }
+            .no-border, .no-border td { border: none; padding: 2px; }
+            .section-title { background-color: #f0f0f0; font-weight: bold; text-align: center; padding: 6px 4px; }
+            .small-text { font-size: 10px; line-height: 1.3; }
+            .footer-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+            .footer-grid .box { border: 1px solid #000; padding: 8px; }
+            .footer-grid .box-qr { width: 32%; min-width: 140px; text-align: center; }
+            .footer-grid .box-terms { width: 66%; min-width: 180px; font-size: 10px; line-height: 1.3; }
           </style>
         </head>
         <body>
@@ -528,17 +542,17 @@ export function VendasTab() {
           <hr style="border-top: 1px dashed #000; margin: 15px 0;">
 
           <!-- Dados da Empresa -->
-          <table class="no-border" style="margin-bottom: 20px;">
+          <table class="no-border" style="margin-bottom: 18px;">
             <tr>
-              <td style="width: 150px;">
-                ${config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 140px;" />` : ''}
+              <td style="width: 150px; vertical-align: top;">
+                ${config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 140px; display: block;" />` : ''}
               </td>
-              <td>
+              <td style="vertical-align: top; padding-left: 8px;">
                 <h2 style="margin: 0 0 5px 0; font-size: 16px;">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</h2>
-                ${config.enderecoLoja || 'Endereço não configurado'}<br>
-                CNPJ: ${config.cnpjLoja || 'Não informado'} | Telefone: ${config.telefoneLoja || 'Não informado'}
+                <div class="small-text">${config.enderecoLoja || 'Endereço não configurado'}</div>
+                <div class="small-text">CNPJ: ${config.cnpjLoja || 'Não informado'} | Tel: ${config.telefoneLoja || 'Não informado'}</div>
               </td>
-              <td style="text-align: right; vertical-align: top;">
+              <td style="text-align: right; vertical-align: top; font-size: 11px;">
                 Data: ${dataAtual}<br>
                 VENDEDOR: ${venda.vendedor || 'Não informado'}<br>
                 <b>RECIBO DA VENDA: ${venda.id || ''}</b>
@@ -571,25 +585,26 @@ export function VendasTab() {
             ${itensHtmlA4}
             <tr>
               <td colspan="5" style="text-align: right; font-weight: bold;">Total</td>
-              <td style="text-align: right; font-weight: bold;">R$ ${((venda as any).valorTotal || venda.valor).toFixed(2).replace('.', ',')}</td>
+              <td style="text-align: right; font-weight: bold;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
             </tr>
           </table>
 
-          <!-- Pagamento (Opcional, adicione se tiver os dados na sua const) -->
-          ${(venda as any).pagamentos ? `
-          <table>
-            <tr><td colspan="4" class="section-title">PAGAMENTO</td></tr>
-            <tr style="font-weight: bold;">
-              <td>Forma de Pagamento</td>
-              <td>Detalhes</td>
-              <td style="text-align: right;">Valor Pago</td>
-              <td style="text-align: center;">Parcelas</td>
-            </tr>
-            <!-- Aqui você faria um map nos pagamentos -->
-          </table>` : ''}
+          <!-- Termos de Garantia -->
+          <div class="box" style="margin-top: 10px; margin-bottom: 8px; padding: 10px;">
+            <div style="font-weight: bold; margin-bottom: 6px;">TERMO DE GARANTIA</div>
+            <div class="small-text">Garantia de ${venda.garantia || '90 dias'} a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</div>
+            <div class="small-text" style="margin-top: 6px;">Esta garantia não cobre:</div>
+            <ul class="small-text" style="margin: 4px 0 0 16px; padding: 0; list-style: disc inside;">
+              <li>Queda, umidade, líquidos ou danos acidentais;</li>
+              <li>Uso indevido, instalação incorreta ou violação do produto;</li>
+              <li>Abertura ou tentativa de conserto por terceiros não autorizados;</li>
+              <li>Não pode molhar e não pode abrir o aparelho.</li>
+            </ul>
+            <div class="small-text" style="margin-top: 6px;"><b>Apresente este recibo junto com o equipamento no atendimento.</b></div>
+          </div>
 
           <!-- Assinaturas -->
-          <div style="margin-top: 50px; text-align: center;">
+          <div style="margin-top: 20px; text-align: center;">
             <div style="display: inline-block; width: 45%;">
               _________________________________________<br>
               ${(venda as any).cliente?.nome || venda.clienteNome || 'Assinatura do Cliente'}
@@ -599,7 +614,7 @@ export function VendasTab() {
               ${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}
             </div>
           </div>
-          <div style="text-align: center; margin-top: 20px; font-weight: bold;">
+          <div style="text-align: center; margin-top: 16px; font-weight: bold;">
             OBRIGADO PELA PREFERÊNCIA.
           </div>
           <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>

@@ -1,20 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
 import { AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   // usa o loading e funções do hook centralizado
-  const { login, registrar, loading: authLoading } = useAuth();
+  const { login, registrar, loading: authLoading, usuario, authReady } = useAuth();
+  const { config } = useStoreConfig();
   const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [storeName, setStoreName] = useState<string>('');
+
+  useEffect(() => {
+    if (config.nomeLoja) {
+      setStoreName(config.nomeLoja.toUpperCase());
+    }
+  }, [config.nomeLoja]);
+
+  useEffect(() => {
+    if (authReady && usuario && !isSuccess) {
+      router.replace('/');
+    }
+  }, [authReady, usuario, isSuccess, router]);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -32,23 +46,34 @@ export default function LoginPage() {
     setError(null);
 
     try {
+      const fallbackStoreName = (config.nomeLoja || 'Phone Center').toUpperCase();
+      setStoreName(fallbackStoreName);
+
       if (isLogin) {
         await login(formData.email, formData.senha);
-        
-        // Busca o nome da loja vinculada ao email
-        const { data: perfil } = await supabase
+
+        const email = formData.email.trim().toLowerCase();
+        const { data: perfil, error: perfilError } = await supabase
           .from('perfis')
           .select('loja_id')
-          .eq('email', formData.email)
-          .single();
-          
+          .eq('email', email)
+          .maybeSingle();
+
+        if (perfilError) {
+          console.warn('Erro ao buscar perfil para a animação de boas-vindas:', perfilError.message);
+        }
+
         if (perfil?.loja_id) {
-          const { data: loja } = await supabase
+          const { data: loja, error: lojaError } = await supabase
             .from('lojas')
             .select('nome')
             .eq('id', perfil.loja_id)
-            .single();
-            
+            .maybeSingle();
+
+          if (lojaError) {
+            console.warn('Erro ao buscar loja para a animação de boas-vindas:', lojaError.message);
+          }
+
           if (loja?.nome) {
             setStoreName(loja.nome.toUpperCase());
           }
@@ -71,6 +96,21 @@ export default function LoginPage() {
   };
 
   const loading = authLoading;
+
+  if (!authReady) {
+    return (
+      <main className="flex min-h-[100dvh] items-center justify-center bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Validando sessão...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (usuario) {
+    return null;
+  }
 
   return (
     <main className={`flex items-center justify-center relative bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)] transition-all duration-700 ${isSuccess ? 'p-0 fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none touch-none' : 'min-h-[100dvh] px-4 py-12'}`}>

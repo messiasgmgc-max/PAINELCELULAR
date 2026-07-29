@@ -5,11 +5,19 @@ import { useState, useEffect } from 'react';
 interface StoreConfig {
   nomeLoja: string;
   logoLoja: string | null; // Base64 data URL
+  enderecoLoja: string;
+  cnpjLoja: string;
+  telefoneLoja: string;
+  emailLoja: string;
 }
 
 const DEFAULT_CONFIG: StoreConfig = {
   nomeLoja: 'Phone Center',
   logoLoja: null,
+  enderecoLoja: 'Endereço não configurado',
+  cnpjLoja: 'Não informado',
+  telefoneLoja: 'Não informado',
+  emailLoja: 'contato@loja.com',
 };
 
 const STORAGE_KEY = 'storeConfig';
@@ -54,6 +62,12 @@ export function useStoreConfig() {
     salvarConfig(novaConfig);
   };
 
+  // Atualizar dados da empresa
+  const atualizarDadosEmpresa = (dados: Partial<StoreConfig>) => {
+    const novaConfig = { ...config, ...dados };
+    salvarConfig(novaConfig);
+  };
+
   // Remover logo (volta para padrão)
   const removerLogo = () => {
     const novaConfig = { ...config, logoLoja: null };
@@ -72,6 +86,7 @@ export function useStoreConfig() {
     salvarConfig,
     atualizarNomeLoja,
     atualizarLogoLoja,
+    atualizarDadosEmpresa,
     removerLogo,
     resetarConfig,
   };

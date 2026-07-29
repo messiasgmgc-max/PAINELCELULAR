@@ -10,6 +10,7 @@ export const GlassCard = ({ children, className = "", hoverEffect = false }: Gla
   return (
     <div 
       className={`
+        relative
         glass 
         p-6 
         ${hoverEffect ? 'glass-hover cursor-pointer' : ''} 

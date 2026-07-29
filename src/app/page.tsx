@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 
 export default function Home() {
-  const { usuario, logout, loading } = useAuth();
+  const { usuario, logout, loading, authReady } = useAuth();
   const { config, atualizarNomeLoja, atualizarLogoLoja } = useStoreConfig();
   
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -74,7 +74,29 @@ export default function Home() {
     fetchLoja();
   }, [usuario?.lojaId]); // Dependências limpas para não dar loop com o cache
 
-  console.debug('Dashboard: render check', { loading, usuario: usuario?.email });
+  console.debug('Dashboard: render check', { loading, authReady, usuario: usuario?.email });
+
+  if (!authReady || loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Validando sessão...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!usuario) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Redirecionando para o login...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Renderizar conteúdo da aba atual
   const renderCurrentTab = () => {
