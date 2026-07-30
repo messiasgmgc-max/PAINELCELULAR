@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Plus, Trash2, Save, Percent, Calculator, Search, TrendingUp, CreditCard, ArrowRightLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
-import { Plus, Trash2, Save, Percent, Calculator, Search, TrendingUp, CreditCard, ArrowRightLeft } from 'lucide-react';
 
 interface LinhaTaxa {
   parcelas: number;

@@ -1,28 +1,187 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import { supabaseAdmin } from '@/integrations/supabase/server';
-import { buildDispatchPayload, buildWhatsAppText, parseGeminiPlan } from './commandExecutor';
+import { buildDispatchPayload, buildWhatsAppText, parseGeminiPlan, type GeminiCommandPlan } from './commandExecutor';
 
 // Inicializa a SDK do Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const GEMINI_MODEL_CANDIDATES = (
+  process.env.GEMINI_MODEL_CANDIDATES ||
+  'gemini-2.0-flash-lite,gemini-2.0-flash,gemini-1.5-flash'
+)
+  .split(',')
+  .map((model) => model.trim())
+  .filter(Boolean);
 
-// Função fofoqueira pra te avisar da merda no zap
-async function caguetarErroNoZap(motivo: string) {
+function normalizePhone(phone: string) {
+  return phone.replace(/\D/g, '');
+}
+
+function normalizeLocalBrazilPhone(phone: string) {
+  let normalized = normalizePhone(phone);
+  while (normalized.startsWith('55')) {
+    normalized = normalized.slice(2);
+  }
+  return normalized;
+}
+
+function buildPhoneCandidates(phone: string) {
+  const base = normalizeLocalBrazilPhone(phone);
+  const candidates = new Set<string>();
+
+  if (!base) return [];
+
+  candidates.add(base);
+
+  // Variação com/sem nono dígito para celular BR
+  if (base.length === 10) {
+    // Ex: 31 + 93586377 -> 31 + 9 + 93586377
+    candidates.add(`${base.slice(0, 2)}9${base.slice(2)}`);
+  }
+
+  if (base.length === 11 && base[2] === '9') {
+    // Ex: 31 + 993586377 -> 31 + 93586377
+    candidates.add(`${base.slice(0, 2)}${base.slice(3)}`);
+  }
+
+  return Array.from(candidates);
+}
+
+function extractMessagePayload(payload: any) {
+  const data = payload?.data;
+  if (Array.isArray(data?.messages) && data.messages.length > 0) {
+    return data.messages[0];
+  }
+  if (Array.isArray(data) && data.length > 0) {
+    return data[0];
+  }
+  if (Array.isArray(payload?.messages) && payload.messages.length > 0) {
+    return payload.messages[0];
+  }
+  return data ?? null;
+}
+
+function extractMessageText(messageData: any) {
+  return (
+    messageData?.message?.conversation ||
+    messageData?.message?.extendedTextMessage?.text ||
+    messageData?.message?.imageMessage?.caption ||
+    messageData?.message?.videoMessage?.caption ||
+    messageData?.message?.buttonsResponseMessage?.selectedDisplayText ||
+    messageData?.message?.listResponseMessage?.title ||
+    messageData?.message?.templateButtonReplyMessage?.selectedDisplayText ||
+    messageData?.conversation ||
+    ''
+  );
+}
+
+function buildFallbackCommandFromText(text: string): GeminiCommandPlan | null {
+  const trimmed = text.trim();
+
+  const createLoja = trimmed.match(/^criar\s+loja\s+(.+)$/i);
+  if (createLoja && createLoja[1]) {
+    return {
+      type: 'command',
+      action: 'create_loja',
+      params: {
+        nome: createLoja[1].trim(),
+      },
+    };
+  }
+
+  if (/^listar\s+lojas$/i.test(trimmed) || /^list\s+lojas$/i.test(trimmed)) {
+    return {
+      type: 'command',
+      action: 'list_lojas',
+      params: {},
+    };
+  }
+
+  return null;
+}
+
+async function notifyAdminError(motivo: string) {
   try {
-    await fetch('https://evolution-api-test-efae.up.railway.app/message/sendText/Webhook-Lucasimports', {
+    const evolutionUrl = process.env.EVOLUTION_API_URL;
+    const instanceName = process.env.EVOLUTION_INSTANCE_NAME;
+    const apiKey = process.env.EVOLUTION_API_KEY;
+    const adminPhone = normalizePhone(process.env.WEBHOOK_ALERT_PHONE || '');
+
+    if (!evolutionUrl || !instanceName || !apiKey || !adminPhone) {
+      console.error('[Webhook Alert]', motivo);
+      return;
+    }
+
+    await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': 'D7A3EDF9C2B5-4FB5-86C8-6041D1C8DB87'
+        apikey: apiKey,
       },
       body: JSON.stringify({
-        number: "31993586377",
-        text: `🚨 *DEU MERDA NO WEBHOOK, SÔ!*\n\nMotivo: ${motivo}`
-      })
+        number: adminPhone,
+        text: `🚨 Webhook com erro:\n${motivo}`,
+      }),
     });
   } catch (e) {
-    console.error('Puta que pariu, nem o aviso de erro funcionou:', e);
+    console.error('Falha ao enviar alerta de erro do webhook:', e);
   }
+}
+
+async function sendWhatsAppText(number: string, text: string) {
+  const evolutionUrl = process.env.EVOLUTION_API_URL;
+  const instanceName = process.env.EVOLUTION_INSTANCE_NAME;
+  const apiKey = process.env.EVOLUTION_API_KEY;
+
+  if (!evolutionUrl || !instanceName || !apiKey) {
+    return { ok: false as const, error: 'Variáveis da Evolution API não configuradas.' };
+  }
+
+  async function generateContentWithModelFallback(contents: string, systemInstruction: string) {
+    let lastError: unknown = null;
+
+    for (const model of GEMINI_MODEL_CANDIDATES) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.2,
+          },
+        });
+
+        return {
+          modelUsed: model,
+          text: response.text || '',
+        };
+      } catch (error) {
+        lastError = error;
+        console.error(`⚠️ [Gemini] Falha no modelo ${model}:`, error);
+      }
+    }
+
+    throw lastError;
+  }
+
+  const response = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: apiKey,
+    },
+    body: JSON.stringify({
+      number: normalizePhone(number),
+      text,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    return { ok: false as const, error: `Evolution API ${response.status}: ${body}` };
+  }
+
+  return { ok: true as const };
 }
 
 async function executeGeminiCommand(plan: ReturnType<typeof parseGeminiPlan>, lojaId: string | null, senderPhone: string) {
@@ -282,45 +441,85 @@ async function executeGeminiCommand(plan: ReturnType<typeof parseGeminiPlan>, lo
 export async function POST(req: Request) {
   try {
     const payload = await req.json();
+    console.log('📥 [Webhook] Payload recebido em /api/webhook/evolution');
+    const eventName = String(payload?.event || payload?.type || '');
+    const isMessageEvent =
+      eventName === 'messages.upsert' ||
+      eventName === 'message.upsert' ||
+      eventName.toLowerCase().includes('upsert');
+    const tentativeMessageData = extractMessagePayload(payload);
+    const hasMessageData = Boolean(
+      tentativeMessageData?.message ||
+      tentativeMessageData?.conversation ||
+      tentativeMessageData?.text
+    );
 
-    if (payload.event !== 'messages.upsert') {
-      return NextResponse.json({ status: 'ignored_event' }, { status: 200 });
+    if (!isMessageEvent && !hasMessageData) {
+      console.log(`ℹ️ [Webhook] Ignorado por evento não-mensagem: ${eventName || 'sem_event'}`);
+      return NextResponse.json({ status: 'ignored_event', event: eventName || null }, { status: 200 });
     }
 
-    const messageData = payload.data;
+    const messageData = tentativeMessageData;
+    if (!messageData) {
+      console.log('ℹ️ [Webhook] Ignorado: sem messageData no payload');
+      return NextResponse.json({ status: 'ignored_no_message_data' }, { status: 200 });
+    }
 
-    if (messageData.key.fromMe) {
+    const fromMe = Boolean(messageData?.key?.fromMe ?? messageData?.fromMe);
+    if (fromMe) {
+      console.log('ℹ️ [Webhook] Ignorado: mensagem fromMe=true');
       return NextResponse.json({ status: 'ignored_from_me' }, { status: 200 });
     }
 
-    const remoteJid = messageData.key.remoteJid || '';
-    const rawPhone = remoteJid.split('@')[0];
-    const cleanPhone = rawPhone.replace(/\D/g, '');
-    const phoneWithoutDDI = cleanPhone.startsWith('55') ? cleanPhone.slice(2) : cleanPhone;
-
-    const userMessage =
-      messageData.message?.conversation ||
-      messageData.message?.extendedTextMessage?.text ||
+    const remoteJid =
+      messageData?.key?.remoteJid ||
+      messageData?.key?.participant ||
+      messageData?.remoteJid ||
+      messageData?.participant ||
+      messageData?.sender ||
+      messageData?.from ||
+      messageData?.jid ||
       '';
 
+    const rawPhone = remoteJid.split('@')[0];
+    const cleanPhone = normalizePhone(rawPhone);
+    const localPhone = normalizeLocalBrazilPhone(rawPhone);
+    if (!cleanPhone) {
+      console.log('⚠️ [Webhook] Ignorado: não foi possível extrair telefone do payload');
+      return NextResponse.json(
+        {
+          status: 'ignored_missing_phone',
+          event: eventName || null,
+          remoteJid: remoteJid || null,
+        },
+        { status: 200 }
+      );
+    }
+
+    const phoneWithoutDDI = localPhone;
+    const phoneCandidates = buildPhoneCandidates(rawPhone);
+
+    const userMessage = extractMessageText(messageData);
+
     if (!userMessage) {
-      await caguetarErroNoZap(`O arrombado do ${cleanPhone} mandou uma mensagem vazia ou arquivo sem texto.`);
+      console.log(`ℹ️ [Webhook] Ignorado: mensagem sem texto para ${cleanPhone}`);
       return NextResponse.json({ status: 'empty_message' }, { status: 200 });
     }
 
     console.log(`\n📩 [Zap Recebido] De: ${cleanPhone} | Mensagem: "${userMessage}"`);
 
+    let contextStoreId: string | null = null;
+    let userRole = 'DESCONHECIDO';
+    let userName = 'Usuário';
+
     // Busca de Lojista
+    const lojaPhoneOr = phoneCandidates.map((candidate) => `telefone.ilike.%${candidate}%`).join(',');
     const { data: loja } = await supabaseAdmin
       .from('lojas')
       .select('*')
-      .or(`telefone.ilike.%${phoneWithoutDDI}%`)
+      .or(lojaPhoneOr)
       .eq('ativo', true)
       .maybeSingle();
-
-    let contextStoreId: string | null = null;
-    let userRole = '';
-    let userName = '';
 
     if (loja) {
       contextStoreId = loja.id;
@@ -329,10 +528,11 @@ export async function POST(req: Request) {
       console.log(`🔍 [Auth] Lojista Identificado: ${loja.nome} (ID: ${loja.id})`);
     } else {
       // Busca de Cliente
+      const clientePhoneOr = phoneCandidates.map((candidate) => `telefone.ilike.%${candidate}%`).join(',');
       const { data: cliente } = await supabaseAdmin
         .from('clientes')
         .select('*')
-        .or(`telefone.ilike.%${phoneWithoutDDI}%`)
+        .or(clientePhoneOr)
         .eq('ativo', true)
         .maybeSingle();
 
@@ -342,25 +542,51 @@ export async function POST(req: Request) {
         userName = cliente.nome;
         console.log(`🔍 [Auth] Cliente Identificado: ${cliente.nome} | Loja: ${cliente.loja_id}`);
       } else {
-        console.log(`⚠️ [Auth] Telefone ${cleanPhone} não encontrado no banco.`);
-        await caguetarErroNoZap(`Telefone não cadastrado tentou usar o bot: ${cleanPhone}`);
-        return NextResponse.json({ status: 'unregistered_user' }, { status: 200 });
+        const superAdminPhone = normalizePhone(process.env.WHATSAPP_SUPERADMIN_PHONE || '');
+        const superAdminCandidates = buildPhoneCandidates(process.env.WHATSAPP_SUPERADMIN_PHONE || '');
+        const isSuperAdmin = Boolean(
+          superAdminPhone &&
+          (
+            cleanPhone === superAdminPhone ||
+            superAdminCandidates.includes(phoneWithoutDDI) ||
+            superAdminCandidates.some((candidate) => phoneCandidates.includes(candidate))
+          )
+        );
+
+        if (isSuperAdmin) {
+          userRole = 'SUPERADMIN';
+          userName = 'Super Admin';
+          console.log(`🔍 [Auth] Super Admin liberado por telefone: ${cleanPhone}`);
+        } else {
+          console.log(`⚠️ [Auth] Telefone ${cleanPhone} não encontrado no banco.`);
+          await sendWhatsAppText(cleanPhone, 'Seu número não está cadastrado para usar este assistente.');
+          return NextResponse.json({ status: 'unregistered_user' }, { status: 200 });
+        }
       }
     }
 
-    const { data: aparelhosEstoque } = await supabaseAdmin
-      .from('aparelhos')
-      .select('id, marca, modelo, cor, capacidade, condicao, preco, imei')
-      .eq('loja_id', contextStoreId)
-      .eq('ativo', true);
+    let aparelhosEstoque: any[] | null = null;
+    let ordensServico: any[] | null = null;
 
-    const { data: ordensServico } = await supabaseAdmin
-      .from('ordens_servico')
-      .select('numeroOS, clienteNome, aparelhoMarca, aparelhoModelo, defeito, status, precoVenda')
-      .eq('loja_id', contextStoreId)
-      .eq('ativo', true)
-      .order('numeroOS', { ascending: false })
-      .limit(10);
+    if (contextStoreId) {
+      const [{ data: aparelhos }, { data: ordens }] = await Promise.all([
+        supabaseAdmin
+          .from('aparelhos')
+          .select('id, marca, modelo, cor, capacidade, condicao, preco, imei')
+          .eq('loja_id', contextStoreId)
+          .eq('ativo', true),
+        supabaseAdmin
+          .from('ordens_servico')
+          .select('numeroOS, clienteNome, aparelhoMarca, aparelhoModelo, defeito, status, precoVenda')
+          .eq('loja_id', contextStoreId)
+          .eq('ativo', true)
+          .order('numeroOS', { ascending: false })
+          .limit(10),
+      ]);
+
+      aparelhosEstoque = aparelhos;
+      ordensServico = ordens;
+    }
 
     const systemInstruction = `
 Você é o assistente virtual inteligente do sistema Phone Center.
@@ -380,24 +606,31 @@ ${JSON.stringify(ordensServico, null, 2)}
 - Se a mensagem não for um comando, responda normalmente com um texto claro.
 `;
 
-    console.log('🤖 [Gemini] Processando resposta com Gemini Flash Lite...');
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
-      contents: userMessage,
-      config: {
-        systemInstruction,
-        temperature: 0.2,
-      },
-    });
-
-    const aiReply = response.text || '';
-    console.log(`💬 [Gemini Resposta]: "${aiReply}"`);
-
-    const plannedCommand = parseGeminiPlan(aiReply);
-    let finalReply = aiReply;
+    let plannedCommand: GeminiCommandPlan | null = null;
+    let finalReply = '';
     let commandResponse = null;
     let plannedAction = null;
+    let geminiFallbackUsed = false;
+
+    console.log('🤖 [Gemini] Processando resposta com Gemini...');
+    try {
+      const generated = await generateContentWithModelFallback(userMessage, systemInstruction);
+      const aiReply = generated.text;
+      console.log(`🤖 [Gemini] Modelo usado: ${generated.modelUsed}`);
+      console.log(`💬 [Gemini Resposta]: "${aiReply}"`);
+      plannedCommand = parseGeminiPlan(aiReply);
+      finalReply = aiReply;
+    } catch (geminiError) {
+      geminiFallbackUsed = true;
+      console.error('⚠️ [Gemini] Falha ao gerar resposta:', geminiError);
+
+      plannedCommand = buildFallbackCommandFromText(userMessage);
+      if (plannedCommand) {
+        finalReply = 'Comando recebido. Processando em modo contingência.';
+      } else {
+        finalReply = '⚠️ IA temporariamente indisponível. Tente novamente em instantes.';
+      }
+    }
 
     if (plannedCommand) {
       try {
@@ -413,30 +646,26 @@ ${JSON.stringify(ordensServico, null, 2)}
       } catch (cmdError) {
         finalReply = 'Falha ao executar o comando solicitado.';
         console.error('❌ [Command Error]:', cmdError);
-        await caguetarErroNoZap(`Falha ao executar o comando solicitado pelo ${cleanPhone}.\nErro: ${cmdError instanceof Error ? cmdError.message : 'Desconhecido'}`);
+        await notifyAdminError(`Falha ao executar comando para ${cleanPhone}. Erro: ${cmdError instanceof Error ? cmdError.message : 'Desconhecido'}`);
       }
     }
 
-    const evolutionUrl = process.env.EVOLUTION_API_URL;
-    const instanceName = process.env.EVOLUTION_INSTANCE_NAME;
-    const apiKey = process.env.EVOLUTION_API_KEY;
-
-    if (evolutionUrl && instanceName && apiKey) {
-      await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': apiKey,
+    const delivery = await sendWhatsAppText(cleanPhone, finalReply);
+    if (!delivery.ok) {
+      console.error('❌ [Evolution API] Erro ao enviar mensagem:', delivery.error);
+      await notifyAdminError(`Erro de envio para ${cleanPhone}: ${delivery.error}`);
+      return NextResponse.json(
+        {
+          status: 'delivery_error',
+          event: eventName || null,
+          message: delivery.error,
+          commandDetected: Boolean(plannedCommand),
+          geminiFallbackUsed,
         },
-        body: JSON.stringify({
-          number: cleanPhone,
-          text: finalReply,
-        }),
-      });
-      console.log(`🚀 [Evolution API] Mensagem enviada para ${cleanPhone} com sucesso!`);
+        { status: 200 }
+      );
     } else {
-      console.log('⚠️ Variáveis da Evolution API não configuradas para envio da mensagem.');
-      await caguetarErroNoZap(`As variáveis da Evolution API sumiram do .env, o zap de resposta pro cliente não foi enviado!`);
+      console.log(`🚀 [Evolution API] Mensagem enviada para ${cleanPhone} com sucesso.`);
     }
 
     return NextResponse.json(
@@ -444,12 +673,15 @@ ${JSON.stringify(ordensServico, null, 2)}
         status: 'success',
         command: commandResponse ? { action: plannedAction ?? null, message: commandResponse.message } : null,
         dispatchPayload: commandResponse?.dispatchPayload ?? null,
+        event: eventName,
+        commandDetected: Boolean(plannedCommand),
+        geminiFallbackUsed,
       },
       { status: 200 }
     );
   } catch (error) {
     console.error('❌ [Webhook Error]:', error);
-    await caguetarErroNoZap(`Erro no catch principal da função POST:\n${error instanceof Error ? error.message : JSON.stringify(error)}`);
+    await notifyAdminError(`Erro no catch principal do webhook: ${error instanceof Error ? error.message : JSON.stringify(error)}`);
     return NextResponse.json({ error: 'Internal Error' }, { status: 500 });
   }
 }
