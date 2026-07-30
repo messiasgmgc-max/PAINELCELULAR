@@ -18,6 +18,7 @@ import { VendasTab } from '@/components/VendasTab';
 import { WhatsappTab } from '@/components/WhatsappTab';
 import { ConfiguracoesTab } from '@/components/ConfiguracoesTab';
 import { MobileNav } from '@/components/MobileNav';
+import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
 import SuperAdminTab from '@/components/SuperAdminTab';
 import { 
   Smartphone, 
@@ -119,6 +120,8 @@ export default function Home() {
         return <GarantiasTab />;
       case 'vendas':
         return <VendasTab />;
+      case 'taxas-maquininha':
+        return <TaxasMaquininhaTab />;
       case 'whatsapp':
         return <WhatsappTab />;
       case 'configuracoes':
