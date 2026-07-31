@@ -196,7 +196,7 @@ export function DashboardTab() {
   if (!isMounted) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="panel-shell space-y-6">
       {/* Filtro de Data */}
       <GlassCard className="flex flex-col sm:flex-row gap-4 items-end sm:items-center">
         <div className="flex items-center gap-2 text-blue-600 font-medium">

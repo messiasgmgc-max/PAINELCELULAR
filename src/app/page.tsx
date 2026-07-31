@@ -146,15 +146,12 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       {/* Header - Mobile optimized */}
       <header className={cn(
-        "relative z-30 h-20 transition-all duration-300 flex items-center px-4",
+        "relative z-30 h-20 transition-all duration-300 flex items-center px-3 sm:px-4 md:px-6",
         isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
       )}>
-        <div className="w-full h-14 glass backdrop-blur-md rounded-2xl border border-white/20 flex items-center justify-between px-4 shadow-lg relative">
-            {/* Spacer para o botão do menu (esquerda) */}
-            <div className="w-10" />
-
-            {/* Logo e Título - Centralizado Absolutamente */}
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
+        <div className="app-content-shell">
+          <div className="w-full h-14 glass nav-surface rounded-2xl border border-white/20 flex items-center justify-between gap-3 px-3 sm:px-4 shadow-lg">
+            <div className="flex min-w-0 items-center gap-3">
               {headerLogoLoja ? (
                 <img
                   src={headerLogoLoja}
@@ -166,14 +163,14 @@ export default function Home() {
                   <Smartphone className="h-5 w-5 sm:h-6 sm:w-6" />
                 </div>
               )}
-              <div className="flex flex-col items-center sm:items-start">
-                <h1 className="text-base sm:text-xl font-bold truncate leading-none">{headerNomeLoja || 'Phone Center'}</h1>
+              <div className="flex min-w-0 flex-col items-start">
+                <h1 className="text-base sm:text-xl font-bold truncate leading-none max-w-[42vw] sm:max-w-[28rem]">{headerNomeLoja || 'Phone Center'}</h1>
                 <p className="text-[10px] sm:text-xs text-muted-foreground truncate leading-none mt-0.5 hidden sm:block">{subtitulo}</p>
               </div>
             </div>
 
             {/* User Info e Logout */}
-            <div className="flex items-center gap-2 z-10">
+            <div className="flex items-center gap-2 shrink-0">
               {/* Botão Super Admin */}
               {usuario?.role === 'super_admin' && (
                 <Button
@@ -208,6 +205,7 @@ export default function Home() {
                 </Button>
               )}
             </div>
+          </div>
         </div>
       </header>
 
@@ -224,8 +222,10 @@ export default function Home() {
         "flex-1 px-4 py-4 sm:px-6 sm:py-6 pb-[calc(110px+env(safe-area-inset-bottom))] sm:pb-6 transition-all duration-300",
         isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
       )}>
-        <div key={currentTab} className="animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-300 will-change-transform">
-          {renderCurrentTab()}
+        <div className="app-content-shell">
+          <div key={currentTab} className="animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-300 will-change-transform">
+            {renderCurrentTab()}
+          </div>
         </div>
       </main>
     </div>

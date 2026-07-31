@@ -298,8 +298,7 @@ export function ConfiguracoesTab() {
   };
 
   return (
-    <div className="w-full flex justify-center">
-      <div className="space-y-4 sm:space-y-6 w-full max-w-4xl px-4 sm:px-0">
+    <div className="panel-shell-narrow space-y-4 sm:space-y-6">
         {/* Header */}
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold">Configurações</h1>
@@ -764,7 +763,6 @@ export function ConfiguracoesTab() {
             </div>
           </TabsContent>
         </Tabs>
-      </div>
     </div>
   );
 }

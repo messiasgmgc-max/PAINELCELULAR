@@ -226,8 +226,7 @@ export function PecasTab() {
   };
 
   return (
-    <div className="flex-1 flex justify-center pt-2 pb-8 transition-all duration-300">
-      <div className="space-y-4 w-full max-w-6xl px-4 sm:px-8">
+    <div className="panel-shell space-y-4 pt-2 pb-8 transition-all duration-300">
         {/* Cabeçalho Separado */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-2">
           <div>
@@ -236,7 +235,7 @@ export function PecasTab() {
               Gerencie seu estoque de componentes ({pecas.length} total)
             </p>
           </div>
-          <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="scroll-row w-full sm:w-auto sm:pb-0">
             <Button
               variant="outline"
               onClick={handleExportCSV}
@@ -529,7 +528,6 @@ export function PecasTab() {
           )}
         </div>
       </GlassCard>
-      </div>
     </div>
   );
 }

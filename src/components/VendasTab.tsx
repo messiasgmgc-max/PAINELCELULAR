@@ -771,8 +771,7 @@ export function VendasTab() {
   };
 
   return (
-    <div className="w-full flex justify-center">
-      <div className="space-y-4 sm:space-y-6 pb-40 sm:pb-6 w-full max-w-6xl px-4 sm:px-0">
+    <div className="panel-shell space-y-4 sm:space-y-6 pb-40 sm:pb-6">
         {/* Header com Botão */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
           <div>
@@ -792,8 +791,8 @@ export function VendasTab() {
 
         {/* Modal PDV Completo */}
         {showPOS && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4 overflow-y-auto">
-            <div className="glass w-full max-w-6xl h-full sm:h-auto sm:max-h-[95vh] rounded-none sm:rounded-[2.5rem] shadow-2xl flex flex-col border border-white/20 overflow-hidden">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
+            <div className="glass w-full max-w-6xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-2rem)] rounded-none sm:rounded-[2.5rem] shadow-2xl flex flex-col border border-white/20 overflow-hidden sm:my-4">
               
               {/* Header do PDV */}
               <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/20 dark:bg-white/5 backdrop-blur-xl sticky top-0 z-20">
@@ -828,7 +827,7 @@ export function VendasTab() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-6">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 scrollbar-soft">
                 
                 {/* Seção 1: Dados da Venda */}
                 <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
@@ -1479,17 +1478,15 @@ export function VendasTab() {
             </div>
           </div>
         </GlassCard>
-      </div>
-
       {/* Modal Novo Cliente */}
       {showNovoCliente && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center z-[60] p-4 overflow-y-auto">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
             <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
               <h3 className="text-lg font-bold">Novo Cliente</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoCliente(false)}><X className="w-4 h-4" /></Button>
             </div>
-            <div className="p-6">
+            <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
               <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
                 <input type="text" placeholder="Nome *" required className="input-glass" value={novoClienteData.nome} onChange={e => setNovoClienteData({...novoClienteData, nome: e.target.value})} />
                 <input type="tel" inputMode="tel" placeholder="Telefone *" required className="input-glass" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
@@ -1504,13 +1501,13 @@ export function VendasTab() {
 
       {/* Modal Novo Aparelho */}
       {showNovoAparelho && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center z-[60] p-4 overflow-y-auto">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
             <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
               <h3 className="text-lg font-bold">Novo Aparelho</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoAparelho(false)}><X className="w-4 h-4" /></Button>
             </div>
-            <div className="p-6">
+            <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
               <form onSubmit={handleNovoAparelhoSubmit} className="space-y-4">
                 <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
                 <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
@@ -1521,7 +1518,6 @@ export function VendasTab() {
                     <input 
                       type="text" 
                       inputMode="decimal"
-                      pattern="[0-9.,]*"
                       placeholder="R$ 0,00" 
                       className="input-glass" 
                       value={novoAparelhoData.custo} 
@@ -1544,7 +1540,6 @@ export function VendasTab() {
                     <input 
                       type="text" 
                       inputMode="decimal"
-                      pattern="[0-9.,]*"
                       placeholder="R$ 0,00" 
                       className="input-glass" 
                       value={novoAparelhoData.preco} 

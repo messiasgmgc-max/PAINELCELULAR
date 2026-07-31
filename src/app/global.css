@@ -357,6 +357,37 @@ html {
     filter: drop-shadow(0 4px 10px rgba(59, 130, 246, 0.35));
   }
 
+  .app-content-shell {
+    width: 100%;
+    max-width: 96rem;
+    margin-inline: auto;
+  }
+
+  .panel-shell {
+    width: 100%;
+    max-width: 80rem;
+    margin-inline: auto;
+  }
+
+  .panel-shell-narrow {
+    width: 100%;
+    max-width: 64rem;
+    margin-inline: auto;
+  }
+
+  .scroll-row {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scroll-row::-webkit-scrollbar {
+    display: none;
+  }
+
   html:not(.dark) .auth-input:-webkit-autofill,
   html:not(.dark) .input-glass:-webkit-autofill,
   html:not(.dark) .autofill-safe:-webkit-autofill,

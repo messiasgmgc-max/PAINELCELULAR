@@ -723,7 +723,7 @@ export function AparelhosTab() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="panel-shell space-y-4">
       <GlassCard className="rounded-3xl">
         <div className="pb-4 border-b border-white/10 mb-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -738,7 +738,7 @@ export function AparelhosTab() {
                 Novo
               </Button>
             </div>
-            <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="scroll-row w-full sm:w-auto sm:pb-0">
               <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap">
                 <History className="h-4 w-4" /> Saídas
               </Button>
@@ -1102,7 +1102,6 @@ export function AparelhosTab() {
                     <input
                       type="text"
                       inputMode="decimal"
-                      pattern="[0-9.,]*"
                       name="custo"
                       placeholder="R$ 0,00"
                       value={formatarPreco(formData.custo)}
@@ -1115,7 +1114,6 @@ export function AparelhosTab() {
                     <input
                       type="text"
                       inputMode="decimal"
-                      pattern="[0-9.,]*"
                       name="preco"
                       placeholder="R$ 0,00"
                       value={formatarPreco(formData.preco)}

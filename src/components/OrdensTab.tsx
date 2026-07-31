@@ -754,7 +754,7 @@ export function OrdensTab() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="panel-shell space-y-4">
       {error && (
         <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800">
           <AlertCircle className="w-5 h-5" />
@@ -773,7 +773,7 @@ export function OrdensTab() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="scroll-row w-full sm:w-auto sm:pb-0">
           <Button onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData(INITIAL_FORM); setSelectedPecas([]); }} className="shrink-0 whitespace-nowrap">
             <Plus className="w-4 h-4 mr-2" />
             Nova OS
