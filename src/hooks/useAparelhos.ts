@@ -20,6 +20,11 @@ export function useAparelhos(): UseAparelhosReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const montarObservacaoBaixa = (observacoesAtuais?: string) => {
+    const baixa = `BAIXA_ESTOQUE:${new Date().toISOString()}:Aparelho removido do estoque por possuir histórico vinculado.`;
+    return observacoesAtuais ? `${observacoesAtuais}\n${baixa}` : baixa;
+  };
+
   const fetchAparelhos = useCallback(async () => {
     if (!usuario?.lojaId) return;
     setLoading(true);
@@ -123,13 +128,37 @@ export function useAparelhos(): UseAparelhosReturn {
       if (error) throw error;
       setAparelhos((prev) => prev.filter((a) => a.id !== id));
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      const isForeignKeyViolation = err?.code === '23503' || String(err?.message || '').includes('foreign key constraint');
+
+      if (isForeignKeyViolation) {
+        const aparelhoAtual = aparelhos.find((aparelho) => aparelho.id === id);
+        const { data, error: updateError } = await supabase
+          .from('aparelhos')
+          .update({
+            ativo: false,
+            observacoes: montarObservacaoBaixa(aparelhoAtual?.observacoes),
+          })
+          .eq('id', id)
+          .eq('loja_id', usuario.lojaId)
+          .select()
+          .single();
+
+        if (updateError) {
+          setError('Erro ao dar baixa no aparelho vinculado a histórico');
+          return false;
+        }
+
+        setAparelhos((prev) => prev.map((aparelho) => (aparelho.id === id ? data : aparelho)));
+        return true;
+      }
+
       setError("Erro ao deletar aparelho");
       return false;
     } finally {
       setLoading(false);
     }
-  }, [usuario?.lojaId]);
+  }, [aparelhos, usuario?.lojaId]);
 
   useEffect(() => {
     fetchAparelhos();

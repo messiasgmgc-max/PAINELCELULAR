@@ -68,8 +68,25 @@ export function AparelhosTab() {
     fetchClientes();
   }, [fetchAparelhos, fetchClientes]);
 
+  useEffect(() => {
+    const historicoSaidas = aparelhos
+      .filter((aparelho: any) => aparelho.ativo === false)
+      .map((aparelho: any) => {
+        const matchBaixa = String(aparelho.observacoes || '').match(/BAIXA_ESTOQUE:([^:]+):(.*)$/m);
+        return {
+          ...aparelho,
+          dataSaida: matchBaixa?.[1] || aparelho.dataCadastro,
+          motivoSaida: matchBaixa?.[2] || 'Baixa de estoque',
+        };
+      })
+      .sort((a, b) => new Date(b.dataSaida).getTime() - new Date(a.dataSaida).getTime());
+
+    setSaidas(historicoSaidas);
+  }, [aparelhos]);
+
   // Filtrar aparelhos por busca
-  const aparelhosFiltrados = aparelhos.filter((aparelho) =>
+  const aparelhosAtivos = aparelhos.filter((aparelho: any) => aparelho.ativo !== false);
+  const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) =>
     aparelho.modelo.toLowerCase().includes(searchTerm.toLowerCase()) ||
     aparelho.marca.toLowerCase().includes(searchTerm.toLowerCase()) ||
     aparelho.imei?.includes(searchTerm) ||
@@ -184,7 +201,10 @@ export function AparelhosTab() {
 
   const handleDelete = async (id: string) => {
     if (confirm("Tem certeza que deseja deletar este aparelho?")) {
-      await deletarAparelho(id);
+      const sucesso = await deletarAparelho(id);
+      if (sucesso) {
+        alert("Aparelho removido do estoque com sucesso.");
+      }
       await fetchAparelhos();
     }
   };
@@ -257,25 +277,40 @@ export function AparelhosTab() {
   };
 
   const handleDeleteEstoque = async () => {
-    if (aparelhos.length === 0) {
+    if (aparelhosAtivos.length === 0) {
       alert("O estoque já está vazio.");
       return;
     }
 
-    const currentLojaId = aparelhos[0].loja_id;
+    const currentLojaId = aparelhosAtivos[0].loja_id;
 
-    const confirmacao = confirm("⚠️ ATENÇÃO: Isso apagará TODOS os aparelhos desta loja permanentemente. Esta ação não pode ser desfeita.\n\nDeseja continuar?");
+    const confirmacao = confirm("⚠️ ATENÇÃO: Isso removerá do estoque todos os aparelhos ativos desta loja. Aparelhos com histórico vinculado serão apenas baixados para preservar as OS.\n\nDeseja continuar?");
     
     if (confirmacao) {
       try {
         const { error } = await supabase
           .from('aparelhos')
           .delete()
-          .eq('loja_id', currentLojaId);
+          .eq('loja_id', currentLojaId)
+          .neq('ativo', false);
 
-        if (error) throw error;
+        if (error) {
+          const observacaoBaixa = `BAIXA_ESTOQUE:${new Date().toISOString()}:Baixa em massa do estoque para preservar histórico.`;
+          const { error: updateError } = await supabase
+            .from('aparelhos')
+            .update({
+              ativo: false,
+              observacoes: observacaoBaixa,
+            })
+            .eq('loja_id', currentLojaId)
+            .neq('ativo', false);
 
-        alert("Estoque deletado com sucesso!");
+          if (updateError) throw updateError;
+          alert("Estoque baixado com sucesso. Os aparelhos com histórico foram preservados como saídas.");
+        } else {
+          alert("Estoque deletado com sucesso!");
+        }
+
         await fetchAparelhos();
       } catch (err: any) {
         console.error("Erro ao deletar estoque:", err);
@@ -688,13 +723,10 @@ export function AparelhosTab() {
               <div>
                 <h3 className="text-base sm:text-lg font-bold">Aparelhos Cadastrados</h3>
                 <p className="text-xs sm:text-sm text-muted-foreground">
-                  Gerencie seus aparelhos e gere certificados ({aparelhos.length} total)
+                  Gerencie seus aparelhos e gere certificados ({aparelhosAtivos.length} em estoque)
                 </p>
               </div>
               <Button size="sm" onClick={() => setShowForm(!showForm)} className="sm:hidden flex items-center gap-1 shrink-0 ml-4">
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
                 Novo
               </Button>
             </div>
@@ -705,7 +737,7 @@ export function AparelhosTab() {
               <Button
                 variant="outline"
                 onClick={handleExportCSV}
-                disabled={aparelhos.length === 0}
+                disabled={aparelhosAtivos.length === 0}
                 className="shrink-0 whitespace-nowrap"
               >
                 <Download className="mr-2 h-4 w-4" />

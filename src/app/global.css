@@ -274,6 +274,91 @@ html {
     border-color: #a18cd1;
     box-shadow: 0 0 0 4px rgba(161, 140, 209, 0.2);
   }
+
+  .auth-field {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .dark .auth-field {
+    background: rgba(15, 23, 42, 0.3);
+  }
+
+  .auth-input {
+    color: #111827;
+    caret-color: #111827;
+    appearance: none;
+  }
+
+  .auth-input::placeholder {
+    color: rgba(17, 24, 39, 0.55);
+  }
+
+  .dark .auth-input {
+    color: #f8fafc;
+    caret-color: #f8fafc;
+  }
+
+  .dark .auth-input::placeholder {
+    color: rgba(248, 250, 252, 0.52);
+  }
+
+  .autofill-safe {
+    appearance: none;
+  }
+
+  html:not(.dark) .auth-input:-webkit-autofill,
+  html:not(.dark) .input-glass:-webkit-autofill,
+  html:not(.dark) .autofill-safe:-webkit-autofill,
+  html:not(.dark) .auth-input:-webkit-autofill:hover,
+  html:not(.dark) .input-glass:-webkit-autofill:hover,
+  html:not(.dark) .autofill-safe:-webkit-autofill:hover,
+  html:not(.dark) .auth-input:-webkit-autofill:focus,
+  html:not(.dark) .input-glass:-webkit-autofill:focus,
+  html:not(.dark) .autofill-safe:-webkit-autofill:focus {
+    -webkit-text-fill-color: #111827 !important;
+    box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.32) inset !important;
+    -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.32) inset !important;
+    caret-color: #111827;
+  }
+
+  .dark .auth-input:-webkit-autofill,
+  .dark .input-glass:-webkit-autofill,
+  .dark .autofill-safe:-webkit-autofill,
+  .dark .auth-input:-webkit-autofill:hover,
+  .dark .input-glass:-webkit-autofill:hover,
+  .dark .autofill-safe:-webkit-autofill:hover,
+  .dark .auth-input:-webkit-autofill:focus,
+  .dark .input-glass:-webkit-autofill:focus,
+  .dark .autofill-safe:-webkit-autofill:focus {
+    -webkit-text-fill-color: #f8fafc !important;
+    box-shadow: 0 0 0 1000px rgba(15, 23, 42, 0.88) inset !important;
+    -webkit-box-shadow: 0 0 0 1000px rgba(15, 23, 42, 0.88) inset !important;
+    caret-color: #f8fafc;
+  }
+
+  html:not(.dark) .auth-input:-moz-autofill,
+  html:not(.dark) .input-glass:-moz-autofill,
+  html:not(.dark) .autofill-safe:-moz-autofill,
+  html:not(.dark) .auth-input:-moz-autofill-preview,
+  html:not(.dark) .input-glass:-moz-autofill-preview,
+  html:not(.dark) .autofill-safe:-moz-autofill-preview {
+    box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.32) inset !important;
+    color: #111827 !important;
+    caret-color: #111827;
+    filter: none !important;
+  }
+
+  .dark .auth-input:-moz-autofill,
+  .dark .input-glass:-moz-autofill,
+  .dark .autofill-safe:-moz-autofill,
+  .dark .auth-input:-moz-autofill-preview,
+  .dark .input-glass:-moz-autofill-preview,
+  .dark .autofill-safe:-moz-autofill-preview {
+    box-shadow: 0 0 0 1000px rgba(15, 23, 42, 0.88) inset !important;
+    color: #f8fafc !important;
+    caret-color: #f8fafc;
+    filter: none !important;
+  }
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

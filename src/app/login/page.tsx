@@ -155,14 +155,14 @@ export default function LoginPage() {
                   <label className="text-[#354152] dark:text-gray-300 text-sm tracking-[0] leading-5">
                     Nome Completo
                   </label>
-                  <div className="flex items-center justify-center py-3 px-4 relative self-stretch w-full rounded-[45px] border border-solid border-[#d0d5db] dark:border-slate-700 bg-transparent focus-within:border-[#155dfc] focus-within:ring-1 focus-within:ring-[#155dfc] transition-all">
+                  <div className="auth-field flex items-center justify-center py-3 px-4 relative self-stretch w-full rounded-[45px] border border-solid border-[#d0d5db] dark:border-slate-700 bg-transparent focus-within:border-[#155dfc] focus-within:ring-1 focus-within:ring-[#155dfc] transition-all">
                     <input
                       name="nome"
                       type="text"
                       value={formData.nome}
                       onChange={handleInputChange}
                       placeholder="Seu nome"
-                      className="w-full bg-transparent outline-none text-[#0a0a0a80] dark:text-gray-300 text-sm tracking-[0] leading-[normal] placeholder:text-[#0a0a0a80] dark:placeholder:text-gray-500"
+                      className="auth-input w-full bg-transparent outline-none text-[#111827] dark:text-gray-100 text-sm tracking-[0] leading-[normal]"
                       required={!isLogin}
                     />
                   </div>
@@ -173,14 +173,14 @@ export default function LoginPage() {
                 <label className="text-[#354152] dark:text-gray-300 text-sm tracking-[0] leading-5">
                   Email
                 </label>
-                <div className="flex items-center justify-center py-3 px-4 relative self-stretch w-full rounded-[45px] border border-solid border-[#d0d5db] dark:border-slate-700 bg-transparent focus-within:border-[#155dfc] focus-within:ring-1 focus-within:ring-[#155dfc] transition-all">
+                <div className="auth-field flex items-center justify-center py-3 px-4 relative self-stretch w-full rounded-[45px] border border-solid border-[#d0d5db] dark:border-slate-700 bg-transparent focus-within:border-[#155dfc] focus-within:ring-1 focus-within:ring-[#155dfc] transition-all">
                   <input
                     name="email"
                     type="email"
                     value={formData.email}
                     onChange={handleInputChange}
                     placeholder="seu@email.com"
-                    className="w-full bg-transparent outline-none text-[#0a0a0a80] dark:text-gray-300 text-sm tracking-[0] leading-[normal] placeholder:text-[#0a0a0a80] dark:placeholder:text-gray-500"
+                    className="auth-input w-full bg-transparent outline-none text-[#111827] dark:text-gray-100 text-sm tracking-[0] leading-[normal]"
                     required
                   />
                 </div>
@@ -190,14 +190,14 @@ export default function LoginPage() {
                 <label className="text-[#354152] dark:text-gray-300 text-sm tracking-[0] leading-5">
                   Senha
                 </label>
-                <div className="flex items-center justify-center py-3 px-4 relative self-stretch w-full rounded-[45px] border border-solid border-[#d0d5db] dark:border-slate-700 bg-transparent focus-within:border-[#155dfc] focus-within:ring-1 focus-within:ring-[#155dfc] transition-all">
+                <div className="auth-field flex items-center justify-center py-3 px-4 relative self-stretch w-full rounded-[45px] border border-solid border-[#d0d5db] dark:border-slate-700 bg-transparent focus-within:border-[#155dfc] focus-within:ring-1 focus-within:ring-[#155dfc] transition-all">
                     <input
                       name="senha"
                       type={showPassword ? 'text' : 'password'}
                       value={formData.senha}
                       onChange={handleInputChange}
                       placeholder={isLogin ? 'Sua senha' : 'Mínimo 6 caracteres'}
-                      className="w-full bg-transparent outline-none text-[#0a0a0a80] dark:text-gray-300 text-sm tracking-[0] leading-[normal] placeholder:text-[#0a0a0a80] dark:placeholder:text-gray-500 pr-8"
+                      className="auth-input w-full bg-transparent outline-none text-[#111827] dark:text-gray-100 text-sm tracking-[0] leading-[normal] pr-8"
                       required
                     />
                     <button
