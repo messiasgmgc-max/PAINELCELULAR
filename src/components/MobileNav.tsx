@@ -68,7 +68,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
       <aside 
         className={cn(
           "fixed left-0 top-0 h-screen z-40 hidden md:flex flex-col transition-all duration-300 ease-in-out",
-          "glass backdrop-blur-2xl border-r border-white/20 shadow-2xl",
+          "glass nav-surface border-r border-white/20 shadow-2xl",
           isCollapsed ? "w-20" : "w-64"
         )}
       >
@@ -90,7 +90,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2 no-scrollbar">
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2 scrollbar-soft">
           {tabsToRender.map((tab) => (
             <button
               key={tab.id}
@@ -129,8 +129,8 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
 
       {/* Dock Mobile */}
       <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pointer-events-none">
-        <div className="pointer-events-auto glass backdrop-blur-2xl border border-white/20 shadow-2xl rounded-[1.75rem] p-2">
-          <div className="flex gap-1 overflow-x-auto no-scrollbar snap-x snap-mandatory">
+        <div className="pointer-events-auto glass nav-surface border border-white/20 shadow-2xl rounded-[1.75rem] p-2">
+          <div className="flex gap-1 overflow-x-auto scrollbar-soft snap-x snap-mandatory">
             {mobileDockTabs.map((tab) => {
               if (tab.id === 'menu') {
                 return (
@@ -173,7 +173,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
             onClick={() => setIsOpen(false)}
           />
 
-          <div className="relative w-[86%] max-w-[320px] h-full bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-white/20">
+          <div className="nav-surface relative w-[86%] max-w-[320px] h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-white/20">
             
             <div className="p-5 border-b border-white/10 flex items-center justify-between">
               <div>
@@ -188,7 +188,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-2 px-2 pb-[calc(env(safe-area-inset-bottom)+16px)]">
+            <div className="flex-1 overflow-y-auto py-2 px-2 pb-[calc(env(safe-area-inset-bottom)+16px)] scrollbar-soft">
               {tabsToRender.map((tab) => (
                 <button
                   key={tab.id}

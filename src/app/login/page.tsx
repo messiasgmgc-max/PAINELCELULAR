@@ -119,8 +119,8 @@ export default function LoginPage() {
     <main className={`flex items-center justify-center relative bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)] transition-all duration-700 ${isSuccess ? 'p-0 fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none touch-none' : 'min-h-[100dvh] px-4 py-12'}`}>
       <section className={`flex flex-col items-center justify-center relative transition-all duration-700 ease-in-out ${isSuccess ? 'w-screen h-[100dvh] max-w-full gap-0' : 'max-w-md w-full gap-6'}`}>
         <header className={`flex flex-col items-center gap-1 relative self-stretch w-full transition-all duration-500 ${isSuccess ? 'h-0 opacity-0 overflow-hidden scale-90' : 'h-auto opacity-100 scale-100'}`}>
-          <div className="flex w-12 h-12 items-center justify-center relative bg-[#155cfb] rounded-[10px] shadow-lg shadow-blue-500/30">
-            <Smartphone className="text-white w-6 h-6" />
+          <div className="login-brand-mark flex w-14 h-14 items-center justify-center relative rounded-[16px]">
+            <Smartphone className="login-brand-icon w-7 h-7" />
           </div>
           <div className="flex flex-col items-center pt-3 pb-0 px-0 relative self-stretch w-full">
             <h1 className="text-[#101727] dark:text-white text-3xl text-center font-normal tracking-[0] leading-9">
@@ -249,8 +249,8 @@ export default function LoginPage() {
 
           {/* CONTEÚDO DE SUCESSO (ANIMAÇÃO TELA CHEIA) */}
           <div className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-700 ease-out ${isSuccess ? 'opacity-100 scale-100 delay-300' : 'opacity-0 scale-50 pointer-events-none'}`}>
-            <div className="w-20 h-20 bg-[#155cfb] rounded-[20px] flex items-center justify-center shadow-lg shadow-blue-500/30 animate-bounce">
-              <Smartphone className="text-white w-10 h-10" />
+            <div className="login-brand-mark w-20 h-20 rounded-[24px] flex items-center justify-center animate-bounce">
+              <Smartphone className="login-brand-icon w-10 h-10" />
             </div>
             <h2 className="mt-6 text-3xl font-bold text-[#101727] dark:text-white text-center flex flex-col gap-2">
               <span>{isLogin ? 'Bem-vindo(a) de volta!' : 'Conta criada com sucesso!'}</span>

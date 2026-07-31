@@ -1227,19 +1227,19 @@ export function AparelhosTab() {
               <h3 className="text-lg font-bold flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)}><X className="h-5 w-5" /></Button>
             </div>
-            <div className="overflow-y-auto p-6">
-              <div className="divide-y">
+            <div className="overflow-y-auto overflow-x-auto scrollbar-soft p-6">
+              <div className="divide-y min-w-[720px]">
                 {saidas.length === 0 ? (
                   <p className="p-8 text-center text-muted-foreground">Nenhuma saída registrada.</p>
                 ) : (
                   saidas.map((item, idx) => (
-                    <div key={idx} className="p-4 flex justify-between items-center hover:bg-muted/50">
-                      <div>
+                    <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-muted/50 min-w-full">
+                      <div className="min-w-0 flex-1">
                         <p className="font-medium">{item.marca} {item.modelo}</p>
                         <p className="text-xs text-muted-foreground">IMEI: {item.imei || 'N/A'}</p>
-                        <p className="text-xs text-red-600 font-medium mt-1">Motivo: {item.motivoSaida}</p>
+                        <p className="text-xs text-red-600 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right shrink-0 min-w-[180px]">
                         <p className="text-xs text-muted-foreground">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
                         <Badge variant="outline">{item.condicao}</Badge>
                       </div>
