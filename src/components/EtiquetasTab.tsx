@@ -403,12 +403,16 @@ export function EtiquetasTab() {
             width: ${pageWidth}mm;
             margin: 0;
             padding: 0;
+            background: #fff !important;
+            color-scheme: light;
           }
           body {
             font-family: Arial, sans-serif;
             color: #000;
+            background: #fff !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            color-adjust: exact;
           }
           .pagina-etiquetas {
             width: ${pageWidth}mm;

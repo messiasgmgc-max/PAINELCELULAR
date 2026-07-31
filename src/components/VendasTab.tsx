@@ -539,9 +539,10 @@ export function VendasTab() {
           <meta charset="utf-8" />
           <title>Recibo de Venda #${venda.id.slice(-6).toUpperCase()}</title>
           <style>
-            body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; margin: 0; padding: 12px; width: 100%; max-width: 320px; }
+            html { color-scheme: light; background: #fff !important; }
+            body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; background: #fff !important; margin: 0; padding: 12px; width: 100%; max-width: 320px; }
             @page { size: 80mm auto; margin: 3mm; }
-            @media print { body { padding: 0; } }
+            @media print { body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; } }
             .center { text-align: center; }
             .bold { font-weight: 700; }
             .divider { border-top: 1px dashed #000; margin: 8px 0; }
@@ -632,10 +633,11 @@ export function VendasTab() {
           <title>Recibo de Venda</title>
           <style>
             @page { size: A4 portrait; margin: 1.5cm; }
+            html { color-scheme: light; background: #fff !important; }
             @media print {
-              body { margin: 0; -webkit-print-color-adjust: exact; color-adjust: exact; }
+              body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
             }
-            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; }
+            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff !important; margin: 0; padding: 0; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
             th, td { border: 1px solid #000; padding: 5px; text-align: left; }
             .no-border, .no-border td { border: none; padding: 2px; }

@@ -502,7 +502,8 @@ export function OrdensTab() {
       <head>
         <title>Ordem de Serviço #${ordem.numeroOS}</title>
         <style>
-          body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; margin: 0; padding: 20px; max-width: 300px; }
+          html { color-scheme: light; background: #fff !important; }
+          body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #000; background: #fff !important; margin: 0; padding: 20px; max-width: 300px; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
           @media print { body { max-width: 100%; padding: 0; } @page { margin: 5mm; } }
           .text-center { text-align: center; } .text-right { text-align: right; } .font-bold { font-weight: bold; }
           .divider { border-top: 1px dashed #000; margin: 10px 0; }
@@ -570,13 +571,14 @@ export function OrdensTab() {
         <title>Ordem de Serviço #${ordem.numeroOS}</title>
         <style>
           * { box-sizing: border-box; }
+          html { color-scheme: light; background: #fff !important; }
           @media print { 
             @page { size: A4 portrait; margin: 10mm; }
-            body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; color-adjust: exact; }
+            body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
             .box { page-break-inside: avoid; }
             tr { page-break-inside: avoid; }
           }
-        body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 0 auto; padding: 20px; line-height: 1.4; max-width: 800px; }
+        body { font-family: Arial, sans-serif; font-size: 12px; color: #333; background: #fff !important; margin: 0 auto; padding: 20px; line-height: 1.4; max-width: 800px; }
           .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
           .header h1 { margin: 0; color: #1e3a8a; font-size: 22px; text-transform: uppercase; }
           .header p { margin: 5px 0 0 0; color: #555; }
@@ -689,7 +691,8 @@ export function OrdensTab() {
       <head>
         <title>Termo de Retirada - OS #${ordem.numeroOS}</title>
         <style>
-          body { font-family: Arial, sans-serif; font-size: 14px; color: #333; margin: 0 auto; padding: 40px; line-height: 1.6; max-width: 800px; }
+          html { color-scheme: light; background: #fff !important; }
+          body { font-family: Arial, sans-serif; font-size: 14px; color: #333; background: #fff !important; margin: 0 auto; padding: 40px; line-height: 1.6; max-width: 800px; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
           .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
           .header h1 { margin: 0; color: #1e3a8a; }
           .content { margin-bottom: 40px; text-align: justify; }

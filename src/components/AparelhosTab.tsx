@@ -529,9 +529,6 @@ export function AparelhosTab() {
                 </p>
               </div>
               <div class="card">
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
                 <p class="card-value">R$ ${aparelho.preco.toFixed(2).replace(".", ",")}</p>
               </div>
             </div>
@@ -570,7 +567,7 @@ export function AparelhosTab() {
               <p style="color: #5a67d8; margin: 10px 0 0 0; font-size: 11px; font-weight: bold; text-transform: uppercase;">Este é um documento de registro eletrônico autenticado</p>
             </div>
           </div>
-          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
+          <script>window.onload = function() { document.documentElement.style.colorScheme = 'light'; window.print(); window.onafterprint = function(){ window.close(); } };</script>
         </body>
         </html>
       `;
