@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 interface StoreConfig {
   nomeLoja: string;
@@ -20,30 +21,82 @@ const DEFAULT_CONFIG: StoreConfig = {
   emailLoja: 'contato@loja.com',
 };
 
-const STORAGE_KEY = 'storeConfig';
+const STORAGE_KEY_PREFIX = 'storeConfig';
 
 export function useStoreConfig() {
   const [config, setConfig] = useState<StoreConfig>(DEFAULT_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
+  const [storageKey, setStorageKey] = useState<string | null>(null);
 
-  // Carregar config ao montar
+  // Resolve uma chave por loja para evitar vazamento visual entre estabelecimentos
   useEffect(() => {
+    let mounted = true;
+
+    const resolverChave = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!mounted) return;
+
+        let scope = 'global';
+        const email = session?.user?.email;
+
+        if (email) {
+          const { data: perfil } = await supabase
+            .from('perfis')
+            .select('loja_id')
+            .eq('email', email)
+            .maybeSingle();
+
+          if (perfil?.loja_id) {
+            scope = String(perfil.loja_id);
+          }
+        } else if (session?.user?.id) {
+          scope = session.user.id;
+        }
+
+        setStorageKey(`${STORAGE_KEY_PREFIX}:${scope}`);
+      } catch (error) {
+        console.error('Erro ao resolver chave da configuração:', error);
+        if (mounted) setStorageKey(`${STORAGE_KEY_PREFIX}:global`);
+      }
+    };
+
+    resolverChave();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(() => {
+      resolverChave();
+    });
+
+    return () => {
+      mounted = false;
+      listener?.subscription?.unsubscribe?.();
+    };
+  }, []);
+
+  // Carregar config ao mudar a chave resolvida
+  useEffect(() => {
+    if (!storageKey) return;
+
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         setConfig(JSON.parse(saved));
+      } else {
+        setConfig(DEFAULT_CONFIG);
       }
     } catch (error) {
       console.error('Erro ao carregar configuração:', error);
+      setConfig(DEFAULT_CONFIG);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [storageKey]);
 
   // Salvar config
   const salvarConfig = (novaConfig: StoreConfig) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(novaConfig));
+      const key = storageKey || `${STORAGE_KEY_PREFIX}:global`;
+      localStorage.setItem(key, JSON.stringify(novaConfig));
       setConfig(novaConfig);
     } catch (error) {
       console.error('Erro ao salvar configuração:', error);
@@ -76,7 +129,8 @@ export function useStoreConfig() {
 
   // Resetar para padrão
   const resetarConfig = () => {
-    localStorage.removeItem(STORAGE_KEY);
+    const key = storageKey || `${STORAGE_KEY_PREFIX}:global`;
+    localStorage.removeItem(key);
     setConfig(DEFAULT_CONFIG);
   };
 

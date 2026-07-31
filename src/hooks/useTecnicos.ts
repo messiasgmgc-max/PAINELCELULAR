@@ -15,11 +15,13 @@ export function useTecnicos() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('tecnicos')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .order('nome');
+      let query = supabase.from('tecnicos').select('*');
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      }
+
+      const { data, error } = await query.order('nome');
       if (error) throw error;
       setTecnicos(data || []);
     } catch (err: any) {
@@ -35,11 +37,13 @@ export function useTecnicos() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('tecnicos')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .ilike('nome', `%${termo}%`);
+      let query = supabase.from('tecnicos').select('*');
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      }
+
+      const { data, error } = await query.ilike('nome', `%${termo}%`);
       if (error) throw error;
       setTecnicos(data || []);
     } catch (err: any) {
@@ -51,12 +55,11 @@ export function useTecnicos() {
 
   // Criar novo técnico
   const criarTecnico = useCallback(async (dados: Partial<Tecnico>) => {
-    if (!usuario?.lojaId) throw new Error("Loja não identificada");
     setError(null);
     try {
       const { data, error } = await supabase
         .from('tecnicos')
-        .insert([{ ...dados, loja_id: usuario.lojaId }])
+        .insert([{ ...dados, ...(usuario?.lojaId ? { loja_id: usuario.lojaId } : {}) }])
         .select()
         .single();
       if (error) throw error;
@@ -70,12 +73,14 @@ export function useTecnicos() {
 
   // Atualizar técnico
   const atualizarTecnico = useCallback(async (id: string, dados: Partial<Tecnico>) => {
+    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     setError(null);
     try {
       const { data, error } = await supabase
         .from('tecnicos')
         .update(dados)
         .eq('id', id)
+        .eq('loja_id', usuario.lojaId)
         .select()
         .single();
       if (error) throw error;
@@ -87,23 +92,25 @@ export function useTecnicos() {
       setError(err.message);
       throw err;
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   // Deletar técnico
   const deletarTecnico = useCallback(async (id: string) => {
+    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     setError(null);
     try {
       const { error } = await supabase
         .from('tecnicos')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('loja_id', usuario.lojaId);
       if (error) throw error;
       setTecnicos(prev => prev.filter(t => t.id !== id));
     } catch (err: any) {
       setError(err.message);
       throw err;
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   useEffect(() => {
     fetchTecnicos();

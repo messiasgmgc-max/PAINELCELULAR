@@ -14,14 +14,16 @@ export function useAgendamentos() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('agendamentos')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .order('data', { ascending: true });
-      
+      let query = supabase.from('agendamentos').select('*');
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      }
+
+      const { data, error } = await query.order('data', { ascending: true });
+
       if (error) throw error;
-      setAgendamentos(data || []);
+      setAgendamentos((data || []).filter(a => a.ativo !== false));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
@@ -34,14 +36,16 @@ export function useAgendamentos() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('agendamentos')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .ilike('clienteNome', `%${termo}%`);
-      
+      let query = supabase.from('agendamentos').select('*');
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      }
+
+      const { data, error } = await query.ilike('clienteNome', `%${termo}%`);
+
       if (error) throw error;
-      setAgendamentos(data || []);
+      setAgendamentos((data || []).filter(a => a.ativo !== false));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');
     } finally {
@@ -50,11 +54,15 @@ export function useAgendamentos() {
   }, [usuario?.lojaId]);
 
   const criarAgendamento = useCallback(async (dados: Omit<Agendamento, 'id' | 'dataCadastro' | 'ativo'>) => {
-    if (!usuario?.lojaId) throw new Error("Loja não identificada");
     try {
+      const payload = {
+        ...dados,
+        ...(usuario?.lojaId ? { loja_id: usuario.lojaId } : {})
+      };
+
       const { data, error } = await supabase
         .from('agendamentos')
-        .insert([{ ...dados, loja_id: usuario.lojaId }])
+        .insert([payload])
         .select()
         .single();
       if (error) throw error;
@@ -66,11 +74,13 @@ export function useAgendamentos() {
   }, [usuario?.lojaId]);
 
   const atualizarAgendamento = useCallback(async (id: string, dados: Partial<Omit<Agendamento, 'id' | 'dataCadastro'>>) => {
+    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     try {
       const { data, error } = await supabase
         .from('agendamentos')
         .update(dados)
         .eq('id', id)
+        .eq('loja_id', usuario.lojaId)
         .select()
         .single();
       if (error) throw error;
@@ -79,20 +89,22 @@ export function useAgendamentos() {
     } catch (err) {
       throw err;
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   const deletarAgendamento = useCallback(async (id: string) => {
+    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     try {
       const { error } = await supabase
         .from('agendamentos')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('loja_id', usuario.lojaId);
       if (error) throw error;
       setAgendamentos(prev => prev.filter(a => a.id !== id));
     } catch (err) {
       throw err;
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   useEffect(() => {
     fetchAgendamentos();

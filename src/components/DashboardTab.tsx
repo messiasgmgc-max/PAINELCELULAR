@@ -9,8 +9,10 @@ import { Badge } from '@/components/ui/badge';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, Users, Zap, Package, DollarSign, Target, Calendar, ShoppingBag, Wrench } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/hooks/useAuth';
 
 export function DashboardTab() {
+  const { usuario } = useAuth();
   const { ordensServico, fetchOrdensServico } = useOrdensServico();
   const { pecas, fetchPecas } = usePecas();
   const { tecnicos, fetchTecnicos } = useTecnicos();
@@ -40,15 +42,17 @@ export function DashboardTab() {
     fetchTecnicos();
     
     const fetchVendas = async () => {
+      if (!usuario?.lojaId) return;
       const { data, error } = await supabase
         .from('vendas')
-        .select('*');
+        .select('*')
+        .eq('loja_id', usuario.lojaId);
       if (!error && data) {
         setVendas(data);
       }
     };
     fetchVendas();
-  }, []);
+  }, [usuario?.lojaId]);
 
   // Filtrar dados pelo período
   const filteredData = useMemo(() => {

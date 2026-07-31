@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "osId": "e8e5351d-a2e5-4546-a862-50eb9c1d1583",
+    "osNumero": 2,
+    "clienteId": "f89a2f43-3533-4549-9d55-a30853fab825",
+    "clienteNome": "Teste",
+    "aparelhoDescricao": "iPhone",
+    "dataInicio": "2026-07-31",
+    "diasGarantia": 30,
+    "descricao": "teste",
+    "historico": [],
+    "ativo": true,
+    "id": "e5d674e2-6285-4dac-9a27-6fc1fc976b67",
+    "dataCadastro": "2026-07-31T11:18:50.636Z"
+  }
+]

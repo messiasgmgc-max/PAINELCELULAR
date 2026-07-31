@@ -529,7 +529,9 @@ export function AparelhosTab() {
                 </p>
               </div>
               <div class="card">
-                <p class="card-title">Valor</p>
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                 <p class="card-value">R$ ${aparelho.preco.toFixed(2).replace(".", ",")}</p>
               </div>
             </div>
@@ -693,7 +695,9 @@ export function AparelhosTab() {
                 </p>
               </div>
               <Button size="sm" onClick={() => setShowForm(!showForm)} className="sm:hidden flex items-center gap-1 shrink-0 ml-4">
-                <Plus className="h-4 w-4" />
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                 Novo
               </Button>
             </div>
@@ -1060,6 +1064,8 @@ export function AparelhosTab() {
                     <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Preço de Custo</label>
                     <input
                       type="text"
+                      inputMode="decimal"
+                      pattern="[0-9.,]*"
                       name="custo"
                       placeholder="R$ 0,00"
                       value={formatarPreco(formData.custo)}
@@ -1071,6 +1077,8 @@ export function AparelhosTab() {
                     <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Preço de Venda</label>
                     <input
                       type="text"
+                      inputMode="decimal"
+                      pattern="[0-9.,]*"
                       name="preco"
                       placeholder="R$ 0,00"
                       value={formatarPreco(formData.preco)}

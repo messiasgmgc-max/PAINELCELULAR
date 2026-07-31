@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Phone Center icon">
+  <rect width="512" height="512" rx="96" fill="#2563eb"/>
+  <rect x="144" y="64" width="224" height="384" rx="36" fill="#ffffff"/>
+  <rect x="172" y="96" width="168" height="256" rx="20" fill="#dbeafe"/>
+  <circle cx="256" cy="392" r="20" fill="#2563eb"/>
+</svg>

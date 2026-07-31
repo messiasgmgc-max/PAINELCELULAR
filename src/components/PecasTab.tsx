@@ -336,7 +336,9 @@ export function PecasTab() {
                   <div>
                     <label className="text-xs text-muted-foreground">Estoque Atual</label>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       name="estoque"
                       value={formData.estoque}
                       onChange={handleInputChange}
@@ -347,7 +349,9 @@ export function PecasTab() {
                   <div>
                     <label className="text-xs text-muted-foreground">Estoque Mín</label>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       name="estoqueMinimo"
                       value={formData.estoqueMinimo}
                       onChange={handleInputChange}
@@ -358,7 +362,9 @@ export function PecasTab() {
                   <div>
                     <label className="text-xs text-muted-foreground">Estoque Máx</label>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       name="estoqueMaximo"
                       value={formData.estoqueMaximo}
                       onChange={handleInputChange}

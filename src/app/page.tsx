@@ -19,6 +19,7 @@ import { WhatsappTab } from '@/components/WhatsappTab';
 import { ConfiguracoesTab } from '@/components/ConfiguracoesTab';
 import { MobileNav } from '@/components/MobileNav';
 import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
+import { EtiquetasTab } from '@/components/EtiquetasTab';
 import SuperAdminTab from '@/components/SuperAdminTab';
 import { 
   Smartphone, 
@@ -48,6 +49,12 @@ export default function Home() {
   useEffect(() => {
     if (isInitialized) localStorage.setItem('last_tab', currentTab);
   }, [currentTab, isInitialized]);
+
+  useEffect(() => {
+    if (currentTab === 'superadmin' && usuario?.role !== 'super_admin') {
+      setCurrentTab('dashboard');
+    }
+  }, [currentTab, usuario?.role]);
 
   useEffect(() => {
     // Atualiza via store (configuracoes) caso seja alterado em tempo real na aba Configurações
@@ -110,6 +117,8 @@ export default function Home() {
         return <AparelhosTab />;
       case 'pecas':
         return <PecasTab />;
+      case 'etiquetas':
+        return <EtiquetasTab />;
       case 'orders':
         return <OrdensTab />;
       case 'tecnicos':
@@ -127,7 +136,7 @@ export default function Home() {
       case 'configuracoes':
         return <ConfiguracoesTab />;
       case 'superadmin':
-        return <SuperAdminTab />;
+        return usuario?.role === 'super_admin' ? <SuperAdminTab /> : <DashboardTab />;
       default:
         return <DashboardTab />;
     }
@@ -166,7 +175,7 @@ export default function Home() {
             {/* User Info e Logout */}
             <div className="flex items-center gap-2 z-10">
               {/* Botão Super Admin */}
-              {(usuario?.role === 'admin' || usuario?.role === 'super_admin') && (
+              {usuario?.role === 'super_admin' && (
                 <Button
                   variant={currentTab === 'superadmin' ? 'default' : 'outline'}
                   size="sm"
@@ -212,10 +221,12 @@ export default function Home() {
 
       {/* Main Content - flex-1 para ocupar espaço */}
       <main className={cn(
-        "flex-1 px-4 py-4 sm:px-6 sm:py-6 pb-24 sm:pb-6 transition-all duration-300",
+        "flex-1 px-4 py-4 sm:px-6 sm:py-6 pb-[calc(110px+env(safe-area-inset-bottom))] sm:pb-6 transition-all duration-300",
         isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
       )}>
-        {renderCurrentTab()}
+        <div key={currentTab} className="animate-in fade-in slide-in-from-bottom-2 zoom-in-95 duration-300 will-change-transform">
+          {renderCurrentTab()}
+        </div>
       </main>
     </div>
   );

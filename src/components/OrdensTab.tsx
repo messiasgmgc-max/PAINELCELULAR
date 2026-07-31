@@ -84,9 +84,16 @@ const StrictModeDroppable = ({ children, ...props }: DroppableProps) => {
 };
 
 export function OrdensTab() {
-  const { ordensServico, loading, error, fetchOrdensServico } = useOrdensServico();
+  const {
+    ordensServico,
+    loading,
+    error,
+    fetchOrdensServico,
+    criarOrdemServico,
+    atualizarOrdemServico,
+    deletarOrdemServico,
+  } = useOrdensServico();
   const { config } = useStoreConfig();
-  const { criarOrdemServico, atualizarOrdemServico, deletarOrdemServico } = useOrdensServico();
   const { clientes, fetchClientes, criarCliente } = useClientes();
   const { aparelhos, fetchAparelhos, criarAparelho } = useAparelhos();
   const { pecas, fetchPecas, criarPeca } = usePecas();
@@ -99,6 +106,7 @@ export function OrdensTab() {
   const [selectedPecas, setSelectedPecas] = useState<PecaUtilizada[]>([]);
   const [pecaSelecionada, setPecaSelecionada] = useState('');
   const [quantidadePeca, setQuantidadePeca] = useState(1);
+  const [aparelhoOsBusca, setAparelhoOsBusca] = useState('');
 
   // Modais de criação rápida
   const [showModalNovoCliente, setShowModalNovoCliente] = useState(false);
@@ -140,6 +148,27 @@ export function OrdensTab() {
 
   const ordensEntregues = ordensFiltradas.filter(o => o.status === 'entregue');
 
+  const aparelhosEstoque = aparelhos
+    .filter((aparelho) => aparelho.ativo)
+    .sort((a, b) => {
+      const marcaA = `${a.marca} ${a.modelo}`.toLowerCase();
+      const marcaB = `${b.marca} ${b.modelo}`.toLowerCase();
+      return marcaA.localeCompare(marcaB);
+    });
+
+  const aparelhosEstoqueFiltrados = aparelhosEstoque.filter((aparelho) => {
+    const termo = aparelhoOsBusca.trim().toLowerCase();
+    if (!termo) return true;
+
+    return (
+      aparelho.marca.toLowerCase().includes(termo) ||
+      aparelho.modelo.toLowerCase().includes(termo) ||
+      aparelho.imei?.toLowerCase().includes(termo) ||
+      aparelho.numeroSerie?.toLowerCase().includes(termo) ||
+      aparelho.cliente?.toLowerCase().includes(termo)
+    );
+  });
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -163,7 +192,9 @@ export function OrdensTab() {
         aparelhoId: value,
         aparelhoMarca: aparelho?.marca || '',
         aparelhoModelo: aparelho?.modelo || '',
-        imei: aparelho?.imei || ''
+        imei: aparelho?.imei || aparelho?.numeroSerie || '',
+        clienteId: aparelho?.clienteId || prev.clienteId,
+        clienteNome: aparelho?.cliente || prev.clienteNome
       }));
     } else if (name === 'tecnicoId') {
       const tecnico = tecnicos.find(t => t.id === value);
@@ -416,6 +447,7 @@ export function OrdensTab() {
           ...ordem,
           status: novoStatus
         });
+        await fetchOrdensServico();
       }
     } catch (err) {
       console.error('Erro ao atualizar status:', err);
@@ -766,10 +798,13 @@ export function OrdensTab() {
                     onChange={(e) => handleSelectChange('aparelhoId', e.target.value)}
                     className="input-glass"
                   >
-                    <option value="">Nenhum aparelho</option>
-                    {aparelhos.filter(a => a.clienteId === formData.clienteId).map(a => (
+                    <option value="">Selecionar aparelho do estoque</option>
+                    {aparelhosEstoqueFiltrados.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.marca} {a.modelo}
+                        {a.imei ? ` | IMEI ${a.imei}` : ''}
+                        {a.numeroSerie ? ` | Série ${a.numeroSerie}` : ''}
+                        {a.cliente ? ` | ${a.cliente}` : ''}
                       </option>
                     ))}
                   </select>
@@ -777,6 +812,19 @@ export function OrdensTab() {
                     <Plus className="w-4 h-4" />
                   </Button>
                 </div>
+                <div className="mt-2 relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={aparelhoOsBusca}
+                    onChange={(event) => setAparelhoOsBusca(event.target.value)}
+                    placeholder="Buscar no estoque por modelo, IMEI ou cliente"
+                    className="input-glass pl-9"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {aparelhosEstoqueFiltrados.length} aparelho(s) ativo(s) no estoque da loja.
+                </p>
               </div>
             </div>
 
@@ -845,10 +893,12 @@ export function OrdensTab() {
                 </select>
 
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   min="1"
                   value={quantidadePeca}
-                  onChange={(e) => setQuantidadePeca(parseInt(e.target.value) || 1)}
+                  onChange={(e) => setQuantidadePeca(parseInt(e.target.value.replace(/\D/g, '')) || 1)}
                   placeholder="Qtd"
                   className="input-glass w-20"
                 />
@@ -883,7 +933,9 @@ export function OrdensTab() {
               <div>
                 <label className="block text-sm font-medium mb-2">Mão de Obra (R$)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.,]*"
                   step="0.01"
                   name="maoDeObra"
                   value={formData.maoDeObra}
@@ -896,7 +948,9 @@ export function OrdensTab() {
               <div>
                 <label className="block text-sm font-medium mb-2">Valor Total (R$)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.,]*"
                   step="0.01"
                   name="precoVenda"
                   value={formData.precoVenda}
@@ -1216,7 +1270,7 @@ export function OrdensTab() {
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className={`bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-[2rem] p-4 border-2 transition-all min-h-96 ${
+                    className={`bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-[2rem] p-4 border-2 transition-all min-h-96 overflow-visible ${
                       snapshot.isDraggingOver ? 'border-blue-400 bg-blue-50/20 dark:bg-blue-900/20' : 'border-white/10'
                     }`}
                   >
@@ -1235,11 +1289,12 @@ export function OrdensTab() {
                             <div
                               ref={provided.innerRef}
                               {...provided.draggableProps}
-                              className={`bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-3 border transition-all ${
+                              style={provided.draggableProps.style}
+                              className={`relative z-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-3 border transition-all overflow-visible transform-gpu ${
                                 snapshot.isDragging
-                                  ? 'border-blue-500 shadow-lg ring-2 ring-blue-300'
-                                  : 'border-white/20 hover:border-blue-400'
-                              } group cursor-move`}
+                                  ? 'border-blue-500 shadow-lg ring-2 ring-blue-300 scale-[1.01]'
+                                  : 'border-white/20'
+                              } cursor-move`}
                             >
                               <div className="flex gap-2 items-start">
                                 <div {...provided.dragHandleProps} className="flex-shrink-0 pt-1">
@@ -1281,7 +1336,7 @@ export function OrdensTab() {
                                     </div>
                                   )}
 
-                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <div className="flex gap-1 opacity-100 transition-opacity">
                                     <Button size="sm" variant="outline" className="flex-1 text-green-600" onClick={() => openWhatsApp(ordem.clienteNome, ordem.numeroOS.toString())}>
                                       <MessageCircle className="w-3 h-3" />
                                     </Button>
@@ -1337,7 +1392,7 @@ export function OrdensTab() {
               <div
                 ref={provided.innerRef}
                 {...provided.droppableProps}
-                className={`bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-[2rem] p-4 border-2 transition-all min-h-[100px] ${
+                className={`bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-[2rem] p-4 border-2 transition-all min-h-[100px] overflow-visible ${
                   snapshot.isDraggingOver ? 'border-purple-400 bg-purple-50/20 dark:bg-purple-900/20' : 'border-white/10'
                 }`}
               >
@@ -1348,11 +1403,12 @@ export function OrdensTab() {
                         <div
                           ref={provided.innerRef}
                           {...provided.draggableProps}
-                          className={`bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-3 border transition-all flex flex-col sm:flex-row sm:items-center gap-4 ${
+                          style={provided.draggableProps.style}
+                          className={`relative z-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-3 border transition-all flex flex-col sm:flex-row sm:items-center gap-4 overflow-visible transform-gpu ${
                             snapshot.isDragging
-                              ? 'border-purple-500 shadow-lg ring-2 ring-purple-300'
-                              : 'border-white/20 hover:border-purple-300'
-                          } group`}
+                              ? 'border-purple-500 shadow-lg ring-2 ring-purple-300 scale-[1.01]'
+                              : 'border-white/20'
+                          }`}
                         >
                           <div {...provided.dragHandleProps} className="flex-shrink-0 text-gray-400 cursor-move">
                             <GripVertical className="w-5 h-5" />
@@ -1377,7 +1433,7 @@ export function OrdensTab() {
                             </div>
                           </div>
 
-                          <div className="flex gap-2 justify-end sm:justify-start">
+                          <div className="flex gap-2 justify-end sm:justify-start opacity-100">
                             <Button size="sm" variant="outline" className="text-green-600" onClick={() => openWhatsApp(ordem.clienteNome, ordem.numeroOS.toString())}>
                               <MessageCircle className="w-4 h-4" />
                             </Button>

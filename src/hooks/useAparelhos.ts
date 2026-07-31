@@ -84,6 +84,7 @@ export function useAparelhos(): UseAparelhosReturn {
 
   const atualizarAparelho = useCallback(
     async (id: string, dados: Partial<Aparelho>) => {
+      if (!usuario?.lojaId) return null;
       setLoading(true);
       setError(null);
       try {
@@ -91,6 +92,7 @@ export function useAparelhos(): UseAparelhosReturn {
           .from('aparelhos')
           .update(dados)
           .eq('id', id)
+          .eq('loja_id', usuario.lojaId)
           .select()
           .single();
         if (error) throw error;
@@ -105,17 +107,19 @@ export function useAparelhos(): UseAparelhosReturn {
         setLoading(false);
       }
     },
-    []
+    [usuario?.lojaId]
   );
 
   const deletarAparelho = useCallback(async (id: string) => {
+    if (!usuario?.lojaId) return false;
     setLoading(true);
     setError(null);
     try {
       const { error } = await supabase
         .from('aparelhos')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('loja_id', usuario.lojaId);
       if (error) throw error;
       setAparelhos((prev) => prev.filter((a) => a.id !== id));
       return true;
@@ -125,7 +129,7 @@ export function useAparelhos(): UseAparelhosReturn {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   useEffect(() => {
     fetchAparelhos();

@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [loginFlowCompleted, setLoginFlowCompleted] = useState(false);
   const [storeName, setStoreName] = useState<string>('');
 
   useEffect(() => {
@@ -25,10 +26,10 @@ export default function LoginPage() {
   }, [config.nomeLoja]);
 
   useEffect(() => {
-    if (authReady && usuario && !isSuccess) {
+    if (authReady && usuario && !isSuccess && !loginFlowCompleted) {
       router.replace('/');
     }
-  }, [authReady, usuario, isSuccess, router]);
+  }, [authReady, usuario, isSuccess, loginFlowCompleted, router]);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -44,6 +45,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setLoginFlowCompleted(false);
 
     try {
       const fallbackStoreName = (config.nomeLoja || 'Phone Center').toUpperCase();
@@ -83,6 +85,7 @@ export default function LoginPage() {
       }
       
       // Ativa a animação de sucesso cobrindo a tela toda
+      setLoginFlowCompleted(true);
       setIsSuccess(true);
       
       // Força a animação a durar pelo menos 2 segundos (2000ms)
@@ -108,7 +111,7 @@ export default function LoginPage() {
     );
   }
 
-  if (usuario) {
+  if (usuario && !isSuccess && !loginFlowCompleted) {
     return null;
   }
 

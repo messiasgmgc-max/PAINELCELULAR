@@ -17,11 +17,15 @@ export function useAuth() {
 
     try {
       // Busca dados atualizados da tabela perfis (Single Source of Truth)
-      const { data: perfil } = await supabase
+      const { data: perfil, error: perfilError } = await supabase
         .from('perfis')
         .select('*')
         .eq('email', session.user.email)
-        .single();
+        .maybeSingle();
+
+      if (perfilError) {
+        console.warn('Perfil não encontrado ou indisponível:', perfilError.message);
+      }
 
       return {
         id: session.user.id,
@@ -29,12 +33,18 @@ export function useAuth() {
         nome: session.user.user_metadata?.nome ?? session.user.email?.split('@')[0] ?? 'Usuário',
         // Prioriza a role do banco de dados; se não tiver, usa do Auth; se não, 'operador'
         role: (perfil?.role as SessaoUsuario['role']) ?? (session.user.user_metadata?.role as SessaoUsuario['role']) ?? 'operador',
-        lojaId: perfil?.loja_id ?? session.user.user_metadata?.lojaId
+        lojaId: perfil?.loja_id ?? session.user.user_metadata?.lojaId ?? session.user.user_metadata?.loja_id ?? null
       };
     } catch (error) {
       console.error('Erro ao buscar perfil complementar:', error);
       // Fallback seguro apenas com dados do Auth
-      return null;
+      return {
+        id: session.user.id,
+        email: session.user.email ?? '',
+        nome: session.user.user_metadata?.nome ?? session.user.email?.split('@')[0] ?? 'Usuário',
+        role: (session.user.user_metadata?.role as SessaoUsuario['role']) ?? 'operador',
+        lojaId: session.user.user_metadata?.lojaId ?? session.user.user_metadata?.loja_id ?? null
+      };
     }
   }, []);
 
@@ -122,11 +132,7 @@ export function useAuth() {
       try {
         listener?.subscription?.unsubscribe?.();
       } catch (e) {
-        try {
-          listener?.unsubscribe?.();
-        } catch (err) {
-          // ignore
-        }
+        // ignore
       }
     };
   }, [montarUsuario]);

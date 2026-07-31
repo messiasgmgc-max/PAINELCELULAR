@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
-  ChevronLeft, LayoutGrid, Menu
+  ChevronLeft, LayoutGrid, Menu, Tag
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -22,6 +22,7 @@ const TABS: Tab[] = [
   { id: 'clientes', label: 'Clientes', icon: <Users className="w-5 h-5" /> },
   { id: 'aparelhos', label: 'Aparelhos', icon: <Smartphone className="w-5 h-5" /> },
   { id: 'pecas', label: 'Peças', icon: <Package className="w-5 h-5" /> },
+  { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-5 h-5" /> },
   { id: 'orders', label: 'OS', icon: <ListTodo className="w-5 h-5" /> },
   { id: 'tecnicos', label: 'Técnicos', icon: <Wrench className="w-5 h-5" /> },
   { id: 'agendamentos', label: 'Agenda', icon: <Calendar className="w-5 h-5" /> },
@@ -51,11 +52,15 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const isSuperAdmin = usuario?.email?.toLowerCase() === 'guiguigamer60@gmail.com';
+  const isSuperAdmin = usuario?.role === 'super_admin';
   
   const tabsToRender = isSuperAdmin 
     ? [...TABS, { id: 'superadmin', label: 'Super Admin', icon: <Lock className="w-5 h-5 text-red-500" /> }]
     : TABS;
+
+  const mobileDockTabs = tabsToRender;
+
+  const openDrawer = () => setIsOpen(true);
 
   return (
     <>
@@ -122,38 +127,42 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
         )}
       </aside>
 
-      {/* BOTÃO MENU MOBILE ANIMADO 
-         z-[999] garante que fique acima do Header (z-30)
-      */}
-      <div 
-        className={cn(
-          "md:hidden fixed z-[999] transition-all duration-500 cubic-bezier(0.34, 1.56, 0.64, 1) pointer-events-auto",
-          scrolled 
-            ? "top-4 left-4 scale-95" 
-            : "top-[12px] left-4 scale-100" 
-        )}
-      >
-        <button
-          onClick={() => setIsOpen(true)}
-          className={cn(
-            "flex items-center justify-center border transition-all duration-500 cursor-pointer",
-            // Estado Normal (Encaixado) - Bg transparente para mesclar com o header, mas com borda suave
-            !scrolled && "h-14 w-14 rounded-2xl border-white/10 bg-transparent text-blue-600 hover:bg-white/5",
-            // Estado Scrollado (Flutuante)
-            scrolled && "h-12 px-4 rounded-full bg-blue-600 text-white shadow-xl shadow-blue-500/30 border-blue-400/30 backdrop-blur-xl"
-          )}
-        >
-          {scrolled ? (
-             // Ícone quando rola (Modo Botão)
-             <div className="flex items-center gap-2">
-               <Menu className="w-5 h-5 animate-in fade-in zoom-in duration-300" />
-               <span className="text-xs font-bold tracking-widest uppercase">Menu</span>
-             </div>
-          ) : (
-             // Ícone quando no topo (Modo Encaixado)
-             <LayoutGrid className="w-7 h-7 animate-in spin-in-90 duration-300 drop-shadow-sm" />
-          )}
-        </button>
+      {/* Dock Mobile */}
+      <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pointer-events-none">
+        <div className="pointer-events-auto glass backdrop-blur-2xl border border-white/20 shadow-2xl rounded-[1.75rem] p-2">
+          <div className="flex gap-1 overflow-x-auto no-scrollbar snap-x snap-mandatory">
+            {mobileDockTabs.map((tab) => {
+              if (tab.id === 'menu') {
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={openDrawer}
+                    className="snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold text-gray-500 hover:text-blue-600 hover:bg-blue-500/10 transition-all"
+                  >
+                    <Menu className="w-5 h-5" />
+                    <span>Menu</span>
+                  </button>
+                );
+              }
+
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => onTabChange(tab.id)}
+                  className={cn(
+                    "snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold transition-all",
+                    currentTab === tab.id
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
+                      : "text-gray-500 hover:text-blue-600 hover:bg-blue-500/10"
+                  )}
+                >
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Menu Lateral (Drawer) */}
@@ -164,7 +173,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
             onClick={() => setIsOpen(false)}
           />
 
-          <div className="relative w-[80%] max-w-[300px] h-full bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-white/20">
+          <div className="relative w-[86%] max-w-[320px] h-full bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-white/20">
             
             <div className="p-5 border-b border-white/10 flex items-center justify-between">
               <div>
@@ -179,7 +188,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-2 px-2">
+            <div className="flex-1 overflow-y-auto py-2 px-2 pb-[calc(env(safe-area-inset-bottom)+16px)]">
               {tabsToRender.map((tab) => (
                 <button
                   key={tab.id}

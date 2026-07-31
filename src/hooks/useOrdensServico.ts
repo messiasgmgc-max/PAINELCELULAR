@@ -15,13 +15,15 @@ export function useOrdensServico() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('ordens_servico')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .order('dataEntrada', { ascending: false });
+      let query = supabase.from('ordens_servico').select('*');
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      }
+
+      const { data, error } = await query.order('dataEntrada', { ascending: false });
       if (error) throw error;
-      setOrdensServico(data || []);
+      setOrdensServico((data || []).filter(o => o.ativo !== false));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -35,13 +37,15 @@ export function useOrdensServico() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('ordens_servico')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .or(`clienteNome.ilike.%${termo}%,aparelhoModelo.ilike.%${termo}%`);
+      let query = supabase.from('ordens_servico').select('*');
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      }
+
+      const { data, error } = await query.or(`clienteNome.ilike.%${termo}%,aparelhoModelo.ilike.%${termo}%`);
       if (error) throw error;
-      setOrdensServico(data || []);
+      setOrdensServico((data || []).filter(o => o.ativo !== false));
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -51,7 +55,6 @@ export function useOrdensServico() {
 
   // Criar nova OS
   const criarOrdemServico = useCallback(async (dados: Partial<OrdemServico>) => {
-    if (!usuario?.lojaId) throw new Error("Loja não identificada");
     setError(null);
     try {
       // Remover campos que não existem no banco ou que são gerados automaticamente
@@ -60,7 +63,7 @@ export function useOrdensServico() {
 
       const { data, error } = await supabase
         .from('ordens_servico')
-        .insert([{ ...dadosLimpos, loja_id: usuario.lojaId }])
+        .insert([{ ...dadosLimpos, ...(usuario?.lojaId ? { loja_id: usuario.lojaId } : {}) }])
         .select()
         .single();
       if (error) throw error;
@@ -75,6 +78,7 @@ export function useOrdensServico() {
 
   // Atualizar OS
   const atualizarOrdemServico = useCallback(async (id: string, dados: Partial<OrdemServico>) => {
+    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     setError(null);
     try {
       // Remover campos que não devem ser atualizados ou não existem no banco
@@ -84,6 +88,7 @@ export function useOrdensServico() {
         .from('ordens_servico')
         .update(dadosLimpos)
         .eq('id', id)
+        .eq('loja_id', usuario.lojaId)
         .select()
         .single();
       if (error) throw error;
@@ -95,23 +100,25 @@ export function useOrdensServico() {
       setError(err.message);
       throw err;
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   // Deletar OS
   const deletarOrdemServico = useCallback(async (id: string) => {
+    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     setError(null);
     try {
       const { error } = await supabase
         .from('ordens_servico')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('loja_id', usuario.lojaId);
       if (error) throw error;
       setOrdensServico(prev => prev.filter(o => o.id !== id));
     } catch (err: any) {
       setError(err.message);
       throw err;
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   useEffect(() => {
     fetchOrdensServico();

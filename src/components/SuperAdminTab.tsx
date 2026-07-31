@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { Plus, Store, Users, Trash2, Key, Save, X, Building2, Edit2 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Loja {
   id: string;
@@ -23,6 +24,7 @@ interface Acesso {
 }
 
 export default function SuperAdminTab() {
+  const { usuario } = useAuth();
   const [lojas, setLojas] = useState<Loja[]>([]);
   const [acessos, setAcessos] = useState<Acesso[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,8 +37,19 @@ export default function SuperAdminTab() {
   const [editingAcesso, setEditingAcesso] = useState<Acesso | null>(null);
 
   useEffect(() => {
+    if (usuario?.role !== "super_admin") {
+      return;
+    }
     fetchDados();
-  }, []);
+  }, [usuario?.role]);
+
+  if (usuario?.role !== "super_admin") {
+    return (
+      <GlassCard className="rounded-3xl">
+        <p className="text-sm text-muted-foreground">Acesso restrito ao super admin.</p>
+      </GlassCard>
+    );
+  }
 
   const fetchDados = async () => {
     setLoading(true);

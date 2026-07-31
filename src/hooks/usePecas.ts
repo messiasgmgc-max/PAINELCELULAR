@@ -76,6 +76,7 @@ export function usePecas() {
   // Atualizar peça
   const atualizarPeca = useCallback(
     async (id: string, dados: Partial<Omit<Peca, "id" | "dataCadastro">>) => {
+      if (!usuario?.lojaId) return null;
       setLoading(true);
       setError(null);
       try {
@@ -83,6 +84,7 @@ export function usePecas() {
           .from('pecas')
           .update(dados)
           .eq('id', id)
+          .eq('loja_id', usuario.lojaId)
           .select()
           .single();
         if (error) throw error;
@@ -97,18 +99,20 @@ export function usePecas() {
         setLoading(false);
       }
     },
-    []
+    [usuario?.lojaId]
   );
 
   // Deletar peça
   const deletarPeca = useCallback(async (id: string) => {
+    if (!usuario?.lojaId) return false;
     setLoading(true);
     setError(null);
     try {
       const { error } = await supabase
         .from('pecas')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('loja_id', usuario.lojaId);
       if (error) throw error;
       setPecas((prev) => prev.filter((peca) => peca.id !== id));
       return true;
@@ -118,7 +122,7 @@ export function usePecas() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [usuario?.lojaId]);
 
   useEffect(() => {
     fetchPecas();

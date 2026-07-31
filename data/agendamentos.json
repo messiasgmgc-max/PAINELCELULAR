@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "clienteId": "f89a2f43-3533-4549-9d55-a30853fab825",
+    "clienteNome": "Teste",
+    "telefone": "123",
+    "data": "2026-08-01T10:00:00.000Z",
+    "descricao": "teste",
+    "status": "agendado",
+    "observacoes": "",
+    "id": "d005b02d-dff8-4f8a-9d59-89de7e1e322e",
+    "dataCadastro": "2026-07-31T11:18:25.294Z",
+    "ativo": true
+  }
+]

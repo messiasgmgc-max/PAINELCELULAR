@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,9 +31,15 @@ export function VendasTab() {
 
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [vendasPorPeriodo, setVendasPorPeriodo] = useState<VendasPorPeriodo[]>([]);
-  const [filtroCliente, setFiltroCliente] = useState('');
+  const [filtroBusca, setFiltroBusca] = useState('');
   const [filtroStatus, setFiltroStatus] = useState<string>('');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('');
+  const [filtroVendedor, setFiltroVendedor] = useState<string>('');
+  const [filtroDataInicio, setFiltroDataInicio] = useState('');
+  const [filtroDataFim, setFiltroDataFim] = useState('');
+  const [ordenarPor, setOrdenarPor] = useState<'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo'>('data');
+  const [direcaoOrdenacao, setDirecaoOrdenacao] = useState<'asc' | 'desc'>('desc');
+  const [showSalesDashboard, setShowSalesDashboard] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
   const [showNovoCliente, setShowNovoCliente] = useState(false);
@@ -89,6 +95,40 @@ export function VendasTab() {
   // Estados para formulários rápidos
   const [novoClienteData, setNovoClienteData] = useState({ nome: '', email: '', telefone: '', cpf: '' });
   const [novoAparelhoData, setNovoAparelhoData] = useState({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' as const });
+
+  const isTypingField = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+  };
+
+  const handleShortcutFinalize = () => {
+    if (showPOS) handleFinalizarVenda();
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!showPOS && !showNovoCliente && !showNovoAparelho) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (showPOS) {
+          setShowPOS(false);
+          resetPOS();
+        }
+        if (showNovoCliente) setShowNovoCliente(false);
+        if (showNovoAparelho) setShowNovoAparelho(false);
+        return;
+      }
+
+      if (showPOS && event.key === 'Enter' && !event.shiftKey && !isTypingField(event.target)) {
+        event.preventDefault();
+        handleShortcutFinalize();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showPOS]);
 
   useEffect(() => {
     if (usuario?.lojaId) {
@@ -269,12 +309,94 @@ export function VendasTab() {
     }
   };
 
-  const vendasFiltradas = vendas.filter(v => {
-    const matchCliente = v.clienteNome.toLowerCase().includes(filtroCliente.toLowerCase());
-    const matchStatus = !filtroStatus || v.status === filtroStatus;
-    const matchMetodo = !filtroMetodo || v.metodo === filtroMetodo;
-    return matchCliente && matchStatus && matchMetodo;
-  });
+  const metodoLabel = (metodo: Venda['metodo']) => {
+    if (metodo === 'cartao_credito') return 'Cartão Crédito';
+    if (metodo === 'cartao_debito') return 'Cartão Débito';
+    if (metodo === 'dinheiro') return 'Dinheiro';
+    if (metodo === 'pix') return 'PIX';
+    return 'Boleto';
+  };
+
+  const statusLabel = (status: Venda['status']) => {
+    if (status === 'pago') return 'Pago';
+    if (status === 'pendente') return 'Pendente';
+    return 'Cancelado';
+  };
+
+  const vendasFiltradas = useMemo(() => {
+    const vendasBase = vendas.filter((venda) => {
+      const cliente = venda.clienteNome || '';
+      const vendedor = venda.vendedor || '';
+      const busca = filtroBusca.trim().toLowerCase();
+
+      const clienteInfo = clientes.find((c) => c.id === venda.clienteId || c.nome === venda.clienteNome);
+      const itensVenda = venda.itens || [];
+      const imeisDaVenda = itensVenda
+        .map((item) => aparelhos.find((a) => a.id === item.aparelhoId)?.imei || '')
+        .join(' ');
+
+      const textoLivre = [
+        venda.id,
+        venda.clienteNome,
+        clienteInfo?.telefone,
+        clienteInfo?.email,
+        clienteInfo?.cpf,
+        venda.vendedor,
+        venda.descricao,
+        venda.garantia,
+        venda.tipoEntrega,
+        metodoLabel(venda.metodo),
+        statusLabel(venda.status),
+        new Date(venda.dataPagamento).toLocaleDateString('pt-BR'),
+        ...itensVenda.map((item) => `${item.descricao} ${item.observacao || ''}`),
+        imeisDaVenda,
+        String(venda.valor),
+        String(venda.lucro)
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      const matchBusca = !busca || textoLivre.includes(busca);
+      const matchStatus = !filtroStatus || venda.status === filtroStatus;
+      const matchMetodo = !filtroMetodo || venda.metodo === filtroMetodo;
+      const matchVendedor = !filtroVendedor || vendedor.toLowerCase().includes(filtroVendedor.toLowerCase());
+
+      const dataVenda = venda.dataPagamento ? new Date(venda.dataPagamento) : null;
+      const matchDataInicio = !filtroDataInicio || (dataVenda && dataVenda >= new Date(`${filtroDataInicio}T00:00:00`));
+      const matchDataFim = !filtroDataFim || (dataVenda && dataVenda <= new Date(`${filtroDataFim}T23:59:59`));
+
+      return !!(matchBusca && matchStatus && matchMetodo && matchVendedor && matchDataInicio && matchDataFim);
+    });
+
+    const statusRank: Record<Venda['status'], number> = {
+      pago: 0,
+      pendente: 1,
+      cancelado: 2
+    };
+
+    const sorted = [...vendasBase].sort((a, b) => {
+      let comparison = 0;
+
+      if (ordenarPor === 'data') {
+        comparison = new Date(a.dataPagamento).getTime() - new Date(b.dataPagamento).getTime();
+      } else if (ordenarPor === 'cliente') {
+        comparison = a.clienteNome.localeCompare(b.clienteNome, 'pt-BR');
+      } else if (ordenarPor === 'valor') {
+        comparison = a.valor - b.valor;
+      } else if (ordenarPor === 'lucro') {
+        comparison = a.lucro - b.lucro;
+      } else if (ordenarPor === 'status') {
+        comparison = statusRank[a.status] - statusRank[b.status];
+      } else if (ordenarPor === 'metodo') {
+        comparison = metodoLabel(a.metodo).localeCompare(metodoLabel(b.metodo), 'pt-BR');
+      }
+
+      return direcaoOrdenacao === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [vendas, filtroBusca, filtroStatus, filtroMetodo, filtroVendedor, filtroDataInicio, filtroDataFim, ordenarPor, direcaoOrdenacao, clientes, aparelhos]);
 
   const resumoVendas = {
     totalVendido: vendasFiltradas.reduce((sum, v) => sum + v.valor, 0),
@@ -798,33 +920,37 @@ export function VendasTab() {
 
               <div className="md:col-span-1">
                 <label className="text-xs text-gray-500 ml-1">Qtd</label>
-                <input type="number" min="1" className="input-glass" value={posItem.quantidade} onChange={e => setPosItem({...posItem, quantidade: parseInt(e.target.value)})} />
+                <input type="text" inputMode="numeric" pattern="[0-9]*" min="1" className="input-glass" value={posItem.quantidade} onChange={e => setPosItem({...posItem, quantidade: parseInt(e.target.value.replace(/\D/g, '')) || 1})} />
               </div>
 
               <div className="md:col-span-2">
                 <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Custo (R$)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.,]*"
                   className="input-glass border-blue-500/30"
                   value={posItem.valorInterno}
-                  onChange={e => setPosItem({...posItem, valorInterno: parseFloat(e.target.value)})}
+                  onChange={e => setPosItem({...posItem, valorInterno: parseFloat(e.target.value.replace(',', '.')) || 0})}
                 />
               </div>
 
               <div className="md:col-span-2">
                 <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Venda (R$)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9.,]*"
                   className="input-glass border-green-500/30"
                   value={posItem.valorExibir}
-                  onChange={e => setPosItem({...posItem, valorExibir: parseFloat(e.target.value)})}
+                  onChange={e => setPosItem({...posItem, valorExibir: parseFloat(e.target.value.replace(',', '.')) || 0})}
                 />
                       </div>
 
                       <div className="md:col-span-1 flex gap-1">
                         <div className="flex-1">
                           <label className="text-xs text-gray-500 ml-1">Desconto</label>
-                          <input type="number" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value)})} />
+                          <input type="text" inputMode="decimal" pattern="[0-9.,]*" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value.replace(',', '.')) || 0})} />
                         </div>
                         <div className="w-16">
                           <label className="text-xs text-gray-500 ml-1">Tipo</label>
@@ -899,10 +1025,12 @@ export function VendasTab() {
                     <div className="flex justify-end items-center gap-2 bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10">
                       <span className="text-sm font-medium">Desconto Total:</span>
                       <input 
-                        type="number" 
+                        type="text" 
+                        inputMode="decimal"
+                        pattern="[0-9.,]*"
                         className="w-24 input-glass py-1 h-8 text-right" 
                         value={posPagamento.descontoGlobal} 
-                        onChange={e => setPosPagamento({...posPagamento, descontoGlobal: parseFloat(e.target.value)})} 
+                        onChange={e => setPosPagamento({...posPagamento, descontoGlobal: parseFloat(e.target.value.replace(',', '.')) || 0})} 
                       />
                       <div className="flex border border-white/20 rounded-lg overflow-hidden">
                         <button 
@@ -954,10 +1082,12 @@ export function VendasTab() {
                     <div>
                       <label className="text-xs text-gray-500 ml-1">Valor Pago (R$)</label>
                       <input 
-                        type="number" 
+                        type="text" 
+                        inputMode="decimal"
+                        pattern="[0-9.,]*"
                         className="input-glass font-bold text-green-600" 
                         value={posPagamento.valorPago} 
-                        onChange={e => setPosPagamento({...posPagamento, valorPago: parseFloat(e.target.value)})} 
+                        onChange={e => setPosPagamento({...posPagamento, valorPago: parseFloat(e.target.value.replace(',', '.')) || 0})} 
                       />
                     </div>
                     <div>
@@ -1007,6 +1137,19 @@ export function VendasTab() {
           </div>
         )}
 
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowSalesDashboard((prev) => !prev)}
+            className="w-full sm:w-auto"
+          >
+            {showSalesDashboard ? 'Ocultar Painel' : 'Mostrar Painel'}
+          </Button>
+        </div>
+
+        {showSalesDashboard && (
+          <>
         {/* Cards de Resumo */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <GlassCard hoverEffect={true} className="rounded-3xl">
@@ -1124,15 +1267,17 @@ export function VendasTab() {
             </div>
           </GlassCard>
         </div>
+          </>
+        )}
 
         {/* Filtros */}
         <GlassCard className="p-4 rounded-3xl">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <input
               type="text"
-              placeholder="Filtrar por cliente..."
-              value={filtroCliente}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroCliente(e.target.value)}
+              placeholder="Buscar cliente, IMEI, item, vendedor, valor..."
+              value={filtroBusca}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroBusca(e.target.value)}
               className="input-glass h-10 sm:h-auto"
             />
             <select
@@ -1157,6 +1302,64 @@ export function VendasTab() {
               <option value="pix">PIX</option>
               <option value="boleto">Boleto</option>
             </select>
+            <input
+              type="text"
+              placeholder="Filtrar por vendedor..."
+              value={filtroVendedor}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroVendedor(e.target.value)}
+              className="input-glass h-10 sm:h-auto"
+            />
+            <input
+              type="date"
+              value={filtroDataInicio}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataInicio(e.target.value)}
+              className="input-glass h-10 sm:h-auto"
+              aria-label="Data inicial"
+            />
+            <input
+              type="date"
+              value={filtroDataFim}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataFim(e.target.value)}
+              className="input-glass h-10 sm:h-auto"
+              aria-label="Data final"
+            />
+            <select
+              className="input-glass h-10 sm:h-auto"
+              value={ordenarPor}
+              onChange={(e) => setOrdenarPor(e.target.value as 'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo')}
+            >
+              <option value="data">Ordenar por data</option>
+              <option value="cliente">Ordenar por cliente</option>
+              <option value="valor">Ordenar por valor</option>
+              <option value="lucro">Ordenar por lucro</option>
+              <option value="status">Ordenar por status</option>
+              <option value="metodo">Ordenar por método</option>
+            </select>
+            <select
+              className="input-glass h-10 sm:h-auto"
+              value={direcaoOrdenacao}
+              onChange={(e) => setDirecaoOrdenacao(e.target.value as 'asc' | 'desc')}
+            >
+              <option value="desc">Mais recentes / maiores</option>
+              <option value="asc">Mais antigos / menores</option>
+            </select>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setFiltroBusca('');
+                setFiltroStatus('');
+                setFiltroMetodo('');
+                setFiltroVendedor('');
+                setFiltroDataInicio('');
+                setFiltroDataFim('');
+                setOrdenarPor('data');
+                setDirecaoOrdenacao('desc');
+              }}
+              className="h-10 sm:h-auto"
+            >
+              Limpar filtros
+            </Button>
           </div>
         </GlassCard>
 
@@ -1192,10 +1395,7 @@ export function VendasTab() {
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.lucro)}
                       </td>
                       <td className="py-3 px-2 hidden sm:table-cell text-xs">
-                        {venda.metodo === 'cartao_credito' ? 'Cartão Crédito' :
-                         venda.metodo === 'cartao_debito' ? 'Cartão Débito' :
-                         venda.metodo === 'dinheiro' ? 'Dinheiro' :
-                         venda.metodo === 'pix' ? 'PIX' : 'Boleto'}
+                        {metodoLabel(venda.metodo)}
                       </td>
                       <td className="py-3 px-2">
                         <Badge variant={venda.status === 'pago' ? 'default' : venda.status === 'pendente' ? 'secondary' : 'outline'} className="text-xs">
@@ -1278,9 +1478,9 @@ export function VendasTab() {
             <div className="p-6">
               <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
                 <input type="text" placeholder="Nome *" required className="input-glass" value={novoClienteData.nome} onChange={e => setNovoClienteData({...novoClienteData, nome: e.target.value})} />
-                <input type="tel" placeholder="Telefone *" required className="input-glass" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
+                <input type="tel" inputMode="tel" placeholder="Telefone *" required className="input-glass" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
                 <input type="email" placeholder="Email" className="input-glass" value={novoClienteData.email} onChange={e => setNovoClienteData({...novoClienteData, email: e.target.value})} />
-                <input type="text" placeholder="CPF" className="input-glass" value={novoClienteData.cpf} onChange={e => setNovoClienteData({...novoClienteData, cpf: e.target.value})} />
+                <input type="text" inputMode="numeric" pattern="[0-9]*" placeholder="CPF" className="input-glass" value={novoClienteData.cpf} onChange={e => setNovoClienteData({...novoClienteData, cpf: e.target.value.replace(/\D/g, '')})} />
                 <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">Cadastrar Cliente</Button>
               </form>
             </div>
@@ -1300,12 +1500,14 @@ export function VendasTab() {
               <form onSubmit={handleNovoAparelhoSubmit} className="space-y-4">
                 <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
                 <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
-                <input type="text" placeholder="IMEI" className="input-glass" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value})} />
+                <input type="tel" inputMode="numeric" pattern="[0-9]*" placeholder="IMEI" className="input-glass" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value.replace(/\D/g, '')})} />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Preço Custo</label>
                     <input 
                       type="text" 
+                      inputMode="decimal"
+                      pattern="[0-9.,]*"
                       placeholder="R$ 0,00" 
                       className="input-glass" 
                       value={novoAparelhoData.custo} 
@@ -1327,6 +1529,8 @@ export function VendasTab() {
                     <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Preço Venda</label>
                     <input 
                       type="text" 
+                      inputMode="decimal"
+                      pattern="[0-9.,]*"
                       placeholder="R$ 0,00" 
                       className="input-glass" 
                       value={novoAparelhoData.preco} 

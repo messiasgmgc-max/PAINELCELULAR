@@ -2,19 +2,22 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useGarantias } from '@/hooks/useGarantias';
-import { useOrdensServico } from '@/hooks/useOrdensServico';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Clock, Shield, AlertTriangle } from 'lucide-react';
-import { Garantia } from '@/lib/db/types';
+import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Shield, AlertTriangle } from 'lucide-react';
+import { Garantia, Venda } from '@/lib/db/types';
 
 export function GarantiasTab() {
+  const { usuario } = useAuth();
   const { garantias, loading, error, fetchGarantias, criarGarantia, atualizarGarantia, deletarGarantia } = useGarantias();
-  const { ordensServico, fetchOrdensServico } = useOrdensServico();
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [loadingVendas, setLoadingVendas] = useState(false);
+  const [vendasProcessadas, setVendasProcessadas] = useState<Venda[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'todas' | 'vigentes' | 'expiradas'>('todas');
   const [formData, setFormData] = useState({
@@ -31,10 +34,79 @@ export function GarantiasTab() {
 
   const [novoHistorico, setNovoHistorico] = useState({ acao: '', descricao: '' });
 
+  const parseDiasGarantia = (garantiaTexto?: string) => {
+    if (!garantiaTexto) return 90;
+    const match = garantiaTexto.match(/(\d+)/);
+    const dias = match ? parseInt(match[1], 10) : 90;
+    return Number.isFinite(dias) && dias > 0 ? dias : 90;
+  };
+
+  const getVendaNumero = (venda: Venda) => {
+    const digits = (venda.id || '').replace(/\D/g, '');
+    const parsed = parseInt(digits.slice(-6), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now();
+  };
+
+  const getDescricaoVenda = (venda: Venda) => {
+    if (venda.itens && venda.itens.length > 0) {
+      return venda.itens.map((item) => item.descricao).join(', ');
+    }
+    return venda.descricao || 'Venda sem descrição';
+  };
+
+  const getDataFimVenda = (venda: Venda) => {
+    const inicio = new Date(venda.dataPagamento);
+    inicio.setHours(0, 0, 0, 0);
+    const fim = new Date(inicio);
+    fim.setDate(fim.getDate() + parseDiasGarantia(venda.garantia));
+    return fim;
+  };
+
+  const getDiasRestantesVenda = (venda: Venda) => {
+    const agora = new Date();
+    agora.setHours(0, 0, 0, 0);
+    const diffMs = getDataFimVenda(venda).getTime() - agora.getTime();
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  };
+
+  const carregarVendasProcessadas = async () => {
+    if (!usuario?.lojaId) return;
+    setLoadingVendas(true);
+    try {
+      const { data, error } = await supabase
+        .from('vendas')
+        .select('*')
+        .eq('loja_id', usuario.lojaId)
+        .eq('status', 'pago')
+        .order('dataPagamento', { ascending: false });
+
+      if (error) throw error;
+      setVendasProcessadas(data || []);
+    } catch (err) {
+      console.error('Erro ao carregar vendas processadas:', err);
+      setVendasProcessadas([]);
+    } finally {
+      setLoadingVendas(false);
+    }
+  };
+
+  const vendasComGarantia = useMemo(() => new Set(garantias.map((g) => g.osId)), [garantias]);
+
+  const vendasElegiveis = useMemo(() => {
+    return vendasProcessadas.filter((venda) => {
+      const dentroDoPrazo = getDiasRestantesVenda(venda) >= 0;
+      if (!dentroDoPrazo) return false;
+
+      const jaTemGarantia = vendasComGarantia.has(venda.id);
+      if (editingId && formData.osId === venda.id) return true;
+      return !jaTemGarantia;
+    });
+  }, [vendasProcessadas, vendasComGarantia, editingId, formData.osId]);
+
   useEffect(() => {
-    fetchOrdensServico();
     fetchGarantias();
-  }, []);
+    carregarVendasProcessadas();
+  }, [usuario?.lojaId]);
 
   const garantiasVigentes = useMemo(() => {
     return garantias.filter(g => {
@@ -67,16 +139,22 @@ export function GarantiasTab() {
     }));
   };
 
-  const handleOsChange = (osId: string) => {
-    const os = ordensServico.find(o => o.id === osId);
-    if (os) {
+  const handleVendaChange = (vendaId: string) => {
+    const venda = vendasProcessadas.find((v) => v.id === vendaId);
+    if (venda) {
+      const dataInicio = venda.dataPagamento?.includes('T')
+        ? venda.dataPagamento.split('T')[0]
+        : venda.dataPagamento;
+
       setFormData(prev => ({
         ...prev,
-        osId,
-        osNumero: os.numeroOS,
-        clienteId: os.clienteId,
-        clienteNome: os.clienteNome,
-        aparelhoDescricao: `${os.aparelhoMarca} ${os.aparelhoModelo}`
+        osId: venda.id,
+        osNumero: getVendaNumero(venda),
+        clienteId: venda.clienteId || '',
+        clienteNome: venda.clienteNome,
+        aparelhoDescricao: getDescricaoVenda(venda),
+        dataInicio,
+        diasGarantia: parseDiasGarantia(venda.garantia)
       }));
     }
   };
@@ -107,6 +185,20 @@ export function GarantiasTab() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!editingId) {
+      const venda = vendasProcessadas.find((v) => v.id === formData.osId);
+      if (!venda) {
+        alert('Selecione uma venda processada para registrar a garantia.');
+        return;
+      }
+
+      if (getDiasRestantesVenda(venda) < 0) {
+        alert('Essa venda está fora do prazo de garantia e não pode ser registrada.');
+        return;
+      }
+    }
+
     try {
       if (editingId) {
         await atualizarGarantia(editingId, formData);
@@ -117,6 +209,23 @@ export function GarantiasTab() {
     } catch (err) {
       console.error('Erro ao salvar garantia:', err);
     }
+  };
+
+  const openNewForm = () => {
+    setEditingId(null);
+    setFormData({
+      osId: '',
+      osNumero: 0,
+      clienteId: '',
+      clienteNome: '',
+      aparelhoDescricao: '',
+      dataInicio: '',
+      diasGarantia: 30,
+      descricao: '',
+      historico: []
+    });
+    setNovoHistorico({ acao: '', descricao: '' });
+    setShowForm(true);
   };
 
   const resetForm = () => {
@@ -212,7 +321,7 @@ export function GarantiasTab() {
           <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
           <input
             type="text"
-            placeholder="Buscar por cliente, aparelho ou OS..."
+            placeholder="Buscar por cliente, aparelho ou venda..."
             className="input-glass pl-10"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -230,7 +339,7 @@ export function GarantiasTab() {
             <option value="expiradas">Expiradas</option>
           </select>
 
-          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }} className="shrink-0 whitespace-nowrap">
+          <Button onClick={openNewForm} className="shrink-0 whitespace-nowrap">
             <Plus className="w-4 h-4 mr-2" />
             Nova Garantia
           </Button>
@@ -252,21 +361,28 @@ export function GarantiasTab() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-2">OS *</label>
+                <label className="block text-sm font-medium mb-2">Venda Processada *</label>
                 <select
                   name="osId"
                   value={formData.osId}
-                  onChange={(e) => handleOsChange(e.target.value)}
+                  onChange={(e) => handleVendaChange(e.target.value)}
                   className="input-glass"
                   required
                 >
-                  <option value="">Selecionar OS</option>
-                  {ordensServico.map(os => (
-                    <option key={os.id} value={os.id}>
-                      #{os.numeroOS} - {os.clienteNome}
+                  <option value="">
+                    {loadingVendas ? 'Carregando vendas...' : 'Selecionar venda paga dentro do prazo'}
+                  </option>
+                  {vendasElegiveis.map(venda => (
+                    <option key={venda.id} value={venda.id}>
+                      {venda.clienteNome} - {new Date(venda.dataPagamento).toLocaleDateString('pt-BR')} ({parseDiasGarantia(venda.garantia)} dias)
                     </option>
                   ))}
                 </select>
+                {!loadingVendas && vendasElegiveis.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Não há vendas pagas dentro do prazo de garantia disponíveis.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -413,7 +529,7 @@ export function GarantiasTab() {
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="font-bold text-lg">
-                          #{garantia.osNumero} - {garantia.clienteNome}
+                          Venda #{garantia.osNumero} - {garantia.clienteNome}
                         </p>
                         <p className="text-sm text-gray-600">{garantia.aparelhoDescricao}</p>
                       </div>
