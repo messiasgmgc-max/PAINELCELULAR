@@ -515,6 +515,7 @@ export function VendasTab() {
   const handleGerarCupomTermico = async (venda: Venda) => {
     try {
       const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 48px; max-width: 120px; margin: 0 auto 8px auto; display: block;" />` : '';
+      const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
       const itensHtml = (venda.itens && venda.itens.length > 0 ? venda.itens : [{ descricao: venda.descricao || 'Produto/serviço', quantidade: 1, valorExibir: venda.valor, total: venda.valor, desconto: venda.descontoTotal || 0, observacao: '' }])
         .map(item => `
           <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #222;">
@@ -547,6 +548,9 @@ export function VendasTab() {
             .bold { font-weight: 700; }
             .divider { border-top: 1px dashed #000; margin: 8px 0; }
             .small { font-size: 10px; }
+            .signature-image { max-width: 120px; max-height: 40px; object-fit: contain; margin: 8px auto 4px auto; display: block; }
+            .signature-box { text-align: center; margin-top: 8px; }
+            .signature-label { font-size: 10px; font-weight: 700; }
           </style>
         </head>
         <body>
@@ -580,6 +584,10 @@ export function VendasTab() {
           <div class="small center">Não pode molhar. Não pode abrir o aparelho.</div>
           <div class="small center">Apresente este recibo para qualquer atendimento de garantia.</div>
           <div class="divider"></div>
+          <div class="signature-box">
+            <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+            <div class="signature-label">Assinatura / Carimbo da Loja</div>
+          </div>
           <div class="center small">Obrigado pela preferência!</div>
           <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } }</script>
         </body>
@@ -602,6 +610,7 @@ export function VendasTab() {
   const handleGerarReciboA4 = async (venda: Venda) => {
     try {
       const dataAtual = new Date().toLocaleDateString('pt-BR');
+      const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
       
       // Mapeamento dos itens
       const itensHtmlA4 = venda.itens && venda.itens.length > 0 
@@ -647,6 +656,8 @@ export function VendasTab() {
             .footer-grid .box { border: 1px solid #000; padding: 8px; }
             .footer-grid .box-qr { width: 32%; min-width: 140px; text-align: center; }
             .footer-grid .box-terms { width: 66%; min-width: 180px; font-size: 10px; line-height: 1.3; }
+            .signature-wrap { display: inline-flex; flex-direction: column; align-items: center; width: 45%; vertical-align: top; }
+            .signature-image { max-width: 180px; max-height: 72px; object-fit: contain; margin-bottom: 6px; display: block; }
           </style>
         </head>
         <body>
@@ -729,11 +740,12 @@ export function VendasTab() {
 
           <!-- Assinaturas -->
           <div style="margin-top: 20px; text-align: center;">
-            <div style="display: inline-block; width: 45%;">
+            <div class="signature-wrap">
               _________________________________________<br>
               ${(venda as any).cliente?.nome || venda.clienteNome || 'Assinatura do Cliente'}
             </div>
-            <div style="display: inline-block; width: 45%;">
+            <div class="signature-wrap">
+              <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
               _________________________________________<br>
               ${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}
             </div>

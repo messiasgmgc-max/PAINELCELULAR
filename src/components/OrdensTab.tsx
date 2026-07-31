@@ -486,6 +486,7 @@ export function OrdensTab() {
 
   const handleGerarOSTermica = (ordem: OrdemServico) => {
     const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 150px; display: block; margin: 0 auto 10px auto;" />` : '';
+    const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
 
     const pecasTermicaHtml = ordem.pecasUtilizadas && ordem.pecasUtilizadas.length > 0 
       ? ordem.pecasUtilizadas.map(p => `
@@ -509,6 +510,10 @@ export function OrdensTab() {
           .divider { border-top: 1px dashed #000; margin: 10px 0; }
           table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
           td { padding: 2px 0; }
+          .signature-image { max-width: 120px; max-height: 38px; object-fit: contain; margin: 12px auto 6px auto; display: block; }
+          .signature-row { display: flex; gap: 16px; justify-content: space-between; margin-top: 16px; }
+          .signature-box { flex: 1; text-align: center; font-size: 10px; }
+          .signature-line { border-top: 1px solid #000; padding-top: 5px; }
         </style>
       </head>
       <body>
@@ -539,8 +544,15 @@ export function OrdensTab() {
         <p class="text-center font-bold" style="margin-bottom: 5px;">TERMOS DE GARANTIA</p>
         <p style="font-size: 10px; margin: 0; text-align: justify;">Garantia de 90 dias. Não cobre mau uso, quedas, contato com líquidos ou abertura por terceiros. Aparelhos não retirados após 90 dias poderão ser vendidos para custear o serviço.</p>
         <div class="divider"></div>
-        <br><br>
-        <div style="border-top: 1px solid #000; text-align: center; font-size: 10px; padding-top: 5px;">Assinatura do Cliente</div>
+        <div class="signature-row">
+          <div class="signature-box">
+            <div class="signature-line">Assinatura do Cliente</div>
+          </div>
+          <div class="signature-box">
+            <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+            <div class="signature-line">Assinatura / Carimbo da Loja</div>
+          </div>
+        </div>
         <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
       </body>
       </html>
@@ -552,6 +564,7 @@ export function OrdensTab() {
 
   const handleGerarOSA4 = (ordem: OrdemServico) => {
     const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 200px; display: block; margin: 0 auto 10px auto;" />` : '';
+    const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
 
     const pecasHtml = ordem.pecasUtilizadas && ordem.pecasUtilizadas.length > 0 
       ? ordem.pecasUtilizadas.map(p => `
@@ -591,6 +604,7 @@ export function OrdensTab() {
           th { background: #f3f4f6; font-weight: bold; color: #333; }
           .signature { margin-top: 60px; display: flex; justify-content: space-around; }
           .sign-line { border-top: 1px solid #000; width: 40%; text-align: center; padding-top: 8px; font-weight: bold; }
+          .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; margin: 0 auto 8px auto; display: block; }
         </style>
       </head>
       <body>
@@ -670,7 +684,7 @@ export function OrdensTab() {
 
         <div class="signature">
           <div class="sign-line">Assinatura do Cliente<br><small style="font-weight: normal; font-size: 11px;">${ordem.clienteNome}</small></div>
-          <div class="sign-line">Técnico Responsável<br><small style="font-weight: normal; font-size: 11px;">${ordem.tecnicoNome || config.nomeLoja || 'Phone Center'}</small></div>
+          <div class="sign-line"><img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />Técnico Responsável<br><small style="font-weight: normal; font-size: 11px;">${ordem.tecnicoNome || config.nomeLoja || 'Phone Center'}</small></div>
         </div>
         
         <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
@@ -684,6 +698,7 @@ export function OrdensTab() {
 
   const handleGerarTermoRetirada = (ordem: OrdemServico) => {
     const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; max-width: 200px; display: block; margin: 0 auto 10px auto;" />` : '';
+    const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
     
     const termoHtml = `
       <!DOCTYPE html>
@@ -699,6 +714,7 @@ export function OrdensTab() {
           .details { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background: #f9fafb; }
           .signature-area { margin-top: 80px; text-align: center; }
           .sign-line { border-top: 1px solid #000; width: 60%; margin: 0 auto; padding-top: 5px; }
+          .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; margin: 0 auto 8px auto; display: block; }
           @media print { body { padding: 0; margin: 15mm; } }
         </style>
       </head>
@@ -720,7 +736,14 @@ export function OrdensTab() {
           <p>Estou ciente e de acordo com os termos de garantia fornecidos para os serviços executados (se houver), não havendo nada a reclamar no presente momento.</p>
           <p style="margin-top: 30px;">Data de retirada: ___ / ___ / ______</p>
         </div>
-        <div class="signature-area"><div class="sign-line">Assinatura de <strong>${ordem.clienteNome}</strong></div><p style="font-size: 12px; color: #666; margin-top: 5px;">Documento de Identificação: _______________________</p></div>
+        <div class="signature-area">
+          <div class="sign-line">Assinatura de <strong>${ordem.clienteNome}</strong></div>
+          <p style="font-size: 12px; color: #666; margin-top: 5px;">Documento de Identificação: _______________________</p>
+          <div style="margin-top: 28px;">
+            <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+            <div class="sign-line">Assinatura / Carimbo da Loja</div>
+          </div>
+        </div>
         <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
       </body>
       </html>

@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
+  const SUCCESS_SCREEN_DURATION_MS = 3600;
   // usa o loading e funções do hook centralizado
   const { login, registrar, loading: authLoading, usuario, authReady } = useAuth();
   const { config } = useStoreConfig();
@@ -17,6 +18,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [loginFlowCompleted, setLoginFlowCompleted] = useState(false);
+  const [isTransitioningToApp, setIsTransitioningToApp] = useState(false);
   const [storeName, setStoreName] = useState<string>('');
 
   useEffect(() => {
@@ -26,10 +28,10 @@ export default function LoginPage() {
   }, [config.nomeLoja]);
 
   useEffect(() => {
-    if (authReady && usuario && !isSuccess && !loginFlowCompleted) {
+    if (authReady && usuario && !isSuccess && !loginFlowCompleted && !isTransitioningToApp) {
       router.replace('/');
     }
-  }, [authReady, usuario, isSuccess, loginFlowCompleted, router]);
+  }, [authReady, usuario, isSuccess, loginFlowCompleted, isTransitioningToApp, router]);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -46,6 +48,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setLoginFlowCompleted(false);
+    setIsTransitioningToApp(false);
 
     try {
       const fallbackStoreName = (config.nomeLoja || 'Phone Center').toUpperCase();
@@ -87,20 +90,24 @@ export default function LoginPage() {
       // Ativa a animação de sucesso cobrindo a tela toda
       setLoginFlowCompleted(true);
       setIsSuccess(true);
+      setIsTransitioningToApp(true);
       
-      // Força a animação a durar pelo menos 2 segundos (2000ms)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Mantém a tela de boas-vindas mais tempo e evita mostrar a tela intermediária de validação.
+      await new Promise(resolve => setTimeout(resolve, SUCCESS_SCREEN_DURATION_MS));
       
       // Redireciona para o dashboard após a animação
       router.push('/');
     } catch (err: any) {
       setError(err?.message ?? 'Erro desconhecido');
+      setIsSuccess(false);
+      setLoginFlowCompleted(false);
+      setIsTransitioningToApp(false);
     }
   };
 
   const loading = authLoading;
 
-  if (!authReady) {
+  if (!authReady && !isTransitioningToApp && !isSuccess) {
     return (
       <main className="flex min-h-[100dvh] items-center justify-center bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)]">
         <div className="flex flex-col items-center gap-3">
@@ -116,9 +123,9 @@ export default function LoginPage() {
   }
 
   return (
-    <main className={`flex items-center justify-center relative bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)] transition-all duration-700 ${isSuccess ? 'p-0 fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none touch-none' : 'min-h-[100dvh] px-4 py-12'}`}>
-      <section className={`flex flex-col items-center justify-center relative transition-all duration-700 ease-in-out ${isSuccess ? 'w-screen h-[100dvh] max-w-full gap-0' : 'max-w-md w-full gap-6'}`}>
-        <header className={`flex flex-col items-center gap-1 relative self-stretch w-full transition-all duration-500 ${isSuccess ? 'h-0 opacity-0 overflow-hidden scale-90' : 'h-auto opacity-100 scale-100'}`}>
+    <main className={`flex items-center justify-center relative bg-[linear-gradient(160deg,rgba(239,246,255,1)_0%,rgba(219,234,254,1)_100%)] dark:bg-[linear-gradient(160deg,rgba(15,23,42,1)_0%,rgba(30,41,59,1)_100%)] transition-all duration-[1400ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${isSuccess ? 'p-0 fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none touch-none' : 'min-h-[100dvh] px-4 py-12'}`}>
+      <section className={`flex flex-col items-center justify-center relative transition-all duration-[1400ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${isSuccess ? 'w-screen h-[100dvh] max-w-full gap-0' : 'max-w-md w-full gap-6'}`}>
+        <header className={`flex flex-col items-center gap-1 relative self-stretch w-full transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${isSuccess ? 'h-0 opacity-0 overflow-hidden scale-90' : 'h-auto opacity-100 scale-100'}`}>
           <div className="login-brand-mark flex w-14 h-14 items-center justify-center relative rounded-[16px]">
             <Smartphone className="login-brand-icon w-7 h-7" />
           </div>
@@ -134,10 +141,10 @@ export default function LoginPage() {
           </div>
         </header>
 
-        <div className={`flex flex-col bg-white dark:bg-slate-900 shadow-[0px_10px_15px_-3px_#0000001a] overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-50 ${isSuccess ? 'w-full h-full rounded-none border-0 items-center justify-center p-6' : 'items-start pt-10 pb-8 px-6 sm:px-8 relative w-full rounded-[30px] sm:rounded-[45px] border-2 border-solid border-neutral-200 dark:border-slate-800'}`}>
+        <div className={`flex flex-col bg-white dark:bg-slate-900 shadow-[0px_10px_15px_-3px_#0000001a] overflow-hidden transition-all duration-[1400ms] ease-[cubic-bezier(0.22,1,0.36,1)] z-50 ${isSuccess ? 'w-full h-full rounded-none border-0 items-center justify-center p-6' : 'items-start pt-10 pb-8 px-6 sm:px-8 relative w-full rounded-[30px] sm:rounded-[45px] border-2 border-solid border-neutral-200 dark:border-slate-800'}`}>
           
           {/* ENVOLTÓRIO DO CONTEÚDO (FADE OUT QUANDO SUCESSO) */}
-          <div className={`w-full flex flex-col transition-all duration-500 ${isSuccess ? 'opacity-0 translate-y-8 pointer-events-none absolute' : 'opacity-100 translate-y-0 relative'}`}>
+          <div className={`w-full flex flex-col transition-all duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${isSuccess ? 'opacity-0 translate-y-8 pointer-events-none absolute' : 'opacity-100 translate-y-0 relative'}`}>
             {error && (
               <div className="flex items-start gap-2 p-3 mb-6 bg-red-50 border border-red-200 rounded-2xl text-red-800 w-full">
                 <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -248,19 +255,19 @@ export default function LoginPage() {
           </div>
 
           {/* CONTEÚDO DE SUCESSO (ANIMAÇÃO TELA CHEIA) */}
-          <div className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-700 ease-out ${isSuccess ? 'opacity-100 scale-100 delay-300' : 'opacity-0 scale-50 pointer-events-none'}`}>
-            <div className="login-brand-mark w-20 h-20 rounded-[24px] flex items-center justify-center animate-bounce">
+          <div className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-[1400ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${isSuccess ? 'opacity-100 scale-100 delay-500' : 'opacity-0 scale-75 pointer-events-none'}`}>
+            <div className="login-brand-mark w-20 h-20 rounded-[24px] flex items-center justify-center animate-[pulse_2.8s_ease-in-out_infinite]">
               <Smartphone className="login-brand-icon w-10 h-10" />
             </div>
-            <h2 className="mt-6 text-3xl font-bold text-[#101727] dark:text-white text-center flex flex-col gap-2">
+            <h2 className="mt-6 text-3xl font-bold text-[#101727] dark:text-white text-center flex flex-col gap-2 transition-all duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
               <span>{isLogin ? 'Bem-vindo(a) de volta!' : 'Conta criada com sucesso!'}</span>
               {isLogin && storeName && (
-                <span className="text-xl sm:text-2xl text-[#155cfb] dark:text-blue-400 font-black tracking-wide animate-fade-in">
+                <span className="text-xl sm:text-2xl text-[#155cfb] dark:text-blue-400 font-black tracking-[0.18em] animate-fade-in">
                   {storeName}
                 </span>
               )}
             </h2>
-            <p className="text-[#495565] dark:text-gray-400 mt-2 text-center">
+            <p className="text-[#495565] dark:text-gray-400 mt-2 text-center transition-opacity duration-[1200ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
               Preparando seu ambiente...
             </p>
           </div>

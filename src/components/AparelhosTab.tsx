@@ -497,6 +497,7 @@ export function AparelhosTab() {
 
   const handleGenerateCertificate = async (aparelho: Aparelho) => {
     try {
+      const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
       const certificadoHtml = `
         <!DOCTYPE html>
         <html>
@@ -519,6 +520,9 @@ export function AparelhosTab() {
             .section-title { color: #5a67d8; font-weight: bold; margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; }
             .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #eee; }
             .footer p { color: #999; margin: 5px 0; font-size: 12px; }
+            .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; margin: 0 auto 12px auto; display: block; }
+            .signature-block { margin-bottom: 16px; }
+            .signature-label { color: #5a67d8; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
             @media print {
               body { background: white; padding: 0; }
               .container { padding: 20px; width: 100%; max-width: 100%; border: none; box-shadow: none; }
@@ -597,6 +601,10 @@ export function AparelhosTab() {
             ` : ""}
 
             <div class="footer">
+              <div class="signature-block">
+                <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+                <div class="signature-label">Autenticação da Loja</div>
+              </div>
               <p>📅 Registrado em: ${new Date(aparelho.dataCadastro).toLocaleDateString("pt-BR", { year: "numeric", month: "long", day: "numeric" })}</p>
               <p>ID do Sistema: <span style="font-family: 'Courier New', monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 4px;">${aparelho.id}</span></p>
               <p style="color: #5a67d8; margin: 10px 0 0 0; font-size: 11px; font-weight: bold; text-transform: uppercase;">Este é um documento de registro eletrônico autenticado</p>
