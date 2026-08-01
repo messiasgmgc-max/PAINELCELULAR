@@ -30,7 +30,7 @@ import {
 
 export default function Home() {
   const { usuario, logout, loading, authReady } = useAuth();
-  const { config, atualizarNomeLoja, atualizarLogoLoja } = useStoreConfig();
+  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja } = useStoreConfig();
   
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -65,7 +65,7 @@ export default function Home() {
   useEffect(() => {
     const fetchLoja = async () => {
       if (usuario?.lojaId) {
-        const { data } = await supabase.from('lojas').select('nome, subtitulo, logo_url').eq('id', usuario.lojaId).single();
+        const { data } = await supabase.from('lojas').select('nome, subtitulo, logo_url, assinatura_url').eq('id', usuario.lojaId).single();
         if (data) {
           if (data.subtitulo) setSubtitulo(data.subtitulo);
           if (data.nome) {
@@ -76,6 +76,7 @@ export default function Home() {
             setHeaderLogoLoja(data.logo_url);
             atualizarLogoLoja(data.logo_url);
           }
+          atualizarAssinaturaLoja(data.assinatura_url || null);
         }
       }
     };

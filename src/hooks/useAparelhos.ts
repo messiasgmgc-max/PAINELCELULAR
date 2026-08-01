@@ -69,16 +69,55 @@ export function useAparelhos(): UseAparelhosReturn {
       setLoading(true);
       setError(null);
       try {
-        const { data, error } = await supabase
-          .from('aparelhos')
-          .insert([{ ...dados, loja_id: usuario.lojaId }])
-          .select()
-          .single();
-        if (error) throw error;
-        setAparelhos((prev) => [...prev, data]);
-        return data;
-      } catch (err) {
-        setError("Erro ao criar aparelho");
+        const rawPayload: Record<string, any> = { ...dados, loja_id: usuario.lojaId };
+
+        // Evita enviar string vazia para colunas opcionais.
+        Object.keys(rawPayload).forEach((key) => {
+          if (typeof rawPayload[key] === 'string' && rawPayload[key].trim() === '') {
+            delete rawPayload[key];
+          }
+        });
+
+        let payload = { ...rawPayload };
+        let data: any = null;
+        let lastError: any = null;
+
+        for (let tentativa = 0; tentativa < 5; tentativa += 1) {
+          const response = await supabase
+            .from('aparelhos')
+            .insert([payload])
+            .select()
+            .single();
+
+          if (!response.error) {
+            data = response.data;
+            lastError = null;
+            break;
+          }
+
+          lastError = response.error;
+
+          const errorText = `${response.error.message || ''} ${response.error.details || ''}`;
+          const columnMatch = errorText.match(/'([^']+)'/);
+          const invalidColumn = response.error.code === 'PGRST204' ? columnMatch?.[1] : null;
+
+          if (invalidColumn && Object.prototype.hasOwnProperty.call(payload, invalidColumn)) {
+            delete payload[invalidColumn];
+            continue;
+          }
+
+          break;
+        }
+
+        if (lastError || !data) {
+          throw lastError || new Error('Falha ao inserir aparelho');
+        }
+
+        const aparelhoCriado = { ...data, custo: data?.custo ?? (dados as any)?.custo ?? 0 } as Aparelho;
+        setAparelhos((prev) => [...prev, aparelhoCriado]);
+        return aparelhoCriado;
+      } catch (err: any) {
+        setError(err?.message || "Erro ao criar aparelho");
         return null;
       } finally {
         setLoading(false);

@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload } from 'lucide-react';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -13,6 +13,14 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Venda, VendaItem } from '@/lib/db/types';
+import {
+  exportDataset,
+  findByAliases,
+  parseCurrencyLike,
+  parseImportFile,
+  type ExportColumn,
+  type ExportFormat,
+} from '@/lib/importExport';
 
 interface VendasPorPeriodo {
   periodo: string;
@@ -26,7 +34,7 @@ export function VendasTab() {
   const { usuario } = useAuth();
   const { config } = useStoreConfig();
   const { clientes, fetchClientes, criarCliente } = useClientes();
-  const { aparelhos, fetchAparelhos, criarAparelho } = useAparelhos();
+  const { aparelhos, fetchAparelhos, criarAparelho, loading: loadingAparelhos, error: erroAparelhos } = useAparelhos();
   const { tecnicos, fetchTecnicos } = useTecnicos();
 
   const [vendas, setVendas] = useState<Venda[]>([]);
@@ -44,7 +52,12 @@ export function VendasTab() {
   const [showPOS, setShowPOS] = useState(false);
   const [showNovoCliente, setShowNovoCliente] = useState(false);
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [confirmDeleteEmail, setConfirmDeleteEmail] = useState('');
+  const [confirmDeletePassword, setConfirmDeletePassword] = useState('');
+  const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   // Estados do PDV
   const [posDados, setPosDados] = useState({
@@ -309,6 +322,64 @@ export function VendasTab() {
     }
   };
 
+  const handleOpenDeleteAllModal = () => {
+    setConfirmDeleteEmail(usuario?.email || '');
+    setConfirmDeletePassword('');
+    setShowDeleteAllModal(true);
+  };
+
+  const handleCancelDeleteAll = () => {
+    setShowDeleteAllModal(false);
+    setConfirmDeletePassword('');
+  };
+
+  const handleDeleteAllVendas = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!usuario?.lojaId) {
+      alert('Loja não identificada para exclusão em massa.');
+      return;
+    }
+
+    if (!confirmDeleteEmail || !confirmDeletePassword) {
+      alert('Informe email e senha para confirmar.');
+      return;
+    }
+
+    try {
+      setDeletingAllVendas(true);
+
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: confirmDeleteEmail.trim(),
+        password: confirmDeletePassword,
+      });
+
+      if (authError) {
+        alert('Falha na confirmação de login. Verifique email e senha.');
+        return;
+      }
+
+      const { error: deleteError } = await supabase
+        .from('vendas')
+        .delete()
+        .eq('loja_id', usuario.lojaId);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      await carregarVendas();
+      setShowDeleteAllModal(false);
+      setConfirmDeletePassword('');
+      alert('Todas as vendas da loja foram apagadas com sucesso.');
+    } catch (error: any) {
+      console.error('Erro ao apagar todas as vendas:', error);
+      alert(`Erro ao apagar vendas: ${error?.message || 'Falha desconhecida'}`);
+    } finally {
+      setDeletingAllVendas(false);
+    }
+  };
+
   const metodoLabel = (metodo: Venda['metodo']) => {
     if (metodo === 'cartao_credito') return 'Cartão Crédito';
     if (metodo === 'cartao_debito') return 'Cartão Débito';
@@ -436,27 +507,50 @@ export function VendasTab() {
 
   const handleNovoAparelhoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const parseCurrencyInput = (value: string) => {
+      const digits = value.replace(/\D/g, '');
+      return digits ? parseFloat(digits) / 100 : 0;
+    };
+
     if (!novoAparelhoData.marca || !novoAparelhoData.modelo) {
       alert('Marca e modelo são obrigatórios');
       return;
     }
-    const precoNum = parseFloat(novoAparelhoData.preco.replace(/\D/g, '')) / 100 || 0;
-    const custoNum = parseFloat(novoAparelhoData.custo.replace(/\D/g, '')) / 100 || 0;
+
+    const custoNum = parseCurrencyInput(novoAparelhoData.custo);
+    const precoNum = parseCurrencyInput(novoAparelhoData.preco);
+    const imeiSanitizado = novoAparelhoData.imei.replace(/\D/g, '').trim();
+
+    if (precoNum <= 0) {
+      alert('Informe um preço de venda válido para cadastrar o aparelho.');
+      return;
+    }
+
     const aparelho = await criarAparelho({
-      ...novoAparelhoData,
+      marca: novoAparelhoData.marca.trim(),
+      modelo: novoAparelhoData.modelo.trim(),
+      imei: imeiSanitizado || undefined,
+      condicao: novoAparelhoData.condicao,
       preco: precoNum,
       custo: custoNum,
       ativo: true,
       capacidade: 'N/A',
       cor: 'N/A'
     });
+
+    if (!aparelho) {
+      alert(erroAparelhos || 'Não foi possível cadastrar o aparelho. Verifique IMEI duplicado ou tente novamente.');
+      return;
+    }
+
     if (aparelho) {
       setPosItem(prev => ({
         ...prev,
         aparelhoId: aparelho.id,
         descricao: `${aparelho.marca} ${aparelho.modelo}`,
         valorExibir: aparelho.preco,
-        valorInterno: aparelho.custo || 0
+        valorInterno: (aparelho as any).custo ?? custoNum
       }));
       setShowNovoAparelho(false);
       setNovoAparelhoData({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' });
@@ -512,10 +606,186 @@ export function VendasTab() {
   const troco = Math.max(0, posPagamento.valorPago - totalFinal);
   const saldo = Math.max(0, totalFinal - posPagamento.valorPago);
 
+  const VENDA_COLUMNS: ExportColumn[] = [
+    { key: 'id', label: 'ID' },
+    { key: 'clienteNome', label: 'Cliente' },
+    { key: 'vendedor', label: 'Vendedor' },
+    { key: 'dataPagamento', label: 'Data Pagamento' },
+    { key: 'metodo', label: 'Metodo' },
+    { key: 'valor', label: 'Valor' },
+    { key: 'status', label: 'Status' },
+  ];
+
+  const parseImportedDate = (rawValue: string): string => {
+    const value = String(rawValue || '').trim();
+    if (!value) return new Date().toISOString();
+
+    const nativeDate = new Date(value);
+    if (!Number.isNaN(nativeDate.getTime())) {
+      return nativeDate.toISOString();
+    }
+
+    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (!match) return new Date().toISOString();
+
+    const [, dd, mm, yyyy, hh = '00', min = '00', ss = '00'] = match;
+    const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  };
+
+  const mapImportedStatus = (rawStatus: string): 'pendente' | 'pago' | 'cancelado' => {
+    const status = String(rawStatus || '').toLowerCase();
+    if (status.includes('cancel')) return 'cancelado';
+    if (status.includes('pend')) return 'pendente';
+    if (status.includes('concluido') || status.includes('concluído') || status.includes('pago')) return 'pago';
+    return 'pago';
+  };
+
+  const mapImportedMetodo = (rawMetodo: string): Venda['metodo'] => {
+    const metodo = String(rawMetodo || '').toLowerCase();
+    if (metodo.includes('credito')) return 'cartao_credito';
+    if (metodo.includes('debito')) return 'cartao_debito';
+    if (metodo.includes('boleto')) return 'boleto';
+    if (metodo.includes('dinheiro')) return 'dinheiro';
+    if (metodo.includes('pix')) return 'pix';
+    return 'pix';
+  };
+
+  const handleExportVendas = async () => {
+    if (vendas.length === 0) {
+      alert('Nenhuma venda para exportar.');
+      return;
+    }
+
+    const formatoEscolhido = window
+      .prompt('Formato para exportar vendas: csv ou xls', 'csv')
+      ?.toLowerCase()
+      .trim() as ExportFormat | undefined;
+
+    if (!formatoEscolhido || !['csv', 'xls'].includes(formatoEscolhido)) {
+      alert('Formato invalido. Use csv ou xls.');
+      return;
+    }
+
+    await exportDataset({
+      fileNameBase: `vendas_${new Date().toISOString().slice(0, 10)}`,
+      title: 'Exportacao de Vendas',
+      format: formatoEscolhido,
+      columns: VENDA_COLUMNS,
+      rows: vendas.map((venda) => ({
+        id: venda.id,
+        clienteNome: venda.clienteNome,
+        vendedor: venda.vendedor || '',
+        dataPagamento: new Date(venda.dataPagamento).toLocaleString('pt-BR'),
+        metodo: venda.metodo,
+        valor: venda.valor,
+        status: venda.status,
+      })),
+    });
+  };
+
+  const handleOpenImportVendas = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportVendas = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!usuario?.lojaId) {
+      alert('Sessao sem loja ativa para importar vendas.');
+      return;
+    }
+
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const importedRows = await parseImportFile(file);
+
+      if (importedRows.length === 0) {
+        alert('Arquivo sem dados validos para importacao.');
+        return;
+      }
+
+      const { data: existentes, error: existentesError } = await supabase
+        .from('vendas')
+        .select('descricao, clienteNome, dataPagamento, valor')
+        .eq('loja_id', usuario.lojaId);
+
+      if (existentesError) throw existentesError;
+
+      const chavesExistentes = new Set(
+        (existentes || []).map((item: any) => {
+          const cliente = String(item.clienteNome || '').trim().toLowerCase();
+          const data = String(item.dataPagamento || '').slice(0, 10);
+          const valor = Number(item.valor || 0).toFixed(2);
+          const ref = /Referencia\s+(\S+)/i.exec(String(item.descricao || ''))?.[1] || '';
+          return `${ref}|${cliente}|${data}|${valor}`;
+        })
+      );
+
+      const chavesNoLote = new Set<string>();
+      const payload = importedRows
+        .map((row) => {
+          // Baseado no CSV enviado: _col1=id, _col2=cliente, _col3=vendedor, _col4=data, _col5=origem, _col6=valor, _col7=status
+          const clienteNome = findByAliases(row, ['cliente', 'clientenome', 'nomecliente', '_col2']);
+          const vendedor = findByAliases(row, ['vendedor', 'tecnico', '_col3']);
+          const dataPagamento = parseImportedDate(findByAliases(row, ['datapagamento', 'data', '_col4']));
+          const origem = findByAliases(row, ['origem', 'canal', 'metodo', 'formapagamento', '_col5']);
+          const metodo = mapImportedMetodo(origem);
+          const valor = parseCurrencyLike(findByAliases(row, ['valor', 'total', 'valorfinal', '_col6']));
+          const status = mapImportedStatus(findByAliases(row, ['status', 'situacao', '_col7']));
+          const idOrigem = findByAliases(row, ['id', 'numero', 'codigo', '_col1']);
+
+          const chave = `${idOrigem}|${clienteNome.trim().toLowerCase()}|${dataPagamento.slice(0, 10)}|${Number(valor || 0).toFixed(2)}`;
+          if (!clienteNome || !Number.isFinite(valor) || chavesExistentes.has(chave) || chavesNoLote.has(chave)) {
+            return null;
+          }
+
+          chavesNoLote.add(chave);
+
+          return {
+            clienteNome,
+            vendedor,
+            tipoEntrega: 'Retirada',
+            itens: [],
+            valor,
+            custo: 0,
+            lucro: valor,
+            percentualLucro: valor > 0 ? 100 : 0,
+            dataPagamento,
+            status,
+            metodo,
+            descricao: idOrigem
+              ? `Importado - Referencia ${idOrigem}${origem ? ` - Origem ${origem}` : ''}`
+              : `Importado por arquivo${origem ? ` - Origem ${origem}` : ''}`,
+            garantia: '90 dias',
+            descontoTotal: 0,
+            loja_id: usuario.lojaId,
+          };
+        })
+        .filter((venda): venda is NonNullable<typeof venda> => Boolean(venda));
+
+      if (payload.length === 0) {
+        alert('Nenhuma linha nova para importar. Tudo ja estava cadastrado ou sem dados minimos.');
+        return;
+      }
+
+      const { error: insertError } = await supabase.from('vendas').insert(payload);
+      if (insertError) throw insertError;
+
+      await carregarVendas();
+      alert(`Importacao concluida: ${payload.length} vendas inseridas.`);
+    } catch (importError: any) {
+      console.error('Erro ao importar vendas:', importError);
+      alert(`Erro ao importar vendas: ${importError?.message || 'Falha desconhecida'}`);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const handleGerarCupomTermico = async (venda: Venda) => {
     try {
       const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 48px; max-width: 120px; margin: 0 auto 8px auto; display: block;" />` : '';
-      const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
+      const assinaturaEmpresaUrl = config.assinaturaLoja;
       const itensHtml = (venda.itens && venda.itens.length > 0 ? venda.itens : [{ descricao: venda.descricao || 'Produto/serviço', quantidade: 1, valorExibir: venda.valor, total: venda.valor, desconto: venda.descontoTotal || 0, observacao: '' }])
         .map(item => `
           <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #222;">
@@ -548,7 +818,7 @@ export function VendasTab() {
             .bold { font-weight: 700; }
             .divider { border-top: 1px dashed #000; margin: 8px 0; }
             .small { font-size: 10px; }
-            .signature-image { max-width: 120px; max-height: 40px; object-fit: contain; margin: 8px auto 4px auto; display: block; }
+            .signature-image { max-width: 120px; max-height: 44px; object-fit: contain; margin: 0 auto -8px auto; display: block; }
             .signature-box { text-align: center; margin-top: 8px; }
             .signature-label { font-size: 10px; font-weight: 700; }
           </style>
@@ -585,7 +855,7 @@ export function VendasTab() {
           <div class="small center">Apresente este recibo para qualquer atendimento de garantia.</div>
           <div class="divider"></div>
           <div class="signature-box">
-            <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+            ${assinaturaEmpresaUrl ? `<img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />` : ''}
             <div class="signature-label">Assinatura / Carimbo da Loja</div>
           </div>
           <div class="center small">Obrigado pela preferência!</div>
@@ -610,7 +880,7 @@ export function VendasTab() {
   const handleGerarReciboA4 = async (venda: Venda) => {
     try {
       const dataAtual = new Date().toLocaleDateString('pt-BR');
-      const assinaturaEmpresaUrl = `${window.location.origin}/assinatura-nota.png`;
+      const assinaturaEmpresaUrl = config.assinaturaLoja;
       
       // Mapeamento dos itens
       const itensHtmlA4 = venda.itens && venda.itens.length > 0 
@@ -656,8 +926,12 @@ export function VendasTab() {
             .footer-grid .box { border: 1px solid #000; padding: 8px; }
             .footer-grid .box-qr { width: 32%; min-width: 140px; text-align: center; }
             .footer-grid .box-terms { width: 66%; min-width: 180px; font-size: 10px; line-height: 1.3; }
-            .signature-wrap { display: inline-flex; flex-direction: column; align-items: center; width: 45%; vertical-align: top; }
-            .signature-image { max-width: 180px; max-height: 72px; object-fit: contain; margin-bottom: 6px; display: block; }
+            .signature-row { display: flex; gap: 24px; justify-content: space-between; align-items: flex-end; margin-top: 20px; }
+            .signature-col { width: 48%; text-align: center; }
+            .signature-holder { height: 44px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: -4px; }
+            .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; display: block; }
+            .signature-line { border-top: 1px solid #000; padding-top: 6px; font-weight: 700; }
+            .signature-subtitle { display: block; margin-top: 2px; font-size: 10px; font-weight: 400; }
           </style>
         </head>
         <body>
@@ -739,15 +1013,22 @@ export function VendasTab() {
           </div>
 
           <!-- Assinaturas -->
-          <div style="margin-top: 20px; text-align: center;">
-            <div class="signature-wrap">
-              _________________________________________<br>
-              ${(venda as any).cliente?.nome || venda.clienteNome || 'Assinatura do Cliente'}
+          <div class="signature-row">
+            <div class="signature-col">
+              <div class="signature-holder"></div>
+              <div class="signature-line">
+                Assinatura do Cliente
+                <span class="signature-subtitle">${(venda as any).cliente?.nome || venda.clienteNome || 'Não informado'}</span>
+              </div>
             </div>
-            <div class="signature-wrap">
-              <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
-              _________________________________________<br>
-              ${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}
+            <div class="signature-col">
+              <div class="signature-holder">
+                ${assinaturaEmpresaUrl ? `<img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />` : ''}
+              </div>
+              <div class="signature-line">
+                Assinatura / Carimbo da Loja
+                <span class="signature-subtitle">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</span>
+              </div>
             </div>
           </div>
           <div style="text-align: center; margin-top: 16px; font-weight: bold;">
@@ -778,21 +1059,56 @@ export function VendasTab() {
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Vendas</h1>
             <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Controle de vendas e faturamento</p>
           </div>
-          <Button 
-            onClick={() => {
-              setShowPOS(true);
-              if (editingId) setEditingId(null);
-            }}
-            className="btn-ios w-full sm:w-auto flex items-center justify-center gap-2 h-auto"
-          >
-            + Nova Venda
-          </Button>
+          <div className="scroll-row w-full sm:w-auto sm:pb-0">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.xls,.xlsx"
+              onChange={handleImportVendas}
+              className="hidden"
+            />
+            <Button
+              variant="outline"
+              onClick={handleExportVendas}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Exportar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleOpenImportVendas}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar
+            </Button>
+            <Button 
+              onClick={() => {
+                setShowPOS(true);
+                if (editingId) setEditingId(null);
+              }}
+              className="btn-ios h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              + Nova Venda
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleOpenDeleteAllModal}
+              disabled={vendas.length === 0}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Apagar Todas
+            </Button>
+          </div>
         </div>
 
         {/* Modal PDV Completo */}
         {showPOS && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
-            <div className="glass w-full max-w-6xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-2rem)] rounded-none sm:rounded-[2.5rem] shadow-2xl flex flex-col border border-white/20 overflow-hidden sm:my-4">
+          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+            <div className="glass w-full max-w-6xl min-h-[100dvh] sm:min-h-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] rounded-none sm:rounded-[2.5rem] shadow-2xl flex flex-col border border-white/20 overflow-hidden sm:my-4">
               
               {/* Header do PDV */}
               <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/20 dark:bg-white/5 backdrop-blur-xl sticky top-0 z-20">
@@ -905,31 +1221,29 @@ export function VendasTab() {
                     {/* Input de Item */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-white/30 dark:bg-black/30 p-3 rounded-xl border border-white/10">
                       <div className="md:col-span-4 flex gap-2">
-                <div className="flex gap-2">
-                  <select
-                            className="input-glass flex-1"
-                            value={posItem.aparelhoId}
-                    onChange={(e) => {
-                      const aparelho = aparelhos.find(a => a.id === e.target.value);
-                              setPosItem({ 
-                                ...posItem, 
-                        aparelhoId: e.target.value, 
-                                descricao: aparelho ? `${aparelho.marca} ${aparelho.modelo}` : '',
-                                valorExibir: aparelho ? aparelho.preco : 0,
-                                valorInterno: aparelho ? (aparelho as any).custo || 0 : 0
-                      });
-                    }}
-                  >
-                    <option value="">Selecionar Aparelho</option>
-                    {aparelhos.map(a => (
-                      <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco}</option>
-                    ))}
-                  </select>
-                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-full aspect-square bg-white/50 backdrop-blur">
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+                        <select
+                          className="input-glass flex-1"
+                          value={posItem.aparelhoId}
+                          onChange={(e) => {
+                            const aparelho = aparelhos.find(a => a.id === e.target.value);
+                            setPosItem({
+                              ...posItem,
+                              aparelhoId: e.target.value,
+                              descricao: aparelho ? `${aparelho.marca} ${aparelho.modelo}` : '',
+                              valorExibir: aparelho ? aparelho.preco : 0,
+                              valorInterno: aparelho ? (aparelho as any).custo || 0 : 0
+                            });
+                          }}
+                        >
+                          <option value="">Selecionar aparelho</option>
+                          {aparelhos.map(a => (
+                            <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco.toFixed(2).replace('.', ',')}</option>
+                          ))}
+                        </select>
+                        <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-full aspect-square bg-white/50 backdrop-blur">
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
 
               <div className="md:col-span-1">
                 <label className="text-xs text-gray-500 ml-1">Qtd</label>
@@ -939,10 +1253,12 @@ export function VendasTab() {
               <div className="md:col-span-2">
                 <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Custo (R$)</label>
                 <input
-                  type="text"
+                  type="number"
                   inputMode="decimal"
-                  pattern="[0-9.,]*"
+                  step="0.01"
+                  min="0"
                   className="input-glass border-blue-500/30"
+                  placeholder="0,00"
                   value={posItem.valorInterno}
                   onChange={e => setPosItem({...posItem, valorInterno: parseFloat(e.target.value.replace(',', '.')) || 0})}
                 />
@@ -951,10 +1267,12 @@ export function VendasTab() {
               <div className="md:col-span-2">
                 <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Venda (R$)</label>
                 <input
-                  type="text"
+                  type="number"
                   inputMode="decimal"
-                  pattern="[0-9.,]*"
+                  step="0.01"
+                  min="0"
                   className="input-glass border-green-500/30"
+                  placeholder="0,00"
                   value={posItem.valorExibir}
                   onChange={e => setPosItem({...posItem, valorExibir: parseFloat(e.target.value.replace(',', '.')) || 0})}
                 />
@@ -963,7 +1281,7 @@ export function VendasTab() {
                       <div className="md:col-span-1 flex gap-1">
                         <div className="flex-1">
                           <label className="text-xs text-gray-500 ml-1">Desconto</label>
-                          <input type="text" inputMode="decimal" pattern="[0-9.,]*" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value.replace(',', '.')) || 0})} />
+                          <input type="number" inputMode="decimal" step="0.01" min="0" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value.replace(',', '.')) || 0})} />
                         </div>
                         <div className="w-16">
                           <label className="text-xs text-gray-500 ml-1">Tipo</label>
@@ -1026,7 +1344,7 @@ export function VendasTab() {
                         </tbody>
                         <tfoot className="bg-white/10 dark:bg-black/10 font-bold">
                           <tr>
-                            <td colSpan={4} className="p-3 text-right">Subtotal:</td>
+                            <td colSpan={5} className="p-3 text-right">Subtotal:</td>
                             <td className="p-3 text-right">R$ {subtotalCarrinho.toFixed(2)}</td>
                             <td></td>
                           </tr>
@@ -1038,24 +1356,27 @@ export function VendasTab() {
                     <div className="flex justify-end items-center gap-2 bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10">
                       <span className="text-sm font-medium">Desconto Total:</span>
                       <input 
-                        type="text" 
+                        type="number" 
                         inputMode="decimal"
-                        pattern="[0-9.,]*"
+                        min="0"
+                        step="0.01"
                         className="w-24 input-glass py-1 h-8 text-right" 
                         value={posPagamento.descontoGlobal} 
                         onChange={e => setPosPagamento({...posPagamento, descontoGlobal: parseFloat(e.target.value.replace(',', '.')) || 0})} 
                       />
                       <div className="flex border border-white/20 rounded-lg overflow-hidden">
                         <button 
+                          type="button"
                           className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === 'R$' ? 'bg-blue-600 text-white' : 'bg-white/50 dark:bg-black/50'}`}
                           onClick={() => setPosPagamento({...posPagamento, tipoDescontoGlobal: 'R$'})}
                         >R$</button>
                         <button 
+                          type="button"
                           className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === '%' ? 'bg-blue-600 text-white' : 'bg-white/50 dark:bg-black/50'}`}
                           onClick={() => setPosPagamento({...posPagamento, tipoDescontoGlobal: '%'})}
                         >%</button>
                       </div>
-                      <button onClick={() => setPosPagamento({...posPagamento, descontoGlobal: 0})} className="text-xs text-red-500 underline ml-2">Limpar</button>
+                      <button type="button" onClick={() => setPosPagamento({...posPagamento, descontoGlobal: 0})} className="text-xs text-red-500 underline ml-2">Limpar</button>
                     </div>
                   </div>
                 </GlassCard>
@@ -1087,6 +1408,7 @@ export function VendasTab() {
                       <select 
                         className="input-glass"
                         value={posPagamento.parcelas}
+                        disabled={posPagamento.metodo !== 'cartao_credito'}
                         onChange={e => setPosPagamento({...posPagamento, parcelas: parseInt(e.target.value)})}
                       >
                         {[1,2,3,4,5,6,10,12].map(p => <option key={p} value={p}>{p}x</option>)}
@@ -1095,13 +1417,22 @@ export function VendasTab() {
                     <div>
                       <label className="text-xs text-gray-500 ml-1">Valor Pago (R$)</label>
                       <input 
-                        type="text" 
+                        type="number" 
                         inputMode="decimal"
-                        pattern="[0-9.,]*"
+                        min="0"
+                        step="0.01"
                         className="input-glass font-bold text-green-600" 
+                        placeholder="0,00"
                         value={posPagamento.valorPago} 
                         onChange={e => setPosPagamento({...posPagamento, valorPago: parseFloat(e.target.value.replace(',', '.')) || 0})} 
                       />
+                      <button
+                        type="button"
+                        className="text-xs text-blue-600 mt-1"
+                        onClick={() => setPosPagamento({ ...posPagamento, valorPago: totalFinal > 0 ? Number(totalFinal.toFixed(2)) : 0 })}
+                      >
+                        Receber valor total
+                      </button>
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 ml-1">Garantia</label>
@@ -1501,10 +1832,13 @@ export function VendasTab() {
 
       {/* Modal Novo Aparelho */}
       {showNovoAparelho && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center z-[60] p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-[60] p-4 overflow-y-auto">
           <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
             <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">Novo Aparelho</h3>
+              <div>
+                <h3 className="text-lg font-bold">Novo Aparelho</h3>
+                <p className="text-xs text-muted-foreground">Cadastro rápido para adicionar item na venda.</p>
+              </div>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoAparelho(false)}><X className="w-4 h-4" /></Button>
             </div>
             <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
@@ -1560,7 +1894,72 @@ export function VendasTab() {
                   <option value="seminovo">Seminovo</option>
                   <option value="usado">Usado</option>
                 </select>
-                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">Cadastrar Aparelho</Button>
+
+                <div className="flex gap-2 pt-2">
+                  <Button type="button" variant="outline" className="flex-1" onClick={() => setShowNovoAparelho(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" disabled={loadingAparelhos} className="flex-1 bg-blue-600 hover:bg-blue-700">
+                    {loadingAparelhos ? 'Cadastrando...' : 'Cadastrar'}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </GlassCard>
+        </div>
+      )}
+
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] p-4 overflow-y-auto">
+          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+              <div>
+                <h3 className="text-lg font-bold text-red-600">Apagar todas as vendas</h3>
+                <p className="text-xs text-muted-foreground mt-1">Esta ação remove definitivamente todos os registros de vendas da loja.</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={handleCancelDeleteAll}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
+              <form onSubmit={handleDeleteAllVendas} className="space-y-4">
+                <input
+                  type="email"
+                  className="input-glass"
+                  placeholder="Email da conta"
+                  value={confirmDeleteEmail}
+                  onChange={(e) => setConfirmDeleteEmail(e.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  className="input-glass"
+                  placeholder="Senha"
+                  value={confirmDeletePassword}
+                  onChange={(e) => setConfirmDeletePassword(e.target.value)}
+                  required
+                />
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={handleCancelDeleteAll}
+                    disabled={deletingAllVendas}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="destructive"
+                    className="flex-1"
+                    disabled={deletingAllVendas}
+                  >
+                    {deletingAllVendas ? 'Apagando...' : 'Confirmar e Apagar'}
+                  </Button>
+                </div>
               </form>
             </div>
           </GlassCard>

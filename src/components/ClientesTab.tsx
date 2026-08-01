@@ -1,14 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
-import { Users, X, Plus, Download, Edit2, Search } from "lucide-react";
+import { Users, X, Plus, Download, Edit2, Search, Upload } from "lucide-react";
 import { useClientes } from "@/hooks/useClientes";
+import { useAuth } from "@/hooks/useAuth";
 import { Cliente } from "@/lib/db/types";
+import { supabase } from "@/lib/supabaseClient";
+import {
+  exportDataset,
+  findByAliases,
+  parseImportFile,
+  type ExportColumn,
+  type ExportFormat,
+} from "@/lib/importExport";
 
 export function ClientesTab() {
+  const { usuario } = useAuth();
   const {
     clientes,
     loading,
@@ -22,6 +32,7 @@ export function ClientesTab() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [formData, setFormData] = useState({
     nome: "",
     email: "",
@@ -114,65 +125,143 @@ export function ClientesTab() {
     }
   };
 
-  const handleExportCSV = () => {
+  const CLIENTE_COLUMNS: ExportColumn[] = [
+    { key: "id", label: "ID" },
+    { key: "nome", label: "Nome" },
+    { key: "email", label: "Email" },
+    { key: "telefone", label: "Telefone" },
+    { key: "cpf", label: "CPF" },
+    { key: "endereco", label: "Endereco" },
+    { key: "cidade", label: "Cidade" },
+    { key: "estado", label: "Estado" },
+    { key: "cep", label: "CEP" },
+    { key: "dataCadastro", label: "Data Cadastro" },
+    { key: "status", label: "Status" },
+  ];
+
+  const handleExport = async () => {
     if (clientes.length === 0) {
       alert("Nenhum cliente para exportar!");
       return;
     }
 
-    // Headers do CSV
-    const headers = [
-      "ID",
-      "Nome",
-      "Email",
-      "Telefone",
-      "CPF",
-      "Endereço",
-      "Cidade",
-      "Estado",
-      "CEP",
-      "Data Cadastro",
-      "Status",
-    ];
+    const formatoEscolhido = window
+      .prompt("Formato para exportar clientes: csv ou xls", "csv")
+      ?.toLowerCase()
+      .trim() as ExportFormat | undefined;
 
-    // Dados do CSV
-    const rows = clientes.map((cliente) => [
-      cliente.id,
-      cliente.nome,
-      cliente.email,
-      cliente.telefone,
-      cliente.cpf || "",
-      cliente.endereco || "",
-      cliente.cidade || "",
-      cliente.estado || "",
-      cliente.cep || "",
-      new Date(cliente.dataCadastro).toLocaleDateString("pt-BR"),
-      cliente.ativo ? "Ativo" : "Inativo",
-    ]);
+    if (!formatoEscolhido || !["csv", "xls"].includes(formatoEscolhido)) {
+      alert("Formato inválido. Use csv ou xls.");
+      return;
+    }
 
-    // Montar CSV
-    let csv = headers.join(",") + "\n";
-    rows.forEach((row) => {
-      csv += row
-        .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-        .join(",") + "\n";
+    await exportDataset({
+      fileNameBase: `clientes_${new Date().toISOString().slice(0, 10)}`,
+      title: "Exportacao de Clientes",
+      format: formatoEscolhido,
+      columns: CLIENTE_COLUMNS,
+      rows: clientes.map((cliente) => ({
+        id: cliente.id,
+        nome: cliente.nome,
+        email: cliente.email,
+        telefone: cliente.telefone,
+        cpf: cliente.cpf || "",
+        endereco: cliente.endereco || "",
+        cidade: cliente.cidade || "",
+        estado: cliente.estado || "",
+        cep: cliente.cep || "",
+        dataCadastro: new Date(cliente.dataCadastro).toLocaleDateString("pt-BR"),
+        status: cliente.ativo ? "Ativo" : "Inativo",
+      })),
     });
+  };
 
-    // Download
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
+  const handleOpenImport = () => {
+    importInputRef.current?.click();
+  };
 
-    link.setAttribute("href", url);
-    link.setAttribute(
-      "download",
-      `clientes_${new Date().toLocaleDateString("pt-BR")}.csv`
-    );
-    link.style.visibility = "hidden";
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!usuario?.lojaId) {
+      alert("Sessao sem loja ativa para importar dados.");
+      return;
+    }
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const importedRows = await parseImportFile(file);
+
+      if (importedRows.length === 0) {
+        alert("Arquivo sem dados validos para importacao.");
+        return;
+      }
+
+      const { data: existentes, error: existentesError } = await supabase
+        .from("clientes")
+        .select("nome, telefone, cpf")
+        .eq("loja_id", usuario.lojaId);
+
+      if (existentesError) throw existentesError;
+
+      const chaveExistente = new Set(
+        (existentes || []).map((item: any) => {
+          const nome = String(item.nome || "").trim().toLowerCase();
+          const telefone = String(item.telefone || "").replace(/\D/g, "");
+          const cpf = String(item.cpf || "").replace(/\D/g, "");
+          return `${nome}|${telefone}|${cpf}`;
+        })
+      );
+
+      const chaveLote = new Set<string>();
+      const nowIso = new Date().toISOString();
+      const payload = importedRows
+        .map((row, index) => {
+          const nome = findByAliases(row, ["nome", "cliente", "razaosocial", "name", "_col2"]);
+          const email = findByAliases(row, ["email", "e-mail"]);
+          const telefoneFonte = findByAliases(row, ["telefone", "celular", "fone", "whatsapp", "_col3"]);
+          const telefone = telefoneFonte.replace(/\D/g, "") || `000000000${(index % 10)}`;
+          const cpf = findByAliases(row, ["cpf", "documento", "cnpj"]);
+
+          const chave = `${nome.trim().toLowerCase()}|${telefone}|${cpf.replace(/\D/g, "")}`;
+          if (!nome || chaveExistente.has(chave) || chaveLote.has(chave)) {
+            return null;
+          }
+
+          chaveLote.add(chave);
+
+          return {
+            nome,
+            email: email || `${nome.toLowerCase().replace(/[^a-z0-9]/g, "") || "cliente"}@sem-email.local`,
+            telefone,
+            cpf,
+            endereco: findByAliases(row, ["endereco", "logradouro", "rua"]),
+            cidade: findByAliases(row, ["cidade"]),
+            estado: findByAliases(row, ["estado", "uf"]),
+            cep: findByAliases(row, ["cep"]),
+            ativo: true,
+            loja_id: usuario.lojaId,
+            dataCadastro: nowIso,
+          };
+        })
+        .filter((cliente): cliente is NonNullable<typeof cliente> => Boolean(cliente));
+
+      if (payload.length === 0) {
+        alert("Nenhuma linha nova para importar. Tudo ja estava cadastrado ou sem nome.");
+        return;
+      }
+
+      const { error: insertError } = await supabase.from("clientes").insert(payload);
+      if (insertError) throw insertError;
+
+      await fetchClientes();
+      alert(`Importacao concluida: ${payload.length} clientes inseridos.`);
+    } catch (importError: any) {
+      console.error("Erro ao importar clientes:", importError);
+      alert(`Erro ao importar clientes: ${importError?.message || "Falha desconhecida"}`);
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const handleCancel = () => {
@@ -201,14 +290,29 @@ export function ClientesTab() {
             </p>
           </div>
           <div className="scroll-row w-full sm:w-auto sm:pb-0">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.xls,.xlsx"
+              onChange={handleImportFile}
+              className="hidden"
+            />
             <Button
               variant="outline"
-              onClick={handleExportCSV}
+              onClick={handleExport}
               disabled={clientes.length === 0}
               className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
             >
               <Download className="mr-2 h-4 w-4" />
               Exportar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleOpenImport}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar
             </Button>
             <Button onClick={() => setShowForm(!showForm)} className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap">
               <Plus className="mr-2 h-4 w-4" />

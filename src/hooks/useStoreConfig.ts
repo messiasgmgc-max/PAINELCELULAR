@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 interface StoreConfig {
   nomeLoja: string;
   logoLoja: string | null; // Base64 data URL
+  assinaturaLoja: string | null; // Base64 data URL para recibos/PDFs
   enderecoLoja: string;
   cnpjLoja: string;
   telefoneLoja: string;
@@ -15,6 +16,7 @@ interface StoreConfig {
 const DEFAULT_CONFIG: StoreConfig = {
   nomeLoja: 'Phone Center',
   logoLoja: null,
+  assinaturaLoja: null,
   enderecoLoja: 'Endereço não configurado',
   cnpjLoja: 'Não informado',
   telefoneLoja: 'Não informado',
@@ -115,6 +117,11 @@ export function useStoreConfig() {
     salvarConfig(novaConfig);
   };
 
+  const atualizarAssinaturaLoja = (assinaturaLoja: string | null) => {
+    const novaConfig = { ...config, assinaturaLoja };
+    salvarConfig(novaConfig);
+  };
+
   // Atualizar dados da empresa
   const atualizarDadosEmpresa = (dados: Partial<StoreConfig>) => {
     const novaConfig = { ...config, ...dados };
@@ -124,6 +131,11 @@ export function useStoreConfig() {
   // Remover logo (volta para padrão)
   const removerLogo = () => {
     const novaConfig = { ...config, logoLoja: null };
+    salvarConfig(novaConfig);
+  };
+
+  const removerAssinatura = () => {
+    const novaConfig = { ...config, assinaturaLoja: null };
     salvarConfig(novaConfig);
   };
 
@@ -140,8 +152,10 @@ export function useStoreConfig() {
     salvarConfig,
     atualizarNomeLoja,
     atualizarLogoLoja,
+    atualizarAssinaturaLoja,
     atualizarDadosEmpresa,
     removerLogo,
+    removerAssinatura,
     resetarConfig,
   };
 }

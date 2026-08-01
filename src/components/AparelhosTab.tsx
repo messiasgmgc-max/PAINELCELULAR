@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2 } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { Aparelho } from "@/lib/db/types";
@@ -28,6 +28,7 @@ export function AparelhosTab() {
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [showOptionalFields, setShowOptionalFields] = useState(false);
   const [supplierListText, setSupplierListText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -149,6 +150,7 @@ export function AparelhosTab() {
 
   const handleEdit = (aparelho: Aparelho) => {
     setEditingId(aparelho.id);
+    setShowOptionalFields(true);
     setFormData({
       marca: aparelho.marca,
       modelo: aparelho.modelo,
@@ -520,8 +522,9 @@ export function AparelhosTab() {
             .section-title { color: #5a67d8; font-weight: bold; margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; }
             .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 2px solid #eee; }
             .footer p { color: #999; margin: 5px 0; font-size: 12px; }
-            .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; margin: 0 auto 12px auto; display: block; }
-            .signature-block { margin-bottom: 16px; }
+            .signature-block { margin: 0 auto 16px auto; width: fit-content; text-align: center; }
+            .signature-holder { height: 56px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 4px; }
+            .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; display: block; }
             .signature-label { color: #5a67d8; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
             @media print {
               body { background: white; padding: 0; }
@@ -602,7 +605,9 @@ export function AparelhosTab() {
 
             <div class="footer">
               <div class="signature-block">
-                <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+                <div class="signature-holder">
+                  <img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />
+                </div>
                 <div class="signature-label">Autenticação da Loja</div>
               </div>
               <p>📅 Registrado em: ${new Date(aparelho.dataCadastro).toLocaleDateString("pt-BR", { year: "numeric", month: "long", day: "numeric" })}</p>
@@ -631,6 +636,7 @@ export function AparelhosTab() {
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
+    setShowOptionalFields(false);
     setFormData({
       marca: "",
       modelo: "",
@@ -779,7 +785,7 @@ export function AparelhosTab() {
 
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
               <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
                 <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
                   <h3 className="text-lg font-bold">Adicionar Novo Cliente</h3>
@@ -995,8 +1001,8 @@ export function AparelhosTab() {
 
       {/* Modal de Novo/Editar Aparelho */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-3xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 flex flex-col max-h-[95vh]">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+          <GlassCard className="w-full max-w-3xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 flex flex-col max-h-[calc(100dvh-2rem)] my-2">
             <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
               <h3 className="text-lg font-bold">
                 {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
@@ -1006,7 +1012,7 @@ export function AparelhosTab() {
               </Button>
             </div>
             
-            <div className="p-6 overflow-y-auto">
+            <div className="p-6 overflow-y-auto max-h-[calc(100dvh-10rem)] scrollbar-soft">
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* Linha 1: Marca e Modelo */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1055,30 +1061,6 @@ export function AparelhosTab() {
                     onChange={handleInputChange}
                     className="input-glass"
                   />
-                </div>
-
-                {/* Linha 3: Cor e Capacidade */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="cor"
-                    placeholder="Cor (ex: Preto, Branco) (opcional)"
-                    value={formData.cor}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                  <select
-                    name="capacidade"
-                    value={formData.capacidade}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  >
-                    {romOptions.map((rom) => (
-                      <option key={rom} value={rom}>
-                        💾 {rom}
-                      </option>
-                    ))}
-                  </select>
                 </div>
 
                 {/* Linha 4: Condição e Preço */}
@@ -1155,32 +1137,70 @@ export function AparelhosTab() {
                   </Button>
                 </div>
 
-                <textarea
-                  name="descricao"
-                  placeholder="Descrição do aparelho (opcional)"
-                  value={formData.descricao}
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="input-glass"
-                />
+                <div className="rounded-xl border border-white/10 bg-white/10 dark:bg-black/10 p-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowOptionalFields((prev) => !prev)}
+                    className="w-full flex items-center justify-between text-sm font-semibold"
+                  >
+                    <span>Campos opcionais (descrição, acessórios e observações)</span>
+                    {showOptionalFields ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
 
-                <textarea
-                  name="acessorios"
-                  placeholder="Acessórios inclusos (opcional)"
-                  value={formData.acessorios}
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="input-glass"
-                />
+                  {showOptionalFields && (
+                    <div className="mt-3 space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <input
+                          type="text"
+                          name="cor"
+                          placeholder="Cor (opcional)"
+                          value={formData.cor}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                        <select
+                          name="capacidade"
+                          value={formData.capacidade}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        >
+                          {romOptions.map((rom) => (
+                            <option key={rom} value={rom}>
+                              💾 {rom}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                <textarea
-                  name="observacoes"
-                  placeholder="Observações adicionais (opcional)"
-                  value={formData.observacoes}
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="input-glass"
-                />
+                      <textarea
+                        name="descricao"
+                        placeholder="Descrição do aparelho (opcional)"
+                        value={formData.descricao}
+                        onChange={handleInputChange}
+                        rows={2}
+                        className="input-glass"
+                      />
+
+                      <textarea
+                        name="acessorios"
+                        placeholder="Acessórios inclusos (opcional)"
+                        value={formData.acessorios}
+                        onChange={handleInputChange}
+                        rows={2}
+                        className="input-glass"
+                      />
+
+                      <textarea
+                        name="observacoes"
+                        placeholder="Observações adicionais (opcional)"
+                        value={formData.observacoes}
+                        onChange={handleInputChange}
+                        rows={2}
+                        className="input-glass"
+                      />
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
                   <Button type="button" variant="outline" onClick={handleCancel}>
@@ -1200,7 +1220,7 @@ export function AparelhosTab() {
 
       {/* Modal Lista de Fornecedor */}
       {showSupplierModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
           <GlassCard className="w-full max-w-2xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
             <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
               <div>
@@ -1227,7 +1247,7 @@ export function AparelhosTab() {
 
       {/* Modal de Saídas */}
       {showSaidas && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
           <GlassCard className="w-full max-w-4xl max-h-[90vh] flex flex-col !p-0 rounded-[2.5rem] overflow-hidden">
             <div className="p-6 border-b border-white/10 flex flex-row items-center justify-between bg-white/10">
               <h3 className="text-lg font-bold flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>

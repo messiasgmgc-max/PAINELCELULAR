@@ -23,7 +23,7 @@ interface Configuracao {
 
 export function ConfiguracoesTab() {
   const { usuario, logout } = useAuth();
-  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarDadosEmpresa, removerLogo } = useStoreConfig();
+  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja, atualizarDadosEmpresa, removerLogo, removerAssinatura } = useStoreConfig();
   const { colorTheme, setColorTheme } = useColorTheme();
   
   const [nomeEmpresa, setNomeEmpresa] = useState('Phone Center');
@@ -37,6 +37,8 @@ export function ConfiguracoesTab() {
   const [subtituloLoja, setSubtituloLoja] = useState('');
   const [logoLoja, setLogoLoja] = useState<string | null>(null);
   const [previewLogo, setPreviewLogo] = useState<string | null>(null);
+  const [assinaturaLoja, setAssinaturaLoja] = useState<string | null>(null);
+  const [previewAssinatura, setPreviewAssinatura] = useState<string | null>(null);
   
   const [notificacoesEmail, setNotificacoesEmail] = useState(true);
   const [notificacoesWhatsapp, setNotificacoesWhatsapp] = useState(false);
@@ -67,6 +69,8 @@ export function ConfiguracoesTab() {
           setSubtituloLoja(data.subtitulo || '');
           setLogoLoja(data.logo_url || null);
           setPreviewLogo(data.logo_url || null);
+          setAssinaturaLoja(data.assinatura_url || null);
+          setPreviewAssinatura(data.assinatura_url || null);
         }
       } catch (err) {
         console.error("Erro ao carregar dados da loja", err);
@@ -97,6 +101,30 @@ export function ConfiguracoesTab() {
     setLogoLoja(null);
     setPreviewLogo(null);
     removerLogo();
+  };
+
+  const handleUploadAssinatura = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 12000000) {
+      alert('Arquivo deve ser menor que 12MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      setPreviewAssinatura(base64);
+      setAssinaturaLoja(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoverAssinatura = () => {
+    setAssinaturaLoja(null);
+    setPreviewAssinatura(null);
+    removerAssinatura();
   };
 
   const handleSalvarConfiguracoes = () => {
@@ -163,6 +191,25 @@ export function ConfiguracoesTab() {
     } catch (error: any) {
       console.error('Erro ao salvar logo:', error);
       alert(`Erro ao salvar logo: ${error.message}`);
+    }
+  };
+
+  const handleSalvarAssinaturaLoja = async () => {
+    if (!usuario?.lojaId) return;
+
+    try {
+      const { error } = await supabase
+        .from('lojas')
+        .update({ assinatura_url: assinaturaLoja })
+        .eq('id', usuario.lojaId);
+
+      if (error) throw error;
+
+      atualizarAssinaturaLoja(assinaturaLoja);
+      alert('Assinatura atualizada com sucesso!');
+    } catch (error: any) {
+      console.error('Erro ao salvar assinatura:', error);
+      alert(`Erro ao salvar assinatura: ${error.message}`);
     }
   };
 
@@ -447,6 +494,51 @@ export function ConfiguracoesTab() {
                         <Button onClick={handleSalvarSubtituloLoja} className="bg-blue-600 hover:bg-blue-700">
                           Aplicar
                         </Button>
+                      </div>
+                    </div>
+
+                    {/* Assinatura para recibos/PDFs */}
+                    <div className="flex flex-col gap-3 border-t border-white/15 pt-4">
+                      <label className="text-sm font-medium">Assinatura para recibos e PDF de compra</label>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <div className="flex-shrink-0">
+                          {previewAssinatura ? (
+                            <div className="relative">
+                              <img
+                                src={previewAssinatura}
+                                alt="Assinatura da loja"
+                                className="w-44 h-20 rounded-lg object-contain bg-white border dark:border-slate-700 p-2"
+                              />
+                              <button
+                                onClick={handleRemoverAssinatura}
+                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-44 h-20 rounded-lg bg-gray-200 dark:bg-slate-800 flex items-center justify-center text-gray-400 border dark:border-slate-700">
+                              <span className="text-xs text-center px-3">Sem assinatura</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={handleUploadAssinatura}
+                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/50 dark:file:text-blue-400 dark:hover:file:bg-blue-900"
+                          />
+                          <p className="text-xs text-gray-500 mt-2">PNG, JPG ou WEBP. Recomendado fundo transparente.</p>
+                          <Button
+                            onClick={handleSalvarAssinaturaLoja}
+                            size="sm"
+                            className="mt-2 bg-blue-600 hover:bg-blue-700 h-8"
+                          >
+                            Salvar Assinatura
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>

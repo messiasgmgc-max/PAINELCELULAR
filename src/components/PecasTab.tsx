@@ -1,14 +1,25 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus, Download, Edit2, Search, Package, AlertCircle } from "lucide-react";
+import { X, Plus, Download, Edit2, Search, Package, AlertCircle, Upload } from "lucide-react";
 import { usePecas } from "@/hooks/usePecas";
+import { useAuth } from "@/hooks/useAuth";
 import { Peca } from "@/lib/db/types";
+import { supabase } from "@/lib/supabaseClient";
+import {
+  exportDataset,
+  findByAliases,
+  parseCurrencyLike,
+  parseImportFile,
+  type ExportColumn,
+  type ExportFormat,
+} from "@/lib/importExport";
 
 export function PecasTab() {
+  const { usuario } = useAuth();
   const {
     pecas,
     loading,
@@ -22,6 +33,7 @@ export function PecasTab() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [formData, setFormData] = useState({
     codigoUnico: "",
     nome: "",
@@ -147,62 +159,160 @@ export function PecasTab() {
     }
   };
 
-  const handleExportCSV = () => {
+  const PECA_COLUMNS: ExportColumn[] = [
+    { key: "codigoUnico", label: "Codigo" },
+    { key: "nome", label: "Nome" },
+    { key: "descricao", label: "Descricao" },
+    { key: "fornecedor", label: "Fornecedor" },
+    { key: "custoPeca", label: "Custo" },
+    { key: "vendaPeca", label: "Venda" },
+    { key: "margem", label: "Margem %" },
+    { key: "estoque", label: "Estoque" },
+    { key: "estoqueMinimo", label: "Min" },
+    { key: "estoqueMaximo", label: "Max" },
+    { key: "localizacao", label: "Localizacao" },
+    { key: "compatibilidade", label: "Compatibilidade" },
+    { key: "dataCadastro", label: "Data Cadastro" },
+  ];
+
+  const handleExport = async () => {
     if (pecas.length === 0) {
       alert("Nenhuma peça para exportar!");
       return;
     }
 
-    const headers = [
-      "Código",
-      "Nome",
-      "Descrição",
-      "Fornecedor",
-      "Custo",
-      "Venda",
-      "Margem %",
-      "Estoque",
-      "Mín",
-      "Máx",
-      "Localização",
-      "Compatibilidade",
-      "Data Cadastro",
-    ];
+    const formatoEscolhido = window
+      .prompt("Formato para exportar estoque: csv ou xls", "csv")
+      ?.toLowerCase()
+      .trim() as ExportFormat | undefined;
 
-    const rows = pecas.map((peca) => [
-      peca.codigoUnico,
-      peca.nome,
-      peca.descricao || "",
-      peca.fornecedor || "",
-      `R$ ${peca.custoPeca.toFixed(2)}`,
-      `R$ ${peca.vendaPeca.toFixed(2)}`,
-      `${peca.margem?.toFixed(2) || 0}%`,
-      peca.estoque,
-      peca.estoqueMinimo,
-      peca.estoqueMaximo,
-      peca.localizacao || "",
-      peca.compatibilidade || "",
-      new Date(peca.dataCadastro).toLocaleDateString("pt-BR"),
-    ]);
+    if (!formatoEscolhido || !["csv", "xls"].includes(formatoEscolhido)) {
+      alert("Formato invalido. Use csv ou xls.");
+      return;
+    }
 
-    let csv = headers.join(",") + "\n";
-    rows.forEach((row) => {
-      csv += row
-        .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-        .join(",") + "\n";
+    await exportDataset({
+      fileNameBase: `estoque_pecas_${new Date().toISOString().slice(0, 10)}`,
+      title: "Exportacao de Estoque - Pecas",
+      format: formatoEscolhido,
+      columns: PECA_COLUMNS,
+      rows: pecas.map((peca) => ({
+        codigoUnico: peca.codigoUnico,
+        nome: peca.nome,
+        descricao: peca.descricao || "",
+        fornecedor: peca.fornecedor || "",
+        custoPeca: peca.custoPeca.toFixed(2),
+        vendaPeca: peca.vendaPeca.toFixed(2),
+        margem: (peca.margem || 0).toFixed(2),
+        estoque: peca.estoque,
+        estoqueMinimo: peca.estoqueMinimo,
+        estoqueMaximo: peca.estoqueMaximo,
+        localizacao: peca.localizacao || "",
+        compatibilidade: peca.compatibilidade || "",
+        dataCadastro: new Date(peca.dataCadastro).toLocaleDateString("pt-BR"),
+      })),
     });
+  };
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
+  const handleOpenImport = () => {
+    importInputRef.current?.click();
+  };
 
-    link.setAttribute("href", url);
-    link.setAttribute("download", `pecas_${new Date().toLocaleDateString("pt-BR")}.csv`);
-    link.style.visibility = "hidden";
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!usuario?.lojaId) {
+      alert("Sessao sem loja ativa para importar estoque.");
+      return;
+    }
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const importedRows = await parseImportFile(file);
+
+      if (importedRows.length === 0) {
+        alert("Arquivo sem dados validos para importacao.");
+        return;
+      }
+
+      const { data: existentes, error: existentesError } = await supabase
+        .from("pecas")
+        .select("codigoUnico")
+        .eq("loja_id", usuario.lojaId);
+
+      if (existentesError) throw existentesError;
+
+      const codigosExistentes = new Set(
+        (existentes || []).map((item: any) => String(item.codigoUnico || "").trim().toLowerCase())
+      );
+
+      const codigosNoLote = new Set<string>();
+      const nowIso = new Date().toISOString();
+      const payload = importedRows
+        .map((row) => {
+          const codigoUnico = findByAliases(row, ["codigo", "codigounico", "sku", "id", "_col2"]);
+          const nome = findByAliases(row, ["nome", "produto", "modelo", "_col8", "_col3"]);
+          const descricao = findByAliases(row, ["descricao", "descricao", "_col3"]);
+          const fornecedor = findByAliases(row, ["fornecedor", "marca", "categoria", "_col1"]);
+
+          const custoPeca = parseCurrencyLike(
+            findByAliases(row, ["custo", "custopeca", "valorcusto", "_col5"])
+          );
+
+          const vendaPeca = parseCurrencyLike(
+            findByAliases(row, ["venda", "vendapeca", "preco", "valor", "_col6"])
+          );
+
+          const estoque = Number(findByAliases(row, ["estoque", "quantidade", "qtd", "_col10"]) || 0);
+          const estoqueMinimo = Number(findByAliases(row, ["estoqueminimo", "min", "estoque_minimo"]) || 5);
+          const estoqueMaximo = Number(findByAliases(row, ["estoquemaximo", "max", "estoque_maximo"]) || 100);
+
+          const margem = custoPeca > 0 ? ((vendaPeca - custoPeca) / custoPeca) * 100 : 0;
+
+          const codigoNormalizado = String(codigoUnico || "").trim().toLowerCase();
+          if (!codigoNormalizado || codigosExistentes.has(codigoNormalizado) || codigosNoLote.has(codigoNormalizado)) {
+            return null;
+          }
+
+          codigosNoLote.add(codigoNormalizado);
+
+          return {
+            codigoUnico,
+            nome,
+            descricao,
+            fornecedor,
+            custoPeca,
+            vendaPeca,
+            margem,
+            estoque: Number.isFinite(estoque) ? estoque : 0,
+            estoqueMinimo: Number.isFinite(estoqueMinimo) ? estoqueMinimo : 5,
+            estoqueMaximo: Number.isFinite(estoqueMaximo) ? estoqueMaximo : 100,
+            localizacao: findByAliases(row, ["localizacao", "local", "enderecoestoque"]),
+            codigoBarras: findByAliases(row, ["codigobarras", "ean", "barra"]),
+            compatibilidade: findByAliases(row, ["compatibilidade", "aplicacao", "_col8"]),
+            dataCadastro: nowIso,
+            ativo: true,
+            loja_id: usuario.lojaId,
+          };
+        })
+        .filter((peca): peca is NonNullable<typeof peca> => Boolean(peca && peca.nome));
+
+      if (payload.length === 0) {
+        alert("Nenhuma linha nova para importar. Tudo ja estava cadastrado ou sem codigo/nome.");
+        return;
+      }
+
+      const { error: insertError } = await supabase.from("pecas").insert(payload);
+      if (insertError) throw insertError;
+
+      await fetchPecas();
+      alert(`Importacao concluida: ${payload.length} pecas inseridas.`);
+    } catch (importError: any) {
+      console.error("Erro ao importar pecas:", importError);
+      alert(`Erro ao importar pecas: ${importError?.message || "Falha desconhecida"}`);
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const handleCancel = () => {
@@ -236,14 +346,29 @@ export function PecasTab() {
             </p>
           </div>
           <div className="scroll-row w-full sm:w-auto sm:pb-0">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,.xls,.xlsx"
+              onChange={handleImportFile}
+              className="hidden"
+            />
             <Button
               variant="outline"
-              onClick={handleExportCSV}
+              onClick={handleExport}
               disabled={pecas.length === 0}
               className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
             >
               <Download className="mr-2 h-4 w-4" />
               Exportar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleOpenImport}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar
             </Button>
             <Button onClick={() => setShowForm(!showForm)} className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap">
               <Plus className="mr-2 h-4 w-4" />
