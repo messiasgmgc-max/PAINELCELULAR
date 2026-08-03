@@ -9,7 +9,7 @@ interface UseClientesReturn {
   error: string | null;
   fetchClientes: () => Promise<void>;
   buscarClientes: (termo: string) => Promise<void>;
-  criarCliente: (dados: Omit<Cliente, "id" | "dataCadastro">) => Promise<Cliente | null>;
+  criarCliente: (dados: Omit<Cliente, "id" | "dataCadastro" | "lojaId">) => Promise<Cliente | null>;
   atualizarCliente: (id: string, dados: Partial<Cliente>) => Promise<Cliente | null>;
   deletarCliente: (id: string) => Promise<boolean>;
 }
@@ -61,7 +61,7 @@ export function useClientes(): UseClientesReturn {
   }, [usuario?.lojaId]);
 
   const criarCliente = useCallback(
-    async (dados: Omit<Cliente, "id" | "dataCadastro">) => {
+    async (dados: Omit<Cliente, "id" | "dataCadastro" | "lojaId">) => {
       if (!usuario?.lojaId) return null;
       setLoading(true);
       setError(null);

@@ -6,6 +6,7 @@ import { useClientes } from '@/hooks/useClientes';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/GlassCard';
+import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Clock, Phone, User } from 'lucide-react';
 import { Agendamento } from '@/lib/db/types';
@@ -160,7 +161,9 @@ export function AgendamentosTab() {
 
       {/* Formulário */}
       {showForm && (
-        <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
+        <ModalPortal>
+        <div className="modal-overlay z-[60]">
+        <GlassCard className="modal-panel modal-panel-xl w-[min(1120px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
               {editingId ? 'Editar Agendamento' : 'Novo Agendamento'}
@@ -293,6 +296,8 @@ export function AgendamentosTab() {
             </div>
           </form>
         </GlassCard>
+        </div>
+        </ModalPortal>
       )}
 
       {/* Listagem */}

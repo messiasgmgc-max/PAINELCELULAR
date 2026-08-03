@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
+import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
 import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
@@ -785,10 +786,11 @@ export function AparelhosTab() {
 
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
-            <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-              <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-                <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-                  <h3 className="text-lg font-bold">Adicionar Novo Cliente</h3>
+            <ModalPortal>
+            <div className="modal-overlay modal-overlay-fit">
+              <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+                <div className="modal-header">
+                  <h3 className="modal-title">Adicionar Novo Cliente</h3>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -797,7 +799,7 @@ export function AparelhosTab() {
                     <X className="h-5 w-5" />
                   </Button>
                 </div>
-                <div className="p-6">
+                <div className="modal-body">
                   <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
                     <input
                       type="text"
@@ -913,6 +915,7 @@ export function AparelhosTab() {
                 </div>
               </GlassCard>
             </div>
+            </ModalPortal>
           )}
 
           {/* Lista de Aparelhos */}
@@ -1001,10 +1004,11 @@ export function AparelhosTab() {
 
       {/* Modal de Novo/Editar Aparelho */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-          <GlassCard className="w-full max-w-3xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 flex flex-col max-h-[calc(100dvh-2rem)] my-2">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-lg modal-panel-tall w-full my-4">
+            <div className="modal-header">
+              <h3 className="modal-title">
                 {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
               </h3>
               <Button variant="ghost" size="icon" onClick={handleCancel}>
@@ -1012,7 +1016,7 @@ export function AparelhosTab() {
               </Button>
             </div>
             
-            <div className="p-6 overflow-y-auto max-h-[calc(100dvh-10rem)] scrollbar-soft">
+            <div className="modal-body-scroll">
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* Linha 1: Marca e Modelo */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1216,20 +1220,22 @@ export function AparelhosTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal Lista de Fornecedor */}
       {showSupplierModal && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-          <GlassCard className="w-full max-w-2xl bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full">
+            <div className="modal-header">
               <div>
-                <h3 className="text-lg font-bold">Importar Lista de Fornecedor</h3>
-                <p className="text-xs text-muted-foreground">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
+                <h3 className="modal-title">Importar Lista de Fornecedor</h3>
+                <p className="modal-subtitle">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setShowSupplierModal(false)}><X className="h-5 w-5" /></Button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="modal-body space-y-4">
               <textarea
                 className="input-glass w-full h-96 font-mono text-xs"
                 placeholder="Cole a lista aqui..."
@@ -1243,17 +1249,19 @@ export function AparelhosTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal de Saídas */}
       {showSaidas && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-          <GlassCard className="w-full max-w-4xl max-h-[90vh] flex flex-col !p-0 rounded-[2.5rem] overflow-hidden">
-            <div className="p-6 border-b border-white/10 flex flex-row items-center justify-between bg-white/10">
-              <h3 className="text-lg font-bold flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-xl modal-panel-tall w-full flex flex-col">
+            <div className="modal-header">
+              <h3 className="modal-title flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)}><X className="h-5 w-5" /></Button>
             </div>
-            <div className="overflow-y-auto overflow-x-auto scrollbar-soft p-6">
+            <div className="modal-body-scroll overflow-x-auto">
               <div className="divide-y min-w-[720px]">
                 {saidas.length === 0 ? (
                   <p className="p-8 text-center text-muted-foreground">Nenhuma saída registrada.</p>
@@ -1276,6 +1284,7 @@ export function AparelhosTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

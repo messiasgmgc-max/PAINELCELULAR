@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
+import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
 import { X, Plus, Download, Edit2, Search, Package, AlertCircle, Upload } from "lucide-react";
 import { usePecas } from "@/hooks/usePecas";
@@ -393,7 +394,9 @@ export function PecasTab() {
 
           {/* Formulário */}
           {showForm && (
-            <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10 p-6 mb-6">
+            <ModalPortal>
+            <div className="modal-overlay z-[60]">
+            <GlassCard className="modal-panel modal-panel-xl w-[min(1120px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="font-semibold">
                   {editingId ? "Editar Peça" : "Nova Peça"}
@@ -569,6 +572,8 @@ export function PecasTab() {
                 )}
               </form>
             </GlassCard>
+            </div>
+            </ModalPortal>
           )}
 
           {/* Lista de Peças */}

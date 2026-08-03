@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,10 +10,12 @@ import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printe
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
+import { createPortal } from 'react-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
-import { Venda, VendaItem } from '@/lib/db/types';
+import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
+import { toast } from 'sonner';
 import {
   exportDataset,
   findByAliases,
@@ -22,6 +25,11 @@ import {
   type ExportFormat,
 } from '@/lib/importExport';
 
+type VendasTabProps = {
+  isSidebarCollapsed?: boolean;
+  setSidebarCollapsed?: (collapsed: boolean) => void;
+};
+
 interface VendasPorPeriodo {
   periodo: string;
   total: number;
@@ -30,7 +38,62 @@ interface VendasPorPeriodo {
   quantidade: number;
 }
 
-export function VendasTab() {
+type PosPagamentoState = {
+  metodo: Venda['metodo'];
+  parcelas: number;
+  detalhes: string;
+  valorPago: number;
+  status: Venda['status'];
+  garantia: string;
+  descontoGlobal: number;
+  tipoDescontoGlobal: 'R$' | '%';
+  pagamentos: PosPagamentoItem[];
+};
+
+type PosPagamentoItem = {
+  id: string;
+  metodo: Venda['metodo'];
+  valor: number;
+  parcelas: number;
+};
+
+const createPagamentoItem = (overrides: Partial<PosPagamentoItem> = {}): PosPagamentoItem => ({
+  id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  metodo: 'dinheiro',
+  valor: 0,
+  parcelas: 1,
+  ...overrides,
+});
+
+const POS_MODAL_CLOSE_MS = 220;
+const SALE_SUCCESS_MS = 1350;
+const SALE_EMOJIS = ['🎉', '🥳', '💰', '✨', '🚀', '🔥'];
+const POS_OVERLAY_OFFSETS = {
+  // Mirrors main layout: header height + content paddings + sidebar offsets
+  top: 96,
+  right: 24,
+  bottom: 24,
+  leftCollapsed: 104,
+  leftExpanded: 280,
+};
+
+const createInitialPosPagamento = (): PosPagamentoState => ({
+  metodo: 'dinheiro',
+  parcelas: 1,
+  detalhes: '',
+  valorPago: 0,
+  status: 'pago',
+  garantia: '90 dias',
+  descontoGlobal: 0,
+  tipoDescontoGlobal: 'R$',
+  pagamentos: [createPagamentoItem()],
+});
+
+export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: VendasTabProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isVendasRoute = pathname === '/vendas';
   const { usuario } = useAuth();
   const { config } = useStoreConfig();
   const { clientes, fetchClientes, criarCliente } = useClientes();
@@ -50,14 +113,22 @@ export function VendasTab() {
   const [showSalesDashboard, setShowSalesDashboard] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
+  const [closingPOS, setClosingPOS] = useState(false);
+  const [savingVenda, setSavingVenda] = useState(false);
+  const [showSaleCelebration, setShowSaleCelebration] = useState(false);
   const [showNovoCliente, setShowNovoCliente] = useState(false);
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [confirmDeleteEmail, setConfirmDeleteEmail] = useState('');
   const [confirmDeletePassword, setConfirmDeletePassword] = useState('');
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const closePOSTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sidebarBeforePOSRef = useRef<boolean | null>(null);
 
   // Estados do PDV
   const [posDados, setPosDados] = useState({
@@ -79,18 +150,20 @@ export function VendasTab() {
   });
 
   const [carrinho, setCart] = useState<VendaItem[]>([]);
-  const [posPagamento, setPosPagamento] = useState({
-    metodo: 'dinheiro' as const,
-    parcelas: 1,
-    detalhes: '',
-    valorPago: 0,
-    usarCredito: false,
-    credito: 0,
-    status: 'pago' as const,
-    garantia: '90 dias',
-    descontoGlobal: 0,
-    tipoDescontoGlobal: 'R$' as 'R$' | '%'
-  });
+  const [posPagamento, setPosPagamento] = useState<PosPagamentoState>(() => createInitialPosPagamento());
+
+  const formatCurrencyField = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number(value || 0));
+  };
+
+  const parseCurrencyField = (rawValue: string) => {
+    const digits = rawValue.replace(/\D/g, '');
+    if (!digits) return 0;
+    return Number(digits) / 100;
+  };
 
   // Estados legados para compatibilidade (se necessário) ou removidos
   /* const [formData, setFormData] = useState({
@@ -114,8 +187,81 @@ export function VendasTab() {
     return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
   };
 
+  const resolveAparelhoCusto = (aparelho?: Aparelho | null) => {
+    if (!aparelho) return 0;
+    const raw = (aparelho as any).custo;
+    if (typeof raw === 'number') return raw;
+    if (typeof raw === 'string') {
+      const parsed = parseFloat(raw.replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  const clearPosTimers = () => {
+    if (closePOSTimerRef.current) {
+      clearTimeout(closePOSTimerRef.current);
+      closePOSTimerRef.current = null;
+    }
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = null;
+    }
+  };
+
+  const openPOSModal = () => {
+    clearPosTimers();
+    setClosingPOS(false);
+    setShowSaleCelebration(false);
+    setShowPOS(true);
+  };
+
+  const closePOSModal = (options?: { reset?: boolean }) => {
+    const shouldReset = options?.reset ?? true;
+    if (!showPOS) return;
+
+    clearPosTimers();
+    setClosingPOS(true);
+
+    closePOSTimerRef.current = setTimeout(() => {
+      setClosingPOS(false);
+      setShowPOS(false);
+      setShowSaleCelebration(false);
+      if (shouldReset) resetPOS();
+    }, POS_MODAL_CLOSE_MS);
+  };
+
+  const playSaleSuccessSound = () => {
+    if (typeof window === 'undefined') return;
+
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    const audioContext = new AudioContextClass();
+    const now = audioContext.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+
+    notes.forEach((frequency, index) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.type = index % 2 === 0 ? 'triangle' : 'sine';
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.06);
+      gainNode.gain.setValueAtTime(0.0001, now + index * 0.06);
+      gainNode.gain.exponentialRampToValueAtTime(0.09, now + index * 0.06 + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.06 + 0.24);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(now + index * 0.06);
+      oscillator.stop(now + index * 0.06 + 0.28);
+    });
+
+    setTimeout(() => {
+      void audioContext.close().catch(() => undefined);
+    }, 700);
+  };
+
   const handleShortcutFinalize = () => {
-    if (showPOS) handleFinalizarVenda();
+    if (showPOS && !closingPOS) handleFinalizarVenda();
   };
 
   useEffect(() => {
@@ -124,10 +270,7 @@ export function VendasTab() {
 
       if (event.key === 'Escape') {
         event.preventDefault();
-        if (showPOS) {
-          setShowPOS(false);
-          resetPOS();
-        }
+        if (showPOS) closePOSModal();
         if (showNovoCliente) setShowNovoCliente(false);
         if (showNovoAparelho) setShowNovoAparelho(false);
         return;
@@ -141,7 +284,70 @@ export function VendasTab() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showPOS, closingPOS]);
+
+  useEffect(() => {
+    if (!showPOS) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyTouchAction = document.body.style.touchAction;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.touchAction = previousBodyTouchAction;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
   }, [showPOS]);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 768px)');
+    const syncViewport = () => setIsDesktopViewport(mediaQuery.matches);
+
+    syncViewport();
+    mediaQuery.addEventListener('change', syncViewport);
+
+    return () => mediaQuery.removeEventListener('change', syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!setSidebarCollapsed || typeof window === 'undefined') return;
+    if (!window.matchMedia('(min-width: 768px)').matches) return;
+
+    if (showPOS) {
+      sidebarBeforePOSRef.current = isSidebarCollapsed;
+      if (!isSidebarCollapsed) {
+        setSidebarCollapsed(true);
+      }
+      return;
+    }
+
+    if (sidebarBeforePOSRef.current === false) {
+      setSidebarCollapsed(false);
+      sidebarBeforePOSRef.current = null;
+    }
+  }, [showPOS, isSidebarCollapsed, setSidebarCollapsed]);
+
+  useEffect(() => () => clearPosTimers(), []);
+
+  const posOverlayManualStyle: React.CSSProperties | undefined = isDesktopViewport
+    ? {
+        top: `${POS_OVERLAY_OFFSETS.top}px`,
+        right: `${POS_OVERLAY_OFFSETS.right}px`,
+        bottom: `${POS_OVERLAY_OFFSETS.bottom}px`,
+        left: `${isSidebarCollapsed ? POS_OVERLAY_OFFSETS.leftCollapsed : POS_OVERLAY_OFFSETS.leftExpanded}px`,
+      }
+    : undefined;
 
   useEffect(() => {
     if (usuario?.lojaId) {
@@ -151,6 +357,50 @@ export function VendasTab() {
     fetchAparelhos();
     fetchTecnicos();
   }, [usuario?.lojaId]);
+
+  useEffect(() => {
+    if (!isClient || !isVendasRoute) return;
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+
+    let panelParam: string | null = null;
+    if (showDeleteAllModal) panelParam = 'delete-all';
+    else if (showPOS || closingPOS) panelParam = 'pos';
+
+    if (panelParam) nextParams.set('panel', panelParam);
+    else nextParams.delete('panel');
+
+    if (panelParam === 'pos') {
+      if (showNovoCliente) nextParams.set('modal', 'novo-cliente');
+      else if (showNovoAparelho) nextParams.set('modal', 'novo-aparelho');
+      else nextParams.delete('modal');
+    } else {
+      nextParams.delete('modal');
+    }
+
+    if (!showSalesDashboard) nextParams.set('dashboard', '0');
+    else nextParams.delete('dashboard');
+
+    const currentQuery = searchParams.toString();
+    const nextQuery = nextParams.toString();
+
+    if (nextQuery === currentQuery) return;
+
+    const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  }, [
+    isClient,
+    isVendasRoute,
+    pathname,
+    router,
+    searchParams,
+    showPOS,
+    closingPOS,
+    showNovoCliente,
+    showNovoAparelho,
+    showDeleteAllModal,
+    showSalesDashboard,
+  ]);
 
   const carregarVendas = async () => {
     if (!usuario?.lojaId) return;
@@ -203,6 +453,7 @@ export function VendasTab() {
 
   const handleFinalizarVenda = async () => {
     try {
+      if (savingVenda) return;
       if (carrinho.length === 0) {
         alert('Adicione pelo menos um item ao carrinho.');
         return;
@@ -211,6 +462,8 @@ export function VendasTab() {
         alert('Selecione um cliente.');
         return;
       }
+
+      setSavingVenda(true);
 
       // Cálculos Finais
       const totalProdutos = carrinho.reduce((acc, item) => acc + item.total, 0);
@@ -226,6 +479,8 @@ export function VendasTab() {
       const custoTotal = carrinho.reduce((acc, item) => acc + (item.valorInterno * item.quantidade), 0);
       const lucro = valorFinal - custoTotal;
       const percentualLucro = valorFinal > 0 ? (lucro / valorFinal) * 100 : 0;
+      const metodoPrincipal = posPagamento.pagamentos[0]?.metodo || posPagamento.metodo;
+      const statusFinal = pagamentosTotal >= valorFinal ? posPagamento.status : 'pendente';
 
       const vendaDados = {
         clienteId: posDados.clienteId,
@@ -238,11 +493,17 @@ export function VendasTab() {
         lucro,
         percentualLucro,
         dataPagamento: posDados.dataVenda,
-        status: posPagamento.status,
-        metodo: posPagamento.metodo,
+        status: statusFinal,
+        metodo: metodoPrincipal,
         descricao: `Venda PDV - ${carrinho.length} itens`,
         garantia: posPagamento.garantia,
         descontoTotal: descontoGlobalValor,
+        pagamentos: posPagamento.pagamentos.map((pagamento) => ({
+          id: pagamento.id,
+          metodo: pagamento.metodo,
+          valor: Number(pagamento.valor) || 0,
+          parcelas: Number(pagamento.parcelas) || 1,
+        })),
         loja_id: usuario?.lojaId
       };
 
@@ -258,11 +519,18 @@ export function VendasTab() {
       }
 
       await carregarVendas();
-      
-      resetPOS();
-      setShowPOS(false);
+      setShowSaleCelebration(true);
+      playSaleSuccessSound();
+      toast.success(editingId ? 'Venda atualizada com sucesso.' : 'Venda finalizada com sucesso.');
+
+      successTimerRef.current = setTimeout(() => {
+        closePOSModal();
+      }, SALE_SUCCESS_MS);
     } catch (error) {
       console.error('Erro ao salvar venda:', error);
+      toast.error('Nao foi possivel salvar a venda.');
+    } finally {
+      setSavingVenda(false);
     }
   };
 
@@ -270,7 +538,7 @@ export function VendasTab() {
     setPosDados({ tipoVenda: 'Venda', clienteId: '', clienteNome: '', vendedor: '', tipoEntrega: 'Retirada', dataVenda: new Date().toISOString().split('T')[0] });
     setCart([]);
     setPosItem({ quantidade: 1, valorInterno: 0, valorExibir: 0, desconto: 0, tipoDesconto: 'R$', observacao: '' });
-    setPosPagamento({ metodo: 'dinheiro', parcelas: 1, detalhes: '', valorPago: 0, usarCredito: false, credito: 0, status: 'pago', garantia: '90 dias', descontoGlobal: 0, tipoDescontoGlobal: 'R$' });
+    setPosPagamento(createInitialPosPagamento());
     setEditingId(null);
   };
 
@@ -299,16 +567,29 @@ export function VendasTab() {
     } as VendaItem];
 
     setCart(itens);
-    setPosPagamento({
-      ...posPagamento,
+    const pagamentosExistentes = Array.isArray((venda as any).pagamentos) ? (venda as any).pagamentos : [];
+    const pagamentosNormalizados = pagamentosExistentes.length > 0
+      ? pagamentosExistentes.map((pagamento: any, index: number) => createPagamentoItem({
+          id: String(pagamento.id || `${venda.id}-pag-${index}`),
+          metodo: pagamento.metodo || venda.metodo,
+          valor: Number(pagamento.valor || 0),
+          parcelas: Number(pagamento.parcelas || 1),
+        }))
+      : [createPagamentoItem({ metodo: venda.metodo, valor: venda.valor, parcelas: 1 })];
+
+    const updatedPagamento: PosPagamentoState = {
+      ...createInitialPosPagamento(),
       metodo: venda.metodo,
       status: venda.status,
       garantia: venda.garantia || '90 dias',
-      descontoGlobal: venda.descontoTotal || 0
-    });
+      descontoGlobal: venda.descontoTotal || 0,
+      pagamentos: pagamentosNormalizados,
+    };
+
+    setPosPagamento(updatedPagamento);
 
     setEditingId(venda.id);
-    setShowPOS(true);
+    openPOSModal();
   };
 
   const handleDelete = async (id: string) => {
@@ -496,7 +777,12 @@ export function VendasTab() {
       alert('Nome e telefone são obrigatórios');
       return;
     }
-    const cliente = await criarCliente({ ...novoClienteData, email: novoClienteData.email || 'sem@email.com', ativo: true });
+    const clientePayload: Omit<Cliente, 'id' | 'dataCadastro' | 'lojaId'> = {
+      ...novoClienteData,
+      email: novoClienteData.email || 'sem@email.com',
+      ativo: true,
+    };
+    const cliente = await criarCliente(clientePayload as Parameters<typeof criarCliente>[0]);
     if (cliente) {
       setPosDados(prev => ({ ...prev, clienteId: cliente.id, clienteNome: cliente.nome }));
       setShowNovoCliente(false);
@@ -527,7 +813,7 @@ export function VendasTab() {
       return;
     }
 
-    const aparelho = await criarAparelho({
+    const aparelhoPayload: Omit<Aparelho, 'id' | 'dataCadastro' | 'lojaId'> = {
       marca: novoAparelhoData.marca.trim(),
       modelo: novoAparelhoData.modelo.trim(),
       imei: imeiSanitizado || undefined,
@@ -537,7 +823,9 @@ export function VendasTab() {
       ativo: true,
       capacidade: 'N/A',
       cor: 'N/A'
-    });
+    };
+
+    const aparelho = await criarAparelho(aparelhoPayload as Parameters<typeof criarAparelho>[0]);
 
     if (!aparelho) {
       alert(erroAparelhos || 'Não foi possível cadastrar o aparelho. Verifique IMEI duplicado ou tente novamente.');
@@ -550,7 +838,7 @@ export function VendasTab() {
         aparelhoId: aparelho.id,
         descricao: `${aparelho.marca} ${aparelho.modelo}`,
         valorExibir: aparelho.preco,
-        valorInterno: (aparelho as any).custo ?? custoNum
+        valorInterno: resolveAparelhoCusto(aparelho) || custoNum
       }));
       setShowNovoAparelho(false);
       setNovoAparelhoData({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' });
@@ -566,6 +854,10 @@ export function VendasTab() {
 
     const qtd = posItem.quantidade || 1;
     const valor = posItem.valorExibir || 0;
+
+    const custoDoEstoque = posItem.aparelhoId
+      ? resolveAparelhoCusto(aparelhos.find((a) => a.id === posItem.aparelhoId))
+      : 0;
     let desconto = 0;
 
     if (posItem.tipoDesconto === '%') {
@@ -581,7 +873,7 @@ export function VendasTab() {
       aparelhoId: posItem.aparelhoId || '',
       descricao: posItem.descricao || 'Item Avulso',
       quantidade: qtd,
-      valorInterno: posItem.valorInterno || 0,
+      valorInterno: posItem.valorInterno || custoDoEstoque || 0,
       valorExibir: valor,
       desconto: posItem.desconto || 0,
       tipoDesconto: posItem.tipoDesconto as 'R$' | '%',
@@ -597,14 +889,59 @@ export function VendasTab() {
     setCart(carrinho.filter(item => item.id !== id));
   };
 
+  const handleAddPagamento = () => {
+    setPosPagamento((current) => ({
+      ...current,
+      pagamentos: [
+        ...current.pagamentos,
+        createPagamentoItem({
+          metodo: current.pagamentos[current.pagamentos.length - 1]?.metodo || current.metodo,
+        }),
+      ],
+    }));
+  };
+
+  const handleUpdatePagamento = (pagamentoId: string, patch: Partial<PosPagamentoItem>) => {
+    setPosPagamento((current) => ({
+      ...current,
+      pagamentos: current.pagamentos.map((pagamento) => (
+        pagamento.id === pagamentoId ? { ...pagamento, ...patch } : pagamento
+      )),
+    }));
+  };
+
+  const handleRemovePagamento = (pagamentoId: string) => {
+    setPosPagamento((current) => {
+      const nextPagamentos = current.pagamentos.filter((pagamento) => pagamento.id !== pagamentoId);
+      return {
+        ...current,
+        pagamentos: nextPagamentos.length > 0 ? nextPagamentos : [createPagamentoItem()],
+      };
+    });
+  };
+
+  const handleReceberValorTotal = () => {
+    setPosPagamento((current) => ({
+      ...current,
+      pagamentos: [
+        createPagamentoItem({
+          metodo: current.pagamentos[0]?.metodo || current.metodo,
+          valor: totalFinal > 0 ? Number(totalFinal.toFixed(2)) : 0,
+          parcelas: current.pagamentos[0]?.parcelas || 1,
+        }),
+      ],
+    }));
+  };
+
   // Cálculos do PDV em tempo real
   const subtotalCarrinho = carrinho.reduce((acc, item) => acc + item.total, 0);
   const descontoGlobalValor = posPagamento.tipoDescontoGlobal === '%' 
     ? subtotalCarrinho * (posPagamento.descontoGlobal / 100) 
     : posPagamento.descontoGlobal;
   const totalFinal = subtotalCarrinho - descontoGlobalValor;
-  const troco = Math.max(0, posPagamento.valorPago - totalFinal);
-  const saldo = Math.max(0, totalFinal - posPagamento.valorPago);
+  const pagamentosTotal = useMemo(() => posPagamento.pagamentos.reduce((sum, pagamento) => sum + (Number(pagamento.valor) || 0), 0), [posPagamento.pagamentos]);
+  const troco = Math.max(0, pagamentosTotal - totalFinal);
+  const saldo = Math.max(0, totalFinal - pagamentosTotal);
 
   const VENDA_COLUMNS: ExportColumn[] = [
     { key: 'id', label: 'ID' },
@@ -1052,7 +1389,7 @@ export function VendasTab() {
   };
 
   return (
-    <div className="panel-shell space-y-4 sm:space-y-6 pb-40 sm:pb-6">
+    <div className="panel-shell relative min-h-[calc(100dvh-12.625rem)] sm:min-h-[calc(100dvh-13.125rem)] space-y-4 sm:space-y-6 pb-40 sm:pb-6">
         {/* Header com Botão */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
           <div>
@@ -1085,7 +1422,7 @@ export function VendasTab() {
             </Button>
             <Button 
               onClick={() => {
-                setShowPOS(true);
+                openPOSModal();
                 if (editingId) setEditingId(null);
               }}
               className="btn-ios h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
@@ -1106,53 +1443,93 @@ export function VendasTab() {
         </div>
 
         {/* Modal PDV Completo */}
-        {showPOS && (
-          <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-            <div className="glass w-full max-w-6xl min-h-[100dvh] sm:min-h-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] rounded-none sm:rounded-[2.5rem] shadow-2xl flex flex-col border border-white/20 overflow-hidden sm:my-4">
+        {isClient && (showPOS || closingPOS) && createPortal(
+          <div
+            className={`modal-overlay pos-modal-overlay z-[24] !inset-0 !items-center !justify-center !p-3 sm:!p-4 !overflow-y-auto ${closingPOS ? 'modal-overlay-out' : ''}`}
+            style={posOverlayManualStyle}
+          >
+            <div className={`glass modal-panel modal-panel-no-scale pos-modal-panel pos-panel-enter relative !m-auto h-auto min-h-0 max-h-[calc(100dvh-4.5rem)] w-[min(1360px,calc(100vw-2rem))] max-w-[1360px] flex flex-col rounded-[1.5rem] will-change-transform ${closingPOS ? 'modal-panel-out pos-panel-exit' : ''}`}>
+              {showSaleCelebration && (
+                <div className="sale-success-overlay">
+                  <div className="sale-success-badge">🎉 PARABENS PELA VENDA 🎉</div>
+                  {SALE_EMOJIS.map((emoji, index) => (
+                    <span
+                      key={`${emoji}-${index}`}
+                      className="sale-success-emoji"
+                      style={{
+                        ['--emoji-x' as '--emoji-x']: `${12 + index * 14}`,
+                        ['--emoji-delay' as '--emoji-delay']: `${index * 70}`,
+                      } as React.CSSProperties}
+                    >
+                      {emoji}
+                    </span>
+                  ))}
+                  {Array.from({ length: 18 }).map((_, index) => (
+                    <span
+                      key={index}
+                      className="sale-confetti"
+                      style={{
+                        ['--confetti-x' as '--confetti-x']: `${6 + index * 5}`,
+                        ['--confetti-delay' as '--confetti-delay']: `${index * 32}`,
+                        ['--confetti-rotate' as '--confetti-rotate']: `${(index % 6) * 24}`,
+                        ['--confetti-drift' as '--confetti-drift']: `${(index % 2 === 0 ? 1 : -1) * (28 + index * 3)}`,
+                        ['--confetti-hue' as '--confetti-hue']: `${200 + (index % 5) * 22}`,
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                </div>
+              )}
               
               {/* Header do PDV */}
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/20 dark:bg-white/5 backdrop-blur-xl sticky top-0 z-20">
+              <div className="modal-header !py-2.5 !px-3 backdrop-blur-xl max-sm:flex-col max-sm:items-start max-sm:gap-2">
                 <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-6 h-6 text-blue-600" />
-                  <h2 className="text-xl font-bold">{editingId ? 'Editar Venda' : 'Nova Venda'}</h2>
+                  <ShoppingCart className="w-5 h-5 text-blue-600" />
+                  <h2 className="modal-title">{editingId ? 'Editar Venda' : 'Nova Venda'}</h2>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => { setShowPOS(false); resetPOS(); }}>
-                  <X className="w-6 h-6" />
-                </Button>
+                <div className="flex items-center gap-2 max-sm:w-full max-sm:justify-end">
+                  <Button onClick={handleFinalizarVenda} disabled={savingVenda} className="h-9 bg-green-600 hover:bg-green-700 gap-2 shadow-lg shadow-green-500/20 disabled:opacity-70">
+                    <Save className="w-4 h-4" /> {savingVenda ? 'SALVANDO...' : 'FINALIZAR VENDA'}
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => closePOSModal()}>
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
               </div>
 
               {/* Resumo Fixo (Cards) - Liquid Glass */}
-              <div className="p-4 bg-white/10 dark:bg-black/20 backdrop-blur-md border-b border-white/10 z-10">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">📦 Valor Produtos</p>
-                    <p className="text-lg font-bold">R$ {subtotalCarrinho.toFixed(2)}</p>
+              <div className="p-2 bg-white/10 dark:bg-black/20 backdrop-blur-md border-b border-white/10 z-10">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <GlassCard className="!p-2 rounded-xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold uppercase">📦 Valor Produtos</p>
+                    <p className="text-sm font-bold leading-tight">R$ {subtotalCarrinho.toFixed(2)}</p>
                   </GlassCard>
-                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">💰 Pagamentos</p>
-                    <p className="text-lg font-bold">R$ {posPagamento.valorPago.toFixed(2)}</p>
+                  <GlassCard className="!p-2 rounded-xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold uppercase">💰 Pagamentos</p>
+                    <p className="text-sm font-bold leading-tight">R$ {pagamentosTotal.toFixed(2)}</p>
                   </GlassCard>
-                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">📉 Saldo</p>
-                    <p className="text-lg font-bold">R$ {saldo.toFixed(2)}</p>
+                  <GlassCard className="!p-2 rounded-xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold uppercase">📉 Saldo</p>
+                    <p className="text-sm font-bold leading-tight">R$ {saldo.toFixed(2)}</p>
                   </GlassCard>
-                  <GlassCard className="!p-3 rounded-2xl bg-white/30 dark:bg-white/5 border-white/10">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">💵 Troco</p>
-                    <p className="text-lg font-bold">R$ {troco.toFixed(2)}</p>
+                  <GlassCard className="!p-2 rounded-xl bg-white/30 dark:bg-white/5 border-white/10">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold uppercase">💵 Troco</p>
+                    <p className="text-sm font-bold leading-tight">R$ {troco.toFixed(2)}</p>
                   </GlassCard>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 scrollbar-soft">
+              <div className="modal-body modal-scrollbar !pt-2 !pb-1.5 !px-2.5 flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-2.5 items-start">
+                  <div className="xl:col-span-8 space-y-2.5">
                 
                 {/* Seção 1: Dados da Venda */}
-                <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
-                  <div className="pb-3 mb-3 border-b border-white/10">
+                <GlassCard className="!p-2.5 bg-white/40 dark:bg-white/5 rounded-2xl border-white/10">
+                  <div className="pb-2 mb-2 border-b border-white/10">
                     <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <User className="w-4 h-4" /> Dados da Venda
                     </h3>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_180px] gap-2">
                     <select 
                       className="input-glass"
                       value={posDados.tipoVenda}
@@ -1163,21 +1540,21 @@ export function VendasTab() {
                       <option>Troca</option>
                     </select>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2 min-w-0">
                   <select
-                      className="input-glass flex-1"
+                      className="input-glass min-w-0 flex-1"
                       value={posDados.clienteId}
                     onChange={(e) => {
                       const cliente = clientes.find(c => c.id === e.target.value);
                         setPosDados({ ...posDados, clienteId: e.target.value, clienteNome: cliente?.nome || '' });
                     }}
                   >
-                    <option value="">Selecionar Cliente</option>
+                    <option value="">Cliente</option>
                     {clientes.map(c => (
                       <option key={c.id} value={c.id}>{c.nome}</option>
                     ))}
                   </select>
-                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoCliente(true)} className="h-full aspect-square bg-white/50 backdrop-blur">
+                  <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoCliente(true)} className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur">
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
@@ -1187,7 +1564,7 @@ export function VendasTab() {
                       value={posDados.vendedor}
                       onChange={e => setPosDados({...posDados, vendedor: e.target.value})}
                     >
-                      <option value="">Vendedor (Opcional)</option>
+                      <option value="">Vendedor</option>
                       {tecnicos.map(t => <option key={t.id} value={t.nome}>{t.nome}</option>)}
                     </select>
 
@@ -1211,274 +1588,308 @@ export function VendasTab() {
                 </GlassCard>
 
                 {/* Seção 2: Itens da Venda */}
-                <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
-                  <div className="pb-3 mb-3 border-b border-white/10">
+                <GlassCard className="!p-2.5 bg-white/40 dark:bg-white/5 rounded-2xl border-white/10">
+                  <div className="pb-2 mb-2 border-b border-white/10">
                     <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <ShoppingCart className="w-4 h-4" /> Itens da Venda
                     </h3>
                   </div>
-                  <div className="space-y-4">
+                  <div className="space-y-1.5">
                     {/* Input de Item */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-white/30 dark:bg-black/30 p-3 rounded-xl border border-white/10">
-                      <div className="md:col-span-4 flex gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1.75fr)_minmax(88px,0.55fr)_minmax(120px,0.8fr)_minmax(120px,0.8fr)_minmax(180px,1fr)_64px] gap-2 items-end bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10 animate-in fade-in slide-in-from-top-2 duration-300">
+                      <div className="flex gap-2 min-w-0 md:col-span-2 xl:col-span-1">
                         <select
-                          className="input-glass flex-1"
+                          className="input-glass min-w-0 flex-1 transition-all duration-200 hover:shadow-md"
                           value={posItem.aparelhoId}
                           onChange={(e) => {
                             const aparelho = aparelhos.find(a => a.id === e.target.value);
+                            const custo = resolveAparelhoCusto(aparelho);
                             setPosItem({
                               ...posItem,
                               aparelhoId: e.target.value,
                               descricao: aparelho ? `${aparelho.marca} ${aparelho.modelo}` : '',
                               valorExibir: aparelho ? aparelho.preco : 0,
-                              valorInterno: aparelho ? (aparelho as any).custo || 0 : 0
+                              valorInterno: aparelho ? custo : 0
                             });
                           }}
                         >
-                          <option value="">Selecionar aparelho</option>
+                          <option value="">Produto</option>
                           {aparelhos.map(a => (
                             <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco.toFixed(2).replace('.', ',')}</option>
                           ))}
                         </select>
-                        <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-full aspect-square bg-white/50 backdrop-blur">
+                        <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
                           <Plus className="h-4 w-4" />
                         </Button>
                       </div>
 
-              <div className="md:col-span-1">
-                <label className="text-xs text-gray-500 ml-1">Qtd</label>
-                <input type="text" inputMode="numeric" pattern="[0-9]*" min="1" className="input-glass" value={posItem.quantidade} onChange={e => setPosItem({...posItem, quantidade: parseInt(e.target.value.replace(/\D/g, '')) || 1})} />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Custo (R$)</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  min="0"
-                  className="input-glass border-blue-500/30"
-                  placeholder="0,00"
-                  value={posItem.valorInterno}
-                  onChange={e => setPosItem({...posItem, valorInterno: parseFloat(e.target.value.replace(',', '.')) || 0})}
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Venda (R$)</label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  min="0"
-                  className="input-glass border-green-500/30"
-                  placeholder="0,00"
-                  value={posItem.valorExibir}
-                  onChange={e => setPosItem({...posItem, valorExibir: parseFloat(e.target.value.replace(',', '.')) || 0})}
-                />
+                      <div className="md:col-span-1 xl:col-span-1">
+                        <label className="text-[11px] text-gray-500 ml-1">Qtd</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          min="1"
+                          className="input-glass h-11 transition-all duration-200 hover:shadow-md focus:shadow-lg"
+                          value={posItem.quantidade}
+                          onChange={e => setPosItem({...posItem, quantidade: parseInt(e.target.value.replace(/\D/g, '')) || 1})}
+                        />
                       </div>
 
-                      <div className="md:col-span-1 flex gap-1">
-                        <div className="flex-1">
-                          <label className="text-xs text-gray-500 ml-1">Desconto</label>
-                          <input type="number" inputMode="decimal" step="0.01" min="0" className="input-glass" value={posItem.desconto} onChange={e => setPosItem({...posItem, desconto: parseFloat(e.target.value.replace(',', '.')) || 0})} />
-                        </div>
-                        <div className="w-16">
-                          <label className="text-xs text-gray-500 ml-1">Tipo</label>
-                <select
-                            className="input-glass px-1"
-                            value={posItem.tipoDesconto}
-                            onChange={e => setPosItem({...posItem, tipoDesconto: e.target.value as any})}
-                >
-                            <option>R$</option>
-                            <option>%</option>
-                </select>
-                        </div>
-              </div>
-
-                      <div className="md:col-span-1">
-                        <label className="text-xs text-gray-500 ml-1">Obs</label>
-                        <input type="text" className="input-glass" value={posItem.observacao} onChange={e => setPosItem({...posItem, observacao: e.target.value})} />
+                      <div className="md:col-span-1 xl:col-span-1">
+                        <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Custo (R$)</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className="input-glass h-11 border-blue-500/30 transition-all duration-200 hover:shadow-md focus:shadow-lg"
+                          placeholder="0,00"
+                          value={formatCurrencyField(posItem.valorInterno || 0)}
+                          onChange={e => setPosItem({...posItem, valorInterno: parseCurrencyField(e.target.value)})}
+                        />
                       </div>
 
-                      <div className="md:col-span-1">
-                        <Button onClick={handleAddItem} className="w-full h-[46px] bg-blue-600 hover:bg-blue-700 rounded-xl shadow-lg shadow-blue-500/20">
-                          <Plus className="w-4 h-4" />
+                      <div className="md:col-span-1 xl:col-span-1">
+                        <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Venda (R$)</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className="input-glass h-11 border-green-500/30 transition-all duration-200 hover:shadow-md focus:shadow-lg"
+                          placeholder="0,00"
+                          value={formatCurrencyField(posItem.valorExibir || 0)}
+                          onChange={e => setPosItem({...posItem, valorExibir: parseCurrencyField(e.target.value)})}
+                        />
+                      </div>
+
+                      <div className="md:col-span-1 xl:col-span-1">
+                        <label className="text-[11px] text-gray-500 ml-1">Desconto</label>
+                        <div className="flex h-11 overflow-hidden rounded-xl border border-white/10 bg-white/20 dark:bg-black/20 transition-all duration-200 focus-within:border-blue-500/50 focus-within:ring-2 focus-within:ring-blue-500/15">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="min-w-0 flex-1 border-0 bg-transparent px-3 text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                            placeholder="0,00"
+                            value={formatCurrencyField(posItem.desconto || 0)}
+                            onChange={e => setPosItem({...posItem, desconto: parseCurrencyField(e.target.value)})}
+                          />
+                          <div className="flex shrink-0 items-center gap-1 border-l border-white/10 px-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPosItem({...posItem, tipoDesconto: 'R$'})}
+                              className={`h-7 min-w-7 rounded-full px-2 text-[10px] font-bold transition-all duration-200 ${posItem.tipoDesconto === 'R$' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25' : 'bg-white/70 text-slate-700 hover:bg-white dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/20'}`}
+                            >
+                              R$
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPosItem({...posItem, tipoDesconto: '%'})}
+                              className={`h-7 min-w-7 rounded-full px-2 text-[10px] font-bold transition-all duration-200 ${posItem.tipoDesconto === '%' ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25' : 'bg-white/70 text-slate-700 hover:bg-white dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/20'}`}
+                            >
+                              %
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-2 xl:col-span-1">
+                        <Button onClick={handleAddItem} className="w-full h-11 bg-blue-600 hover:bg-blue-700 rounded-xl shadow-lg shadow-blue-500/20 transition-all duration-200 hover:-translate-y-0.5">
+                          <Plus className="w-4 h-5" />
                         </Button>
                       </div>
                     </div>
 
                     {/* Tabela de Itens */}
-                    <div className="border border-white/10 rounded-xl overflow-hidden">
-                      <table className="w-full text-sm">
+                    {carrinho.length > 0 ? (
+                      <div className="border border-white/10 rounded-xl overflow-hidden">
+                        <table className="w-full text-xs">
                         <thead className="bg-white/20 dark:bg-black/20 text-xs uppercase text-gray-500">
                           <tr>
-                            <th className="p-3 text-left">Produto</th>
-                            <th className="p-3 text-center">Qtd</th>
-                            <th className="p-3 text-right">Custo Unit.</th>
-                            <th className="p-3 text-right">Vlr Unit.</th>
-                            <th className="p-3 text-right">Desc.</th>
-                            <th className="p-3 text-right">Total</th>
-                            <th className="p-3 text-center">Ação</th>
+                            <th className="p-1.5 text-left">Produto</th>
+                            <th className="p-1.5 text-center">Qtd</th>
+                            <th className="p-1.5 text-right">Custo Unit.</th>
+                            <th className="p-1.5 text-right">Vlr Unit.</th>
+                            <th className="p-1.5 text-right">Desc.</th>
+                            <th className="p-1.5 text-right">Total</th>
+                            <th className="p-1.5 text-center">Ação</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/10">
                           {carrinho.map(item => (
                             <tr key={item.id} className="hover:bg-white/5">
-                              <td className="p-3">{item.descricao} <span className="text-xs text-gray-400 block">{item.observacao}</span></td>
-                              <td className="p-3 text-center">{item.quantidade}</td>
-                              <td className="p-3 text-right text-blue-500">R$ {item.valorInterno.toFixed(2)}</td>
-                              <td className="p-3 text-right">R$ {item.valorExibir.toFixed(2)}</td>
-                              <td className="p-3 text-right text-red-500">
+                              <td className="p-1.5">{item.descricao} <span className="text-[10px] text-gray-400 block">{item.observacao}</span></td>
+                              <td className="p-1.5 text-center">{item.quantidade}</td>
+                              <td className="p-1.5 text-right text-blue-500">R$ {item.valorInterno.toFixed(2)}</td>
+                              <td className="p-1.5 text-right">R$ {item.valorExibir.toFixed(2)}</td>
+                              <td className="p-1.5 text-right text-red-500">
                                 {item.desconto > 0 ? `-${item.tipoDesconto === 'R$' ? 'R$' : ''}${item.desconto}${item.tipoDesconto === '%' ? '%' : ''}` : '-'}
                               </td>
-                              <td className="p-3 text-right font-bold">R$ {item.total.toFixed(2)}</td>
-                              <td className="p-3 text-center">
+                              <td className="p-1.5 text-right font-bold">R$ {item.total.toFixed(2)}</td>
+                              <td className="p-1.5 text-center">
                                 <button onClick={() => handleRemoveItem(item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
                               </td>
                             </tr>
                           ))}
-                          {carrinho.length === 0 && (
-                            <tr><td colSpan={7} className="p-4 text-center text-gray-400">Nenhum item adicionado</td></tr>
-                          )}
                         </tbody>
                         <tfoot className="bg-white/10 dark:bg-black/10 font-bold">
                           <tr>
-                            <td colSpan={5} className="p-3 text-right">Subtotal:</td>
-                            <td className="p-3 text-right">R$ {subtotalCarrinho.toFixed(2)}</td>
+                            <td colSpan={5} className="p-1.5 text-right">Subtotal:</td>
+                            <td className="p-1.5 text-right">R$ {subtotalCarrinho.toFixed(2)}</td>
                             <td></td>
                           </tr>
                         </tfoot>
-                      </table>
-                    </div>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-white/20 bg-white/20 dark:bg-black/20 px-3 py-2 text-center text-xs text-gray-500">
+                        Nenhum item adicionado
+                      </div>
+                    )}
 
                     {/* Desconto Total */}
-                    <div className="flex justify-end items-center gap-2 bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10">
+                    <div className="flex flex-wrap justify-end items-center gap-2 bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10">
                       <span className="text-sm font-medium">Desconto Total:</span>
                       <input 
-                        type="number" 
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
+                        type="text" 
+                        inputMode="numeric"
                         className="w-24 input-glass py-1 h-8 text-right" 
-                        value={posPagamento.descontoGlobal} 
-                        onChange={e => setPosPagamento({...posPagamento, descontoGlobal: parseFloat(e.target.value.replace(',', '.')) || 0})} 
+                        value={formatCurrencyField(posPagamento.descontoGlobal)} 
+                        onChange={e => setPosPagamento((current): PosPagamentoState => ({...current, descontoGlobal: parseCurrencyField(e.target.value)}))} 
                       />
                       <div className="flex border border-white/20 rounded-lg overflow-hidden">
                         <button 
                           type="button"
                           className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === 'R$' ? 'bg-blue-600 text-white' : 'bg-white/50 dark:bg-black/50'}`}
-                          onClick={() => setPosPagamento({...posPagamento, tipoDescontoGlobal: 'R$'})}
+                          onClick={() => setPosPagamento((current): PosPagamentoState => ({...current, tipoDescontoGlobal: 'R$'}))}
                         >R$</button>
                         <button 
                           type="button"
                           className={`px-2 py-1 text-xs ${posPagamento.tipoDescontoGlobal === '%' ? 'bg-blue-600 text-white' : 'bg-white/50 dark:bg-black/50'}`}
-                          onClick={() => setPosPagamento({...posPagamento, tipoDescontoGlobal: '%'})}
+                          onClick={() => setPosPagamento((current): PosPagamentoState => ({...current, tipoDescontoGlobal: '%'}))}
                         >%</button>
                       </div>
-                      <button type="button" onClick={() => setPosPagamento({...posPagamento, descontoGlobal: 0})} className="text-xs text-red-500 underline ml-2">Limpar</button>
+                      <button type="button" onClick={() => setPosPagamento((current): PosPagamentoState => ({...current, descontoGlobal: 0}))} className="text-xs text-red-500 underline ml-2">Limpar</button>
                     </div>
                   </div>
                 </GlassCard>
 
+                  </div>
+
                 {/* Seção 3: Pagamento */}
-                <GlassCard className="bg-white/40 dark:bg-white/5 rounded-[2rem] border-white/10">
-                  <div className="pb-3 mb-3 border-b border-white/10">
+                <div className="xl:col-span-4 space-y-2.5">
+                <GlassCard className="!p-2.5 bg-white/40 dark:bg-white/5 rounded-2xl border-white/10">
+                  <div className="pb-2 mb-2 border-b border-white/10">
                     <h3 className="text-sm font-bold uppercase text-slate-500 flex items-center gap-2">
                       <CreditCard className="w-4 h-4" /> Dados do Pagamento
                     </h3>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-500 ml-1">Forma Pagamento</label>
-                      <select 
-                        className="input-glass"
-                        value={posPagamento.metodo}
-                        onChange={e => setPosPagamento({...posPagamento, metodo: e.target.value as any})}
-                      >
-                        <option value="dinheiro">Dinheiro</option>
-                        <option value="cartao_credito">Cartão Crédito</option>
-                        <option value="cartao_debito">Cartão Débito</option>
-                        <option value="pix">PIX</option>
-                        <option value="boleto">Boleto</option>
-                      </select>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs text-gray-500 ml-1">Formas de Pagamento</label>
+                      <Button type="button" variant="outline" size="sm" onClick={handleAddPagamento} className="h-8 gap-2">
+                        <Plus className="h-4 w-4" /> Adicionar forma
+                      </Button>
                     </div>
-                    <div>
-                      <label className="text-xs text-gray-500 ml-1">Parcelas</label>
-                      <select 
-                        className="input-glass"
-                        value={posPagamento.parcelas}
-                        disabled={posPagamento.metodo !== 'cartao_credito'}
-                        onChange={e => setPosPagamento({...posPagamento, parcelas: parseInt(e.target.value)})}
-                      >
-                        {[1,2,3,4,5,6,10,12].map(p => <option key={p} value={p}>{p}x</option>)}
-                      </select>
+
+                    <div className="space-y-2">
+                      {posPagamento.pagamentos.map((pagamento, index) => (
+                        <div key={pagamento.id} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.1fr)_minmax(120px,0.65fr)_minmax(92px,0.55fr)_42px] gap-2 items-end bg-white/20 dark:bg-black/20 rounded-xl border border-white/10 p-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                          <div>
+                            <label className="text-[11px] text-gray-500 ml-1">Método {index + 1}</label>
+                            <select
+                              className="input-glass"
+                              value={pagamento.metodo}
+                              onChange={(e) => handleUpdatePagamento(pagamento.id, { metodo: e.target.value as Venda['metodo'] })}
+                            >
+                              <option value="dinheiro">Dinheiro</option>
+                              <option value="cartao_credito">Cartão Crédito</option>
+                              <option value="cartao_debito">Cartão Débito</option>
+                              <option value="pix">PIX</option>
+                              <option value="boleto">Boleto</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-gray-500 ml-1">Valor</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              className="input-glass font-bold text-green-600"
+                              placeholder="0,00"
+                              value={formatCurrencyField(pagamento.valor || 0)}
+                              onChange={(e) => handleUpdatePagamento(pagamento.id, { valor: parseCurrencyField(e.target.value) })}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-gray-500 ml-1">Parcelas</label>
+                            <select
+                              className="input-glass"
+                              value={pagamento.parcelas}
+                              disabled={pagamento.metodo !== 'cartao_credito'}
+                              onChange={(e) => handleUpdatePagamento(pagamento.id, { parcelas: parseInt(e.target.value) })}
+                            >
+                              {[1, 2, 3, 4, 5, 6, 10, 12].map((parcela) => <option key={parcela} value={parcela}>{parcela}x</option>)}
+                            </select>
+                          </div>
+                          <div className="flex items-center justify-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemovePagamento(pagamento.id)}
+                              className="h-9 w-9 text-red-500 hover:bg-red-500/10"
+                              disabled={posPagamento.pagamentos.length === 1}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <label className="text-xs text-gray-500 ml-1">Valor Pago (R$)</label>
-                      <input 
-                        type="number" 
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        className="input-glass font-bold text-green-600" 
-                        placeholder="0,00"
-                        value={posPagamento.valorPago} 
-                        onChange={e => setPosPagamento({...posPagamento, valorPago: parseFloat(e.target.value.replace(',', '.')) || 0})} 
-                      />
-                      <button
-                        type="button"
-                        className="text-xs text-blue-600 mt-1"
-                        onClick={() => setPosPagamento({ ...posPagamento, valorPago: totalFinal > 0 ? Number(totalFinal.toFixed(2)) : 0 })}
-                      >
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/20 dark:bg-black/20 px-3 py-2 text-xs sm:text-sm">
+                      <div className="flex flex-wrap items-center gap-3 text-gray-600 dark:text-gray-300">
+                        <span>Total pago: <strong>R$ {pagamentosTotal.toFixed(2)}</strong></span>
+                        <span>Restante: <strong>R$ {saldo.toFixed(2)}</strong></span>
+                        <span>Troco: <strong>R$ {troco.toFixed(2)}</strong></span>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={handleReceberValorTotal} className="h-8 gap-2">
                         Receber valor total
-                      </button>
+                      </Button>
                     </div>
+
                     <div>
                       <label className="text-xs text-gray-500 ml-1">Garantia</label>
                       <input 
                         type="text" 
                         className="input-glass" 
                         value={posPagamento.garantia} 
-                        onChange={e => setPosPagamento({...posPagamento, garantia: e.target.value})} 
+                        onChange={e => setPosPagamento((current): PosPagamentoState => ({...current, garantia: e.target.value}))} 
                       />
                     </div>
-                    <div className="sm:col-span-2">
+                    <div className="sm:col-span-2 xl:col-span-1">
                       <label className="text-xs text-gray-500 ml-1">Detalhes / Obs Pagamento</label>
                       <input 
                         type="text" 
                         className="input-glass" 
                         value={posPagamento.detalhes} 
-                        onChange={e => setPosPagamento({...posPagamento, detalhes: e.target.value})} 
+                        onChange={e => setPosPagamento((current): PosPagamentoState => ({...current, detalhes: e.target.value}))} 
                       />
-                    </div>
-                    <div className="flex items-end mb-2">
-                      <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={posPagamento.usarCredito} 
-                          onChange={e => setPosPagamento({...posPagamento, usarCredito: e.target.checked})} 
-                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        Usar Crédito Cliente
-                      </label>
                     </div>
                   </div>
                 </GlassCard>
+                </div>
+
+                </div>
 
               </div>
 
               {/* Footer Ações */}
-              <div className="p-6 border-t border-white/10 bg-white/20 dark:bg-white/5 backdrop-blur-xl flex justify-end gap-3 sticky bottom-0 z-20">
-                <Button variant="outline" onClick={() => { setShowPOS(false); resetPOS(); }} className="gap-2 bg-white/50 hover:bg-white/80 border-white/20">
+              <div className="shrink-0 p-2 border-t border-white/10 bg-white/20 dark:bg-white/5 backdrop-blur-xl flex justify-end gap-2">
+                <Button variant="outline" onClick={() => closePOSModal()} className="h-9 gap-2 bg-white/50 hover:bg-white/80 border-white/20">
                   <Ban className="w-4 h-4" /> Cancelar
                 </Button>
-                <Button onClick={handleFinalizarVenda} className="bg-green-600 hover:bg-green-700 gap-2 w-full sm:w-auto shadow-lg shadow-green-500/20">
-                  <Save className="w-4 h-4" /> FINALIZAR VENDA
-              </Button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         <div className="flex justify-end">
@@ -1810,14 +2221,14 @@ export function VendasTab() {
           </div>
         </GlassCard>
       {/* Modal Novo Cliente */}
-      {showNovoCliente && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center z-[60] p-4 overflow-y-auto">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">Novo Cliente</h3>
+      {isClient && showNovoCliente && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[60]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
+              <h3 className="modal-title">Novo Cliente</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoCliente(false)}><X className="w-4 h-4" /></Button>
             </div>
-            <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
+            <div className="modal-body-scroll">
               <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
                 <input type="text" placeholder="Nome *" required className="input-glass" value={novoClienteData.nome} onChange={e => setNovoClienteData({...novoClienteData, nome: e.target.value})} />
                 <input type="tel" inputMode="tel" placeholder="Telefone *" required className="input-glass" value={novoClienteData.telefone} onChange={e => setNovoClienteData({...novoClienteData, telefone: e.target.value})} />
@@ -1827,21 +2238,22 @@ export function VendasTab() {
               </form>
             </div>
           </GlassCard>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Modal Novo Aparelho */}
-      {showNovoAparelho && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-[60] p-4 overflow-y-auto">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+      {isClient && showNovoAparelho && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[60]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
               <div>
-                <h3 className="text-lg font-bold">Novo Aparelho</h3>
-                <p className="text-xs text-muted-foreground">Cadastro rápido para adicionar item na venda.</p>
+                <h3 className="modal-title">Novo Aparelho</h3>
+                <p className="modal-subtitle">Cadastro rápido para adicionar item na venda.</p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setShowNovoAparelho(false)}><X className="w-4 h-4" /></Button>
             </div>
-            <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
+            <div className="modal-body-scroll">
               <form onSubmit={handleNovoAparelhoSubmit} className="space-y-4">
                 <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
                 <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
@@ -1906,23 +2318,24 @@ export function VendasTab() {
               </form>
             </div>
           </GlassCard>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showDeleteAllModal && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] p-4 overflow-y-auto">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0 my-6 sm:my-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
+      {isClient && showDeleteAllModal && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[70]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
               <div>
-                <h3 className="text-lg font-bold text-red-600">Apagar todas as vendas</h3>
-                <p className="text-xs text-muted-foreground mt-1">Esta ação remove definitivamente todos os registros de vendas da loja.</p>
+                <h3 className="modal-title text-red-600">Apagar todas as vendas</h3>
+                <p className="modal-subtitle">Esta ação remove definitivamente todos os registros de vendas da loja.</p>
               </div>
               <Button variant="ghost" size="icon" onClick={handleCancelDeleteAll}>
                 <X className="w-4 h-4" />
               </Button>
             </div>
 
-            <div className="p-6 max-h-[calc(100dvh-8rem)] overflow-y-auto scrollbar-soft">
+            <div className="modal-body-scroll">
               <form onSubmit={handleDeleteAllVendas} className="space-y-4">
                 <input
                   type="email"
@@ -1963,7 +2376,8 @@ export function VendasTab() {
               </form>
             </div>
           </GlassCard>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

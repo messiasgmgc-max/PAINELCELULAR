@@ -666,14 +666,14 @@ export function EtiquetasTab() {
       </GlassCard>
 
       {showEditor && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-3xl bg-white/95 dark:bg-black/90 rounded-3xl space-y-4">
-            <div>
-              <h3 className="text-lg font-bold">{modeloEmEdicao.id === 'novo' ? 'Novo Modelo Global' : 'Editar Modelo Global'}</h3>
-              <p className="text-sm text-muted-foreground">Esses modelos ficam disponíveis para todas as lojas.</p>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full space-y-4">
+            <div className="modal-header block">
+              <h3 className="modal-title">{modeloEmEdicao.id === 'novo' ? 'Novo Modelo Global' : 'Editar Modelo Global'}</h3>
+              <p className="modal-subtitle">Esses modelos ficam disponíveis para todas as lojas.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="modal-body grid grid-cols-1 md:grid-cols-3 gap-3 pt-0">
               <div className="md:col-span-2">
                 <label className="text-xs font-bold text-muted-foreground uppercase">Nome</label>
                 <input
@@ -737,7 +737,7 @@ export function EtiquetasTab() {
               <label className="flex items-center gap-2"><input type="checkbox" checked={modeloEmEdicao.mostrarImei} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarImei: event.target.checked }))} /> Mostrar IMEI</label>
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 px-[1.125rem] pb-[1.125rem]">
               <Button variant="outline" onClick={() => setShowEditor(false)}>Cancelar</Button>
               <Button onClick={salvarModelo}>Salvar Modelo</Button>
             </div>

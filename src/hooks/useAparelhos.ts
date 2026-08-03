@@ -9,7 +9,7 @@ interface UseAparelhosReturn {
   error: string | null;
   fetchAparelhos: () => Promise<void>;
   buscarAparelhos: (termo: string) => Promise<void>;
-  criarAparelho: (dados: Omit<Aparelho, "id" | "dataCadastro">) => Promise<Aparelho | null>;
+  criarAparelho: (dados: Omit<Aparelho, "id" | "dataCadastro" | "lojaId">) => Promise<Aparelho | null>;
   atualizarAparelho: (id: string, dados: Partial<Aparelho>) => Promise<Aparelho | null>;
   deletarAparelho: (id: string) => Promise<boolean>;
 }
@@ -64,7 +64,7 @@ export function useAparelhos(): UseAparelhosReturn {
   }, [usuario?.lojaId]);
 
   const criarAparelho = useCallback(
-    async (dados: Omit<Aparelho, "id" | "dataCadastro">) => {
+    async (dados: Omit<Aparelho, "id" | "dataCadastro" | "lojaId">) => {
       if (!usuario?.lojaId) return null;
       setLoading(true);
       setError(null);

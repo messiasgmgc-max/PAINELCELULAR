@@ -213,13 +213,13 @@ export default function SuperAdminTab() {
 
       {/* Modal Nova Loja */}
       {showNovaLoja && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
-            <div className="pb-4 border-b border-white/10 mb-4">
-              <h3 className="text-lg font-bold">Criar Nova Loja</h3>
-              <p className="text-sm text-muted-foreground">Defina os dados da nova unidade</p>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header block">
+              <h3 className="modal-title">Criar Nova Loja</h3>
+              <p className="modal-subtitle">Defina os dados da nova unidade</p>
             </div>
-            <div>
+            <div className="modal-body">
               <form onSubmit={handleCriarLoja} className="space-y-4">
                 <div>
                   <label className="text-sm font-medium ml-1">Nome da Loja</label>
@@ -252,13 +252,13 @@ export default function SuperAdminTab() {
 
       {/* Modal Novo Acesso */}
       {showNovoAcesso && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
-            <div className="pb-4 border-b border-white/10 mb-4">
-              <h3 className="text-lg font-bold">Novo Acesso</h3>
-              <p className="text-sm text-muted-foreground">Adicionar usuário para a loja</p>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header block">
+              <h3 className="modal-title">Novo Acesso</h3>
+              <p className="modal-subtitle">Adicionar usuário para a loja</p>
             </div>
-            <div>
+            <div className="modal-body">
               <form onSubmit={handleCriarAcesso} className="space-y-4">
                 <div>
                   <label className="text-sm font-medium ml-1">Email de Login</label>
@@ -309,13 +309,13 @@ export default function SuperAdminTab() {
 
       {/* Modal Editar Acesso */}
       {editingAcesso && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/90 dark:bg-black/90">
-            <div className="pb-4 border-b border-white/10 mb-4">
-              <h3 className="text-lg font-bold">Editar Acesso</h3>
-              <p className="text-sm text-muted-foreground">Alterar permissões do usuário</p>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header block">
+              <h3 className="modal-title">Editar Acesso</h3>
+              <p className="modal-subtitle">Alterar permissões do usuário</p>
             </div>
-            <div>
+            <div className="modal-body">
               <form onSubmit={handleUpdateAcesso} className="space-y-4">
                 <div>
                   <label className="text-sm font-medium ml-1">Email de Login</label>

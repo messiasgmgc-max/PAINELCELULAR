@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
@@ -29,32 +30,64 @@ import {
 } from 'lucide-react';
 
 export default function Home() {
+  const router = useRouter();
+  const pathname = usePathname();
   const { usuario, logout, loading, authReady } = useAuth();
   const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja } = useStoreConfig();
   
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [subtitulo, setSubtitulo] = useState('Sistema de Gestão');
   const [headerNomeLoja, setHeaderNomeLoja] = useState('');
   const [headerLogoLoja, setHeaderLogoLoja] = useState<string | null>(null);
 
-  // Persistir a aba atual para não voltar ao dashboard ao recarregar
-  useEffect(() => {
-    const savedTab = localStorage.getItem('last_tab');
-    if (savedTab) setCurrentTab(savedTab);
-    setIsInitialized(true);
-  }, []);
+  const normalizeTabFromPath = (path: string) => {
+    const segment = path.split('/').filter(Boolean)[0] || 'dashboard';
+
+    if (segment === 'os') return 'orders';
+
+    const allowedTabs = new Set([
+      'dashboard',
+      'vendas',
+      'taxas-maquininha',
+      'clientes',
+      'aparelhos',
+      'pecas',
+      'etiquetas',
+      'orders',
+      'tecnicos',
+      'agendamentos',
+      'garantias',
+      'whatsapp',
+      'configuracoes',
+      'superadmin',
+    ]);
+
+    return allowedTabs.has(segment) ? segment : 'dashboard';
+  };
+
+  const tabToPath = (tabId: string) => {
+    if (tabId === 'dashboard') return '/';
+    if (tabId === 'orders') return '/os';
+    return `/${tabId}`;
+  };
+
+  const handleTabChange = (tabId: string) => {
+    const nextPath = tabToPath(tabId);
+    if (nextPath !== pathname) {
+      router.push(nextPath);
+    }
+  };
 
   useEffect(() => {
-    if (isInitialized) localStorage.setItem('last_tab', currentTab);
-  }, [currentTab, isInitialized]);
+    setCurrentTab(normalizeTabFromPath(pathname));
+  }, [pathname]);
 
   useEffect(() => {
     if (currentTab === 'superadmin' && usuario?.role !== 'super_admin') {
-      setCurrentTab('dashboard');
+      router.replace('/');
     }
-  }, [currentTab, usuario?.role]);
+  }, [currentTab, usuario?.role, router]);
 
   useEffect(() => {
     // Atualiza via store (configuracoes) caso seja alterado em tempo real na aba Configurações
@@ -129,7 +162,7 @@ export default function Home() {
       case 'garantias':
         return <GarantiasTab />;
       case 'vendas':
-        return <VendasTab />;
+        return <VendasTab isSidebarCollapsed={isSidebarCollapsed} setSidebarCollapsed={setIsSidebarCollapsed} />;
       case 'taxas-maquininha':
         return <TaxasMaquininhaTab />;
       case 'whatsapp':
@@ -177,7 +210,7 @@ export default function Home() {
                 <Button
                   variant={currentTab === 'superadmin' ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setCurrentTab('superadmin')}
+                  onClick={() => handleTabChange('superadmin')}
                   className="hidden sm:flex gap-2 h-9 sm:h-10"
                 >
                   <Shield className="w-4 h-4" />
@@ -213,7 +246,7 @@ export default function Home() {
       {/* Mobile Navigation - acima do conteúdo */}
       <MobileNav 
         currentTab={currentTab} 
-        onTabChange={setCurrentTab} 
+        onTabChange={handleTabChange} 
         isCollapsed={isSidebarCollapsed} 
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
       />

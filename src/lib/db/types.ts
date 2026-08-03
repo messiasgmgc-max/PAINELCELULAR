@@ -45,6 +45,7 @@ export interface Aparelho {
   capacidade?: string;
   condicao: "novo" | "seminovo" | "usado" | "danificado";
   preco: number;
+  custo?: number;
   descricao?: string;
   cliente?: string; // Nome do cliente proprietário
   clienteId?: string; // ID do cliente
@@ -184,6 +185,13 @@ export interface VendaItem {
   observacao: string;
 }
 
+export interface VendaPagamento {
+  id: string;
+  metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto';
+  valor: number;
+  parcelas: number;
+}
+
 export interface Venda {
   id: string;
   clienteId?: string;
@@ -201,6 +209,7 @@ export interface Venda {
   descricao?: string;
   garantia?: string;
   descontoTotal?: number;
+  pagamentos?: VendaPagamento[];
   lojaId: string;
 }
 

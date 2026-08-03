@@ -10,6 +10,7 @@ import { useTecnicos } from '@/hooks/useTecnicos';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/GlassCard';
+import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, GripVertical, Camera, MessageCircle, Printer, FileText, FileCheck } from 'lucide-react';
 
@@ -1105,15 +1106,16 @@ export function OrdensTab() {
 
       {/* Modal Novo Cliente */}
       {showModalNovoCliente && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">Novo Cliente</h3>
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header">
+              <h3 className="modal-title">Novo Cliente</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowModalNovoCliente(false)}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
-            <div className="p-6">
+            <div className="modal-body">
               <form onSubmit={handleCreateCliente} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Nome *</label>
@@ -1139,19 +1141,21 @@ export function OrdensTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal Novo Técnico */}
       {showModalNovaTecnico && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">Novo Técnico</h3>
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header">
+              <h3 className="modal-title">Novo Técnico</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowModalNovaTecnico(false)}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
-            <div className="p-6">
+            <div className="modal-body">
               <form onSubmit={handleCreateTecnico} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Nome *</label>
@@ -1203,19 +1207,21 @@ export function OrdensTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal Nova Peça */}
       {showModalNovaPeca && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">Nova Peça</h3>
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header">
+              <h3 className="modal-title">Nova Peça</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowModalNovaPeca(false)}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
-            <div className="p-6">
+            <div className="modal-body">
               <form onSubmit={handleCreatePeca} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Código *</label>
@@ -1273,19 +1279,21 @@ export function OrdensTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal Novo Aparelho (OS) */}
       {showModalNovoAparelho && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <GlassCard className="w-full max-w-md bg-white/20 dark:bg-white/5 backdrop-blur-2xl rounded-[2.5rem] border-white/20 shadow-2xl overflow-hidden !p-0">
-            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/10">
-              <h3 className="text-lg font-bold">Novo Aparelho (Cliente)</h3>
+        <ModalPortal>
+        <div className="modal-overlay modal-overlay-fit">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+            <div className="modal-header">
+              <h3 className="modal-title">Novo Aparelho (Cliente)</h3>
               <Button variant="ghost" size="icon" onClick={() => setShowModalNovoAparelho(false)}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
-            <div className="p-6">
+            <div className="modal-body">
               <form onSubmit={handleCreateAparelho} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1313,6 +1321,7 @@ export function OrdensTab() {
             </div>
           </GlassCard>
         </div>
+        </ModalPortal>
       )}
 
 {/* Visualização Kanban com Drag & Drop */}
