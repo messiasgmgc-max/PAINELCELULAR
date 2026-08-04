@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette } from 'lucide-react';
+import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
 import { useColorTheme, ColorTheme } from '@/components/ThemeProvider';
+import { useTecnicos } from '@/hooks/useTecnicos';
 
 interface Configuracao {
   id: string;
@@ -31,6 +32,9 @@ export function ConfiguracoesTab() {
   const [enderecoEmpresa, setEnderecoEmpresa] = useState('');
   const [emailEmpresa, setEmailEmpresa] = useState('');
   const [cnpj, setCnpj] = useState('');
+
+  const { tecnicos, fetchTecnicos /*, criarTecnico, deletarTecnico (se tiver no seu hook) */ } = useTecnicos();
+  const [novoTecnico, setNovoTecnico] = useState('');
   
   // Estados para loja (nome + logo)
   const [nomeLoja, setNomeLoja] = useState('');
@@ -400,6 +404,84 @@ export function ConfiguracoesTab() {
                       <span className="font-medium text-sm text-left leading-tight">{t.name}</span>
                     </button>
                   ))}
+                </div>
+              </GlassCard>
+
+              {/* Gerenciamento de Equipe (Técnicos/Vendedores) */}
+              <GlassCard className="border-2 border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800 rounded-3xl mt-4 sm:mt-6">
+                <div className="pb-4 border-b border-white/10 mb-4">
+                  <h3 className="text-base sm:text-lg font-bold text-blue-900 dark:text-blue-300 flex items-center gap-2">
+                    <User className="w-5 h-5" /> Equipe (Técnicos e Vendedores)
+                  </h3>
+                  <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
+                    Cadastre a galera que vai aparecer na lista de vendas e ordens de serviço.
+                  </p>
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={novoTecnico}
+                      onChange={(e) => setNovoTecnico(e.target.value)}
+                      placeholder="Nome do caboclo..."
+                      className="input-glass flex-1"
+                    />
+                    <Button 
+                      onClick={async () => {
+                        if (!novoTecnico.trim()) {
+                          alert('Digite o nome do caboclo, sô!');
+                          return;
+                        }
+                        try {
+                          // Inserindo direto no Supabase na tabela de técnicos/vendedores vinculada à loja
+                          const { error } = await supabase.from('tecnicos').insert([
+                            { nome: novoTecnico.trim(), loja_id: usuario?.lojaId }
+                          ]);
+                          if (error) throw error;
+                          
+                          setNovoTecnico('');
+                          fetchTecnicos(); // Atualiza a lista na hora
+                          alert('Técnico/Vendedor cadastrado com sucesso!');
+                        } catch (err: any) {
+                          console.error('Erro ao cadastrar:', err);
+                          alert(`Erro ao cadastrar: ${err.message}`);
+                        }
+                      }} 
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Adicionar
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-4">
+                    {tecnicos?.map((tec) => (
+                      <div key={tec.id} className="flex items-center justify-between bg-white/20 dark:bg-slate-800/50 border border-white/10 p-2 rounded-xl">
+                        <span className="text-sm font-medium">{tec.nome}</span>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-red-500 hover:bg-red-500/10"
+                          onClick={async () => {
+                            if (window.confirm(`Tem certeza que deseja apagar ${tec.nome}?`)) {
+                              try {
+                                const { error } = await supabase.from('tecnicos').delete().eq('id', tec.id);
+                                if (error) throw error;
+                                fetchTecnicos(); // Atualiza a lista
+                              } catch (err: any) {
+                                alert(`Erro ao excluir: ${err.message}`);
+                              }
+                            }
+                          }}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    {(!tecnicos || tecnicos.length === 0) && (
+                      <p className="text-sm text-muted-foreground italic">Ninguém cadastrado ainda.</p>
+                    )}
+                  </div>
                 </div>
               </GlassCard>
 

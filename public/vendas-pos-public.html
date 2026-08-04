@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vendas POS Public</title>
+  <link rel="stylesheet" href="/vendas-pos-public.css" />
+</head>
+<body>
+  <main class="preview">
+    <aside class="sidebar" aria-hidden="true"></aside>
+    <header class="header" aria-hidden="true"></header>
+
+    <section class="overlay">
+      <article class="pdv">
+        <div class="pdv-head">
+          <h1 class="title">Nova Venda</h1>
+          <div class="actions">
+            <button class="btn ok">FINALIZAR VENDA</button>
+            <button class="btn">X</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><small>VALOR PRODUTOS</small><strong>R$ 0,00</strong></div>
+          <div class="metric"><small>PAGAMENTOS</small><strong>R$ 0,00</strong></div>
+          <div class="metric"><small>SALDO</small><strong>R$ 0,00</strong></div>
+          <div class="metric"><small>TROCO</small><strong>R$ 0,00</strong></div>
+        </div>
+
+        <div class="content">
+          <div class="block">
+            <h3>Dados da Venda</h3>
+            <div class="grid">
+              <div class="field">Venda</div>
+              <div class="field">Cliente</div>
+              <div class="field">Vendedor</div>
+              <div class="field">Retirada</div>
+              <div class="field">03/08/2026</div>
+            </div>
+
+            <h3 style="margin-top: 14px;">Itens da Venda</h3>
+            <div class="grid">
+              <div class="field">Produto</div>
+              <div class="field">Qtd</div>
+              <div class="field">Custo (R$)</div>
+              <div class="field">Venda (R$)</div>
+              <div class="field">Desconto</div>
+            </div>
+          </div>
+
+          <div class="block">
+            <h3>Dados do Pagamento</h3>
+            <div class="field" style="margin-bottom: 8px;">Forma de Pagamento</div>
+            <div class="field" style="margin-bottom: 8px;">Valor</div>
+            <div class="field" style="margin-bottom: 8px;">Parcelas</div>
+            <div class="field" style="margin-bottom: 8px;">Total pago / Restante / Troco</div>
+            <div class="field" style="margin-bottom: 8px;">Garantia</div>
+            <div class="field">Detalhes / Obs Pagamento</div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <button class="btn">Cancelar</button>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

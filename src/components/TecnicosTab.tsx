@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/GlassCard';
 import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
-import { X, Plus, Download, Edit2, Search, AlertCircle, Trash2, Phone, Mail } from 'lucide-react';
+import { X, Plus, Download, Edit2, Search, AlertCircle, Trash2, Phone, Mail, UserCheck } from 'lucide-react';
 import { Tecnico } from '@/lib/db/types';
 
 export function TecnicosTab() {
@@ -15,28 +15,33 @@ export function TecnicosTab() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filtroTipo, setFiltroTipo] = useState<'todos' | 'tecnico' | 'vendedor'>('tecnico'); // Aba técnico por padrão
   const [formData, setFormData] = useState({
     nome: '',
     email: '',
     telefone: '',
     cpf: '',
-    especialidade: ''
+    especialidade: '',
+    tipo: 'tecnico' as 'tecnico' | 'vendedor'
   });
 
   useEffect(() => {
     fetchTecnicos();
   }, []);
 
-  const tecnicosFiltrados = searchTerm.trim()
-    ? tecnicos.filter(t =>
-        t.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.telefone.includes(searchTerm) ||
-        t.especialidade?.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    : tecnicos;
+  const tecnicosFiltrados = tecnicos.filter(t => {
+    const matchTipo = filtroTipo === 'todos' || (t as any).tipo === filtroTipo;
+    const termo = searchTerm.trim().toLowerCase();
+    const matchBusca = !termo ||
+      t.nome.toLowerCase().includes(termo) ||
+      t.email?.toLowerCase().includes(termo) ||
+      t.telefone.includes(termo) ||
+      t.especialidade?.toLowerCase().includes(termo);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    return matchTipo && matchBusca;
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -44,13 +49,14 @@ export function TecnicosTab() {
     }));
   };
 
-  const handleEdit = (tecnico: Tecnico) => {
+  const handleEdit = (tecnico: Tecnico & { tipo?: string }) => {
     setFormData({
       nome: tecnico.nome,
       email: tecnico.email || '',
       telefone: tecnico.telefone,
       cpf: tecnico.cpf || '',
-      especialidade: tecnico.especialidade || ''
+      especialidade: tecnico.especialidade || '',
+      tipo: (tecnico.tipo as 'tecnico' | 'vendedor') || 'tecnico'
     });
     setEditingId(tecnico.id);
     setShowForm(true);
@@ -70,7 +76,8 @@ export function TecnicosTab() {
         email: formData.email || undefined,
         telefone: formData.telefone,
         cpf: formData.cpf || undefined,
-        especialidade: formData.especialidade || undefined
+        especialidade: formData.especialidade || undefined,
+        tipo: formData.tipo
       };
 
       if (editingId) {
@@ -84,17 +91,18 @@ export function TecnicosTab() {
         email: '',
         telefone: '',
         cpf: '',
-        especialidade: ''
+        especialidade: '',
+        tipo: 'tecnico'
       });
       setEditingId(null);
       setShowForm(false);
     } catch (err) {
-      console.error('Erro ao salvar técnico:', err);
+      console.error('Erro ao salvar:', err);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja deletar esse técnico?')) {
+    if (confirm('Tem certeza que deseja deletar este registro?')) {
       try {
         await deletarTecnico(id);
       } catch (err) {
@@ -104,9 +112,10 @@ export function TecnicosTab() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['Nome', 'Email', 'Telefone', 'CPF', 'Especialidade', 'Data Cadastro'];
+    const headers = ['Nome', 'Tipo', 'Email', 'Telefone', 'CPF', 'Especialidade', 'Data Cadastro'];
     const data = tecnicosFiltrados.map(t => [
       t.nome,
+      (t as any).tipo || 'tecnico',
       t.email || '',
       t.telefone,
       t.cpf || '',
@@ -125,7 +134,7 @@ export function TecnicosTab() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `tecnicos_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`);
+    link.setAttribute('download', `equipe_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`);
     link.click();
   };
 
@@ -137,6 +146,31 @@ export function TecnicosTab() {
           {error}
         </div>
       )}
+
+      {/* Botões de Filtro por Aba */}
+      <div className="flex gap-2 border-b border-white/10 pb-3">
+        <Button
+          variant={filtroTipo === 'tecnico' ? 'default' : 'outline'}
+          onClick={() => setFiltroTipo('tecnico')}
+          className="rounded-xl"
+        >
+          Técnicos
+        </Button>
+        <Button
+          variant={filtroTipo === 'vendedor' ? 'default' : 'outline'}
+          onClick={() => setFiltroTipo('vendedor')}
+          className="rounded-xl"
+        >
+          Vendedores
+        </Button>
+        <Button
+          variant={filtroTipo === 'todos' ? 'default' : 'outline'}
+          onClick={() => setFiltroTipo('todos')}
+          className="rounded-xl"
+        >
+          Todos
+        </Button>
+      </div>
 
       <div className="flex flex-col sm:flex-row gap-4 mb-4">
         <div className="w-full sm:flex-1 relative">
@@ -154,29 +188,42 @@ export function TecnicosTab() {
             <Download className="w-4 h-4 mr-2" />
             CSV
           </Button>
-          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '' }); }} className="shrink-0 whitespace-nowrap">
+          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '', tipo: filtroTipo === 'vendedor' ? 'vendedor' : 'tecnico' }); }} className="shrink-0 whitespace-nowrap bg-blue-600 hover:bg-blue-700">
             <Plus className="w-4 h-4 mr-2" />
-            Novo Técnico
+            Novo Membro
           </Button>
         </div>
       </div>
 
-      {/* Formulário */}
+      {/* Formulário Modal */}
       {showForm && (
         <ModalPortal>
         <div className="modal-overlay z-[60]">
         <GlassCard className="modal-panel modal-panel-lg w-[min(780px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold">
-              {editingId ? 'Editar Técnico' : 'Novo Técnico'}
+              {editingId ? 'Editar Membro' : 'Novo Membro da Equipe'}
             </h3>
-            <Button variant="ghost" size="sm" onClick={() => { setShowForm(false); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '' }); }}>
+            <Button variant="ghost" size="sm" onClick={() => { setShowForm(false); setEditingId(null); }}>
               <X className="w-4 h-4" />
             </Button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Função / Cargo *</label>
+                <select
+                  name="tipo"
+                  value={formData.tipo}
+                  onChange={handleInputChange}
+                  className="input-glass"
+                  required
+                >
+                  <option value="tecnico">Técnico</option>
+                  <option value="vendedor">Vendedor</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium mb-2">Nome *</label>
                 <input
@@ -224,20 +271,20 @@ export function TecnicosTab() {
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-2">Especialidade</label>
+                <label className="block text-sm font-medium mb-2">Especialidade (opcional)</label>
                 <input
                   type="text"
                   name="especialidade"
-                  placeholder="Ex: Tela, Bateria, Placa, Reparo Geral"
+                  placeholder="Ex: Tela, Bateria, Placa, Vendas Balcão"
                   value={formData.especialidade}
                   onChange={handleInputChange}
                   className="input-glass"
                 />
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">{editingId ? 'Atualizar' : 'Criar'} Técnico</Button>
-              <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '' }); }}>
+            <div className="flex gap-2 pt-2">
+              <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">{editingId ? 'Atualizar' : 'Salvar'}</Button>
+              <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); }}>
                 Cancelar
               </Button>
             </div>
@@ -247,16 +294,19 @@ export function TecnicosTab() {
         </ModalPortal>
       )}
 
-      {/* Lista de Técnicos */}
+      {/* Lista */}
       <div className="space-y-3">
-        {tecnicosFiltrados.map((tecnico) => (
+        {tecnicosFiltrados.map((tecnico: any) => (
           <GlassCard key={tecnico.id} className="p-4 hover:shadow-lg transition-shadow group rounded-2xl">
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
                   <h3 className="text-lg font-semibold text-blue-600">{tecnico.nome}</h3>
+                  <Badge variant={tecnico.tipo === 'vendedor' ? 'default' : 'secondary'} className={tecnico.tipo === 'vendedor' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}>
+                    {tecnico.tipo === 'vendedor' ? 'Vendedor' : 'Técnico'}
+                  </Badge>
                   {tecnico.especialidade && (
-                    <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                    <Badge variant="outline" className="text-xs">
                       {tecnico.especialidade}
                     </Badge>
                   )}
@@ -275,36 +325,15 @@ export function TecnicosTab() {
                       {tecnico.email}
                     </div>
                   )}
-                  {tecnico.cpf && (
-                    <div className="text-xs text-gray-500">
-                      CPF: {tecnico.cpf}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-2 text-xs text-gray-400">
-                  Cadastrado em {new Date(tecnico.dataCadastro).toLocaleDateString('pt-BR')}
                 </div>
               </div>
 
               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleEdit(tecnico)}
-                  className="flex items-center gap-1"
-                >
-                  <Edit2 className="w-4 h-4" />
-                  Editar
+                <Button size="sm" variant="outline" onClick={() => handleEdit(tecnico)}>
+                  <Edit2 className="w-4 h-4" /> Editar
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleDelete(tecnico.id)}
-                  className="text-red-600 hover:text-red-700"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Deletar
+                <Button size="sm" variant="outline" onClick={() => handleDelete(tecnico.id)} className="text-red-600 hover:text-red-700">
+                  <Trash2 className="w-4 h-4" /> Deletar
                 </Button>
               </div>
             </div>
@@ -314,13 +343,7 @@ export function TecnicosTab() {
 
       {tecnicosFiltrados.length === 0 && !showForm && (
         <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
-          <p>{searchTerm ? 'Nenhum técnico encontrado' : 'Nenhum técnico cadastrado'}</p>
-        </GlassCard>
-      )}
-
-      {loading && (
-        <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
-          <p>Carregando técnicos...</p>
+          <p>Nenhum registro encontrado para esta categoria.</p>
         </GlassCard>
       )}
     </div>

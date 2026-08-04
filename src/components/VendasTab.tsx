@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -68,14 +68,6 @@ const createPagamentoItem = (overrides: Partial<PosPagamentoItem> = {}): PosPaga
 const POS_MODAL_CLOSE_MS = 220;
 const SALE_SUCCESS_MS = 1350;
 const SALE_EMOJIS = ['🎉', '🥳', '💰', '✨', '🚀', '🔥'];
-const POS_OVERLAY_OFFSETS = {
-  // Mirrors main layout: header height + content paddings + sidebar offsets
-  top: 96,
-  right: 24,
-  bottom: 24,
-  leftCollapsed: 104,
-  leftExpanded: 280,
-};
 
 const createInitialPosPagamento = (): PosPagamentoState => ({
   metodo: 'dinheiro',
@@ -90,7 +82,6 @@ const createInitialPosPagamento = (): PosPagamentoState => ({
 });
 
 export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: VendasTabProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isVendasRoute = pathname === '/vendas';
@@ -121,6 +112,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [posOverlayRect, setPosOverlayRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [confirmDeleteEmail, setConfirmDeleteEmail] = useState('');
   const [confirmDeletePassword, setConfirmDeletePassword] = useState('');
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
@@ -340,14 +332,68 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   useEffect(() => () => clearPosTimers(), []);
 
-  const posOverlayManualStyle: React.CSSProperties | undefined = isDesktopViewport
-    ? {
-        top: `${POS_OVERLAY_OFFSETS.top}px`,
-        right: `${POS_OVERLAY_OFFSETS.right}px`,
-        bottom: `${POS_OVERLAY_OFFSETS.bottom}px`,
-        left: `${isSidebarCollapsed ? POS_OVERLAY_OFFSETS.leftCollapsed : POS_OVERLAY_OFFSETS.leftExpanded}px`,
+  useEffect(() => {
+    if (!isDesktopViewport || typeof window === 'undefined') {
+      setPosOverlayRect(null);
+      return;
+    }
+
+    if (!showPOS && !closingPOS) {
+      setPosOverlayRect(null);
+      return;
+    }
+
+    const syncOverlayRect = () => {
+      const main = document.querySelector('main');
+      if (!(main instanceof HTMLElement)) {
+        setPosOverlayRect(null);
+        return;
       }
-    : undefined;
+
+      const rect = main.getBoundingClientRect();
+      if (rect.width < 280 || rect.height < 280) {
+        setPosOverlayRect(null);
+        return;
+      }
+
+      setPosOverlayRect({
+        top: Math.round(rect.top),
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
+    };
+
+    syncOverlayRect();
+
+    const main = document.querySelector('main');
+    const observer = main instanceof HTMLElement && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(syncOverlayRect)
+      : null;
+
+    if (main instanceof HTMLElement && observer) {
+      observer.observe(main);
+    }
+
+    window.addEventListener('resize', syncOverlayRect);
+
+    return () => {
+      window.removeEventListener('resize', syncOverlayRect);
+      observer?.disconnect();
+    };
+  }, [isDesktopViewport, showPOS, closingPOS, isSidebarCollapsed]);
+
+  const posOverlayManualStyle: React.CSSProperties | undefined =
+    isDesktopViewport && posOverlayRect
+      ? {
+          top: `${posOverlayRect.top}px`,
+          left: `${posOverlayRect.left}px`,
+          width: `${posOverlayRect.width}px`,
+          height: `${posOverlayRect.height}px`,
+          right: 'auto',
+          bottom: 'auto',
+        }
+      : undefined;
 
   useEffect(() => {
     if (usuario?.lojaId) {
@@ -387,12 +433,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     if (nextQuery === currentQuery) return;
 
     const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-    router.replace(nextUrl, { scroll: false });
+    window.history.replaceState(window.history.state, '', nextUrl);
   }, [
     isClient,
     isVendasRoute,
     pathname,
-    router,
     searchParams,
     showPOS,
     closingPOS,
@@ -483,7 +528,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const statusFinal = pagamentosTotal >= valorFinal ? posPagamento.status : 'pendente';
 
       const vendaDados = {
-        clienteId: posDados.clienteId,
+        clienteId: posDados.clienteId || null, // <--- O SEGREDO PRA SALVAR E EDITAR É ESSE NULL AQUI
         clienteNome: posDados.clienteNome,
         vendedor: posDados.vendedor,
         tipoEntrega: posDados.tipoEntrega,
@@ -504,7 +549,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           valor: Number(pagamento.valor) || 0,
           parcelas: Number(pagamento.parcelas) || 1,
         })),
-        loja_id: usuario?.lojaId
+        loja_id: usuario?.lojaId || null // <--- SEGURANÇA AQUI TAMBÉM
       };
 
       if (editingId) {
@@ -516,6 +561,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       } else {
         const { error } = await supabase.from('vendas').insert([vendaDados]);
         if (error) throw error;
+      }
+
+      const aparelhosIds = carrinho.map(item => item.aparelhoId).filter(Boolean);
+      if (aparelhosIds.length > 0) {
+        const { error: erroEstoque } = await supabase
+          .from('aparelhos')
+          .update({ ativo: false, condicao: 'vendido' }) 
+          .in('id', aparelhosIds);
+          
+        if (erroEstoque) console.error('Fudeu o estoque:', erroEstoque);
       }
 
       await carregarVendas();
@@ -593,12 +648,41 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir esta venda?')) {
-      const { error } = await supabase.from('vendas').delete().eq('id', id);
-      if (error) {
-        console.error('Erro ao deletar venda:', error);
-      } else {
+    if (window.confirm('Tem certeza que deseja mandar essa venda pro quinto dos infernos? (Os aparelhos voltarão pro estoque)')) {
+      try {
+        // 1. Pega os dados da venda pra não perder o rastro dos celulares
+        const { data: venda, error: erroBusca } = await supabase
+          .from('vendas')
+          .select('itens')
+          .eq('id', id)
+          .single();
+
+        if (erroBusca) throw erroBusca;
+
+        // 2. Passa a faca na venda
+        const { error: erroDelete } = await supabase.from('vendas').delete().eq('id', id);
+        if (erroDelete) throw erroDelete;
+
+        // 3. O Milagre da Ressurreição (Devolve pro estoque)
+        if (venda?.itens && venda.itens.length > 0) {
+          const aparelhosIds = venda.itens.map((item: any) => item.aparelhoId).filter(Boolean);
+          
+          if (aparelhosIds.length > 0) {
+            const { error: erroEstoque } = await supabase
+              .from('aparelhos')
+              .update({ ativo: true, condicao: 'seminovo' }) // Botei seminovo, ajusta se precisar
+              .in('id', aparelhosIds);
+              
+            if (erroEstoque) console.error('Erro ao voltar pro estoque:', erroEstoque);
+          }
+        }
+
+        toast.success('Venda apagada e estoque recuperado, sô!');
         await carregarVendas();
+      } catch (error: any) {
+        console.error('Erro macabro ao deletar venda:', error);
+        // Agora cê vai ver na cara qual é o erro que o Supabase tá dando!
+        toast.error(`Deu merda: ${error?.message || 'Falha desconhecida, abre o F12 aí'}`);
       }
     }
   };
@@ -1444,11 +1528,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
         {/* Modal PDV Completo */}
         {isClient && (showPOS || closingPOS) && createPortal(
-          <div
-            className={`modal-overlay pos-modal-overlay z-[24] !inset-0 !items-center !justify-center !p-3 sm:!p-4 !overflow-y-auto ${closingPOS ? 'modal-overlay-out' : ''}`}
-            style={posOverlayManualStyle}
-          >
-            <div className={`glass modal-panel modal-panel-no-scale pos-modal-panel pos-panel-enter relative !m-auto h-auto min-h-0 max-h-[calc(100dvh-4.5rem)] w-[min(1360px,calc(100vw-2rem))] max-w-[1360px] flex flex-col rounded-[1.5rem] will-change-transform ${closingPOS ? 'modal-panel-out pos-panel-exit' : ''}`}>
+            <div
+             className={`fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-3 sm:p-4 overflow-hidden transition-opacity duration-300 ${closingPOS ? 'opacity-0' : 'opacity-100'}`}
+            >
+             <div className={`relative flex flex-col w-full max-w-[1360px] max-h-full overflow-hidden rounded-[1.5rem] bg-white/10 dark:bg-slate-900/60 backdrop-blur-3xl border border-white/20 shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-all duration-300 will-change-transform ${closingPOS ? 'scale-95 opacity-0' : 'scale-100 opacity-100'}`}>
               {showSaleCelebration && (
                 <div className="sale-success-overlay">
                   <div className="sale-success-badge">🎉 PARABENS PELA VENDA 🎉</div>
