@@ -16,11 +16,11 @@ export function useAuth() {
     if (!session?.user) return null;
 
     try {
-      // Busca dados atualizados da tabela perfis (Single Source of Truth)
+            // Busca dados atualizados da tabela perfis (Single Source of Truth)
       const { data: perfil, error: perfilError } = await supabase
         .from('perfis')
         .select('*')
-        .eq('email', session.user.email)
+        .eq('id', session.user.id)
         .maybeSingle();
 
       if (perfilError) {

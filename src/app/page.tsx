@@ -55,7 +55,7 @@ export default function Home() {
       'pecas',
       'etiquetas',
       'orders',
-      'equipe',
+      'tecnicos',
       'agendamentos',
       'garantias',
       'whatsapp',
@@ -155,7 +155,7 @@ export default function Home() {
         return <EtiquetasTab />;
       case 'orders':
         return <OrdensTab />;
-      case 'equipe':
+      case 'tecnicos':
         return <TecnicosTab />;
       case 'agendamentos':
         return <AgendamentosTab />;
