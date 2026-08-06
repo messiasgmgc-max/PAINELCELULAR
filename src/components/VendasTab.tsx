@@ -5,8 +5,15 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle } from 'lucide-react'
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat } from 'lucide-react';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -110,6 +117,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showNovoCliente, setShowNovoCliente] = useState(false);
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [showImportarPedidoModal, setShowImportarPedidoModal] = useState(false);
   const [isClient, setIsClient] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [posOverlayRect, setPosOverlayRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -117,6 +125,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [confirmDeletePassword, setConfirmDeletePassword] = useState('');
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [textoPedido, setTextoPedido] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const closePOSTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -265,6 +274,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         if (showPOS) closePOSModal();
         if (showNovoCliente) setShowNovoCliente(false);
         if (showNovoAparelho) setShowNovoAparelho(false);
+    if (showImportarPedidoModal) setShowImportarPedidoModal(false);
         return;
       }
 
@@ -444,6 +454,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     showNovoCliente,
     showNovoAparelho,
     showDeleteAllModal,
+    showImportarPedidoModal,
     showSalesDashboard,
   ]);
 
@@ -494,6 +505,112 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     });
 
     setVendasPorPeriodo(Object.values(mapa).reverse());
+  };
+
+  const handleProcessarPedido = async () => {
+    if (!textoPedido.trim()) {
+      alert('Cole o texto do formulário de pedido na área indicada.');
+      return;
+    }
+
+    try {
+      // Extrair dados do cliente
+      const nome = /Nome completo:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const cpf = /CPF:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const dataNascimento = /Data de nascimento:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const telefone = /(?:Telefone|WhatsApp):\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const email = /E-mail:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const rua = /Rua \/ Avenida:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const numero = /Número:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const complemento = /Complemento:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const bairro = /Bairro:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const cidade = /Cidade:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const cep = /CEP:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+
+      // Extrair dados do pedido
+      const valorTotalStr = /Valor total:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      const formaPagamentoStr = /Forma de pagamento:\s*\(\s*X\s*\)\s*(Pix|Cartão de crédito|Cartão de débito|Dinheiro|Outro)/i.exec(textoPedido)?.[1].trim() || '';
+      const codAparelho = /COD:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+
+      if (!nome || !telefone) {
+        alert('Não foi possível encontrar o Nome e Telefone no formulário. Verifique o formato.');
+        return;
+      }
+
+      // 1. Procurar ou criar cliente
+      let cliente = clientes.find(c => c.telefone.replace(/\D/g, '') === telefone.replace(/\D/g, ''));
+      if (!cliente) {
+        cliente = await criarCliente({
+          nome,
+          cpf,
+          telefone,
+          email: email || 'sem@email.com',
+          endereco: `${rua}, ${numero} ${complemento}`,
+          bairro,
+          cidade,
+          cep,
+          ativo: true,
+        });
+        if (cliente) await fetchClientes(); // Atualiza a lista de clientes
+      }
+
+      if (!cliente) {
+        alert('Falha ao encontrar ou criar o cliente.');
+        return;
+      }
+
+      // 2. Procurar aparelho
+      let aparelho: Aparelho | undefined;
+      if (codAparelho) {
+        aparelho = aparelhos.find(a => a.id === codAparelho || a.imei === codAparelho || a.numeroSerie === codAparelho);
+        if (!aparelho) {
+          alert(`Aparelho com COD "${codAparelho}" não encontrado no estoque. Adicione-o manualmente no PDV.`);
+        }
+      }
+
+      // 3. Preencher o PDV
+      setPosDados(prev => ({
+        ...prev,
+        clienteId: cliente!.id,
+        clienteNome: cliente!.nome,
+      }));
+
+      const valorTotalNumerico = parseCurrencyField(valorTotalStr.replace('R$', '').trim());
+      const metodoPagamento: Venda['metodo'] = formaPagamentoStr.toLowerCase().includes('pix') ? 'pix' :
+                                               formaPagamentoStr.toLowerCase().includes('crédito') ? 'cartao_credito' :
+                                               formaPagamentoStr.toLowerCase().includes('débito') ? 'cartao_debito' :
+                                               formaPagamentoStr.toLowerCase().includes('dinheiro') ? 'dinheiro' : 'outros';
+
+      setPosPagamento(prev => ({
+        ...prev,
+        pagamentos: [createPagamentoItem({
+          metodo: metodoPagamento,
+          valor: valorTotalNumerico,
+        })],
+      }));
+
+      if (aparelho) {
+        setCart([{
+          id: Date.now().toString(),
+          aparelhoId: aparelho.id,
+          descricao: `${aparelho.marca} ${aparelho.modelo} ${aparelho.capacidade}`,
+          quantidade: 1,
+          valorInterno: resolveAparelhoCusto(aparelho),
+          valorExibir: aparelho.preco,
+          desconto: 0,
+          tipoDesconto: 'R$',
+          total: aparelho.preco,
+          observacao: `COD: ${codAparelho}`
+        }]);
+      }
+
+      setShowImportarPedidoModal(false);
+      openPOSModal();
+
+    } catch (error) {
+      console.error('Erro ao processar pedido:', error);
+      alert('Erro ao processar pedido. Verifique o formato ou tente novamente.');
+    }
   };
 
   const handleFinalizarVenda = async () => {
@@ -816,6 +933,199 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         toast.error(`Deu merda: ${error?.message || 'Falha desconhecida, abre o F12 aí'}`);
       }
     }
+  };
+
+  // Nova função auxiliar para gerar o HTML do recibo A4
+  const getReciboA4Html = (venda: Venda, clienteVenda: Cliente) => {
+    const dataAtual = new Date().toLocaleDateString('pt-BR');
+    const assinaturaEmpresaUrl = config.assinaturaLoja;
+    const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 140px; display: block;" />` : '';
+
+    const itensHtmlA4 = venda.itens && venda.itens.length > 0
+      ? venda.itens.map(item => `
+          <tr>
+            <td style="text-align: center; border: 1px solid #000; padding: 5px;">${(item as any).codigo || ''}</td>
+            <td style="border: 1px solid #000; padding: 5px;">${item.descricao} <br><small style="color: #666;">${item.observacao || ''}</small></td>
+            <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.quantidade}</td>
+            <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</td>
+            <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
+            <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 5px;">R$ ${item.total.toFixed(2).replace('.', ',')}</td>
+          </tr>
+        `).join('')
+      : `<tr>
+           <td style="text-align: center; border: 1px solid #000; padding: 5px;">-</td>
+           <td style="border: 1px solid #000; padding: 5px;">${venda.descricao || 'Produto Genérico'}</td>
+           <td style="text-align: center; border: 1px solid #000; padding: 5px;">1</td>
+           <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
+           <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ 0,00</td>
+           <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 5px;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
+         </tr>`;
+
+    const valorTotalVenda = ((venda as any).valorTotal || venda.valor || 0);
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Recibo de Venda</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+          th, td { border: 1px solid #000; padding: 5px; text-align: left; }
+          .no-border, .no-border td { border: none; padding: 2px; }
+          .section-title { background-color: #f0f0f0; font-weight: bold; text-align: center; padding: 6px 4px; }
+          .small-text { font-size: 10px; line-height: 1.3; }
+          .signature-row { display: flex; gap: 24px; justify-content: space-between; align-items: flex-end; margin-top: 20px; }
+          .signature-col { width: 48%; text-align: center; }
+          .signature-holder { height: 44px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: -4px; }
+          .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; display: block; }
+          .signature-line { border-top: 1px solid #000; padding-top: 6px; font-weight: 700; }
+          .signature-subtitle { display: block; margin-top: 2px; font-size: 10px; font-weight: 400; }
+        </style>
+      </head>
+      <body>
+        <div style="max-width: 800px; margin: 0 auto; background-color: #ffffff; border: 1px solid #ccc; padding: 30px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <!-- Canhoto de Recebimento -->
+          <table>
+            <tr>
+              <td colspan="3" class="section-title">RECIBO DE ${config.nomeLoja || 'LOJA NÃO CONFIGURADA'} - OS PRODUTOS E/OU SERVIÇOS CONSTANTES NO PEDIDO</td>
+            </tr>
+            <tr>
+              <td style="width: 30%;">Data de recebimento<br><br>___/___/______</td>
+              <td style="width: 40%;">Identificação e assinatura do recebedor<br><br>_________________________________________</td>
+              <td style="width: 30%; text-align: center;">Recibo da venda:<br><b>${venda.id || ''}</b></td>
+            </tr>
+          </table>
+
+          <hr style="border-top: 1px dashed #000; margin: 15px 0;">
+
+          <!-- Dados da Empresa -->
+          <table class="no-border" style="margin-bottom: 18px;">
+            <tr>
+              <td style="width: 150px; vertical-align: top;">${logoHtml}</td>
+              <td style="vertical-align: top; padding-left: 8px;">
+                <h2 style="margin: 0 0 5px 0; font-size: 16px;">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</h2>
+                <div class="small-text">${config.enderecoLoja || 'Endereço não configurado'}</div>
+                <div class="small-text">CNPJ: ${config.cnpjLoja || 'Não informado'} | Tel: ${config.telefoneLoja || 'Não informado'}</div>
+              </td>
+              <td style="text-align: right; vertical-align: top; font-size: 11px;">
+                Data: ${dataAtual}<br>
+                VENDEDOR: ${venda.vendedor || 'Não informado'}<br>
+                <b>RECIBO DA VENDA: ${venda.id || ''}</b>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Dados do Cliente -->
+          <table>
+            <tr><td colspan="4" class="section-title">DESTINATÁRIO/REMETENTE</td></tr>
+            <tr>
+              <td style="width: 40%;">Nome/Razão social<br><b>${clienteVenda.nome || ''}</b></td>
+              <td style="width: 20%;">Telefone<br>${clienteVenda.telefone || ''}</td>
+              <td style="width: 20%;">CPF/CNPJ<br>${clienteVenda.cpf || ''}</td>
+              <td style="width: 20%;">E-mail<br>${clienteVenda.email || ''}</td>
+            </tr>
+          </table>
+
+          <!-- Produtos -->
+          <table>
+            <tr><td colspan="6" class="section-title">DADOS DO PRODUTO</td></tr>
+            <tr style="font-weight: bold; text-align: center;">
+              <td style="width: 10%;">Cód</td>
+              <td style="width: 45%; text-align: left;">Produto</td>
+              <td style="width: 5%;">Qtd</td>
+              <td style="width: 15%;">Valor Unitário</td>
+              <td style="width: 10%;">Desconto</td>
+              <td style="width: 15%;">Valor Total</td>
+            </tr>
+            ${itensHtmlA4}
+            <tr>
+              <td colspan="5" style="text-align: right; font-weight: bold;">Total</td>
+              <td style="text-align: right; font-weight: bold;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
+            </tr>
+          </table>
+
+          <!-- Termos de Garantia -->
+          <div style="margin-top: 10px; margin-bottom: 8px; padding: 10px; border: 1px solid #000;">
+            <div style="font-weight: bold; margin-bottom: 6px;">TERMO DE GARANTIA</div>
+            <div class="small-text">Garantia de ${venda.garantia || '90 dias'} a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</div>
+            <div class="small-text" style="margin-top: 6px;">Esta garantia não cobre:</div>
+            <ul class="small-text" style="margin: 4px 0 0 16px; padding: 0; list-style: disc inside;">
+              <li>Queda, umidade, líquidos ou danos acidentais;</li>
+              <li>Uso indevido, instalação incorreta ou violação do produto;</li>
+              <li>Abertura ou tentativa de conserto por terceiros não autorizados;</li>
+              <li>Não pode molhar e não pode abrir o aparelho.</li>
+            </ul>
+            <div class="small-text" style="margin-top: 6px;"><b>Apresente este recibo junto com o equipamento no atendimento.</b></div>
+          </div>
+
+          <!-- Assinaturas -->
+          <div class="signature-row">
+            <div class="signature-col">
+              <div class="signature-holder"></div>
+              <div class="signature-line">
+                Assinatura do Cliente
+                <span class="signature-subtitle">${clienteVenda.nome || 'Não informado'}</span>
+              </div>
+            </div>
+            <div class="signature-col">
+              <div class="signature-holder">
+                ${assinaturaEmpresaUrl ? `<img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />` : ''}
+              </div>
+              <div class="signature-line">
+                Assinatura / Carimbo da Loja
+                <span class="signature-subtitle">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</span>
+              </div>
+            </div>
+          </div>
+          <div style="text-align: center; margin-top: 16px; font-weight: bold;">
+            OBRIGADO PELA PREFERÊNCIA.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  };
+
+  const handleReenviarRecibo = async (venda: Venda) => {
+    if (!venda.clienteId) {
+      toast.error('Cliente não associado a esta venda.');
+      return;
+    }
+    const clienteVenda = clientes.find(c => c.id === venda.clienteId);
+    if (!clienteVenda || !clienteVenda.email || clienteVenda.email === 'sem@email.com') {
+      toast.error('Cliente sem e-mail cadastrado.');
+      return;
+    }
+
+    try {
+      const htmlDoRecibo = getReciboA4Html(venda, clienteVenda);
+
+      await fetch('/api/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          para: clienteVenda.email,
+          assunto: 'Recibo de Compra - ' + (config.nomeLoja || 'Phone Center'),
+          mensagem: htmlDoRecibo,
+        }),
+      });
+      toast.success('Recibo reenviado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao reenviar recibo:', error);
+      toast.error('Erro ao reenviar recibo.');
+    }
+  };
+
+  const handleCancelarVenda = async (venda: Venda) => {
+    if (!window.confirm(`Tem certeza que deseja CANCELAR a venda ${venda.id.slice(-6).toUpperCase()}? Os itens serão devolvidos ao estoque.`)) return;
+    await handleDelete(venda.id); // Reutiliza a lógica de exclusão que já devolve itens ao estoque
+    toast.info(`Venda ${venda.id.slice(-6).toUpperCase()} cancelada e itens devolvidos ao estoque.`);
+  };
+
+  const handleTrocarItem = (venda: Venda) => {
+    handleEdit(venda); // Abre o PDV em modo de edição
   };
 
   const handleOpenDeleteAllModal = () => {
@@ -1433,6 +1743,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     try {
       const dataAtual = new Date().toLocaleDateString('pt-BR');
       const assinaturaEmpresaUrl = config.assinaturaLoja;
+      const clienteVenda = clientes.find(c => c.id === venda.clienteId);
       
       // Mapeamento dos itens
       const itensHtmlA4 = venda.itens && venda.itens.length > 0 
@@ -1487,6 +1798,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           </style>
         </head>
         <body>
+      const conteudoHtml = getReciboA4Html(venda, clienteVenda!); // ClienteVenda já é garantido pela validação inicial
 
           <!-- Canhoto de Recebimento -->
           <table>
@@ -1630,6 +1942,14 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             <Button
               variant="outline"
               onClick={handleOpenImportVendas}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Importar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowImportarPedidoModal(true)}
               className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
             >
               <Upload className="mr-2 h-4 w-4" />
@@ -2359,15 +2679,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     <tr key={venda.id} className="border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors">
                       <td className="py-3 px-2 font-medium">{venda.clienteNome}</td>
                       <td className="py-3 px-2 hidden sm:table-cell text-muted-foreground">{venda.itens && venda.itens.length > 0 ? `${venda.itens.length} itens` : venda.descricao}</td>
-                      <td className="py-3 px-2 text-right font-bold">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}
-                      </td>
-                      <td className="py-3 px-2 text-right hidden sm:table-cell text-green-600 font-medium">
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.lucro)}
-                      </td>
-                      <td className="py-3 px-2 hidden sm:table-cell text-xs">
-                        {metodoLabel(venda.metodo)}
-                      </td>
+                      <td className="py-3 px-2 text-right font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</td>
+                      <td className="py-3 px-2 text-right hidden sm:table-cell text-green-600 font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.lucro)}</td>
+                      <td className="py-3 px-2 hidden sm:table-cell text-xs">{metodoLabel(venda.metodo)}</td>
                       <td className="py-3 px-2">
                         <Badge variant={venda.status === 'pago' ? 'default' : venda.status === 'pendente' ? 'secondary' : 'outline'} className="text-xs">
                           {venda.status === 'pago' ? 'Pago' : venda.status === 'pendente' ? 'Pendente' : 'Cancelado'}
@@ -2375,48 +2689,43 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       </td>
                       <td className="py-3 px-2 text-right">
                         <div className="flex gap-2 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(venda)}
-                            className="h-8 text-xs hover:bg-white/10"
-                          >
-                            Editar
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(venda.id)}
-                            className="h-8 text-xs text-red-500 hover:bg-red-500/10"
-                          >
-                            Excluir
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleGerarCupomTermico(venda)}
-                            className="h-8 text-xs text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            title="Cupom Térmico"
-                          >
-                            <Printer className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleGerarReciboA4(venda)}
-                            className="h-8 text-xs text-blue-600 hover:bg-blue-500/10"
-                            title="Recibo A4"
-                          >
-                            <FileText className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}
-                            className="h-8 text-xs text-green-600 hover:bg-green-500/10"
-                          >
-                            <MessageCircle className="w-3 h-3" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}>
+                                <MessageCircle className="mr-2 h-4 w-4" />
+                                Chamar no WhatsApp
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
+                                <Printer className="mr-2 h-4 w-4" />
+                                Cupom Térmico
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleGerarReciboA4(venda)}>
+                                <FileText className="mr-2 h-4 w-4" />
+                                Recibo A4
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleReenviarRecibo(venda)}>
+                                <Mail className="mr-2 h-4 w-4" />
+                                Reenviar Recibo
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleTrocarItem(venda)}>
+                                <Repeat className="mr-2 h-4 w-4" />
+                                Trocar Item
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleCancelarVenda(venda)}
+                                className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
+                              >
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Cancelar Venda
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </td>
                     </tr>
@@ -2538,6 +2847,40 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         document.body
       )}
 
+      {/* Modal Importar Pedido */}
+      {isClient && showImportarPedidoModal && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[60]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title">Importar Pedido</h3>
+                <p className="modal-subtitle">Cole o formulário de pedido para preencher o PDV automaticamente.</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowImportarPedidoModal(false)}><X className="w-4 h-4" /></Button>
+            </div>
+            <div className="modal-body-scroll">
+              <form onSubmit={(e) => { e.preventDefault(); handleProcessarPedido(); }} className="space-y-4">
+                <textarea
+                  className="input-glass min-h-[200px]"
+                  placeholder="Cole o formulário de pedido aqui..."
+                  value={textoPedido}
+                  onChange={(e) => setTextoPedido(e.target.value)}
+                  required
+                />
+                <div className="flex gap-2 pt-2">
+                  <Button type="button" variant="outline" className="flex-1" onClick={() => setShowImportarPedidoModal(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">
+                    Processar Pedido
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
       {isClient && showDeleteAllModal && createPortal(
         <div className="modal-overlay modal-overlay-fit z-[70]">
           <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
