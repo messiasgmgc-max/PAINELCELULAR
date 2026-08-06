@@ -6,7 +6,7 @@ import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle } from 'lucide-react'
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -552,15 +552,25 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         loja_id: usuario?.lojaId || null // <--- SEGURANÇA AQUI TAMBÉM
       };
 
+      let vendaSalva = null; // DECLARA ESSA CARALHA AQUI
+
       if (editingId) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('vendas')
           .update(vendaDados)
-          .eq('id', editingId);
+          .eq('id', editingId)
+          .select() // Pede pro Supabase devolver o dado atualizado
+          .single();
         if (error) throw error;
+        vendaSalva = data;
       } else {
-        const { error } = await supabase.from('vendas').insert([vendaDados]);
+        const { data, error } = await supabase
+          .from('vendas')
+          .insert([vendaDados])
+          .select() // Pede pro Supabase devolver o dado criado
+          .single();
         if (error) throw error;
+        vendaSalva = data;
       }
 
       const aparelhosIds = carrinho.map(item => item.aparelhoId).filter(Boolean);
@@ -573,10 +583,131 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         if (erroEstoque) console.error('Fudeu o estoque:', erroEstoque);
       }
 
+       
+      const clienteVenda = clientes.find(c => c.id === posDados.clienteId);
+      
+      if (clienteVenda && clienteVenda.email && clienteVenda.email !== 'sem@email.com') {
+        
+        // 1. Monta as linhas da tabela igualzinho a sua notinha A4
+        const itensHtmlA4 = carrinho.map(item => `
+          <tr>
+            <td style="border: 1px solid #000; padding: 6px; text-align: left;">
+              ${item.descricao} <br><small style="color: #666;">${item.observacao || ''}</small>
+            </td>
+            <td style="border: 1px solid #000; padding: 6px; text-align: center;">${item.quantidade}</td>
+            <td style="border: 1px solid #000; padding: 6px; text-align: right;">R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</td>
+            <td style="border: 1px solid #000; padding: 6px; text-align: right;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
+            <td style="border: 1px solid #000; padding: 6px; text-align: right; font-weight: bold;">R$ ${item.total.toFixed(2).replace('.', ',')}</td>
+          </tr>
+        `).join('');
+
+        // 2. Monta o corpor do email com cara de Nota Fiscal Impressa
+        const htmlDoRecibo = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Recibo de Venda</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; background-color: #f4f4f5; padding: 20px; color: #000;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #ccc; padding: 30px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+              
+              <!-- Cabeçalho da Loja -->
+              <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 15px; margin-bottom: 20px;">
+                <h1 style="margin: 0; font-size: 22px; text-transform: uppercase;">${config.nomeLoja || 'PHONE CENTER'}</h1>
+                <p style="margin: 5px 0 0 0; font-size: 12px; color: #555;">Assistência Técnica e Vendas</p>
+                <p style="margin: 2px 0 0 0; font-size: 12px; font-weight: bold;">RECIBO DE VENDA N° ${vendaSalva?.id ? vendaSalva.id.slice(-6).toUpperCase() : '000000'}</p>
+              </div>
+
+              <!-- Dados da Venda e Cliente -->
+              <table style="width: 100%; margin-bottom: 20px; font-size: 13px; line-height: 1.5;">
+                <tr>
+                  <td style="width: 50%; vertical-align: top;">
+                    <b>Cliente:</b> ${clienteVenda.nome}<br>
+                    <b>Telefone:</b> ${clienteVenda.telefone || 'N/A'}<br>
+                    <b>CPF:</b> ${clienteVenda.cpf || 'N/A'}
+                  </td>
+                  <td style="width: 50%; text-align: right; vertical-align: top;">
+                    <b>Data:</b> ${new Date().toLocaleDateString('pt-BR')}<br>
+                    <b>Vendedor:</b> ${posDados.vendedor || 'Padrão'}<br>
+                    <b>Forma de Pagto:</b> ${posPagamento.pagamentos[0]?.metodo.toUpperCase().replace('_', ' ')}
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Tabela de Produtos -->
+              <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px;">
+                <thead>
+                  <tr style="background-color: #f0f0f0;">
+                    <th style="border: 1px solid #000; padding: 8px; text-align: left;">Produto</th>
+                    <th style="border: 1px solid #000; padding: 8px; text-align: center;">Qtd</th>
+                    <th style="border: 1px solid #000; padding: 8px; text-align: right;">Vlr Unit.</th>
+                    <th style="border: 1px solid #000; padding: 8px; text-align: right;">Desc.</th>
+                    <th style="border: 1px solid #000; padding: 8px; text-align: right;">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itensHtmlA4}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="4" style="border: 1px solid #000; padding: 10px; text-align: right; font-weight: bold; font-size: 14px;">TOTAL:</td>
+                    <td style="border: 1px solid #000; padding: 10px; text-align: right; font-weight: bold; font-size: 14px;">R$ ${valorFinal.toFixed(2).replace('.', ',')}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <!-- Termos de Garantia (Igualzinho o seu) -->
+              <div style="border: 1px solid #000; padding: 15px; font-size: 11px; margin-bottom: 20px; background-color: #fafafa;">
+                <p style="margin: 0 0 8px 0; font-weight: bold; text-align: center; font-size: 13px;">TERMO DE GARANTIA</p>
+                <p style="margin: 0 0 5px 0;">Garantia de <b>${posPagamento.garantia}</b> a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</p>
+                <p style="margin: 0 0 3px 0;"><b>Esta garantia não cobre:</b></p>
+                <ul style="margin: 0; padding-left: 20px;">
+                  <li>Queda, umidade, líquidos ou danos acidentais;</li>
+                  <li>Uso indevido, instalação incorreta ou violação do produto;</li>
+                  <li>Abertura ou tentativa de conserto por terceiros não autorizados;</li>
+                  <li>Não pode molhar e não pode abrir o aparelho.</li>
+                </ul>
+              </div>
+
+              <div style="text-align: center; font-weight: bold; font-size: 14px; margin-top: 30px;">
+                OBRIGADO PELA PREFERÊNCIA!
+              </div>
+
+            </div>
+          </body>
+          </html>
+        `;
+
+        // 3. Chama o motoboy!
+        fetch('/api/email', { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            para: clienteVenda.email,
+            assunto: 'Recibo de Compra - ' + (config.nomeLoja || 'Phone Center'),
+            mensagem: htmlDoRecibo // Manda a caralha do HTML inteiro
+          }),
+        })
+        .then(res => {
+          if (!res.ok) throw new Error('Motoboy furou o pneu.');
+          console.log('Recibo HTML enviado igual um foguete, uai!');
+        })
+        .catch(err => console.error('Deu ruim no email:', err));
+        
+      } else {
+        console.log('Cliente sem email ou mal cadastrado. Deixa quieto.');
+      }
+
       await carregarVendas();
       setShowSaleCelebration(true);
       playSaleSuccessSound();
       toast.success(editingId ? 'Venda atualizada com sucesso.' : 'Venda finalizada com sucesso.');
+
+      // Dispara o recibo automaticamente após salvar com sucesso
+      if (vendaSalva) {
+        handleGerarReciboA4(vendaSalva);
+      }
 
       successTimerRef.current = setTimeout(() => {
         closePOSModal();
@@ -1697,8 +1828,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           }}
                         >
                           <option value="">Produto</option>
-                          {aparelhos.map(a => (
-                            <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco.toFixed(2).replace('.', ',')}</option>
+                          {aparelhos
+                           .filter(a => a.ativo !== false && a.condicao !== 'vendido') // Filtra os mortos aqui, uai!
+                           .map(a => (
+                           <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco.toFixed(2).replace('.', ',')}</option>
                           ))}
                         </select>
                         <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">

@@ -3,7 +3,7 @@ import nodemailer from 'nodemailer';
 
 export async function POST(request: Request) {
   try {
-    const { para, assunto, mensagem } = await request.json();
+    const { para, assunto, mensagem, pdfUrl } = await request.json();
 
     const transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST,
@@ -15,11 +15,20 @@ export async function POST(request: Request) {
       },
     });
 
+    const anexos = [];
+    if (pdfUrl) {
+      anexos.push({
+        filename: 'Comprovante_PhoneCenter.pdf',
+        path: pdfUrl, // O Nodemailer faz o download sozinho direto do seu Supabase, sô!
+      });
+    }
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: para,
       subject: assunto,
-      html: mensagem, // <-- MUDOU PRA HTML AQUI, SÔ! O SEGREDO TÁ NESSA CARALHA!
+      html: mensagem, // Voltamos pro texto simples no corpo do email
+      attachments: anexos,
     });
 
     return NextResponse.json({ message: 'Email enviado com sucesso, caralho!' }, { status: 200 });

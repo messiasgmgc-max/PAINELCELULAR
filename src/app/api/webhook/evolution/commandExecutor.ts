@@ -11,7 +11,8 @@ export type GeminiCommandAction =
   | 'create_loja'
   | 'update_loja'
   | 'list_lojas'
-  | 'search_entities';
+  | 'search_entities'
+  | 'query_entities';
 
 export interface GeminiCommandPlan {
   type: 'command';
@@ -81,12 +82,6 @@ export function buildWhatsAppText(action: string, data: unknown, phone: string) 
       return `✅ Agendamento criado com sucesso!\n\nCliente: ${nombre}\nData: ${entity.data || '-'}\nDescrição: ${entity.descricao || '-'}\n\nID: ${id}`;
     case 'create_garantia':
       return `✅ Garantia criada com sucesso!\n\nCliente: ${nombre}\nOS: ${entity.osNumero || '-'}\nPeríodo: ${entity.diasGarantia || '-'} dias\n\nID: ${id}`;
-    case 'create_venda':
-      return `✅ Venda gerada com sucesso!\n\nCliente: ${nombre}\nValor: ${entity.valor ? `R$ ${Number(entity.valor).toFixed(2).replace('.', ',')}` : '-'}\nMétodo: ${entity.metodo || '-'}\n\nID: ${id}`;
-    case 'generate_etiquetas':
-      return `🏷️ Etiquetas geradas com sucesso.\n\nModelo: ${entity.template || '-'}\nItens: ${entity.totalEtiquetas || '-'}`;
-    case 'list_estoque':
-      return `📦 Estoque consultado com sucesso.\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
     case 'create_loja':
       return `✅ Loja cadastrada com sucesso!\n\nNome: ${nombre}\nTelefone: ${extra || '-'}\n\nID: ${id}`;
     case 'update_loja':
@@ -94,7 +89,8 @@ export function buildWhatsAppText(action: string, data: unknown, phone: string) 
     case 'list_lojas':
       return `📋 Lojas disponíveis:\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
     case 'search_entities':
-      return `🔎 Busca concluída.\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
+    case 'query_entities':
+      return `🔎 Consulta concluída.\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
     default:
       return `✅ Comando processado com sucesso.\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
   }
