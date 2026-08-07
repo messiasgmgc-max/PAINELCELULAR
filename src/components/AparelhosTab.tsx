@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { Aparelho } from "@/lib/db/types";
@@ -31,6 +31,7 @@ export function AparelhosTab() {
   const [showSaidas, setShowSaidas] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showMercadoPhoneModal, setShowMercadoPhoneModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [mercadoPhoneText, setMercadoPhoneText] = useState("");
   const [mercadoPhoneMargem, setMercadoPhoneMargem] = useState("300");
   const [importingMercadoPhone, setImportingMercadoPhone] = useState(false);
@@ -612,6 +613,100 @@ export function AparelhosTab() {
     document.body.removeChild(link);
   };
 
+  // ── Exportar Lista WhatsApp ──
+  const handleExportWhatsApp = () => {
+    if (aparelhosAtivos.length === 0) {
+      toast.error("Nenhum aparelho em estoque para exportar!");
+      return;
+    }
+
+    const condicaoLabel = (c: string) => {
+      switch (c) {
+        case "novo": return "NOVO";
+        case "seminovo": return "SEMI";
+        case "usado": return "USADO";
+        case "danificado": return "AVARIA";
+        default: return c.toUpperCase();
+      }
+    };
+
+    const formatPreco = (v: number) =>
+      v > 0
+        ? v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+        : "";
+
+    // Agrupa por modelo
+    const grupos: Record<string, typeof aparelhosAtivos> = {};
+    aparelhosAtivos.forEach((a) => {
+      const chave = `${a.marca} ${a.modelo}`.trim();
+      if (!grupos[chave]) grupos[chave] = [];
+      grupos[chave].push(a);
+    });
+
+    const hoje = new Date().toLocaleDateString("pt-BR", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+    });
+
+    let texto = `📱 *ESTOQUE — ${hoje}*\n`;
+    texto += `_${aparelhosAtivos.length} aparelho(s) disponível(is)_\n`;
+    texto += `${"-".repeat(30)}\n\n`;
+
+    Object.entries(grupos).forEach(([modelo, itens]) => {
+      texto += `*${modelo}* (${itens.length})\n`;
+      itens.forEach((a) => {
+        // ID / etiqueta: usa numeroSerie ou IMEI (últimos 4) ou id curto
+        const etiqueta = a.numeroSerie
+          ? a.numeroSerie.slice(-6).toUpperCase()
+          : a.imei
+          ? a.imei.slice(-4)
+          : a.id.slice(0, 6).toUpperCase();
+
+        const partes: string[] = [];
+        partes.push(`🔖 *${etiqueta}*`);
+        if (a.capacidade) partes.push(a.capacidade);
+        if (a.cor && a.cor.toLowerCase() !== "padrão") partes.push(a.cor);
+        partes.push(`[${condicaoLabel(a.condicao)}]`);
+        if (a.preco > 0) partes.push(formatPreco(a.preco));
+
+        // Observações relevantes (bateria, acessórios etc.)
+        const obs: string[] = [];
+        if (a.observacoes) {
+          const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i);
+          if (bateriaMatch) obs.push(`🔋 ${bateriaMatch[1]}%`);
+          // outras obs curtas
+          const outrasObs = a.observacoes
+            .replace(/BAIXA_ESTOQUE:[^|]+/g, "")
+            .replace(/\d+%\s*bat[a-z]*/gi, "")
+            .split("|")
+            .map((o) => o.trim())
+            .filter((o) => o.length > 0 && o.length < 40);
+          obs.push(...outrasObs.slice(0, 2));
+        }
+
+        texto += `  ${partes.join(" · ")}${obs.length ? " — " + obs.join(" | ") : ""}\n`;
+      });
+      texto += "\n";
+    });
+
+    texto += `${"-".repeat(30)}\n`;
+    texto += `✅ *Consulte disponibilidade antes de confirmar*`;
+
+    // Copia para clipboard
+    navigator.clipboard.writeText(texto)
+      .then(() => toast.success("Lista copiada! Cole no WhatsApp 📋", { duration: 4000 }))
+      .catch(() => {
+        // Fallback: abre em nova aba como texto
+        const blob = new Blob([texto], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `estoque_whatsapp_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Lista baixada como arquivo .txt!");
+      });
+  };
+
   const handleDeleteEstoque = async () => {
     if (aparelhosAtivos.length === 0) {
       alert("O estoque já está vazio.");
@@ -1083,15 +1178,49 @@ export function AparelhosTab() {
               <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap h-9">
                 <History className="h-4 w-4" /> Saídas
               </Button>
-              <Button
-                variant="outline"
-                onClick={handleExportCSV}
-                disabled={aparelhosAtivos.length === 0}
-                className="shrink-0 whitespace-nowrap h-9"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Exportar CSV
-              </Button>
+              {/* Dropdown Exportar */}
+              <div className="relative shrink-0">
+                <Button
+                  variant="outline"
+                  disabled={aparelhosAtivos.length === 0}
+                  onClick={() => setShowExportMenu((v) => !v)}
+                  className="whitespace-nowrap h-9 gap-1.5"
+                >
+                  <Download className="h-4 w-4" />
+                  Exportar
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showExportMenu ? "rotate-180" : ""}`} />
+                </Button>
+
+                {showExportMenu && (
+                  <>
+                    {/* fechar ao clicar fora */}
+                    <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                    <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[180px] rounded-xl border border-white/15 bg-slate-900/98 dark:bg-slate-950/98 shadow-2xl backdrop-blur-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                      <button
+                        onClick={() => { handleExportCSV(); setShowExportMenu(false); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-slate-200 hover:bg-white/10 transition-colors text-left"
+                      >
+                        <FileSpreadsheet className="h-4 w-4 text-emerald-400" />
+                        <div>
+                          <div className="font-medium">Exportar CSV</div>
+                          <div className="text-[10px] text-slate-400">Planilha completa</div>
+                        </div>
+                      </button>
+                      <div className="h-px bg-white/8 mx-3" />
+                      <button
+                        onClick={() => { handleExportWhatsApp(); setShowExportMenu(false); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-slate-200 hover:bg-white/10 transition-colors text-left"
+                      >
+                        <MessageCircle className="h-4 w-4 text-green-400" />
+                        <div>
+                          <div className="font-medium">Lista WhatsApp</div>
+                          <div className="text-[10px] text-slate-400">Copia pro grupo de estoque</div>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap h-9">
                 <List className="h-4 w-4" /> Lista Fornecedor
               </Button>
