@@ -1066,43 +1066,40 @@ export function AparelhosTab() {
     <div className="panel-shell space-y-4">
       <GlassCard className="rounded-3xl">
         <div className="pb-4 border-b border-white/10 mb-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center justify-between w-full sm:w-auto">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base sm:text-lg font-bold">Aparelhos Cadastrados</h3>
                 <p className="text-xs sm:text-sm text-muted-foreground">
                   Gerencie seus aparelhos e gere certificados ({aparelhosAtivos.length} em estoque)
                 </p>
               </div>
-              <Button size="sm" onClick={() => setShowForm(!showForm)} className="sm:hidden flex items-center gap-1 shrink-0 ml-4">
-                Novo
-              </Button>
             </div>
-            <div className="scroll-row w-full sm:w-auto sm:pb-0">
-              <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap">
+            <div className="scroll-row w-full pb-1">
+              <Button onClick={() => setShowForm(!showForm)} className="btn-ios shrink-0 whitespace-nowrap flex items-center gap-1.5 h-9 px-4 text-sm">
+                <Plus className="h-4 w-4" />
+                Novo Aparelho
+              </Button>
+              <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap h-9">
                 <History className="h-4 w-4" /> Saídas
               </Button>
               <Button
                 variant="outline"
                 onClick={handleExportCSV}
                 disabled={aparelhosAtivos.length === 0}
-                className="shrink-0 whitespace-nowrap"
+                className="shrink-0 whitespace-nowrap h-9"
               >
                 <Download className="mr-2 h-4 w-4" />
                 Exportar CSV
               </Button>
-              <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap">
-                <List className="h-4 w-4" /> Lista de Fornecedor
+              <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap h-9">
+                <List className="h-4 w-4" /> Lista Fornecedor
               </Button>
-              <Button variant="outline" onClick={() => setShowMercadoPhoneModal(true)} className="gap-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/50 dark:text-emerald-400 shrink-0 whitespace-nowrap">
+              <Button variant="outline" onClick={() => setShowMercadoPhoneModal(true)} className="gap-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/50 dark:text-emerald-400 shrink-0 whitespace-nowrap h-9">
                 <Download className="h-4 w-4" /> Lista MP
               </Button>
-              <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50 shrink-0 whitespace-nowrap">
+              <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50 shrink-0 whitespace-nowrap h-9">
                 <Trash2 className="h-4 w-4" /> Deletar Estoque
-              </Button>
-              <Button onClick={() => setShowForm(!showForm)} className="hidden sm:flex shrink-0 whitespace-nowrap">
-                <Plus className="mr-2 h-4 w-4" />
-                Novo Aparelho
               </Button>
             </div>
           </div>

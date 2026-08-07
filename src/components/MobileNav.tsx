@@ -128,9 +128,11 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
       </aside>
 
       {/* Dock Mobile */}
-      <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pointer-events-none">
+      <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pointer-events-none">
         <div className={cn(
-          "pointer-events-auto glass nav-surface border border-white/20 shadow-2xl rounded-[1.75rem] p-2 transition-all duration-300",
+          "pointer-events-auto border shadow-2xl rounded-[1.75rem] p-2 transition-all duration-300",
+          "bg-white/95 dark:bg-slate-950/98 border-slate-200/80 dark:border-slate-700/70",
+          "backdrop-filter backdrop-blur-xl",
           scrolled ? "translate-y-0 opacity-100" : "translate-y-0 opacity-100"
         )}>
           <div className="flex gap-1 overflow-x-auto scrollbar-soft snap-x snap-mandatory">
@@ -140,7 +142,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
                   <button
                     key={tab.id}
                     onClick={openDrawer}
-                    className="snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold text-gray-500 hover:text-blue-600 hover:bg-blue-500/10 transition-all"
+                    className="snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10 transition-all"
                   >
                     <Menu className="w-5 h-5" />
                     <span>Menu</span>
@@ -155,8 +157,8 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
                   className={cn(
                     "snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold transition-all",
                     currentTab === tab.id
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                      : "text-gray-500 hover:text-blue-600 hover:bg-blue-500/10"
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-500/40"
+                      : "text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10"
                   )}
                 >
                   {tab.icon}
