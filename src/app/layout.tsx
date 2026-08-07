@@ -73,7 +73,34 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js').catch(() => {});
+                // updateViaCache:'none' faz o browser re-buscar o sw.js a cada carregamento
+                navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+                  .then(reg => {
+                    // Verifica por atualizações assim que a página carrega
+                    reg.update().catch(() => {});
+
+                    // Quando um novo SW está esperando (após deploy), força a ativação
+                    reg.addEventListener('updatefound', () => {
+                      const newWorker = reg.installing;
+                      if (!newWorker) return;
+                      newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                          // Novo deploy detectado — manda o SW pular a fila e ativar
+                          newWorker.postMessage('SKIP_WAITING');
+                        }
+                      });
+                    });
+                  })
+                  .catch(() => {});
+
+                // Quando o SW novo assumir o controle, recarrega a página automaticamente
+                let refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                  if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                  }
+                });
               }
             `,
           }}
