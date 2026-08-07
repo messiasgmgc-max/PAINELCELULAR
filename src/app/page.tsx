@@ -219,11 +219,11 @@ export default function Home() {
               )}
 
               {usuario && (
-                <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-slate-800 rounded-lg">
-                  <User className="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-gray-900 dark:text-gray-200">{usuario.nome}</span>
-                    <span className="text-xs text-gray-600 dark:text-gray-400">{usuario.role}</span>
+                <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-2 bg-gray-100/80 dark:bg-slate-800/80 rounded-xl border border-white/10">
+                  <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500 flex-shrink-0" />
+                  <div className="flex flex-col text-left">
+                    <span className="text-xs sm:text-sm font-medium text-gray-900 dark:text-gray-200 max-w-[80px] sm:max-w-[160px] truncate">{usuario.nome}</span>
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 capitalize leading-none hidden sm:block">{usuario.role}</span>
                   </div>
                 </div>
               )}

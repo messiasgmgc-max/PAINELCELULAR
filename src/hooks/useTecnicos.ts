@@ -9,38 +9,66 @@ export function useTecnicos() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Auxiliar para resolver o ID da loja com fallbacks seguros
+  const resolveLojaId = useCallback(async (): Promise<string | null> => {
+    if (usuario?.lojaId) return usuario.lojaId;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        const { data: perfil } = await supabase
+          .from('perfis')
+          .select('loja_id')
+          .eq('email', session.user.email)
+          .maybeSingle();
+        if (perfil?.loja_id) return perfil.loja_id;
+      }
+
+      const { data: primeiraLoja } = await supabase
+        .from('lojas')
+        .select('id')
+        .limit(1)
+        .maybeSingle();
+      if (primeiraLoja?.id) return primeiraLoja.id;
+    } catch (e) {
+      console.error('Erro ao resolver loja_id:', e);
+    }
+    return null;
+  }, [usuario?.lojaId]);
+
   // Buscar todos os técnicos
   const fetchTecnicos = useCallback(async () => {
-    if (!usuario?.lojaId) return;
     setLoading(true);
     setError(null);
     try {
+      const lojaId = await resolveLojaId();
       let query = supabase.from('tecnicos').select('*');
 
-      if (usuario?.lojaId) {
-        query = query.eq('loja_id', usuario.lojaId);
+      if (lojaId) {
+        query = query.eq('loja_id', lojaId);
       }
 
       const { data, error } = await query.order('nome');
       if (error) throw error;
       setTecnicos(data || []);
     } catch (err: any) {
+      console.error('Erro ao buscar membros da equipe:', err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [usuario?.lojaId]);
+  }, [resolveLojaId]);
 
   // Buscar técnicos por termo
   const buscarTecnicos = useCallback(async (termo: string) => {
-    if (!usuario?.lojaId) return;
     setLoading(true);
     setError(null);
     try {
+      const lojaId = await resolveLojaId();
       let query = supabase.from('tecnicos').select('*');
 
-      if (usuario?.lojaId) {
-        query = query.eq('loja_id', usuario.lojaId);
+      if (lojaId) {
+        query = query.eq('loja_id', lojaId);
       }
 
       const { data, error } = await query.ilike('nome', `%${termo}%`);
@@ -51,66 +79,78 @@ export function useTecnicos() {
     } finally {
       setLoading(false);
     }
-  }, [usuario?.lojaId]);
+  }, [resolveLojaId]);
 
-  // Criar novo técnico
+  // Criar novo técnico / vendedor
   const criarTecnico = useCallback(async (dados: Partial<Tecnico>) => {
     setError(null);
     try {
+      const lojaId = await resolveLojaId();
+      const payload = {
+        ...dados,
+        ...(lojaId ? { loja_id: lojaId } : {})
+      };
+
       const { data, error } = await supabase
         .from('tecnicos')
-        .insert([{ ...dados, ...(usuario?.lojaId ? { loja_id: usuario.lojaId } : {}) }])
+        .insert([payload])
         .select()
         .single();
+
       if (error) throw error;
       setTecnicos(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome)));
       return data;
     } catch (err: any) {
+      console.error('Erro ao criar membro da equipe:', err);
       setError(err.message);
       throw err;
     }
-  }, [usuario?.lojaId]);
+  }, [resolveLojaId]);
 
-  // Atualizar técnico
+  // Atualizar técnico / vendedor
   const atualizarTecnico = useCallback(async (id: string, dados: Partial<Tecnico>) => {
-    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('tecnicos')
-        .update(dados)
-        .eq('id', id)
-        .eq('loja_id', usuario.lojaId)
-        .select()
-        .single();
+      const lojaId = await resolveLojaId();
+      let query = supabase.from('tecnicos').update(dados).eq('id', id);
+      if (lojaId) {
+        query = query.eq('loja_id', lojaId);
+      }
+
+      const { data, error } = await query.select().single();
       if (error) throw error;
+
       setTecnicos(prev => 
         prev.map(t => t.id === id ? data : t).sort((a, b) => a.nome.localeCompare(b.nome))
       );
       return data;
     } catch (err: any) {
+      console.error('Erro ao atualizar membro da equipe:', err);
       setError(err.message);
       throw err;
     }
-  }, [usuario?.lojaId]);
+  }, [resolveLojaId]);
 
-  // Deletar técnico
+  // Deletar técnico / vendedor
   const deletarTecnico = useCallback(async (id: string) => {
-    if (!usuario?.lojaId) throw new Error('Loja não autenticada');
     setError(null);
     try {
-      const { error } = await supabase
-        .from('tecnicos')
-        .delete()
-        .eq('id', id)
-        .eq('loja_id', usuario.lojaId);
+      const lojaId = await resolveLojaId();
+      let query = supabase.from('tecnicos').delete().eq('id', id);
+      if (lojaId) {
+        query = query.eq('loja_id', lojaId);
+      }
+
+      const { error } = await query;
       if (error) throw error;
+
       setTecnicos(prev => prev.filter(t => t.id !== id));
     } catch (err: any) {
+      console.error('Erro ao deletar membro da equipe:', err);
       setError(err.message);
       throw err;
     }
-  }, [usuario?.lojaId]);
+  }, [resolveLojaId]);
 
   useEffect(() => {
     fetchTecnicos();

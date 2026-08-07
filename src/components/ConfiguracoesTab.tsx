@@ -69,12 +69,18 @@ export function ConfiguracoesTab() {
           .single();
 
         if (data) {
-          setNomeLoja(data.nome || '');
+          const nomeFinal = data.nome || config.nomeLoja || 'Phone Center';
+          setNomeLoja(nomeFinal);
+          setNomeEmpresa(nomeFinal);
           setSubtituloLoja(data.subtitulo || '');
           setLogoLoja(data.logo_url || null);
           setPreviewLogo(data.logo_url || null);
           setAssinaturaLoja(data.assinatura_url || null);
           setPreviewAssinatura(data.assinatura_url || null);
+          setEnderecoEmpresa(data.endereco || config.enderecoLoja || '');
+          setCnpj(data.cnpj || config.cnpjLoja || '');
+          setTelefoneEmpresa(data.telefone || config.telefoneLoja || '');
+          setEmailEmpresa(data.email || config.emailLoja || '');
         }
       } catch (err) {
         console.error("Erro ao carregar dados da loja", err);
@@ -82,6 +88,19 @@ export function ConfiguracoesTab() {
     }
     carregarDadosLoja();
   }, [usuario?.lojaId]);
+
+  // Sincroniza os dados do formulário sempre que o hook `useStoreConfig` carregar do Supabase
+  useEffect(() => {
+    if (config) {
+      if (config.nomeLoja && config.nomeLoja !== 'Phone Center') setNomeEmpresa(prev => prev || config.nomeLoja);
+      if (config.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado') setEnderecoEmpresa(prev => prev || config.enderecoLoja);
+      if (config.cnpjLoja && config.cnpjLoja !== 'Não informado') setCnpj(prev => prev || config.cnpjLoja);
+      if (config.telefoneLoja && config.telefoneLoja !== 'Não informado') setTelefoneEmpresa(prev => prev || config.telefoneLoja);
+      if (config.emailLoja && config.emailLoja !== 'contato@loja.com') setEmailEmpresa(prev => prev || config.emailLoja);
+      if (config.logoLoja) { setLogoLoja(config.logoLoja); setPreviewLogo(config.logoLoja); }
+      if (config.assinaturaLoja) { setAssinaturaLoja(config.assinaturaLoja); setPreviewAssinatura(config.assinaturaLoja); }
+    }
+  }, [config]);
 
   const handleUploadLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -131,7 +150,29 @@ export function ConfiguracoesTab() {
     removerAssinatura();
   };
 
-  const handleSalvarConfiguracoes = () => {
+  const handleSalvarConfiguracoes = async () => {
+    if (usuario?.lojaId) {
+      try {
+        const { error } = await supabase.from('lojas').update({
+          nome: nomeEmpresa || config.nomeLoja,
+          telefone: telefoneEmpresa,
+          endereco: enderecoEmpresa,
+          email: emailEmpresa,
+          cnpj,
+        }).eq('id', usuario.lojaId);
+
+        if (error) {
+          console.error('Erro ao atualizar loja no Supabase:', error);
+          alert(`Erro ao salvar no banco: ${error.message}`);
+          return;
+        }
+      } catch (err: any) {
+        console.error('Erro ao salvar dados da loja no banco:', err);
+        alert(`Erro ao salvar no banco: ${err?.message || 'Falha de conexão'}`);
+        return;
+      }
+    }
+
     atualizarDadosEmpresa({
       nomeLoja: nomeEmpresa || config.nomeLoja,
       telefoneLoja: telefoneEmpresa,
@@ -139,6 +180,7 @@ export function ConfiguracoesTab() {
       emailLoja: emailEmpresa,
       cnpjLoja: cnpj,
     });
+
     alert('Configurações da empresa salvas com sucesso!');
   };
 
@@ -648,12 +690,29 @@ export function ConfiguracoesTab() {
                         />
                       </div>
                       <div>
-                        <label className="text-sm font-medium">CNPJ</label>
+                        <label className="text-sm font-medium">CPF / CNPJ</label>
                         <input
                           type="text"
                           value={cnpj}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCnpj(e.target.value)}
-                          placeholder="00.000.000/0000-00"
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            const raw = e.target.value;
+                            const digits = raw.replace(/\D/g, '').slice(0, 14);
+                            let formatted = digits;
+                            if (digits.length <= 11) {
+                              formatted = digits
+                                .replace(/(\d{3})(\d)/, '$1.$2')
+                                .replace(/(\d{3})(\d)/, '$1.$2')
+                                .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+                            } else {
+                              formatted = digits
+                                .replace(/^(\d{2})(\d)/, '$1.$2')
+                                .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+                                .replace(/\.(\d{3})(\d)/, '.$1/$2')
+                                .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+                            }
+                            setCnpj(formatted);
+                          }}
+                          placeholder="000.000.000-00 ou 00.000.000/0000-00"
                           className="input-glass mt-2"
                         />
                       </div>

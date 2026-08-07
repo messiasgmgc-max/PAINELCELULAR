@@ -29,17 +29,19 @@ export function useStoreConfig() {
   const [config, setConfig] = useState<StoreConfig>(DEFAULT_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
   const [storageKey, setStorageKey] = useState<string | null>(null);
+  const [lojaId, setLojaId] = useState<string | null>(null);
 
-  // Resolve uma chave por loja para evitar vazamento visual entre estabelecimentos
+  // Resolve uma chave por loja e busca os dados reais da tabela 'lojas' no Supabase
   useEffect(() => {
     let mounted = true;
 
-    const resolverChave = async () => {
+    const resolverChaveEBuscarLoja = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!mounted) return;
 
         let scope = 'global';
+        let currentLojaId: string | null = null;
         const email = session?.user?.email;
 
         if (email) {
@@ -51,22 +53,72 @@ export function useStoreConfig() {
 
           if (perfil?.loja_id) {
             scope = String(perfil.loja_id);
+            currentLojaId = String(perfil.loja_id);
           }
         } else if (session?.user?.id) {
           scope = session.user.id;
         }
 
-        setStorageKey(`${STORAGE_KEY_PREFIX}:${scope}`);
+        setLojaId(currentLojaId);
+        const resolvedKey = `${STORAGE_KEY_PREFIX}:${scope}`;
+        setStorageKey(resolvedKey);
+
+        // 1. Tenta primeiro carregar do localStorage como cache rápido
+        const saved = localStorage.getItem(resolvedKey);
+        if (saved && mounted) {
+          try {
+            setConfig(prev => ({ ...prev, ...JSON.parse(saved) }));
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        // 2. Carrega os dados oficiais atualizados da tabela 'lojas' (com fallback para a primeira loja)
+        let lojaDb: any = null;
+        if (currentLojaId) {
+          const { data } = await supabase
+            .from('lojas')
+            .select('*')
+            .eq('id', currentLojaId)
+            .maybeSingle();
+          lojaDb = data;
+        }
+
+        if (!lojaDb) {
+          const { data } = await supabase
+            .from('lojas')
+            .select('*')
+            .limit(1)
+            .maybeSingle();
+          lojaDb = data;
+          if (lojaDb?.id) setLojaId(String(lojaDb.id));
+        }
+
+        if (lojaDb && mounted) {
+          const configDb: StoreConfig = {
+            nomeLoja: lojaDb.nome || DEFAULT_CONFIG.nomeLoja,
+            logoLoja: lojaDb.logo_url || null,
+            assinaturaLoja: lojaDb.assinatura_url || null,
+            enderecoLoja: lojaDb.endereco || DEFAULT_CONFIG.enderecoLoja,
+            cnpjLoja: lojaDb.cnpj || DEFAULT_CONFIG.cnpjLoja,
+            telefoneLoja: lojaDb.telefone || DEFAULT_CONFIG.telefoneLoja,
+            emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
+          };
+
+          setConfig(configDb);
+          localStorage.setItem(resolvedKey, JSON.stringify(configDb));
+        }
       } catch (error) {
-        console.error('Erro ao resolver chave da configuração:', error);
-        if (mounted) setStorageKey(`${STORAGE_KEY_PREFIX}:global`);
+        console.error('Erro ao resolver chave ou carregar dados da loja:', error);
+      } finally {
+        if (mounted) setIsLoading(false);
       }
     };
 
-    resolverChave();
+    resolverChaveEBuscarLoja();
 
     const { data: listener } = supabase.auth.onAuthStateChange(() => {
-      resolverChave();
+      resolverChaveEBuscarLoja();
     });
 
     return () => {
@@ -75,31 +127,24 @@ export function useStoreConfig() {
     };
   }, []);
 
-  // Carregar config ao mudar a chave resolvida
-  useEffect(() => {
-    if (!storageKey) return;
-
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        setConfig(JSON.parse(saved));
-      } else {
-        setConfig(DEFAULT_CONFIG);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar configuração:', error);
-      setConfig(DEFAULT_CONFIG);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [storageKey]);
-
   // Salvar config
-  const salvarConfig = (novaConfig: StoreConfig) => {
+  const salvarConfig = async (novaConfig: StoreConfig) => {
     try {
       const key = storageKey || `${STORAGE_KEY_PREFIX}:global`;
       localStorage.setItem(key, JSON.stringify(novaConfig));
       setConfig(novaConfig);
+
+      if (lojaId) {
+        await supabase.from('lojas').update({
+          nome: novaConfig.nomeLoja,
+          logo_url: novaConfig.logoLoja,
+          assinatura_url: novaConfig.assinaturaLoja,
+          endereco: novaConfig.enderecoLoja,
+          cnpj: novaConfig.cnpjLoja,
+          telefone: novaConfig.telefoneLoja,
+          email: novaConfig.emailLoja,
+        }).eq('id', lojaId);
+      }
     } catch (error) {
       console.error('Erro ao salvar configuração:', error);
     }

@@ -339,131 +339,119 @@ export function ClientesTab() {
           {/* Formulário de Novo/Editar Cliente */}
           {showForm && (
             <ModalPortal>
-            <div className="modal-overlay z-[60]">
-            <GlassCard className="modal-panel modal-panel-lg w-[min(860px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-semibold">
-                  {editingId ? "Editar Cliente" : "Adicionar Novo Cliente"}
-                </h3>
-                <button
-                  onClick={handleCancel}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+              <div className="modal-overlay modal-overlay-fit">
+                <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full my-4">
+                  <div className="modal-header">
+                    <h3 className="modal-title">
+                      {editingId ? "Editar Cliente" : "Adicionar Novo Cliente"}
+                    </h3>
+                    <Button variant="ghost" size="icon" onClick={handleCancel}>
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </div>
+
+                  <div className="modal-body-scroll">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      {/* Linha 1: Nome e Email */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                          type="text"
+                          name="nome"
+                          placeholder="Nome completo *"
+                          value={formData.nome}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass"
+                        />
+                        <input
+                          type="email"
+                          name="email"
+                          placeholder="Email *"
+                          value={formData.email}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass"
+                        />
+                      </div>
+
+                      {/* Linha 2: Telefone e CPF */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                          type="tel"
+                          name="telefone"
+                          placeholder="Telefone *"
+                          value={formData.telefone}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass"
+                        />
+                        <input
+                          type="text"
+                          name="cpf"
+                          placeholder="CPF (opcional)"
+                          value={formData.cpf}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                      </div>
+
+                      {/* Linha 3: Endereço */}
+                      <input
+                        type="text"
+                        name="endereco"
+                        placeholder="Endereço (opcional)"
+                        value={formData.endereco}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                      />
+
+                      {/* Linha 4: Cidade, Estado e CEP */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <input
+                          type="text"
+                          name="cidade"
+                          placeholder="Cidade (opcional)"
+                          value={formData.cidade}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                        <input
+                          type="text"
+                          name="estado"
+                          placeholder="Estado (opcional)"
+                          value={formData.estado}
+                          onChange={handleInputChange}
+                          maxLength={2}
+                          className="input-glass"
+                        />
+                        <input
+                          type="text"
+                          name="cep"
+                          placeholder="CEP (opcional)"
+                          value={formData.cep}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                      </div>
+
+                      {error && (
+                        <p className="text-sm text-red-500 font-semibold">
+                          Erro: {error}
+                        </p>
+                      )}
+
+                      <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                        <Button type="button" variant="outline" onClick={handleCancel}>
+                          Cancelar
+                        </Button>
+                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
+                          {loading ? "Processando..." : editingId ? "Atualizar Cliente" : "Salvar Cliente"}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                </GlassCard>
               </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Linha 1: Nome e Email */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="nome"
-                    placeholder="Nome completo *"
-                    value={formData.nome}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="Email *"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Linha 2: Telefone e CPF */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="tel"
-                    name="telefone"
-                    placeholder="Telefone *"
-                    value={formData.telefone}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="cpf"
-                    placeholder="CPF (opcional)"
-                    value={formData.cpf}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Linha 3: Endereço */}
-                <input
-                  type="text"
-                  name="endereco"
-                  placeholder="Endereço (opcional)"
-                  value={formData.endereco}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                />
-
-                {/* Linha 4: Cidade, Estado e CEP */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input
-                    type="text"
-                    name="cidade"
-                    placeholder="Cidade (opcional)"
-                    value={formData.cidade}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="estado"
-                    placeholder="Estado (opcional)"
-                    value={formData.estado}
-                    onChange={handleInputChange}
-                    maxLength={2}
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="cep"
-                    placeholder="CEP (opcional)"
-                    value={formData.cep}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Botões */}
-                <div className="flex gap-2 justify-end pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCancel}
-                  >
-                    Cancelar
-                  </Button>
-                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                    {loading
-                      ? editingId
-                        ? "Atualizando..."
-                        : "Salvando..."
-                      : editingId
-                      ? "Atualizar Cliente"
-                      : "Salvar Cliente"}
-                  </Button>
-                </div>
-
-                {error && (
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    Erro: {error}
-                  </p>
-                )}
-              </form>
-            </GlassCard>
-            </div>
             </ModalPortal>
           )}
 

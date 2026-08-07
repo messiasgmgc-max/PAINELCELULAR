@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit } from 'lucide-react';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -88,6 +88,158 @@ const createInitialPosPagamento = (): PosPagamentoState => ({
   pagamentos: [createPagamentoItem()],
 });
 
+function ProdutoCombobox({
+  aparelhos,
+  value,
+  onChange,
+}: {
+  aparelhos: Aparelho[];
+  value: string;
+  onChange: (aparelhoId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (open && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [open]);
+
+  const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido');
+  const selecionado = disponiveis.find(a => a.id === value);
+
+  const filtrados = disponiveis.filter(a => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    const imeiStr = (a.imei || a.numeroSerie || '').toLowerCase();
+    const modeloStr = (a.modelo || '').toLowerCase();
+    const marcaStr = (a.marca || '').toLowerCase();
+    const corStr = (a.cor || '').toLowerCase();
+    const capStr = (a.capacidade || '').toLowerCase();
+    return (
+      imeiStr.includes(term) ||
+      modeloStr.includes(term) ||
+      marcaStr.includes(term) ||
+      corStr.includes(term) ||
+      capStr.includes(term) ||
+      `${marcaStr} ${modeloStr}`.includes(term)
+    );
+  });
+
+  const formatSelectedText = (a: Aparelho) => {
+    const imei = a.imei || a.numeroSerie || '';
+    const imeiTag = imei ? `[IMEI: ${imei}] ` : '';
+    const capTag = a.capacidade ? ` ${a.capacidade}` : '';
+    const corTag = a.cor ? ` - ${a.cor}` : '';
+    const precoStr = ` - R$ ${(a.preco || 0).toFixed(2).replace('.', ',')}`;
+    return `${imeiTag}${a.marca || ''} ${a.modelo || ''}${capTag}${corTag}${precoStr}`;
+  };
+
+  return (
+    <div ref={containerRef} className="relative flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="input-glass min-w-0 w-full text-left flex items-center justify-between gap-2 h-11 px-3 py-2 text-xs font-mono"
+      >
+        <span className="truncate">
+          {selecionado ? (
+            <span className="font-bold text-emerald-400">
+              {formatSelectedText(selecionado)}
+            </span>
+          ) : (
+            <span className="text-muted-foreground font-sans">🔍 Pesquisar aparelho por IMEI ou Modelo...</span>
+          )}
+        </span>
+        <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1.5 w-full min-w-[320px] md:min-w-[460px] bg-slate-900/98 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl z-[999] overflow-hidden flex flex-col max-h-80 animate-in fade-in slide-in-from-top-1 duration-150">
+          <div className="p-2.5 border-b border-white/10 bg-black/40 flex items-center gap-2">
+            <Search className="w-4 h-4 text-emerald-400 shrink-0 ml-1" />
+            <input
+              ref={inputRef}
+              type="text"
+              className="bg-transparent border-none outline-none text-xs w-full text-white placeholder-slate-400 font-mono"
+              placeholder="Digite o IMEI (ex: 9551984) ou Modelo (ex: 11 Pro Max)..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <button type="button" onClick={() => setSearchTerm('')} className="p-1 text-slate-400 hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="overflow-y-auto divide-y divide-white/5 text-xs font-mono flex-1 max-h-64">
+            {filtrados.length === 0 ? (
+              <div className="p-4 text-center text-muted-foreground text-xs font-sans">
+                Nenhum aparelho encontrado com "{searchTerm}".
+              </div>
+            ) : (
+              filtrados.map((a) => {
+                const imei = a.imei || a.numeroSerie || '';
+                const isSelected = a.id === value;
+                return (
+                  <div
+                    key={a.id}
+                    onClick={() => {
+                      onChange(a.id);
+                      setOpen(false);
+                      setSearchTerm('');
+                    }}
+                    className={`p-3 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
+                      isSelected ? 'bg-emerald-600/30 border-l-4 border-emerald-500' : 'hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {imei && (
+                          <span className="font-bold text-emerald-400 bg-emerald-950/90 px-2 py-0.5 rounded border border-emerald-500/40 text-[11px]">
+                            IMEI: {imei}
+                          </span>
+                        )}
+                        <span className="font-bold text-white text-xs">
+                          {a.marca} {a.modelo}
+                        </span>
+                        {a.capacidade && <span className="text-slate-300 text-[11px]">{a.capacidade}</span>}
+                        {a.cor && <span className="text-blue-400 text-[11px]">{a.cor}</span>}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="font-bold text-emerald-400 block text-xs">
+                        R$ {(a.preco || 0).toFixed(2).replace('.', ',')}
+                      </span>
+                      <Badge variant={a.condicao === 'novo' ? 'default' : 'secondary'} className="text-[9px] py-0 px-1.5 mt-0.5">
+                        {a.condicao === 'novo' ? 'Lacrado' : 'Seminovo'}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: VendasTabProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -108,6 +260,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [filtroDataFim, setFiltroDataFim] = useState('');
   const [ordenarPor, setOrdenarPor] = useState<'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo'>('data');
   const [direcaoOrdenacao, setDirecaoOrdenacao] = useState<'asc' | 'desc'>('desc');
+  const [mostrarFiltrosAvancados, setMostrarFiltrosAvancados] = useState(false);
   const [showSalesDashboard, setShowSalesDashboard] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
@@ -125,6 +278,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [confirmDeletePassword, setConfirmDeletePassword] = useState('');
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showReenviarNotinhaPrompt, setShowReenviarNotinhaPrompt] = useState(false);
+  const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const closePOSTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,13 +287,23 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const sidebarBeforePOSRef = useRef<boolean | null>(null);
 
   // Estados do PDV
+  const formatForDatetimeLocal = (dateString?: string) => {
+    const d = dateString ? new Date(dateString) : new Date();
+    if (isNaN(d.getTime())) {
+      const now = new Date();
+      return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    }
+    const localISOTime = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    return localISOTime;
+  };
+
   const [posDados, setPosDados] = useState({
     tipoVenda: 'Venda',
     clienteId: '',
     clienteNome: '',
     vendedor: '',
     tipoEntrega: 'Retirada',
-    dataVenda: new Date().toISOString().split('T')[0],
+    dataVenda: formatForDatetimeLocal(),
   });
 
   const [posItem, setPosItem] = useState<Partial<VendaItem>>({
@@ -654,7 +819,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         custo: custoTotal,
         lucro,
         percentualLucro,
-        dataPagamento: posDados.dataVenda,
+        dataPagamento: posDados.dataVenda ? new Date(posDados.dataVenda).toISOString() : new Date().toISOString(),
         status: statusFinal,
         metodo: metodoPrincipal,
         descricao: `Venda PDV - ${carrinho.length} itens`,
@@ -796,33 +961,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           </html>
         `;
 
-        // 3. Chama o motoboy!
-        fetch('/api/email', { 
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            para: clienteVenda.email,
-            assunto: 'Recibo de Compra - ' + (config.nomeLoja || 'Phone Center'),
-            mensagem: htmlDoRecibo // Manda a caralha do HTML inteiro
-          }),
-        })
-        .then(res => {
-          if (!res.ok) throw new Error('Motoboy furou o pneu.');
-          console.log('Recibo HTML enviado igual um foguete, uai!');
-        })
-        .catch(err => console.error('Deu ruim no email:', err));
-        
+        // Envia o recibo em formato PDF em anexo no e-mail
+        dispararEmailReciboComPdf(vendaSalva, clienteVenda);
       } else {
-        console.log('Cliente sem email ou mal cadastrado. Deixa quieto.');
+        console.log('Cliente sem email cadastrado. Pula envio de recibo por e-mail.');
       }
 
+      const foiEdicao = Boolean(editingId);
       await carregarVendas();
       setShowSaleCelebration(true);
       playSaleSuccessSound();
-      toast.success(editingId ? 'Venda atualizada com sucesso.' : 'Venda finalizada com sucesso.');
+      toast.success(foiEdicao ? 'Venda atualizada com sucesso.' : 'Venda finalizada com sucesso.');
 
-      // Dispara o recibo automaticamente após salvar com sucesso
-      if (vendaSalva) {
+      if (foiEdicao && vendaSalva) {
+        setVendaEditadaNotinha(vendaSalva);
+        setShowReenviarNotinhaPrompt(true);
+      } else if (vendaSalva) {
         handleGerarReciboA4(vendaSalva);
       }
 
@@ -838,7 +992,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   const resetPOS = () => {
-    setPosDados({ tipoVenda: 'Venda', clienteId: '', clienteNome: '', vendedor: '', tipoEntrega: 'Retirada', dataVenda: new Date().toISOString().split('T')[0] });
+    setPosDados({ tipoVenda: 'Venda', clienteId: '', clienteNome: '', vendedor: '', tipoEntrega: 'Retirada', dataVenda: formatForDatetimeLocal() });
     setCart([]);
     setPosItem({ quantidade: 1, valorInterno: 0, valorExibir: 0, desconto: 0, tipoDesconto: 'R$', observacao: '' });
     setPosPagamento(createInitialPosPagamento());
@@ -852,7 +1006,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       clienteNome: venda.clienteNome,
       vendedor: venda.vendedor || '',
       tipoEntrega: venda.tipoEntrega || 'Retirada',
-      dataVenda: venda.dataPagamento
+      dataVenda: formatForDatetimeLocal(venda.dataPagamento || (venda as any).created_at)
     });
     
     // Se for venda antiga sem itens, cria um item fictício
@@ -936,7 +1090,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   // Nova função auxiliar para gerar o HTML do recibo A4
-  const getReciboA4Html = (venda: Venda, clienteVenda: Cliente) => {
+  const getReciboA4Html = (venda: Venda, clienteVenda?: Cliente, isForEmail: boolean = false) => {
     const dataAtual = new Date().toLocaleDateString('pt-BR');
     const assinaturaEmpresaUrl = config.assinaturaLoja;
     const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 140px; display: block;" />` : '';
@@ -962,6 +1116,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
          </tr>`;
 
     const valorTotalVenda = ((venda as any).valorTotal || venda.valor || 0);
+    const nomeClienteFinal = clienteVenda?.nome || venda.clienteNome || 'Não informado';
 
     return `
       <!DOCTYPE html>
@@ -1007,7 +1162,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               <td style="vertical-align: top; padding-left: 8px;">
                 <h2 style="margin: 0 0 5px 0; font-size: 16px;">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</h2>
                 <div class="small-text">${config.enderecoLoja || 'Endereço não configurado'}</div>
-                <div class="small-text">CNPJ: ${config.cnpjLoja || 'Não informado'} | Tel: ${config.telefoneLoja || 'Não informado'}</div>
+                <div class="small-text">CPF/CNPJ: ${config.cnpjLoja || 'Não informado'} | Tel: ${config.telefoneLoja || 'Não informado'}</div>
               </td>
               <td style="text-align: right; vertical-align: top; font-size: 11px;">
                 Data: ${dataAtual}<br>
@@ -1021,10 +1176,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           <table>
             <tr><td colspan="4" class="section-title">DESTINATÁRIO/REMETENTE</td></tr>
             <tr>
-              <td style="width: 40%;">Nome/Razão social<br><b>${clienteVenda.nome || ''}</b></td>
-              <td style="width: 20%;">Telefone<br>${clienteVenda.telefone || ''}</td>
-              <td style="width: 20%;">CPF/CNPJ<br>${clienteVenda.cpf || ''}</td>
-              <td style="width: 20%;">E-mail<br>${clienteVenda.email || ''}</td>
+              <td style="width: 40%;">Nome/Razão social<br><b>${nomeClienteFinal}</b></td>
+              <td style="width: 20%;">Telefone<br>${clienteVenda?.telefone || 'N/A'}</td>
+              <td style="width: 20%;">CPF/CNPJ<br>${clienteVenda?.cpf || 'N/A'}</td>
+              <td style="width: 20%;">E-mail<br>${clienteVenda?.email || 'N/A'}</td>
             </tr>
           </table>
 
@@ -1066,7 +1221,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               <div class="signature-holder"></div>
               <div class="signature-line">
                 Assinatura do Cliente
-                <span class="signature-subtitle">${clienteVenda.nome || 'Não informado'}</span>
+                <span class="signature-subtitle">${nomeClienteFinal}</span>
               </div>
             </div>
             <div class="signature-col">
@@ -1083,9 +1238,58 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             OBRIGADO PELA PREFERÊNCIA.
           </div>
         </div>
+        ${isForEmail ? '' : '<script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>'}
       </body>
       </html>
     `;
+  };
+
+  const dispararEmailReciboComPdf = async (venda: Venda, clienteVenda: Cliente) => {
+    try {
+      const publicLink = `${window.location.origin}/recibo/${venda.id}`;
+      const nomeLoja = config.nomeLoja || 'Phone Center';
+      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; margin-bottom: 12px; display: block; margin-left: auto; margin-right: auto;" />` : '';
+
+      const emailCorpoHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+          <div style="text-align: center; margin-bottom: 20px;">
+            ${logoHtml}
+            <h2 style="color: #0f172a; margin: 0 0 6px 0; font-size: 20px;">${nomeLoja}</h2>
+            <p style="color: #64748b; margin: 0; font-size: 13px;">Comprovante Digital de Venda #${venda.id.slice(-6).toUpperCase()}</p>
+          </div>
+          
+          <div style="background-color: #f8fafc; padding: 18px; border-radius: 12px; border: 1px solid #cbd5e1; margin-bottom: 24px; font-size: 14px; color: #334155; line-height: 1.6;">
+            <p style="margin: 0 0 10px 0;">Olá, <b>${clienteVenda.nome}</b>!</p>
+            <p style="margin: 0 0 10px 0;">Obrigado por comprar na <b>${nomeLoja}</b>!</p>
+            <p style="margin: 0;">Seu comprovante de venda digital e termo de garantia estão disponíveis para visualização e impressão a qualquer momento no botão abaixo:</p>
+          </div>
+
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${publicLink}" target="_blank" style="display: inline-block; background-color: #059669; color: #ffffff; padding: 14px 28px; border-radius: 10px; font-weight: bold; text-decoration: none; font-size: 15px; box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.2);">
+              📱 Visualizar Recibo Digital Online
+            </a>
+          </div>
+
+          <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 11px; color: #94a3b8; text-align: center;">
+            Este e-mail foi enviado automaticamente por ${nomeLoja}. Por favor, mantenha este comprovante para efeito de garantia.
+          </div>
+        </div>
+      `;
+
+      await fetch('/api/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          para: clienteVenda.email,
+          assunto: `Recibo de Compra #${venda.id.slice(-6).toUpperCase()} - ${nomeLoja}`,
+          mensagem: emailCorpoHtml,
+        }),
+      });
+      return true;
+    } catch (err) {
+      console.error('Erro ao enviar e-mail:', err);
+      return false;
+    }
   };
 
   const handleReenviarRecibo = async (venda: Venda) => {
@@ -1099,22 +1303,18 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       return;
     }
 
-    try {
-      const htmlDoRecibo = getReciboA4Html(venda, clienteVenda);
+    const toastId = toast.loading('Enviando e-mail do recibo...');
 
-      await fetch('/api/email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          para: clienteVenda.email,
-          assunto: 'Recibo de Compra - ' + (config.nomeLoja || 'Phone Center'),
-          mensagem: htmlDoRecibo,
-        }),
-      });
-      toast.success('Recibo reenviado com sucesso!');
+    try {
+      const ok = await dispararEmailReciboComPdf(venda, clienteVenda);
+      if (ok) {
+        toast.success('E-mail com recibo digital enviado com sucesso!', { id: toastId });
+      } else {
+        toast.error('Erro ao enviar e-mail.', { id: toastId });
+      }
     } catch (error) {
       console.error('Erro ao reenviar recibo:', error);
-      toast.error('Erro ao reenviar recibo.');
+      toast.error('Erro ao reenviar recibo.', { id: toastId });
     }
   };
 
@@ -1256,7 +1456,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       let comparison = 0;
 
       if (ordenarPor === 'data') {
-        comparison = new Date(a.dataPagamento).getTime() - new Date(b.dataPagamento).getTime();
+        const timeA = new Date((a as any).created_at || a.dataPagamento).getTime();
+        const timeB = new Date((b as any).created_at || b.dataPagamento).getTime();
+        comparison = timeA - timeB;
       } else if (ordenarPor === 'cliente') {
         comparison = a.clienteNome.localeCompare(b.clienteNome, 'pt-BR');
       } else if (ordenarPor === 'valor') {
@@ -1294,7 +1496,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     value: vendasFiltradas.filter(v => v.metodo === metodo).reduce((sum, v) => sum + v.valor, 0),
   })).filter(d => d.value > 0);
 
-  const COLORS = ['#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff'];
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
 
   const handleNovoClienteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1662,8 +1864,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           </div>
         `).join('');
 
-      const qrData = encodeURIComponent(`Recibo:${venda.id};Data:${new Date(venda.dataPagamento).toLocaleDateString('pt-BR')};Cliente:${venda.clienteNome || 'N/A'};Valor:R$${(venda.valor || 0).toFixed(2)};Garantia:${venda.garantia || '90 dias'}`);
-      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${qrData}`;
+      const publicReceiptUrl = `${window.location.origin}/recibo/${venda.id}`;
+      const qrData = encodeURIComponent(publicReceiptUrl);
+      const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${qrData}`;
 
       const cupomHtml = `
         <!DOCTYPE html>
@@ -1707,9 +1910,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           </div>
           ${(venda.descontoTotal && venda.descontoTotal > 0) ? `<div class="small" style="text-align: right;">Desconto: R$ ${venda.descontoTotal.toFixed(2).replace('.', ',')}</div>` : ''}
           <div class="divider"></div>
-          <div class="center" style="margin-bottom: 8px;">
-            <img src="${qrCodeUrl}" alt="QR Code" style="width: 120px; height: 120px; object-fit: contain; margin: 0 auto;" />
-            <div class="small">Validação de garantia</div>
+          <div class="center" style="margin: 10px 0;">
+            <img src="${qrCodeUrl}" alt="QR Code" style="width: 130px; height: 130px; object-fit: contain; margin: 0 auto; display: block;" />
+            <div class="small bold" style="margin-top: 4px;">Recibo Digital & Garantia Online</div>
+            <div class="small" style="font-size: 9px; color: #444;">Escaneie o QR Code para acessar no celular</div>
           </div>
           <div class="bold center">GARANTIA</div>
           <div class="small center">Válida por ${venda.garantia || '90 dias'} a partir da data da compra.</div>
@@ -1741,174 +1945,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const handleGerarReciboA4 = async (venda: Venda) => {
     try {
-      const dataAtual = new Date().toLocaleDateString('pt-BR');
-      const assinaturaEmpresaUrl = config.assinaturaLoja;
       const clienteVenda = clientes.find(c => c.id === venda.clienteId);
-      
-      // Mapeamento dos itens
-      const itensHtmlA4 = venda.itens && venda.itens.length > 0 
-        ? venda.itens.map(item => `
-            <tr>
-              <td style="text-align: center;">${(item as any).codigo || ''}</td>
-              <td>${item.descricao} <br><small style="color: #666;">${item.observacao || ''}</small></td>
-              <td style="text-align: center;">${item.quantidade}</td>
-              <td style="text-align: right;">R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</td>
-              <td style="text-align: right;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
-              <td style="text-align: right;">R$ ${item.total.toFixed(2).replace('.', ',')}</td>
-            </tr>
-          `).join('')
-        : `<tr>
-             <td style="text-align: center;">-</td>
-             <td>${venda.descricao || 'Produto Genérico'}</td>
-             <td style="text-align: center;">1</td>
-             <td style="text-align: right;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
-             <td style="text-align: right;">R$ 0,00</td>
-             <td style="text-align: right;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
-           </tr>`;
-
-      const valorTotalVenda = ((venda as any).valorTotal || venda.valor || 0);
-
-      const conteudoHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Recibo de Venda</title>
-          <style>
-            @page { size: A4 portrait; margin: 1.5cm; }
-            html { color-scheme: light; background: #fff !important; }
-            @media print {
-              body { margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
-            }
-            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff !important; margin: 0; padding: 0; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-            th, td { border: 1px solid #000; padding: 5px; text-align: left; }
-            .no-border, .no-border td { border: none; padding: 2px; }
-            .section-title { background-color: #f0f0f0; font-weight: bold; text-align: center; padding: 6px 4px; }
-            .small-text { font-size: 10px; line-height: 1.3; }
-            .footer-grid { display: flex; gap: 10px; flex-wrap: wrap; }
-            .footer-grid .box { border: 1px solid #000; padding: 8px; }
-            .footer-grid .box-qr { width: 32%; min-width: 140px; text-align: center; }
-            .footer-grid .box-terms { width: 66%; min-width: 180px; font-size: 10px; line-height: 1.3; }
-            .signature-row { display: flex; gap: 24px; justify-content: space-between; align-items: flex-end; margin-top: 20px; }
-            .signature-col { width: 48%; text-align: center; }
-            .signature-holder { height: 44px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: -4px; }
-            .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; display: block; }
-            .signature-line { border-top: 1px solid #000; padding-top: 6px; font-weight: 700; }
-            .signature-subtitle { display: block; margin-top: 2px; font-size: 10px; font-weight: 400; }
-          </style>
-        </head>
-        <body>
-      const conteudoHtml = getReciboA4Html(venda, clienteVenda!); // ClienteVenda já é garantido pela validação inicial
-
-          <!-- Canhoto de Recebimento -->
-          <table>
-            <tr>
-            <td colspan="3" class="section-title">RECIBO DE ${config.nomeLoja || 'LOJA NÃO CONFIGURADA'} - OS PRODUTOS E/OU SERVIÇOS CONSTANTES NO PEDIDO</td>
-            </tr>
-            <tr>
-              <td style="width: 30%;">Data de recebimento<br><br>___/___/______</td>
-              <td style="width: 40%;">Identificação e assinatura do recebedor<br><br>_________________________________________</td>
-              <td style="width: 30%; text-align: center;">Recibo da venda:<br><b>${venda.id || ''}</b></td>
-            </tr>
-          </table>
-
-          <hr style="border-top: 1px dashed #000; margin: 15px 0;">
-
-          <!-- Dados da Empresa -->
-          <table class="no-border" style="margin-bottom: 18px;">
-            <tr>
-              <td style="width: 150px; vertical-align: top;">
-                ${config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 140px; display: block;" />` : ''}
-              </td>
-              <td style="vertical-align: top; padding-left: 8px;">
-                <h2 style="margin: 0 0 5px 0; font-size: 16px;">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</h2>
-                <div class="small-text">${config.enderecoLoja || 'Endereço não configurado'}</div>
-                <div class="small-text">CNPJ: ${config.cnpjLoja || 'Não informado'} | Tel: ${config.telefoneLoja || 'Não informado'}</div>
-              </td>
-              <td style="text-align: right; vertical-align: top; font-size: 11px;">
-                Data: ${dataAtual}<br>
-                VENDEDOR: ${venda.vendedor || 'Não informado'}<br>
-                <b>RECIBO DA VENDA: ${venda.id || ''}</b>
-              </td>
-            </tr>
-          </table>
-
-          <!-- Dados do Cliente -->
-          <table>
-            <tr><td colspan="4" class="section-title">DESTINATÁRIO/REMETENTE</td></tr>
-            <tr>
-              <td style="width: 40%;">Nome/Razão social<br><b>${(venda as any).cliente?.nome || venda.clienteNome || ''}</b></td>
-              <td style="width: 20%;">Telefone<br>${(venda as any).cliente?.telefone || ''}</td>
-              <td style="width: 20%;">CPF/CNPJ<br>${(venda as any).cliente?.documento || ''}</td>
-              <td style="width: 20%;">E-mail<br>${(venda as any).cliente?.email || ''}</td>
-            </tr>
-          </table>
-
-          <!-- Produtos -->
-          <table>
-            <tr><td colspan="6" class="section-title">DADOS DO PRODUTO</td></tr>
-            <tr style="font-weight: bold; text-align: center;">
-              <td style="width: 10%;">Cód</td>
-              <td style="width: 45%; text-align: left;">Produto</td>
-              <td style="width: 5%;">Qtd</td>
-              <td style="width: 15%;">Valor Unitário</td>
-              <td style="width: 10%;">Desconto</td>
-              <td style="width: 15%;">Valor Total</td>
-            </tr>
-            ${itensHtmlA4}
-            <tr>
-              <td colspan="5" style="text-align: right; font-weight: bold;">Total</td>
-              <td style="text-align: right; font-weight: bold;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
-            </tr>
-          </table>
-
-          <!-- Termos de Garantia -->
-          <div class="box" style="margin-top: 10px; margin-bottom: 8px; padding: 10px;">
-            <div style="font-weight: bold; margin-bottom: 6px;">TERMO DE GARANTIA</div>
-            <div class="small-text">Garantia de ${venda.garantia || '90 dias'} a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</div>
-            <div class="small-text" style="margin-top: 6px;">Esta garantia não cobre:</div>
-            <ul class="small-text" style="margin: 4px 0 0 16px; padding: 0; list-style: disc inside;">
-              <li>Queda, umidade, líquidos ou danos acidentais;</li>
-              <li>Uso indevido, instalação incorreta ou violação do produto;</li>
-              <li>Abertura ou tentativa de conserto por terceiros não autorizados;</li>
-              <li>Não pode molhar e não pode abrir o aparelho.</li>
-            </ul>
-            <div class="small-text" style="margin-top: 6px;"><b>Apresente este recibo junto com o equipamento no atendimento.</b></div>
-          </div>
-
-          <!-- Assinaturas -->
-          <div class="signature-row">
-            <div class="signature-col">
-              <div class="signature-holder"></div>
-              <div class="signature-line">
-                Assinatura do Cliente
-                <span class="signature-subtitle">${(venda as any).cliente?.nome || venda.clienteNome || 'Não informado'}</span>
-              </div>
-            </div>
-            <div class="signature-col">
-              <div class="signature-holder">
-                ${assinaturaEmpresaUrl ? `<img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />` : ''}
-              </div>
-              <div class="signature-line">
-                Assinatura / Carimbo da Loja
-                <span class="signature-subtitle">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</span>
-              </div>
-            </div>
-          </div>
-          <div style="text-align: center; margin-top: 16px; font-weight: bold;">
-            OBRIGADO PELA PREFERÊNCIA.
-          </div>
-          <script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>
-        </body>
-        </html>
-      `;
+      const conteudoHtml = getReciboA4Html(venda, clienteVenda);
 
       const printWindow = window.open('', '_blank');
       if (printWindow) { 
         printWindow.document.write(conteudoHtml); 
         printWindow.document.close(); 
-      } 
-      else { alert("Por favor, permita pop-ups no navegador para imprimir o comprovante."); }
+      } else { 
+        alert("Por favor, permita pop-ups no navegador para imprimir o comprovante."); 
+      }
     } catch (err) {
       console.error("Erro ao gerar nota:", err);
       alert("Erro ao gerar comprovante de venda.");
@@ -1944,16 +1990,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               onClick={handleOpenImportVendas}
               className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
             >
-              <Upload className="mr-2 h-4 w-4" />
-              Importar
+              <Upload className="mr-1.5 h-4 w-4" />
+              Importar CSV
             </Button>
             <Button
               variant="outline"
               onClick={() => setShowImportarPedidoModal(true)}
               className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
             >
-              <Upload className="mr-2 h-4 w-4" />
-              Importar
+              <FileInput className="mr-1.5 h-4 w-4" />
+              Importar Pedido
             </Button>
             <Button 
               onClick={() => {
@@ -2063,7 +2109,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       <User className="w-4 h-4" /> Dados da Venda
                     </h3>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_180px] gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-center">
                     <select 
                       className="input-glass"
                       value={posDados.tipoVenda}
@@ -2112,12 +2158,37 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       <option>Correios</option>
                     </select>
 
-                    <input 
-                      type="date" 
-                      className="input-glass"
-                      value={posDados.dataVenda}
-                      onChange={e => setPosDados({...posDados, dataVenda: e.target.value})}
-                    />
+                    {/* Data e Horário em 2 Campos Compactos para não Cortar */}
+                    <div className="flex gap-1.5 shrink-0 items-center">
+                      <input 
+                        type="date" 
+                        title="Data da Venda"
+                        className="input-glass text-xs h-11 w-[125px] shrink-0 px-2"
+                        value={posDados.dataVenda ? posDados.dataVenda.split('T')[0] : new Date().toISOString().split('T')[0]}
+                        onChange={e => {
+                          const novaData = e.target.value;
+                          const horaAtual = posDados.dataVenda && posDados.dataVenda.includes('T') 
+                            ? posDados.dataVenda.split('T')[1].slice(0, 5) 
+                            : new Date().toTimeString().slice(0, 5);
+                          setPosDados({ ...posDados, dataVenda: `${novaData}T${horaAtual}` });
+                        }}
+                      />
+                      <input 
+                        type="time" 
+                        title="Horário da Venda"
+                        className="input-glass text-xs h-11 w-[85px] shrink-0 px-1.5"
+                        value={posDados.dataVenda && posDados.dataVenda.includes('T') 
+                          ? posDados.dataVenda.split('T')[1].slice(0, 5) 
+                          : new Date().toTimeString().slice(0, 5)}
+                        onChange={e => {
+                          const novaHora = e.target.value;
+                          const dataAtual = posDados.dataVenda 
+                            ? posDados.dataVenda.split('T')[0] 
+                            : new Date().toISOString().split('T')[0];
+                          setPosDados({ ...posDados, dataVenda: `${dataAtual}T${novaHora}` });
+                        }}
+                      />
+                    </div>
                   </div>
                 </GlassCard>
 
@@ -2132,28 +2203,21 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     {/* Input de Item */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(0,1.75fr)_minmax(88px,0.55fr)_minmax(120px,0.8fr)_minmax(120px,0.8fr)_minmax(180px,1fr)_64px] gap-2 items-end bg-white/30 dark:bg-black/30 p-2 rounded-xl border border-white/10 animate-in fade-in slide-in-from-top-2 duration-300">
                       <div className="flex gap-2 min-w-0 md:col-span-2 xl:col-span-1">
-                        <select
-                          className="input-glass min-w-0 flex-1 transition-all duration-200 hover:shadow-md"
+                        <ProdutoCombobox
+                          aparelhos={aparelhos}
                           value={posItem.aparelhoId}
-                          onChange={(e) => {
-                            const aparelho = aparelhos.find(a => a.id === e.target.value);
+                          onChange={(aparelhoId) => {
+                            const aparelho = aparelhos.find(a => a.id === aparelhoId);
                             const custo = resolveAparelhoCusto(aparelho);
                             setPosItem({
                               ...posItem,
-                              aparelhoId: e.target.value,
+                              aparelhoId,
                               descricao: aparelho ? `${aparelho.marca} ${aparelho.modelo}` : '',
                               valorExibir: aparelho ? aparelho.preco : 0,
                               valorInterno: aparelho ? custo : 0
                             });
                           }}
-                        >
-                          <option value="">Produto</option>
-                          {aparelhos
-                           .filter(a => a.ativo !== false && a.condicao !== 'vendido') // Filtra os mortos aqui, uai!
-                           .map(a => (
-                           <option key={a.id} value={a.id}>{a.marca} {a.modelo} - R$ {a.preco.toFixed(2).replace('.', ',')}</option>
-                          ))}
-                        </select>
+                        />
                         <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
                           <Plus className="h-4 w-4" />
                         </Button>
@@ -2561,110 +2625,159 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           </>
         )}
 
-        {/* Filtros */}
-        <GlassCard className="p-4 rounded-3xl">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <input
-              type="text"
-              placeholder="Buscar cliente, IMEI, item, vendedor, valor..."
-              value={filtroBusca}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroBusca(e.target.value)}
-              className="input-glass h-10 sm:h-auto"
-            />
-            <select
-              className="input-glass h-10 sm:h-auto"
-              value={filtroStatus}
-              onChange={(e) => setFiltroStatus(e.target.value)}
-            >
-              <option value="">Todos os status</option>
-              <option value="pago">Pago</option>
-              <option value="pendente">Pendente</option>
-              <option value="cancelado">Cancelado</option>
-            </select>
-            <select
-              className="input-glass h-10 sm:h-auto"
-              value={filtroMetodo}
-              onChange={(e) => setFiltroMetodo(e.target.value)}
-            >
-              <option value="">Todos os métodos</option>
-              <option value="dinheiro">Dinheiro</option>
-              <option value="cartao_credito">Cartão Crédito</option>
-              <option value="cartao_debito">Cartão Débito</option>
-              <option value="pix">PIX</option>
-              <option value="boleto">Boleto</option>
-            </select>
-            <input
-              type="text"
-              placeholder="Filtrar por vendedor..."
-              value={filtroVendedor}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroVendedor(e.target.value)}
-              className="input-glass h-10 sm:h-auto"
-            />
-            <input
-              type="date"
-              value={filtroDataInicio}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataInicio(e.target.value)}
-              className="input-glass h-10 sm:h-auto"
-              aria-label="Data inicial"
-            />
-            <input
-              type="date"
-              value={filtroDataFim}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataFim(e.target.value)}
-              className="input-glass h-10 sm:h-auto"
-              aria-label="Data final"
-            />
-            <select
-              className="input-glass h-10 sm:h-auto"
-              value={ordenarPor}
-              onChange={(e) => setOrdenarPor(e.target.value as 'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo')}
-            >
-              <option value="data">Ordenar por data</option>
-              <option value="cliente">Ordenar por cliente</option>
-              <option value="valor">Ordenar por valor</option>
-              <option value="lucro">Ordenar por lucro</option>
-              <option value="status">Ordenar por status</option>
-              <option value="metodo">Ordenar por método</option>
-            </select>
-            <select
-              className="input-glass h-10 sm:h-auto"
-              value={direcaoOrdenacao}
-              onChange={(e) => setDirecaoOrdenacao(e.target.value as 'asc' | 'desc')}
-            >
-              <option value="desc">Mais recentes / maiores</option>
-              <option value="asc">Mais antigos / menores</option>
-            </select>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setFiltroBusca('');
-                setFiltroStatus('');
-                setFiltroMetodo('');
-                setFiltroVendedor('');
-                setFiltroDataInicio('');
-                setFiltroDataFim('');
-                setOrdenarPor('data');
-                setDirecaoOrdenacao('desc');
-              }}
-              className="h-10 sm:h-auto"
-            >
-              Limpar filtros
-            </Button>
-          </div>
-        </GlassCard>
+        {/* Tabela de Vendas e Filtros Integrados */}
+        <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-4">
+          {/* Cabeçalho + Barra de Filtros Resumida */}
+          <div className="flex flex-col gap-3 pb-4 border-b border-white/10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-bold">Vendas Registradas</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground">{vendasFiltradas.length} de {vendas.length} vendas registradas</p>
+              </div>
 
-        {/* Tabela de Vendas */}
-        <GlassCard className="rounded-3xl">
-          <div className="pb-4 border-b border-white/10 mb-4">
-            <h3 className="text-base sm:text-lg font-bold">Vendas Registradas</h3>
-            <p className="text-xs sm:text-sm text-muted-foreground">{vendasFiltradas.length} vendas</p>
+              {/* Ações Rápidas de Filtro */}
+              <div className="flex items-center gap-2">
+                {(filtroBusca || filtroStatus || filtroMetodo || filtroVendedor || filtroDataInicio || filtroDataFim || ordenarPor !== 'data' || direcaoOrdenacao !== 'desc') && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFiltroBusca('');
+                      setFiltroStatus('');
+                      setFiltroMetodo('');
+                      setFiltroVendedor('');
+                      setFiltroDataInicio('');
+                      setFiltroDataFim('');
+                      setOrdenarPor('data');
+                      setDirecaoOrdenacao('desc');
+                    }}
+                    className="text-xs text-red-400 hover:text-red-300 h-8 px-2.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                    Limpar
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant={mostrarFiltrosAvancados ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setMostrarFiltrosAvancados(!mostrarFiltrosAvancados)}
+                  className="text-xs h-8"
+                >
+                  <Filter className="w-3.5 h-3.5 mr-1" />
+                  {mostrarFiltrosAvancados ? 'Ocultar Filtros' : 'Filtros Avançados'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Linha Principal de Filtros Rápidos */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="relative lg:col-span-2">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Buscar cliente, IMEI, item, vendedor ou valor..."
+                  value={filtroBusca}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroBusca(e.target.value)}
+                  className="input-glass pl-9 text-xs h-9 w-full"
+                />
+              </div>
+
+              <select
+                className="input-glass text-xs h-9 w-full"
+                value={filtroStatus}
+                onChange={(e) => setFiltroStatus(e.target.value)}
+              >
+                <option value="">Todos os status</option>
+                <option value="pago">Pago</option>
+                <option value="pendente">Pendente</option>
+                <option value="cancelado">Cancelado</option>
+              </select>
+
+              <select
+                className="input-glass text-xs h-9 w-full"
+                value={filtroMetodo}
+                onChange={(e) => setFiltroMetodo(e.target.value)}
+              >
+                <option value="">Todos os métodos</option>
+                <option value="dinheiro">Dinheiro</option>
+                <option value="cartao_credito">Cartão Crédito</option>
+                <option value="cartao_debito">Cartão Débito</option>
+                <option value="pix">PIX</option>
+                <option value="boleto">Boleto</option>
+              </select>
+            </div>
+
+            {/* Painel Expansível de Filtros Avançados */}
+            {mostrarFiltrosAvancados && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div>
+                  <label className="text-[11px] text-muted-foreground block mb-1">Vendedor</label>
+                  <input
+                    type="text"
+                    placeholder="Nome do vendedor..."
+                    value={filtroVendedor}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroVendedor(e.target.value)}
+                    className="input-glass text-xs h-9 w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-muted-foreground block mb-1">Período De</label>
+                  <input
+                    type="date"
+                    value={filtroDataInicio}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataInicio(e.target.value)}
+                    className="input-glass text-xs h-9 w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-muted-foreground block mb-1">Até</label>
+                  <input
+                    type="date"
+                    value={filtroDataFim}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataFim(e.target.value)}
+                    className="input-glass text-xs h-9 w-full"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-muted-foreground block mb-1">Ordenar por</label>
+                  <div className="flex gap-1">
+                    <select
+                      className="input-glass text-xs h-9 flex-1"
+                      value={ordenarPor}
+                      onChange={(e) => setOrdenarPor(e.target.value as any)}
+                    >
+                      <option value="data">Data</option>
+                      <option value="cliente">Cliente</option>
+                      <option value="valor">Valor</option>
+                      <option value="lucro">Lucro</option>
+                      <option value="status">Status</option>
+                      <option value="metodo">Método</option>
+                    </select>
+                    <select
+                      className="input-glass text-xs h-9 shrink-0 w-24"
+                      value={direcaoOrdenacao}
+                      onChange={(e) => setDirecaoOrdenacao(e.target.value as any)}
+                    >
+                      <option value="desc">Decres.</option>
+                      <option value="asc">Cresc.</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="border-b border-white/10">
                   <tr className="text-xs sm:text-sm text-left">
+                    <th className="py-3 px-2">ID</th>
+                    <th className="py-3 px-2 hidden md:table-cell">Data & Horário</th>
                     <th className="py-3 px-2">Cliente</th>
                     <th className="text-left py-3 px-2 hidden sm:table-cell">Aparelho</th>
                     <th className="text-right py-3 px-2">Valor</th>
@@ -2677,6 +2790,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 <tbody>
                   {vendasFiltradas.map((venda) => (
                     <tr key={venda.id} className="border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors">
+                      <td className="py-3 px-2 font-mono text-xs text-blue-400 font-bold">#{venda.id ? venda.id.slice(-6).toUpperCase() : 'N/A'}</td>
+                      <td className="py-3 px-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date((venda as any).created_at || venda.dataPagamento).toLocaleString('pt-BR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </td>
                       <td className="py-3 px-2 font-medium">{venda.clienteNome}</td>
                       <td className="py-3 px-2 hidden sm:table-cell text-muted-foreground">{venda.itens && venda.itens.length > 0 ? `${venda.itens.length} itens` : venda.descricao}</td>
                       <td className="py-3 px-2 text-right font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</td>
@@ -2695,9 +2818,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuContent align="end" className="w-52">
+                              <DropdownMenuItem onClick={() => handleEdit(venda)}>
+                                <Edit className="mr-2 h-4 w-4 text-blue-400" />
+                                Editar Venda
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}>
-                                <MessageCircle className="mr-2 h-4 w-4" />
+                                <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
                                 Chamar no WhatsApp
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
@@ -2745,6 +2872,72 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             </div>
           </div>
         </GlassCard>
+
+      {/* Modal Prompt de Reenvio de Notinha pós Edição */}
+      {isClient && showReenviarNotinhaPrompt && vendaEditadaNotinha && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[70]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
+              <h3 className="modal-title flex items-center gap-2 text-blue-400 font-bold">
+                <FileText className="w-5 h-5 text-blue-500" /> Venda Alterada com Sucesso!
+              </h3>
+              <Button variant="ghost" size="icon" onClick={() => setShowReenviarNotinhaPrompt(false)}>
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+
+            <div className="modal-body-scroll p-6 space-y-4 text-center">
+              <p className="text-sm font-medium">
+                Os dados da venda <span className="font-mono text-blue-400 font-bold">#{vendaEditadaNotinha.id ? vendaEditadaNotinha.id.slice(-6).toUpperCase() : ''}</span> foram atualizados no sistema.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Deseja gerar ou reenviar a notinha com as novas informações para o cliente <strong className="text-white">{vendaEditadaNotinha.clienteNome}</strong>?
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    handleGerarCupomTermico(vendaEditadaNotinha);
+                    setShowReenviarNotinhaPrompt(false);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-xs font-bold"
+                >
+                  <Printer className="w-4 h-4 mr-1" /> Cupom Térmico
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    handleGerarReciboA4(vendaEditadaNotinha);
+                    setShowReenviarNotinhaPrompt(false);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-xs font-bold"
+                >
+                  <FileText className="w-4 h-4 mr-1" /> Recibo A4
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    handleReenviarRecibo(vendaEditadaNotinha);
+                    setShowReenviarNotinhaPrompt(false);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-xs font-bold"
+                >
+                  <Mail className="w-4 h-4 mr-1" /> WhatsApp / Email
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex justify-end p-4 border-t border-white/10">
+              <Button variant="outline" size="sm" onClick={() => setShowReenviarNotinhaPrompt(false)}>
+                Concluir sem Reenviar
+              </Button>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
       {/* Modal Novo Cliente */}
       {isClient && showNovoCliente && createPortal(
         <div className="modal-overlay modal-overlay-fit z-[60]">

@@ -30,7 +30,7 @@ export function useAuth() {
       return {
         id: session.user.id,
         email: session.user.email ?? '',
-        nome: session.user.user_metadata?.nome ?? session.user.email?.split('@')[0] ?? 'Usuário',
+        nome: perfil?.nome ?? session.user.user_metadata?.nome ?? session.user.email?.split('@')[0] ?? 'Usuário',
         // Prioriza a role do banco de dados; se não tiver, usa do Auth; se não, 'operador'
         role: (perfil?.role as SessaoUsuario['role']) ?? (session.user.user_metadata?.role as SessaoUsuario['role']) ?? 'operador',
         lojaId: perfil?.loja_id ?? session.user.user_metadata?.lojaId ?? session.user.user_metadata?.loja_id ?? null

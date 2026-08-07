@@ -395,184 +395,176 @@ export function PecasTab() {
           {/* Formulário */}
           {showForm && (
             <ModalPortal>
-            <div className="modal-overlay z-[60]">
-            <GlassCard className="modal-panel modal-panel-xl w-[min(1120px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-semibold">
-                  {editingId ? "Editar Peça" : "Nova Peça"}
-                </h3>
-                <button
-                  onClick={handleCancel}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+              <div className="modal-overlay modal-overlay-fit">
+                <GlassCard className="modal-panel modal-panel-fit modal-panel-xl w-full my-4">
+                  <div className="modal-header">
+                    <h3 className="modal-title">
+                      {editingId ? "Editar Peça" : "Nova Peça"}
+                    </h3>
+                    <Button variant="ghost" size="icon" onClick={handleCancel}>
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </div>
+
+                  <div className="modal-body-scroll">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                      {/* Linha 1: Código e Nome */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                          type="text"
+                          name="codigoUnico"
+                          placeholder="Código Único *"
+                          value={formData.codigoUnico}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass"
+                        />
+                        <input
+                          type="text"
+                          name="nome"
+                          placeholder="Nome *"
+                          value={formData.nome}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass"
+                        />
+                      </div>
+
+                      {/* Linha 2: Custo e Venda */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-xs text-muted-foreground">Custo *</label>
+                          <input
+                            type="text"
+                            name="custoPeca"
+                            placeholder="R$ 0,00"
+                            value={formatarPreco(formData.custoPeca)}
+                            onChange={handlePrecoChange}
+                            className="input-glass"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Venda *</label>
+                          <input
+                            type="text"
+                            name="vendaPeca"
+                            placeholder="R$ 0,00"
+                            value={formatarPreco(formData.vendaPeca)}
+                            onChange={handlePrecoChange}
+                            className="input-glass"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Linha 3: Estoque */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-xs text-muted-foreground">Estoque Atual</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            name="estoque"
+                            value={formData.estoque}
+                            onChange={handleInputChange}
+                            min="0"
+                            className="input-glass"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Estoque Mín</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            name="estoqueMinimo"
+                            value={formData.estoqueMinimo}
+                            onChange={handleInputChange}
+                            min="0"
+                            className="input-glass"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">Estoque Máx</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            name="estoqueMaximo"
+                            value={formData.estoqueMaximo}
+                            onChange={handleInputChange}
+                            min="0"
+                            className="input-glass"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Descrição */}
+                      <textarea
+                        name="descricao"
+                        placeholder="Descrição (opcional)"
+                        value={formData.descricao}
+                        onChange={handleInputChange}
+                        rows={2}
+                        className="input-glass"
+                      />
+
+                      {/* Fornecedor e Localização */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                          type="text"
+                          name="fornecedor"
+                          placeholder="Fornecedor (opcional)"
+                          value={formData.fornecedor}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                        <input
+                          type="text"
+                          name="localizacao"
+                          placeholder="Localização Física (opcional)"
+                          value={formData.localizacao}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                      </div>
+
+                      {/* Código de Barras e Compatibilidade */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                          type="text"
+                          name="codigoBarras"
+                          placeholder="Código de Barras (opcional)"
+                          value={formData.codigoBarras}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                        <input
+                          type="text"
+                          name="compatibilidade"
+                          placeholder="Compatibilidade (ex: iPhone 13) (opcional)"
+                          value={formData.compatibilidade}
+                          onChange={handleInputChange}
+                          className="input-glass"
+                        />
+                      </div>
+
+                      {error && (
+                        <p className="text-sm text-red-500 font-semibold">Erro: {error}</p>
+                      )}
+
+                      <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                        <Button type="button" variant="outline" onClick={handleCancel}>
+                          Cancelar
+                        </Button>
+                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
+                          {loading ? "Processando..." : editingId ? "Atualizar Peça" : "Salvar Peça"}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                </GlassCard>
               </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Linha 1: Código e Nome */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="codigoUnico"
-                    placeholder="Código Único *"
-                    value={formData.codigoUnico}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="nome"
-                    placeholder="Nome *"
-                    value={formData.nome}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Linha 2: Custo e Venda */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs text-muted-foreground">Custo *</label>
-                    <input
-                      type="text"
-                      name="custoPeca"
-                      placeholder="R$ 0,00"
-                      value={formatarPreco(formData.custoPeca)}
-                      onChange={handlePrecoChange}
-                      className="input-glass"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Venda *</label>
-                    <input
-                      type="text"
-                      name="vendaPeca"
-                      placeholder="R$ 0,00"
-                      value={formatarPreco(formData.vendaPeca)}
-                      onChange={handlePrecoChange}
-                      className="input-glass"
-                    />
-                  </div>
-                </div>
-
-                {/* Linha 3: Estoque */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-xs text-muted-foreground">Estoque Atual</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      name="estoque"
-                      value={formData.estoque}
-                      onChange={handleInputChange}
-                      min="0"
-                      className="input-glass"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Estoque Mín</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      name="estoqueMinimo"
-                      value={formData.estoqueMinimo}
-                      onChange={handleInputChange}
-                      min="0"
-                      className="input-glass"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground">Estoque Máx</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      name="estoqueMaximo"
-                      value={formData.estoqueMaximo}
-                      onChange={handleInputChange}
-                      min="0"
-                      className="input-glass"
-                    />
-                  </div>
-                </div>
-
-                {/* Descrição */}
-                <textarea
-                  name="descricao"
-                  placeholder="Descrição (opcional)"
-                  value={formData.descricao}
-                  onChange={handleInputChange}
-                  rows={2}
-                  className="input-glass"
-                />
-
-                {/* Fornecedor e Localização */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="fornecedor"
-                    placeholder="Fornecedor (opcional)"
-                    value={formData.fornecedor}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="localizacao"
-                    placeholder="Localização Física (opcional)"
-                    value={formData.localizacao}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Código de Barras e Compatibilidade */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="codigoBarras"
-                    placeholder="Código de Barras (opcional)"
-                    value={formData.codigoBarras}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="compatibilidade"
-                    placeholder="Compatibilidade (ex: iPhone 13) (opcional)"
-                    value={formData.compatibilidade}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                </div>
-
-                {/* Botões */}
-                <div className="flex gap-2 justify-end pt-2">
-                  <Button type="button" variant="outline" onClick={handleCancel}>
-                    Cancelar
-                  </Button>
-                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                    {loading
-                      ? editingId
-                        ? "Atualizando..."
-                        : "Salvando..."
-                      : editingId
-                      ? "Atualizar Peça"
-                      : "Salvar Peça"}
-                  </Button>
-                </div>
-
-                {error && (
-                  <p className="text-sm text-red-600 dark:text-red-400">Erro: {error}</p>
-                )}
-              </form>
-            </GlassCard>
-            </div>
             </ModalPortal>
           )}
 

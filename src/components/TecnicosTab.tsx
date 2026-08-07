@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { X, Plus, Download, Edit2, Search, AlertCircle, Trash2, Phone, Mail, UserCheck } from 'lucide-react';
 import { Tecnico } from '@/lib/db/types';
 
+import { toast } from 'sonner';
+
 export function TecnicosTab() {
   const { tecnicos, loading, error, fetchTecnicos, criarTecnico, atualizarTecnico, deletarTecnico } = useTecnicos();
 
@@ -66,7 +68,7 @@ export function TecnicosTab() {
     e.preventDefault();
 
     if (!formData.nome || !formData.telefone) {
-      alert('Nome e telefone são obrigatórios');
+      toast.error('Nome e telefone são obrigatórios');
       return;
     }
 
@@ -82,8 +84,10 @@ export function TecnicosTab() {
 
       if (editingId) {
         await atualizarTecnico(editingId, dados);
+        toast.success('Membro da equipe atualizado com sucesso!');
       } else {
         await criarTecnico(dados);
+        toast.success('Novo membro cadastrado com sucesso!');
       }
 
       setFormData({
@@ -96,8 +100,10 @@ export function TecnicosTab() {
       });
       setEditingId(null);
       setShowForm(false);
-    } catch (err) {
+      await fetchTecnicos();
+    } catch (err: any) {
       console.error('Erro ao salvar:', err);
+      toast.error(`Erro ao salvar membro: ${err.message || 'Falha no banco de dados'}`);
     }
   };
 
@@ -105,8 +111,11 @@ export function TecnicosTab() {
     if (confirm('Tem certeza que deseja deletar este registro?')) {
       try {
         await deletarTecnico(id);
-      } catch (err) {
+        toast.success('Membro removido da equipe!');
+        await fetchTecnicos();
+      } catch (err: any) {
         console.error('Erro ao deletar:', err);
+        toast.error(`Erro ao deletar: ${err.message || 'Falha no processamento'}`);
       }
     }
   };
@@ -198,99 +207,104 @@ export function TecnicosTab() {
       {/* Formulário Modal */}
       {showForm && (
         <ModalPortal>
-        <div className="modal-overlay z-[60]">
-        <GlassCard className="modal-panel modal-panel-lg w-[min(780px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              {editingId ? 'Editar Membro' : 'Novo Membro da Equipe'}
-            </h3>
-            <Button variant="ghost" size="sm" onClick={() => { setShowForm(false); setEditingId(null); }}>
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full my-4">
+              <div className="modal-header">
+                <h3 className="modal-title">
+                  {editingId ? 'Editar Membro da Equipe' : 'Novo Membro da Equipe'}
+                </h3>
+                <Button variant="ghost" size="icon" onClick={() => { setShowForm(false); setEditingId(null); }}>
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Função / Cargo *</label>
-                <select
-                  name="tipo"
-                  value={formData.tipo}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                  required
-                >
-                  <option value="tecnico">Técnico</option>
-                  <option value="vendedor">Vendedor</option>
-                </select>
+              <div className="modal-body-scroll">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Função / Cargo *</label>
+                      <select
+                        name="tipo"
+                        value={formData.tipo}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                        required
+                      >
+                        <option value="tecnico">Técnico</option>
+                        <option value="vendedor">Vendedor</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Nome *</label>
+                      <input
+                        type="text"
+                        name="nome"
+                        placeholder="Nome completo"
+                        value={formData.nome}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Telefone *</label>
+                      <input
+                        type="tel"
+                        name="telefone"
+                        placeholder="(11) 98765-4321"
+                        value={formData.telefone}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Email</label>
+                      <input
+                        type="email"
+                        name="email"
+                        placeholder="email@example.com"
+                        value={formData.email}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">CPF</label>
+                      <input
+                        type="text"
+                        name="cpf"
+                        placeholder="123.456.789-00"
+                        value={formData.cpf}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium mb-2">Especialidade (opcional)</label>
+                      <input
+                        type="text"
+                        name="especialidade"
+                        placeholder="Ex: Tela, Bateria, Placa, Vendas Balcão"
+                        value={formData.especialidade}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                    <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); }}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
+                      {editingId ? 'Atualizar Membro' : 'Salvar Membro'}
+                    </Button>
+                  </div>
+                </form>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Nome *</label>
-                <input
-                  type="text"
-                  name="nome"
-                  placeholder="Nome completo"
-                  value={formData.nome}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Telefone *</label>
-                <input
-                  type="tel"
-                  name="telefone"
-                  placeholder="(11) 98765-4321"
-                  value={formData.telefone}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Email</label>
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="email@example.com"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">CPF</label>
-                <input
-                  type="text"
-                  name="cpf"
-                  placeholder="123.456.789-00"
-                  value={formData.cpf}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-2">Especialidade (opcional)</label>
-                <input
-                  type="text"
-                  name="especialidade"
-                  placeholder="Ex: Tela, Bateria, Placa, Vendas Balcão"
-                  value={formData.especialidade}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 pt-2">
-              <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">{editingId ? 'Atualizar' : 'Salvar'}</Button>
-              <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); }}>
-                Cancelar
-              </Button>
-            </div>
-          </form>
-        </GlassCard>
-        </div>
+            </GlassCard>
+          </div>
         </ModalPortal>
       )}
 

@@ -162,141 +162,143 @@ export function AgendamentosTab() {
       {/* Formulário */}
       {showForm && (
         <ModalPortal>
-        <div className="modal-overlay z-[60]">
-        <GlassCard className="modal-panel modal-panel-xl w-[min(1120px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              {editingId ? 'Editar Agendamento' : 'Novo Agendamento'}
-            </h3>
-            <Button variant="ghost" size="sm" onClick={() => { setShowForm(false); setEditingId(null); }}>
-              <X className="w-4 h-4" />
-            </Button>
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-xl w-full my-4">
+              <div className="modal-header">
+                <h3 className="modal-title">
+                  {editingId ? 'Editar Agendamento' : 'Novo Agendamento'}
+                </h3>
+                <Button variant="ghost" size="icon" onClick={() => { setShowForm(false); setEditingId(null); }}>
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+
+              <div className="modal-body-scroll">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Cliente *</label>
+                      <select
+                        name="clienteId"
+                        value={formData.clienteId}
+                        onChange={(e) => handleClienteChange(e.target.value)}
+                        className="input-glass"
+                        required
+                      >
+                        <option value="">Selecionar cliente</option>
+                        {clientes.map(c => (
+                          <option key={c.id} value={c.id}>{c.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Data e Hora *</label>
+                      <input
+                        type="datetime-local"
+                        name="data"
+                        value={formData.data}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Telefone</label>
+                      <input
+                        type="tel"
+                        name="telefone"
+                        value={formData.telefone}
+                        readOnly
+                        className="input-glass bg-white/10"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Técnico</label>
+                      <select
+                        name="tecnicoId"
+                        value={formData.tecnicoId}
+                        onChange={(e) => handleTecnicoChange(e.target.value)}
+                        className="input-glass"
+                      >
+                        <option value="">Selecionar técnico</option>
+                        {tecnicos.map(t => (
+                          <option key={t.id} value={t.id}>{t.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Aparelho</label>
+                    <input
+                      type="text"
+                      name="aparelhoDescricao"
+                      placeholder="Ex: iPhone 13 Pro Preto"
+                      value={formData.aparelhoDescricao}
+                      onChange={handleInputChange}
+                      className="input-glass"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Descrição do Serviço *</label>
+                    <textarea
+                      name="descricao"
+                      placeholder="Descreva o serviço a ser realizado..."
+                      value={formData.descricao}
+                      onChange={handleInputChange}
+                      rows={3}
+                      className="input-glass"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Status</label>
+                      <select
+                        name="status"
+                        value={formData.status}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                      >
+                        <option value="agendado">Agendado</option>
+                        <option value="confirmado">Confirmado</option>
+                        <option value="concluido">Concluído</option>
+                        <option value="cancelado">Cancelado</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Observações</label>
+                      <input
+                        type="text"
+                        name="observacoes"
+                        placeholder="Observações adicionais"
+                        value={formData.observacoes}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                    <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); }}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
+                      {editingId ? 'Atualizar' : 'Salvar'}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </GlassCard>
           </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Cliente *</label>
-                <select
-                  name="clienteId"
-                  value={formData.clienteId}
-                  onChange={(e) => handleClienteChange(e.target.value)}
-                  className="input-glass"
-                  required
-                >
-                  <option value="">Selecionar cliente</option>
-                  {clientes.map(c => (
-                    <option key={c.id} value={c.id}>{c.nome}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Data e Hora *</label>
-                <input
-                  type="datetime-local"
-                  name="data"
-                  value={formData.data}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Telefone</label>
-                <input
-                  type="tel"
-                  name="telefone"
-                  value={formData.telefone}
-                  readOnly
-                  className="input-glass bg-white/10"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Técnico</label>
-                <select
-                  name="tecnicoId"
-                  value={formData.tecnicoId}
-                  onChange={(e) => handleTecnicoChange(e.target.value)}
-                  className="input-glass"
-                >
-                  <option value="">Selecionar técnico</option>
-                  {tecnicos.map(t => (
-                    <option key={t.id} value={t.id}>{t.nome}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Aparelho</label>
-              <input
-                type="text"
-                name="aparelhoDescricao"
-                placeholder="Ex: iPhone 13 Pro Preto"
-                value={formData.aparelhoDescricao}
-                onChange={handleInputChange}
-                className="input-glass"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Descrição do Serviço *</label>
-              <textarea
-                name="descricao"
-                placeholder="Descreva o serviço a ser realizado..."
-                value={formData.descricao}
-                onChange={handleInputChange}
-                rows={3}
-                className="input-glass"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Status</label>
-                <select
-                  name="status"
-                  value={formData.status}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                >
-                  <option value="agendado">Agendado</option>
-                  <option value="confirmado">Confirmado</option>
-                  <option value="concluido">Concluído</option>
-                  <option value="cancelado">Cancelado</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Observações</label>
-                <input
-                  type="text"
-                  name="observacoes"
-                  placeholder="Observações adicionais"
-                  value={formData.observacoes}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
-                {editingId ? 'Atualizar' : 'Criar'} Agendamento
-              </Button>
-            </div>
-          </form>
-        </GlassCard>
-        </div>
         </ModalPortal>
       )}
 

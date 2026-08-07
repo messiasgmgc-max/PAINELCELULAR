@@ -350,168 +350,170 @@ export function GarantiasTab() {
       {/* Formulário */}
       {showForm && (
         <ModalPortal>
-        <div className="modal-overlay z-[60]">
-        <GlassCard className="modal-panel modal-panel-xl w-[min(1120px,calc(100vw-2rem))] max-h-[calc(100dvh-2.5rem)] overflow-y-auto p-4 sm:p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              {editingId ? 'Editar Garantia' : 'Nova Garantia'}
-            </h3>
-            <Button variant="ghost" size="sm" onClick={resetForm}>
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Venda Processada *</label>
-                <select
-                  name="osId"
-                  value={formData.osId}
-                  onChange={(e) => handleVendaChange(e.target.value)}
-                  className="input-glass"
-                  required
-                >
-                  <option value="">
-                    {loadingVendas ? 'Carregando vendas...' : 'Selecionar venda paga dentro do prazo'}
-                  </option>
-                  {vendasElegiveis.map(venda => (
-                    <option key={venda.id} value={venda.id}>
-                      {venda.clienteNome} - {new Date(venda.dataPagamento).toLocaleDateString('pt-BR')} ({parseDiasGarantia(venda.garantia)} dias)
-                    </option>
-                  ))}
-                </select>
-                {!loadingVendas && vendasElegiveis.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    Não há vendas pagas dentro do prazo de garantia disponíveis.
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Data de Início *</label>
-                <input
-                  type="date"
-                  name="dataInicio"
-                  value={formData.dataInicio}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Dias de Garantia *</label>
-                <input
-                  type="number"
-                  name="diasGarantia"
-                  value={formData.diasGarantia}
-                  onChange={handleInputChange}
-                  className="input-glass"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Cliente</label>
-                <input
-                  type="text"
-                  value={formData.clienteNome}
-                  readOnly
-                  className="input-glass bg-white/10"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Aparelho</label>
-              <input
-                type="text"
-                value={formData.aparelhoDescricao}
-                readOnly
-                className="input-glass bg-white/10"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Descrição</label>
-              <textarea
-                name="descricao"
-                placeholder="Descrição da garantia..."
-                value={formData.descricao}
-                onChange={handleInputChange}
-                rows={2}
-                className="input-glass"
-              />
-            </div>
-
-            {/* Histórico */}
-            <div className="space-y-2 border-t pt-4">
-              <h4 className="font-medium text-sm">Histórico</h4>
-              
-              <div className="space-y-2">
-                {formData.historico.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded border">
-                    <div className="text-sm">
-                      <p className="font-medium">{item.acao}</p>
-                      <p className="text-xs text-gray-600">{new Date(item.data).toLocaleDateString('pt-BR')} {item.descricao && `- ${item.descricao}`}</p>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleRemoveHistorico(idx)}
-                      className="text-red-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-2">
-                <select
-                  value={novoHistorico.acao}
-                  onChange={(e) => setNovoHistorico(prev => ({ ...prev, acao: e.target.value }))}
-                  className="input-glass flex-1 text-sm"
-                >
-                  <option value="">Selecionar ação</option>
-                  <option value="Troca">Troca</option>
-                  <option value="Reparo">Reparo</option>
-                  <option value="Verificação">Verificação</option>
-                  <option value="Substituição">Substituição</option>
-                </select>
-                <input
-                  type="text"
-                  placeholder="Descrição (opcional)"
-                  value={novoHistorico.descricao}
-                  onChange={(e) => setNovoHistorico(prev => ({ ...prev, descricao: e.target.value }))}
-                  className="input-glass flex-1 text-sm"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleAddHistorico}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  Adicionar
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg modal-panel-tall w-full my-4">
+              <div className="modal-header">
+                <h3 className="modal-title">
+                  {editingId ? 'Editar Garantia' : 'Nova Garantia'}
+                </h3>
+                <Button variant="ghost" size="icon" onClick={resetForm}>
+                  <X className="h-5 w-5" />
                 </Button>
               </div>
-            </div>
 
-            <div className="flex gap-2 justify-end border-t pt-4">
-              <Button type="button" variant="outline" onClick={resetForm}>
-                Cancelar
-              </Button>
-              <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
-                {editingId ? 'Atualizar' : 'Criar'} Garantia
-              </Button>
-            </div>
-          </form>
-        </GlassCard>
-        </div>
+              <div className="modal-body-scroll">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Venda Processada *</label>
+                      <select
+                        name="osId"
+                        value={formData.osId}
+                        onChange={(e) => handleVendaChange(e.target.value)}
+                        className="input-glass"
+                        required
+                      >
+                        <option value="">
+                          {loadingVendas ? 'Carregando vendas...' : 'Selecionar venda paga dentro do prazo'}
+                        </option>
+                        {vendasElegiveis.map(venda => (
+                          <option key={venda.id} value={venda.id}>
+                            {venda.clienteNome} - {new Date(venda.dataPagamento).toLocaleDateString('pt-BR')} ({parseDiasGarantia(venda.garantia)} dias)
+                          </option>
+                        ))}
+                      </select>
+                      {!loadingVendas && vendasElegiveis.length === 0 && (
+                        <p className="text-xs text-amber-500 mt-1">
+                          Não há vendas pagas dentro do prazo de garantia disponíveis.
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Data de Início *</label>
+                      <input
+                        type="date"
+                        name="dataInicio"
+                        value={formData.dataInicio}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Dias de Garantia *</label>
+                      <input
+                        type="number"
+                        name="diasGarantia"
+                        value={formData.diasGarantia}
+                        onChange={handleInputChange}
+                        className="input-glass"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Cliente</label>
+                      <input
+                        type="text"
+                        value={formData.clienteNome}
+                        readOnly
+                        className="input-glass bg-white/10"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Aparelho</label>
+                    <input
+                      type="text"
+                      value={formData.aparelhoDescricao}
+                      readOnly
+                      className="input-glass bg-white/10"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Descrição</label>
+                    <textarea
+                      name="descricao"
+                      placeholder="Descrição da garantia..."
+                      value={formData.descricao}
+                      onChange={handleInputChange}
+                      rows={2}
+                      className="input-glass"
+                    />
+                  </div>
+
+                  {/* Histórico */}
+                  <div className="space-y-2 border-t border-white/10 pt-4">
+                    <h4 className="font-medium text-sm text-blue-400">Histórico de Atendimentos</h4>
+                    
+                    <div className="space-y-2">
+                      {formData.historico.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2.5 bg-white/5 rounded-xl border border-white/10">
+                          <div className="text-sm">
+                            <p className="font-medium text-white">{item.acao}</p>
+                            <p className="text-xs text-muted-foreground">{new Date(item.data).toLocaleDateString('pt-BR')} {item.descricao && `- ${item.descricao}`}</p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRemoveHistorico(idx)}
+                            className="text-red-400 hover:text-red-300"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <select
+                        value={novoHistorico.acao}
+                        onChange={(e) => setNovoHistorico(prev => ({ ...prev, acao: e.target.value }))}
+                        className="input-glass flex-1 text-sm"
+                      >
+                        <option value="">Selecionar ação</option>
+                        <option value="Troca">Troca</option>
+                        <option value="Reparo">Reparo</option>
+                        <option value="Verificação">Verificação</option>
+                        <option value="Substituição">Substituição</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Descrição (opcional)"
+                        value={novoHistorico.descricao}
+                        onChange={(e) => setNovoHistorico(prev => ({ ...prev, descricao: e.target.value }))}
+                        className="input-glass flex-1 text-sm"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleAddHistorico}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                      >
+                        Adicionar
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                    <Button type="button" variant="outline" onClick={resetForm}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
+                      {editingId ? 'Atualizar Garantia' : 'Criar Garantia'}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </GlassCard>
+          </div>
         </ModalPortal>
       )}
 

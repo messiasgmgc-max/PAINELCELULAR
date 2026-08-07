@@ -7,12 +7,14 @@ interface GlassCardProps {
 }
 
 export const GlassCard = ({ children, className = "", hoverEffect = false }: GlassCardProps) => {
+  const hasNoPadding = className.includes('p-0') || className.includes('!p-0');
+
   return (
     <div 
       className={`
         relative
         glass 
-        p-6 
+        ${hasNoPadding ? '' : 'p-6'} 
         ${hoverEffect ? 'glass-hover cursor-pointer' : ''} 
         ${className}
       `}
@@ -20,7 +22,7 @@ export const GlassCard = ({ children, className = "", hoverEffect = false }: Gla
       {/* Brilho sutil no topo para simular reflexo de luz */}
       <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-50 rounded-t-3xl pointer-events-none" />
       
-      <div className="relative z-10 h-full">
+      <div className="relative z-10 h-full flex flex-col min-h-0 overflow-hidden">
         {children}
       </div>
     </div>

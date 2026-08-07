@@ -10,6 +10,7 @@ import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
+import { toast } from "sonner";
 
 export function AparelhosTab() {
   const {
@@ -29,6 +30,10 @@ export function AparelhosTab() {
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [showMercadoPhoneModal, setShowMercadoPhoneModal] = useState(false);
+  const [mercadoPhoneText, setMercadoPhoneText] = useState("");
+  const [mercadoPhoneMargem, setMercadoPhoneMargem] = useState("300");
+  const [importingMercadoPhone, setImportingMercadoPhone] = useState(false);
   const [showOptionalFields, setShowOptionalFields] = useState(false);
   const [supplierListText, setSupplierListText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -131,7 +136,7 @@ export function AparelhosTab() {
     const valor = e.target.value.replace(/\D/g, "");
     const custoNum = valor ? parseInt(valor) / 100 : 0;
     const vendaValor = valor ? String(Math.round((custoNum + 300) * 100)) : "";
-    
+
     setFormData((prev) => ({
       ...prev,
       custo: valor,
@@ -169,6 +174,334 @@ export function AparelhosTab() {
       observacoes: aparelho.observacoes || "",
     });
     setShowForm(true);
+  };
+
+  // Extrai o modelo e a cor exata do iPhone sem separar Pro ou Pro Max
+  const extractIphoneModelAndColor = (str: string): { modelo: string; cor: string } => {
+    const cleanStr = str.replace(/[\s\u00A0\u200B\u200E]+/g, ' ').trim();
+
+    const modelPatterns = [
+      // Geração 17
+      { regex: /\b17\s*pro\s*max\b/i, name: 'iPhone 17 Pro Max' },
+      { regex: /\b17\s*pro\b/i, name: 'iPhone 17 Pro' },
+      { regex: /\b17\s*plus\b/i, name: 'iPhone 17 Plus' },
+      { regex: /\b17\s*e\b/i, name: 'iPhone 17e' },
+      { regex: /\b17e\b/i, name: 'iPhone 17e' },
+      { regex: /\b17\b/i, name: 'iPhone 17' },
+
+      // Geração 16
+      { regex: /\b16\s*pro\s*max\b/i, name: 'iPhone 16 Pro Max' },
+      { regex: /\b16\s*pro\b/i, name: 'iPhone 16 Pro' },
+      { regex: /\b16\s*plus\b/i, name: 'iPhone 16 Plus' },
+      { regex: /\b16\s*e\b/i, name: 'iPhone 16e' },
+      { regex: /\b16e\b/i, name: 'iPhone 16e' },
+      { regex: /\b16\b/i, name: 'iPhone 16' },
+
+      // Geração 15
+      { regex: /\b15\s*pro\s*max\b/i, name: 'iPhone 15 Pro Max' },
+      { regex: /\b15\s*pro\b/i, name: 'iPhone 15 Pro' },
+      { regex: /\b15\s*plus\b/i, name: 'iPhone 15 Plus' },
+      { regex: /\b15\s*e\b/i, name: 'iPhone 15e' },
+      { regex: /\b15e\b/i, name: 'iPhone 15e' },
+      { regex: /\b15\b/i, name: 'iPhone 15' },
+
+      // Geração 14
+      { regex: /\b14\s*pro\s*max\b/i, name: 'iPhone 14 Pro Max' },
+      { regex: /\b14\s*pro\b/i, name: 'iPhone 14 Pro' },
+      { regex: /\b14\s*plus\b/i, name: 'iPhone 14 Plus' },
+      { regex: /\b14\b/i, name: 'iPhone 14' },
+
+      // Geração 13
+      { regex: /\b13\s*pro\s*max\b/i, name: 'iPhone 13 Pro Max' },
+      { regex: /\b13\s*pro\b/i, name: 'iPhone 13 Pro' },
+      { regex: /\b13\s*mini\b/i, name: 'iPhone 13 Mini' },
+      { regex: /\b13\b/i, name: 'iPhone 13' },
+
+      // Geração 12
+      { regex: /\b12\s*pro\s*max\b/i, name: 'iPhone 12 Pro Max' },
+      { regex: /\b12\s*pro\b/i, name: 'iPhone 12 Pro' },
+      { regex: /\b12\s*mini\b/i, name: 'iPhone 12 Mini' },
+      { regex: /\b12\b/i, name: 'iPhone 12' },
+
+      // Geração 11
+      { regex: /\b11\s*pro\s*max\b/i, name: 'iPhone 11 Pro Max' },
+      { regex: /\b11\s*pro\b/i, name: 'iPhone 11 Pro' },
+      { regex: /\b11\b/i, name: 'iPhone 11' },
+
+      // Outros modelos Apple
+      { regex: /\bse\s*3\b/i, name: 'iPhone SE 3' },
+      { regex: /\bse\s*2\b/i, name: 'iPhone SE 2' },
+      { regex: /\bse\b/i, name: 'iPhone SE' },
+      { regex: /\bxr\b/i, name: 'iPhone XR' },
+      { regex: /\bxs\s*max\b/i, name: 'iPhone XS Max' },
+      { regex: /\bxs\b/i, name: 'iPhone XS' },
+      { regex: /\bx\b/i, name: 'iPhone X' },
+      { regex: /\b8\s*plus\b/i, name: 'iPhone 8 Plus' },
+      { regex: /\b8\b/i, name: 'iPhone 8' },
+      { regex: /\b7\s*plus\b/i, name: 'iPhone 7 Plus' },
+      { regex: /\b7\b/i, name: 'iPhone 7' },
+    ];
+
+    for (const p of modelPatterns) {
+      if (p.regex.test(cleanStr)) {
+        const rest = cleanStr.replace(p.regex, '').replace(/iphone/gi, '').trim();
+        return {
+          modelo: p.name,
+          cor: rest || 'Padrão'
+        };
+      }
+    }
+
+    return {
+      modelo: `iPhone ${cleanStr.split(' ')[0] || 'Genérico'}`,
+      cor: cleanStr.split(' ').slice(1).join(' ') || 'Padrão'
+    };
+  };
+
+  // Utilitário para interpretar lista exportada do MercadoPhone
+  const parseMercadoPhoneList = (rawText: string, margemAdicional: number) => {
+    const lines = rawText.split('\n');
+    const aparelhosFormatados: any[] = [];
+
+    for (let rawLine of lines) {
+      // Normalização inicial de espaços em branco não-quebráveis (como vindos do WhatsApp/MercadoPhone)
+      let line = rawLine.replace(/[\s\u00A0\u200B\u200E]+/g, ' ').trim();
+      if (!line) continue;
+
+      // 1. Extrair ID existente (ex: | ID: 9410244)
+      let idEtiqueta: string | null = null;
+      const matchId = line.match(/\|\s*ID:\s*(\d+)/i) || line.match(/ID:\s*(\d+)/i);
+      if (matchId) {
+        idEtiqueta = matchId[1];
+        line = line.replace(matchId[0], '').trim();
+      } else {
+        // Gera um ID numérico de 7 dígitos caso não exista na etiqueta
+        idEtiqueta = String(Math.floor(1000000 + Math.random() * 9000000));
+      }
+
+      // Remover Emojis e símbolos iniciais (NÃO remover dígitos do modelo como 11, 12, 16, 17!)
+      line = line.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s=+\-*•∙]+/gu, '').trim();
+      if (!line) continue;
+
+      // 2. Extração de Sufixo / Código / Serial após o hífen (-)
+      let mainPart = line;
+      let sufixoSerial = '';
+      if (line.includes('-')) {
+        const parts = line.split('-');
+        mainPart = parts[0].trim();
+        sufixoSerial = parts.slice(1).join('-').trim();
+      }
+
+      // 3. Extrair Saúde de Bateria (%) ou indicação de Lacrado
+      let bateria = '';
+      let condicao: "novo" | "seminovo" = "seminovo";
+      if (mainPart.toLowerCase().includes('lacrado') || sufixoSerial.toLowerCase().includes('lacrado') || rawLine.toLowerCase().includes('lacrado')) {
+        condicao = "novo";
+        bateria = "100% (Lacrado)";
+        mainPart = mainPart.replace(/lacrado/gi, '').trim();
+      } else {
+        const matchBat = mainPart.match(/(\d{2,3})%/);
+        if (matchBat) {
+          bateria = `${matchBat[1]}%`;
+          mainPart = mainPart.replace(matchBat[0], '').trim();
+        }
+      }
+
+      // 4. Extrair Capacidade (ex: 256gb, 128GB, 512gb, 1TB)
+      let capacidade = '128GB';
+      const matchRom = mainPart.match(/\b(\d+gb|\d+tb)\b/i);
+      if (matchRom) {
+        capacidade = matchRom[1].toUpperCase();
+        mainPart = mainPart.replace(matchRom[0], '').trim();
+      }
+
+      // 5. Extrair Valor de Custo (se houver indicação explícita de valor R$)
+      let custoNumerico = 0;
+      const matchCustoExplicit = mainPart.match(/R\$\s*([\d\.,]+)/i);
+      if (matchCustoExplicit) {
+        custoNumerico = parseFloat(matchCustoExplicit[1].replace(/\./g, '').replace(',', '.'));
+        mainPart = mainPart.replace(matchCustoExplicit[0], '').trim();
+      }
+
+      // 6. Identificar Modelo e Cor usando o extrator dedicado imune a espaços especiais
+      const { modelo, cor: corExtraida } = extractIphoneModelAndColor(mainPart);
+
+      // 7. Extrair Observações (ex: "msg bateria", "msgdegradada", "TRASEIRA DIEGO", "detalhe", "tela trocada", etc.)
+      let observacoesPartes: string[] = [];
+
+      // A) Se no sufixoSerial houver texto além dos 4 dígitos do IMEI (ex: "5039 TRASEIRA DIEGO" ou "5877 msg bateria")
+      if (sufixoSerial) {
+        const matchSerialWithObs = sufixoSerial.match(/^([A-Za-z0-9]{3,6})\s+(.+)$/);
+        if (matchSerialWithObs) {
+          sufixoSerial = matchSerialWithObs[1];
+          const obsTxt = matchSerialWithObs[2].trim();
+          if (obsTxt) observacoesPartes.push(obsTxt);
+        }
+      }
+
+      // B) Identificar palavras-chave de observações no modelo/cor/linha
+      const regexObsKeywords = /\b(msg\s*degradada|msgdegradada|msg\s*bateria|msgbateria|msg\s*bat|msg\s*tela|msg\s*camera|msg\s*peça|msg\s*peca|traseira\s*[\w\s]*|tampa\s*[\w\s]*|tela\s*trocada|trincad[oa]|detalhe|face\s*id\s*off)\b/gi;
+
+      const matchesObsCor = corExtraida.match(regexObsKeywords);
+      if (matchesObsCor) {
+        matchesObsCor.forEach(obs => {
+          if (!observacoesPartes.includes(obs.trim())) {
+            observacoesPartes.push(obs.trim());
+          }
+        });
+      }
+
+      const matchesObsMain = mainPart.match(regexObsKeywords);
+      if (matchesObsMain) {
+        matchesObsMain.forEach(obs => {
+          if (!observacoesPartes.includes(obs.trim())) {
+            observacoesPartes.push(obs.trim());
+          }
+        });
+      }
+
+      // Limpar a COR removendo as observações identificadas
+      let corFinal = corExtraida;
+      observacoesPartes.forEach(obs => {
+        corFinal = corFinal.replace(new RegExp(obs, 'gi'), '');
+      });
+      const cor = corFinal.replace(/lacrado/gi, '').replace(/\b\d+%\b/g, '').trim() || 'Padrão';
+      const observacoes = observacoesPartes.join(' | ');
+
+      const precoVenda = custoNumerico > 0 ? custoNumerico + margemAdicional : margemAdicional;
+
+      aparelhosFormatados.push({
+        raw: rawLine,
+        idEtiqueta,
+        marca: 'Apple',
+        modelo,
+        capacidade,
+        cor,
+        condicao,
+        bateria,
+        sufixoSerial,
+        observacoes,
+        custo: custoNumerico,
+        preco: precoVenda,
+      });
+    }
+
+    return aparelhosFormatados;
+  };
+
+  const handleProcessMercadoPhoneList = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    let currentLojaId = null;
+
+    if (session?.user?.email) {
+      const { data: perfil } = await supabase
+        .from('perfis')
+        .select('loja_id')
+        .eq('email', session.user.email)
+        .maybeSingle();
+      if (perfil?.loja_id) currentLojaId = perfil.loja_id;
+    }
+
+    if (!currentLojaId) {
+      toast.error('Loja não identificada para o cadastro.');
+      return;
+    }
+
+    const margem = parseFloat(mercadoPhoneMargem) || 0;
+    const itens = parseMercadoPhoneList(mercadoPhoneText, margem);
+
+    if (itens.length === 0) {
+      toast.error('Nenhum aparelho válido identificado. Verifique o texto colado.');
+      return;
+    }
+
+    setImportingMercadoPhone(true);
+    const toastId = toast.loading(`Processando ${itens.length} aparelhos...`);
+
+    try {
+      // 1. Buscar todos os aparelhos existentes da loja para verificar duplicidade por IMEI / Número de Série
+      const { data: aparelhosExistentes, error: searchError } = await supabase
+        .from('aparelhos')
+        .select('*')
+        .eq('loja_id', currentLojaId);
+
+      if (searchError) throw searchError;
+
+      const existentes = aparelhosExistentes || [];
+      let novosCadastrados = 0;
+      let existentesAtualizados = 0;
+
+      for (const item of itens) {
+        // Busca se já existe por IMEI (4 últimos dígitos) ou ID de etiqueta
+        const existente = existentes.find(a => 
+          (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) ||
+          (item.idEtiqueta && a.numeroSerie === item.idEtiqueta)
+        );
+
+        const idEtiquetaFinal = existente?.numeroSerie || item.idEtiqueta;
+        const obsString = [
+          item.observacoes ? `Obs: ${item.observacoes}` : '',
+          `ID Etiqueta: ${idEtiquetaFinal}`,
+          item.bateria ? `Bateria: ${item.bateria}` : '',
+          item.sufixoSerial ? `IMEI (últimos dígitos): ${item.sufixoSerial}` : ''
+        ].filter(Boolean).join(' | ');
+
+        if (existente) {
+          // Atualiza dados do aparelho existente com as novas informações da lista diária
+          const { error: updateErr } = await supabase
+            .from('aparelhos')
+            .update({
+              modelo: item.modelo,
+              capacidade: item.capacidade,
+              cor: item.cor,
+              condicao: item.condicao,
+              preco: item.preco,
+              custo: item.custo > 0 ? item.custo : existente.custo,
+              observacoes: obsString,
+              ativo: true,
+            })
+            .eq('id', existente.id);
+
+          if (updateErr) console.error('Erro ao atualizar aparelho:', updateErr);
+          else existentesAtualizados++;
+        } else {
+          // Cadastra novo aparelho se não encontrou IMEI/ID existente
+          const { error: insertErr } = await supabase
+            .from('aparelhos')
+            .insert({
+              loja_id: currentLojaId,
+              marca: item.marca,
+              modelo: item.modelo,
+              imei: item.sufixoSerial || idEtiquetaFinal,
+              numeroSerie: idEtiquetaFinal,
+              cor: item.cor,
+              capacidade: item.capacidade,
+              condicao: item.condicao,
+              preco: item.preco,
+              custo: item.custo,
+              descricao: item.raw,
+              cliente: '',
+              clienteId: null,
+              acessorios: '',
+              observacoes: obsString,
+              ativo: true,
+            });
+
+          if (insertErr) console.error('Erro ao cadastrar novo aparelho:', insertErr);
+          else novosCadastrados++;
+        }
+      }
+
+      toast.success(`🚀 Pronto! ${novosCadastrados} novos cadastrados, ${existentesAtualizados} atualizados.`, { id: toastId });
+      await fetchAparelhos();
+      setShowMercadoPhoneModal(false);
+      setMercadoPhoneText("");
+    } catch (error: any) {
+      console.error("Erro ao importar MercadoPhone:", error);
+      toast.error(`Erro ao importar: ${error.message || 'Falha no processamento'}`, { id: toastId });
+    } finally {
+      setImportingMercadoPhone(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -288,7 +621,7 @@ export function AparelhosTab() {
     const currentLojaId = aparelhosAtivos[0].loja_id;
 
     const confirmacao = confirm("⚠️ ATENÇÃO: Isso removerá do estoque todos os aparelhos ativos desta loja. Aparelhos com histórico vinculado serão apenas baixados para preservar as OS.\n\nDeseja continuar?");
-    
+
     if (confirmacao) {
       try {
         const { error } = await supabase
@@ -339,7 +672,7 @@ export function AparelhosTab() {
     let currentCapacity = "";
     let currentCondition: "novo" | "seminovo" | "usado" | "danificado" = "seminovo";
     let pendingColors: string[] = [];
-    
+
     // Objeto para agrupar preços: { "Marca|Modelo|Capacidade|Condicao|Cor": [preços] }
     const groupedData: Record<string, number[]> = {};
 
@@ -384,11 +717,11 @@ export function AparelhosTab() {
 
       // Detectar preço
       const priceMatch = line.match(/(?:💰|💵|R\$|[\u26aa\u26ab\ud83d\udd35\ud83d\udfe0\ud83c\udf38\ud83d\udfe2\ud83d\udfe1\ud83d\udfe3\ud83d\udc2a\ud83d\udc2d\ud83d\udd18])\s*(?:R\$)?\s*(?:\d+%\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{3,})/i);
-      
+
       if (priceMatch && currentModel) {
         let rawPrice = priceMatch[1].replace(/\./g, '').replace(',', '.');
         let costPrice = parseFloat(rawPrice);
-        
+
         if (!isNaN(costPrice)) {
           // Clona as cores pendentes ou detecta a cor da linha
           const colorsToProcess = [...pendingColors];
@@ -415,7 +748,7 @@ export function AparelhosTab() {
             if (!groupedData[key]) groupedData[key] = [];
             groupedData[key].push(costPrice);
           }
-          
+
           pendingColors = [];
         }
       }
@@ -761,6 +1094,9 @@ export function AparelhosTab() {
               <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap">
                 <List className="h-4 w-4" /> Lista de Fornecedor
               </Button>
+              <Button variant="outline" onClick={() => setShowMercadoPhoneModal(true)} className="gap-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/50 dark:text-emerald-400 shrink-0 whitespace-nowrap">
+                <Download className="h-4 w-4" /> Lista MP
+              </Button>
               <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50 shrink-0 whitespace-nowrap">
                 <Trash2 className="h-4 w-4" /> Deletar Estoque
               </Button>
@@ -787,134 +1123,134 @@ export function AparelhosTab() {
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
             <ModalPortal>
-            <div className="modal-overlay modal-overlay-fit">
-              <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
-                <div className="modal-header">
-                  <h3 className="modal-title">Adicionar Novo Cliente</h3>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowNovoClientePopup(false)}
-                  >
-                    <X className="h-5 w-5" />
-                  </Button>
-                </div>
-                <div className="modal-body">
-                  <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
-                    <input
-                      type="text"
-                      placeholder="Nome *"
-                      value={novoClienteData.nome}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          nome: e.target.value,
-                        }))
-                      }
-                      required
-                      className="input-glass"
-                    />
-                    <input
-                      type="email"
-                      placeholder="Email *"
-                      value={novoClienteData.email}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          email: e.target.value,
-                        }))
-                      }
-                      required
-                      className="input-glass"
-                    />
-                    <input
-                      type="tel"
-                      placeholder="Telefone *"
-                      value={novoClienteData.telefone}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          telefone: e.target.value,
-                        }))
-                      }
-                      required
-                      className="input-glass"
-                    />
-                    <input
-                      type="text"
-                      placeholder="CPF (opcional)"
-                      value={novoClienteData.cpf}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          cpf: e.target.value,
-                        }))
-                      }
-                      className="input-glass"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Endereço (opcional)"
-                      value={novoClienteData.endereco}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          endereco: e.target.value,
-                        }))
-                      }
-                      className="input-glass"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Cidade (opcional)"
-                      value={novoClienteData.cidade}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          cidade: e.target.value,
-                        }))
-                      }
-                      className="input-glass"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Estado (opcional)"
-                      value={novoClienteData.estado}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          estado: e.target.value,
-                        }))
-                      }
-                      className="input-glass"
-                    />
-                    <input
-                      type="text"
-                      placeholder="CEP (opcional)"
-                      value={novoClienteData.cep}
-                      onChange={(e) =>
-                        setNovoClienteData((prev) => ({
-                          ...prev,
-                          cep: e.target.value,
-                        }))
-                      }
-                      className="input-glass"
-                    />
+              <div className="modal-overlay modal-overlay-fit">
+                <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full">
+                  <div className="modal-header">
+                    <h3 className="modal-title">Adicionar Novo Cliente</h3>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowNovoClientePopup(false)}
+                    >
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <div className="modal-body">
+                    <form onSubmit={handleNovoClienteSubmit} className="space-y-4">
+                      <input
+                        type="text"
+                        placeholder="Nome *"
+                        value={novoClienteData.nome}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            nome: e.target.value,
+                          }))
+                        }
+                        required
+                        className="input-glass"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email *"
+                        value={novoClienteData.email}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            email: e.target.value,
+                          }))
+                        }
+                        required
+                        className="input-glass"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Telefone *"
+                        value={novoClienteData.telefone}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            telefone: e.target.value,
+                          }))
+                        }
+                        required
+                        className="input-glass"
+                      />
+                      <input
+                        type="text"
+                        placeholder="CPF (opcional)"
+                        value={novoClienteData.cpf}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            cpf: e.target.value,
+                          }))
+                        }
+                        className="input-glass"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Endereço (opcional)"
+                        value={novoClienteData.endereco}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            endereco: e.target.value,
+                          }))
+                        }
+                        className="input-glass"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Cidade (opcional)"
+                        value={novoClienteData.cidade}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            cidade: e.target.value,
+                          }))
+                        }
+                        className="input-glass"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Estado (opcional)"
+                        value={novoClienteData.estado}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            estado: e.target.value,
+                          }))
+                        }
+                        className="input-glass"
+                      />
+                      <input
+                        type="text"
+                        placeholder="CEP (opcional)"
+                        value={novoClienteData.cep}
+                        onChange={(e) =>
+                          setNovoClienteData((prev) => ({
+                            ...prev,
+                            cep: e.target.value,
+                          }))
+                        }
+                        className="input-glass"
+                      />
 
-                    <div className="flex gap-2 justify-end pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setShowNovoClientePopup(false)}
-                      >
-                        Cancelar
-                      </Button>
-                      <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Adicionar Cliente</Button>
-                    </div>
-                  </form>
-                </div>
-              </GlassCard>
-            </div>
+                      <div className="flex gap-2 justify-end pt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowNovoClientePopup(false)}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Adicionar Cliente</Button>
+                      </div>
+                    </form>
+                  </div>
+                </GlassCard>
+              </div>
             </ModalPortal>
           )}
 
@@ -1005,285 +1341,386 @@ export function AparelhosTab() {
       {/* Modal de Novo/Editar Aparelho */}
       {showForm && (
         <ModalPortal>
-        <div className="modal-overlay modal-overlay-fit">
-          <GlassCard className="modal-panel modal-panel-fit modal-panel-lg modal-panel-tall w-full my-4">
-            <div className="modal-header">
-              <h3 className="modal-title">
-                {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
-              </h3>
-              <Button variant="ghost" size="icon" onClick={handleCancel}>
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-            
-            <div className="modal-body-scroll">
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Linha 1: Marca e Modelo */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    name="marca"
-                    placeholder="Marca *"
-                    value={formData.marca}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                  <input
-                    type="text"
-                    name="modelo"
-                    placeholder="Modelo *"
-                    value={formData.modelo}
-                    onChange={handleInputChange}
-                    required
-                    className="input-glass"
-                  />
-                </div>
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg modal-panel-tall w-full my-4">
+              <div className="modal-header">
+                <h3 className="modal-title">
+                  {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
+                </h3>
+                <Button variant="ghost" size="icon" onClick={handleCancel}>
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
 
-                {/* Linha 2: IMEI e Série */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+              <div className="modal-body-scroll">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {/* Linha 1: Marca e Modelo */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input
                       type="text"
-                      name="imei"
-                      placeholder="IMEI (15 dígitos máximo)"
-                      value={formData.imei}
-                      onChange={handleIMEIChange}
-                      maxLength={15}
-                      inputMode="numeric"
+                      name="marca"
+                      placeholder="Marca *"
+                      value={formData.marca}
+                      onChange={handleInputChange}
+                      required
                       className="input-glass"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formData.imei.length}/15 dígitos
-                    </p>
+                    <input
+                      type="text"
+                      name="modelo"
+                      placeholder="Modelo *"
+                      value={formData.modelo}
+                      onChange={handleInputChange}
+                      required
+                      className="input-glass"
+                    />
                   </div>
-                  <input
-                    type="text"
-                    name="numeroSerie"
-                    placeholder="Número de Série (opcional)"
-                    value={formData.numeroSerie}
-                    onChange={handleInputChange}
-                    className="input-glass"
-                  />
-                </div>
 
-                {/* Linha 4: Condição e Preço */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Condição</label>
-                    <select
-                      name="condicao"
-                      value={formData.condicao}
+                  {/* Linha 2: IMEI e Série */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <input
+                        type="text"
+                        name="imei"
+                        placeholder="IMEI (15 dígitos máximo)"
+                        value={formData.imei}
+                        onChange={handleIMEIChange}
+                        maxLength={15}
+                        inputMode="numeric"
+                        className="input-glass"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {formData.imei.length}/15 dígitos
+                      </p>
+                    </div>
+                    <input
+                      type="text"
+                      name="numeroSerie"
+                      placeholder="Número de Série (opcional)"
+                      value={formData.numeroSerie}
                       onChange={handleInputChange}
                       className="input-glass"
-                    >
-                      <option value="novo">🆕 Novo</option>
-                      <option value="seminovo">⭐ Seminovo</option>
-                      <option value="usado">♻️ Usado</option>
-                      <option value="danificado">⚠️ Danificado</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Preço de Custo</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      name="custo"
-                      placeholder="R$ 0,00"
-                      value={formatarPreco(formData.custo)}
-                      onChange={handleCustoChange}
-                      className="input-glass"
                     />
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Preço de Venda</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      name="preco"
-                      placeholder="R$ 0,00"
-                      value={formatarPreco(formData.preco)}
-                      onChange={handlePrecoChange}
-                      className="input-glass"
-                    />
-                  </div>
-                </div>
 
-                {/* Cliente */}
-                <div className="flex gap-2">
-                  <select
-                    name="cliente"
-                    value={formData.clienteId || ""}
-                    onChange={(e) => {
-                      const clienteSelecionado = clientes.find((c) => c.id === e.target.value);
-                      setFormData((prev) => ({
-                        ...prev,
-                        clienteId: e.target.value,
-                        cliente: clienteSelecionado?.nome || "",
-                      }));
-                    }}
-                    className="input-glass flex-1"
-                  >
-                    <option value="">Selecione um cliente (opcional)</option>
-                    {clientes.map((cliente) => (
-                      <option key={cliente.id} value={cliente.id}>
-                        {cliente.nome} ({cliente.telefone})
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setShowNovoClientePopup(true)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/10 dark:bg-black/10 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowOptionalFields((prev) => !prev)}
-                    className="w-full flex items-center justify-between text-sm font-semibold"
-                  >
-                    <span>Campos opcionais (descrição, acessórios e observações)</span>
-                    {showOptionalFields ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-
-                  {showOptionalFields && (
-                    <div className="mt-3 space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <input
-                          type="text"
-                          name="cor"
-                          placeholder="Cor (opcional)"
-                          value={formData.cor}
-                          onChange={handleInputChange}
-                          className="input-glass"
-                        />
-                        <select
-                          name="capacidade"
-                          value={formData.capacidade}
-                          onChange={handleInputChange}
-                          className="input-glass"
-                        >
-                          {romOptions.map((rom) => (
-                            <option key={rom} value={rom}>
-                              💾 {rom}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <textarea
-                        name="descricao"
-                        placeholder="Descrição do aparelho (opcional)"
-                        value={formData.descricao}
+                  {/* Linha 4: Condição e Preço */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Condição</label>
+                      <select
+                        name="condicao"
+                        value={formData.condicao}
                         onChange={handleInputChange}
-                        rows={2}
                         className="input-glass"
-                      />
-
-                      <textarea
-                        name="acessorios"
-                        placeholder="Acessórios inclusos (opcional)"
-                        value={formData.acessorios}
-                        onChange={handleInputChange}
-                        rows={2}
-                        className="input-glass"
-                      />
-
-                      <textarea
-                        name="observacoes"
-                        placeholder="Observações adicionais (opcional)"
-                        value={formData.observacoes}
-                        onChange={handleInputChange}
-                        rows={2}
+                      >
+                        <option value="novo">🆕 Novo</option>
+                        <option value="seminovo">⭐ Seminovo</option>
+                        <option value="usado">♻️ Usado</option>
+                        <option value="danificado">⚠️ Danificado</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Preço de Custo</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        name="custo"
+                        placeholder="R$ 0,00"
+                        value={formatarPreco(formData.custo)}
+                        onChange={handleCustoChange}
                         className="input-glass"
                       />
                     </div>
-                  )}
-                </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Preço de Venda</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        name="preco"
+                        placeholder="R$ 0,00"
+                        value={formatarPreco(formData.preco)}
+                        onChange={handlePrecoChange}
+                        className="input-glass"
+                      />
+                    </div>
+                  </div>
 
-                <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
-                  <Button type="button" variant="outline" onClick={handleCancel}>
-                    Cancelar
-                  </Button>
-                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                    {loading ? "Processando..." : editingId ? "Atualizar Aparelho" : "Salvar Aparelho"}
-                  </Button>
-                </div>
+                  {/* Cliente */}
+                  <div className="flex gap-2">
+                    <select
+                      name="cliente"
+                      value={formData.clienteId || ""}
+                      onChange={(e) => {
+                        const clienteSelecionado = clientes.find((c) => c.id === e.target.value);
+                        setFormData((prev) => ({
+                          ...prev,
+                          clienteId: e.target.value,
+                          cliente: clienteSelecionado?.nome || "",
+                        }));
+                      }}
+                      className="input-glass flex-1"
+                    >
+                      <option value="">Selecione um cliente (opcional)</option>
+                      {clientes.map((cliente) => (
+                        <option key={cliente.id} value={cliente.id}>
+                          {cliente.nome} ({cliente.telefone})
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setShowNovoClientePopup(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
 
-                {error && <p className="text-sm text-red-500 text-center">{error}</p>}
-              </form>
-            </div>
-          </GlassCard>
-        </div>
+                  <div className="rounded-xl border border-white/10 bg-white/10 dark:bg-black/10 p-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowOptionalFields((prev) => !prev)}
+                      className="w-full flex items-center justify-between text-sm font-semibold"
+                    >
+                      <span>Campos opcionais (descrição, acessórios e observações)</span>
+                      {showOptionalFields ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+
+                    {showOptionalFields && (
+                      <div className="mt-3 space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <input
+                            type="text"
+                            name="cor"
+                            placeholder="Cor (opcional)"
+                            value={formData.cor}
+                            onChange={handleInputChange}
+                            className="input-glass"
+                          />
+                          <select
+                            name="capacidade"
+                            value={formData.capacidade}
+                            onChange={handleInputChange}
+                            className="input-glass"
+                          >
+                            {romOptions.map((rom) => (
+                              <option key={rom} value={rom}>
+                                💾 {rom}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <textarea
+                          name="descricao"
+                          placeholder="Descrição do aparelho (opcional)"
+                          value={formData.descricao}
+                          onChange={handleInputChange}
+                          rows={2}
+                          className="input-glass"
+                        />
+
+                        <textarea
+                          name="acessorios"
+                          placeholder="Acessórios inclusos (opcional)"
+                          value={formData.acessorios}
+                          onChange={handleInputChange}
+                          rows={2}
+                          className="input-glass"
+                        />
+
+                        <textarea
+                          name="observacoes"
+                          placeholder="Observações adicionais (opcional)"
+                          value={formData.observacoes}
+                          onChange={handleInputChange}
+                          rows={2}
+                          className="input-glass"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                    <Button type="button" variant="outline" onClick={handleCancel}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
+                      {loading ? "Processando..." : editingId ? "Atualizar Aparelho" : "Salvar Aparelho"}
+                    </Button>
+                  </div>
+
+                  {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+                </form>
+              </div>
+            </GlassCard>
+          </div>
         </ModalPortal>
       )}
 
       {/* Modal Lista de Fornecedor */}
       {showSupplierModal && (
         <ModalPortal>
-        <div className="modal-overlay modal-overlay-fit">
-          <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full">
-            <div className="modal-header">
-              <div>
-                <h3 className="modal-title">Importar Lista de Fornecedor</h3>
-                <p className="modal-subtitle">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full">
+              <div className="modal-header">
+                <div>
+                  <h3 className="modal-title">Importar Lista de Fornecedor</h3>
+                  <p className="modal-subtitle">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setShowSupplierModal(false)}><X className="h-5 w-5" /></Button>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowSupplierModal(false)}><X className="h-5 w-5" /></Button>
-            </div>
-            <div className="modal-body space-y-4">
-              <textarea
-                className="input-glass w-full h-96 font-mono text-xs"
-                placeholder="Cole a lista aqui..."
-                value={supplierListText}
-                onChange={(e) => setSupplierListText(e.target.value)}
-              />
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setShowSupplierModal(false)}>Cancelar</Button>
-                <Button onClick={processarListaFornecedor} className="bg-blue-600 hover:bg-blue-700" disabled={!supplierListText.trim()}>Processar e Cadastrar</Button>
+              <div className="modal-body space-y-4">
+                <textarea
+                  className="input-glass w-full h-96 font-mono text-xs"
+                  placeholder="Cole a lista aqui..."
+                  value={supplierListText}
+                  onChange={(e) => setSupplierListText(e.target.value)}
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setShowSupplierModal(false)}>Cancelar</Button>
+                  <Button onClick={processarListaFornecedor} className="bg-blue-600 hover:bg-blue-700" disabled={!supplierListText.trim()}>Processar e Cadastrar</Button>
+                </div>
               </div>
-            </div>
-          </GlassCard>
-        </div>
+            </GlassCard>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* Modal Importar MercadoPhone */}
+      {showMercadoPhoneModal && (
+        <ModalPortal>
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-xl w-full my-4">
+              <div className="modal-header">
+                <h3 className="modal-title text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                  <Smartphone className="h-5 w-5" /> Importar Aparelhos (Formato MercadoPhone)
+                </h3>
+                <Button variant="ghost" size="icon" onClick={() => setShowMercadoPhoneModal(false)}>
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+
+              <div className="modal-body-scroll">
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2 space-y-2">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+                        Cole as linhas da lista abaixo:
+                      </label>
+                      <textarea
+                        className="input-glass w-full h-64 font-mono text-xs p-3 leading-relaxed border-emerald-500/30 resize-none"
+                        placeholder="Cole aqui as linhas como:&#10;🔵 17 Pro Max 256gb Azul Lacrado - 2605&#10;🏜️ 16 Pro Max 256gb Desert 97% - 5177 | ID: 9410244&#10;🌸 15 128GB Rosa 90% MSG TELA - 8193 | ID: 9563370..."
+                        value={mercadoPhoneText}
+                        onChange={(e) => setMercadoPhoneText(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="space-y-4 bg-emerald-50/30 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20">
+                      <h4 className="font-bold text-sm text-emerald-700 dark:text-emerald-300">Configuração de Valores</h4>
+
+                      <div>
+                        <label className="text-xs font-medium block mb-1">Margem / Preço Inicial Padrão (R$)</label>
+                        <input
+                          type="number"
+                          value={mercadoPhoneMargem}
+                          onChange={(e) => setMercadoPhoneMargem(e.target.value)}
+                          placeholder="300"
+                          className="input-glass text-sm font-bold"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Adicionada ao valor do custo de cada aparelho ou usada como valor padrão.
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-white/40 dark:bg-black/30 rounded-xl border border-emerald-500/20">
+                        <p className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
+                          📊 Aparelhos Detectados: <span className="font-bold text-base">{parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).length}</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pré-visualização da Lista Interpretada */}
+                  {mercadoPhoneText.trim() && (
+                    <div className="mt-4 border border-white/10 rounded-2xl overflow-hidden bg-black/20">
+                      <div className="p-3 bg-white/5 border-b border-white/10 font-bold text-xs flex justify-between items-center">
+                        <span>Pré-visualização dos Aparelhos Interpretados</span>
+                        <Badge variant="outline" className="text-emerald-500 border-emerald-500">
+                          {parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).length} itens
+                        </Badge>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto divide-y divide-white/5 text-xs font-mono">
+                        {parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).map((item, idx) => (
+                          <div key={idx} className="p-2.5 flex items-center justify-between hover:bg-white/5 gap-3">
+                            <div className="min-w-0 flex-1">
+                              <span className="font-bold text-emerald-500">ID: {item.idEtiqueta}</span>
+                              <span className="ml-2 font-semibold text-white">{item.modelo}</span>
+                              <span className="ml-2 text-muted-foreground">{item.capacidade}</span>
+                              <span className="ml-2 text-blue-400">{item.cor}</span>
+                              {item.bateria && <span className="ml-2 text-amber-400 font-bold">[{item.bateria}]</span>}
+                              {item.observacoes && <span className="ml-2 text-purple-400 font-semibold">(Obs: {item.observacoes})</span>}
+                              {item.sufixoSerial && <span className="ml-2 text-gray-400">({item.sufixoSerial})</span>}
+                            </div>
+                            <Badge variant={item.condicao === 'novo' ? 'default' : 'secondary'} className="text-[10px]">
+                              {item.condicao === 'novo' ? 'Lacrado' : 'Seminovo'}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                    <Button variant="outline" onClick={() => setShowMercadoPhoneModal(false)}>Cancelar</Button>
+                    <Button
+                      onClick={handleProcessMercadoPhoneList}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6"
+                      disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
+                    >
+                      {importingMercadoPhone ? 'Processando...' : `Confirmar e Cadastrar no Estoque`}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </GlassCard>
+          </div>
         </ModalPortal>
       )}
 
       {/* Modal de Saídas */}
       {showSaidas && (
         <ModalPortal>
-        <div className="modal-overlay modal-overlay-fit">
-          <GlassCard className="modal-panel modal-panel-fit modal-panel-xl modal-panel-tall w-full flex flex-col">
-            <div className="modal-header">
-              <h3 className="modal-title flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)}><X className="h-5 w-5" /></Button>
-            </div>
-            <div className="modal-body-scroll overflow-x-auto">
-              <div className="divide-y min-w-[720px]">
-                {saidas.length === 0 ? (
-                  <p className="p-8 text-center text-muted-foreground">Nenhuma saída registrada.</p>
-                ) : (
-                  saidas.map((item, idx) => (
-                    <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-muted/50 min-w-full">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium">{item.marca} {item.modelo}</p>
-                        <p className="text-xs text-muted-foreground">IMEI: {item.imei || 'N/A'}</p>
-                        <p className="text-xs text-red-600 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
-                      </div>
-                      <div className="text-right shrink-0 min-w-[180px]">
-                        <p className="text-xs text-muted-foreground">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
-                        <Badge variant="outline">{item.condicao}</Badge>
-                      </div>
-                    </div>
-                  ))
-                )}
+          <div className="modal-overlay modal-overlay-fit">
+            <GlassCard className="modal-panel modal-panel-fit modal-panel-xl modal-panel-tall w-full flex flex-col">
+              <div className="modal-header">
+                <h3 className="modal-title flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
+                <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)}><X className="h-5 w-5" /></Button>
               </div>
-            </div>
-          </GlassCard>
-        </div>
+              <div className="modal-body-scroll overflow-x-auto">
+                <div className="divide-y min-w-[720px]">
+                  {saidas.length === 0 ? (
+                    <p className="p-8 text-center text-muted-foreground">Nenhuma saída registrada.</p>
+                  ) : (
+                    saidas.map((item, idx) => (
+                      <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-muted/50 min-w-full">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium">{item.marca} {item.modelo}</p>
+                          <p className="text-xs text-muted-foreground">IMEI: {item.imei || 'N/A'}</p>
+                          <p className="text-xs text-red-600 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
+                        </div>
+                        <div className="text-right shrink-0 min-w-[180px]">
+                          <p className="text-xs text-muted-foreground">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
+                          <Badge variant="outline">{item.condicao}</Badge>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </GlassCard>
+          </div>
         </ModalPortal>
       )}
     </div>

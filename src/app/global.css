@@ -274,10 +274,13 @@ html {
   .modal-panel {
     --modal-scale: 1;
     width: min(100%, 34rem);
+    max-height: calc(100dvh - 2.5rem);
+    display: flex;
+    flex-direction: column;
     margin: auto;
     padding: 0 !important;
     overflow: hidden;
-    border-radius: 1.75rem;
+    border-radius: 1.5rem;
     border: 1px solid rgba(255, 255, 255, 0.16);
     background: color-mix(in srgb, var(--glass-bg) 92%, transparent);
     box-shadow: 0 28px 70px rgba(2, 6, 23, 0.28);
@@ -286,13 +289,12 @@ html {
   }
 
   .modal-panel-fit {
-    max-height: calc(100dvh - 1rem);
+    max-height: calc(100dvh - 2rem);
     display: flex;
     flex-direction: column;
-    margin: 0 auto !important;
-    transform: scale(var(--modal-scale));
-    transform-origin: top center;
-    will-change: transform;
+    margin: auto !important;
+    transform: none !important;
+    will-change: auto;
   }
 
   .modal-panel-no-scale {
@@ -360,35 +362,35 @@ html {
   }
 
   @media (max-height: 920px) {
-    .modal-panel-fit { --modal-scale: 0.98; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 860px) {
-    .modal-panel-fit { --modal-scale: 0.95; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 800px) {
-    .modal-panel-fit { --modal-scale: 0.92; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 740px) {
-    .modal-panel-fit { --modal-scale: 0.89; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 680px) {
-    .modal-panel-fit { --modal-scale: 0.86; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 620px) {
-    .modal-panel-fit { --modal-scale: 0.82; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 560px) {
-    .modal-panel-fit { --modal-scale: 0.78; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   @media (max-height: 500px) {
-    .modal-panel-fit { --modal-scale: 0.72; }
+    .modal-panel-fit { --modal-scale: 1; }
   }
 
   .modal-header {
@@ -549,6 +551,44 @@ html {
 
     .input-glass {
       box-shadow: none;
+    }
+
+    /* Estilização Neutra e Elegante de Select e Option */
+    select.input-glass,
+    select {
+      color-scheme: dark;
+      background-color: rgba(15, 23, 42, 0.7);
+      color: #f8fafc;
+    }
+
+    select.input-glass option,
+    select option {
+      background-color: #0f172a !important;
+      color: #f8fafc !important;
+      padding: 8px 12px;
+    }
+
+    select.input-glass option:hover,
+    select.input-glass option:focus,
+    select.input-glass option:checked,
+    select option:hover,
+    select option:focus,
+    select option:checked {
+      background-color: #1e293b !important;
+      color: #38bdf8 !important;
+    }
+
+    html:not(.dark) select.input-glass,
+    html:not(.dark) select {
+      color-scheme: light;
+      background-color: rgba(255, 255, 255, 0.85);
+      color: #0f172a;
+    }
+
+    html:not(.dark) select.input-glass option,
+    html:not(.dark) select option {
+      background-color: #ffffff !important;
+      color: #0f172a !important;
     }
   }
 
