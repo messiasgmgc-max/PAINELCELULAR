@@ -1969,7 +1969,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Vendas</h1>
             <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Controle de vendas e faturamento</p>
           </div>
-          <div className="scroll-row w-full sm:w-auto sm:pb-0">
+          <div className="scroll-row w-full pb-1">
             <input
               ref={importInputRef}
               type="file"

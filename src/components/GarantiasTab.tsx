@@ -329,7 +329,7 @@ export function GarantiasTab() {
           />
         </div>
         
-        <div className="scroll-row w-full sm:w-auto sm:pb-0">
+        <div className="scroll-row w-full pb-1">
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as any)}

@@ -346,7 +346,7 @@ export function PecasTab() {
               Gerencie seu estoque de componentes ({pecas.length} total)
             </p>
           </div>
-          <div className="scroll-row w-full sm:w-auto sm:pb-0">
+          <div className="scroll-row w-full pb-1">
             <input
               ref={importInputRef}
               type="file"

@@ -713,7 +713,7 @@ export function AparelhosTab() {
       return;
     }
 
-    const currentLojaId = aparelhosAtivos[0].loja_id;
+    const currentLojaId = (aparelhosAtivos[0] as any).loja_id || aparelhosAtivos[0].lojaId;
 
     const confirmacao = confirm("⚠️ ATENÇÃO: Isso removerá do estoque todos os aparelhos ativos desta loja. Aparelhos com histórico vinculado serão apenas baixados para preservar as OS.\n\nDeseja continuar?");
 
@@ -754,7 +754,7 @@ export function AparelhosTab() {
     if (!supplierListText.trim()) return;
 
     // Captura o ID da loja atual a partir de um aparelho existente
-    const currentLojaId = aparelhos.length > 0 ? aparelhos[0].loja_id : null;
+    const currentLojaId = aparelhos.length > 0 ? ((aparelhos[0] as any).loja_id || aparelhos[0].lojaId) : null;
 
     if (!currentLojaId) {
       alert("Erro: Não foi possível identificar o ID da loja. Cadastre ao menos um aparelho manualmente primeiro.");

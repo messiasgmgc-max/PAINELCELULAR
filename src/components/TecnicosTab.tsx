@@ -192,7 +192,7 @@ export function TecnicosTab() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <div className="scroll-row w-full sm:w-auto sm:pb-0">
+        <div className="scroll-row w-full pb-1">
           <Button onClick={handleExportCSV} variant="outline" className="shrink-0 whitespace-nowrap">
             <Download className="w-4 h-4 mr-2" />
             CSV
