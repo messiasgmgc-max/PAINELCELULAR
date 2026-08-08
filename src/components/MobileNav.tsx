@@ -6,7 +6,7 @@ import {
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
   ChevronLeft, LayoutGrid, Menu, Tag
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, checkIsSuperAdmin } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 
 interface Tab {
@@ -52,7 +52,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const isSuperAdmin = usuario?.role === 'super_admin';
+  const isSuperAdmin = checkIsSuperAdmin(usuario);
   
   const tabsToRender = isSuperAdmin 
     ? [...TABS, { id: 'superadmin', label: 'Super Admin', icon: <Lock className="w-5 h-5 text-red-500" /> }]

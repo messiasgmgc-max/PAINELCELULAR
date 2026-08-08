@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { cn } from '@/lib/utils';
+import { cn, checkIsSuperAdmin } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
@@ -84,10 +84,10 @@ export default function Home() {
   }, [pathname]);
 
   useEffect(() => {
-    if (currentTab === 'superadmin' && usuario?.role !== 'super_admin') {
+    if (currentTab === 'superadmin' && !checkIsSuperAdmin(usuario)) {
       router.replace('/');
     }
-  }, [currentTab, usuario?.role, router]);
+  }, [currentTab, usuario, router]);
 
   useEffect(() => {
     // Atualiza via store (configuracoes) caso seja alterado em tempo real na aba Configurações
@@ -170,7 +170,7 @@ export default function Home() {
       case 'configuracoes':
         return <ConfiguracoesTab />;
       case 'superadmin':
-        return usuario?.role === 'super_admin' ? <SuperAdminTab /> : <DashboardTab />;
+        return checkIsSuperAdmin(usuario) ? <SuperAdminTab /> : <DashboardTab />;
       default:
         return <DashboardTab />;
     }
@@ -206,7 +206,7 @@ export default function Home() {
             {/* User Info e Logout */}
             <div className="flex items-center gap-2 shrink-0">
               {/* Botão Super Admin */}
-              {usuario?.role === 'super_admin' && (
+              {checkIsSuperAdmin(usuario) && (
                 <Button
                   variant={currentTab === 'superadmin' ? 'default' : 'outline'}
                   size="sm"
