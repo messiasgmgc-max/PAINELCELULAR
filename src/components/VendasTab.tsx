@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
 import { toast } from 'sonner';
+import { generateReciboA4Html } from '@/lib/reciboA4';
 import {
   exportDataset,
   findByAliases,
@@ -1089,159 +1090,18 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
-  // Nova função auxiliar para gerar o HTML do recibo A4
-  const getReciboA4Html = (venda: Venda, clienteVenda?: Cliente, isForEmail: boolean = false) => {
-    const dataAtual = new Date().toLocaleDateString('pt-BR');
-    const assinaturaEmpresaUrl = config.assinaturaLoja;
-    const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 80px; max-width: 140px; display: block;" />` : '';
-
-    const itensHtmlA4 = venda.itens && venda.itens.length > 0
-      ? venda.itens.map(item => `
-          <tr>
-            <td style="text-align: center; border: 1px solid #000; padding: 5px;">${(item as any).codigo || ''}</td>
-            <td style="border: 1px solid #000; padding: 5px;">${item.descricao} <br><small style="color: #666;">${item.observacao || ''}</small></td>
-            <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.quantidade}</td>
-            <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${item.valorExibir.toFixed(2).replace('.', ',')}</td>
-            <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
-            <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 5px;">R$ ${item.total.toFixed(2).replace('.', ',')}</td>
-          </tr>
-        `).join('')
-      : `<tr>
-           <td style="text-align: center; border: 1px solid #000; padding: 5px;">-</td>
-           <td style="border: 1px solid #000; padding: 5px;">${venda.descricao || 'Produto Genérico'}</td>
-           <td style="text-align: center; border: 1px solid #000; padding: 5px;">1</td>
-           <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
-           <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ 0,00</td>
-           <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 5px;">R$ ${venda.valor.toFixed(2).replace('.', ',')}</td>
-         </tr>`;
-
-    const valorTotalVenda = ((venda as any).valorTotal || venda.valor || 0);
-    const nomeClienteFinal = clienteVenda?.nome || venda.clienteNome || 'Não informado';
-
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Recibo de Venda</title>
-        <style>
-          body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-          th, td { border: 1px solid #000; padding: 5px; text-align: left; }
-          .no-border, .no-border td { border: none; padding: 2px; }
-          .section-title { background-color: #f0f0f0; font-weight: bold; text-align: center; padding: 6px 4px; }
-          .small-text { font-size: 10px; line-height: 1.3; }
-          .signature-row { display: flex; gap: 24px; justify-content: space-between; align-items: flex-end; margin-top: 20px; }
-          .signature-col { width: 48%; text-align: center; }
-          .signature-holder { height: 44px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: -4px; }
-          .signature-image { max-width: 180px; max-height: 64px; object-fit: contain; display: block; }
-          .signature-line { border-top: 1px solid #000; padding-top: 6px; font-weight: 700; }
-          .signature-subtitle { display: block; margin-top: 2px; font-size: 10px; font-weight: 400; }
-        </style>
-      </head>
-      <body>
-        <div style="max-width: 800px; margin: 0 auto; background-color: #ffffff; border: 1px solid #ccc; padding: 30px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <!-- Canhoto de Recebimento -->
-          <table>
-            <tr>
-              <td colspan="3" class="section-title">RECIBO DE ${config.nomeLoja || 'LOJA NÃO CONFIGURADA'} - OS PRODUTOS E/OU SERVIÇOS CONSTANTES NO PEDIDO</td>
-            </tr>
-            <tr>
-              <td style="width: 30%;">Data de recebimento<br><br>___/___/______</td>
-              <td style="width: 40%;">Identificação e assinatura do recebedor<br><br>_________________________________________</td>
-              <td style="width: 30%; text-align: center;">Recibo da venda:<br><b>${venda.id || ''}</b></td>
-            </tr>
-          </table>
-
-          <hr style="border-top: 1px dashed #000; margin: 15px 0;">
-
-          <!-- Dados da Empresa -->
-          <table class="no-border" style="margin-bottom: 18px;">
-            <tr>
-              <td style="width: 150px; vertical-align: top;">${logoHtml}</td>
-              <td style="vertical-align: top; padding-left: 8px;">
-                <h2 style="margin: 0 0 5px 0; font-size: 16px;">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</h2>
-                <div class="small-text">${config.enderecoLoja || 'Endereço não configurado'}</div>
-                <div class="small-text">CPF/CNPJ: ${config.cnpjLoja || 'Não informado'} | Tel: ${config.telefoneLoja || 'Não informado'}</div>
-              </td>
-              <td style="text-align: right; vertical-align: top; font-size: 11px;">
-                Data: ${dataAtual}<br>
-                VENDEDOR: ${venda.vendedor || 'Não informado'}<br>
-                <b>RECIBO DA VENDA: ${venda.id || ''}</b>
-              </td>
-            </tr>
-          </table>
-
-          <!-- Dados do Cliente -->
-          <table>
-            <tr><td colspan="4" class="section-title">DESTINATÁRIO/REMETENTE</td></tr>
-            <tr>
-              <td style="width: 40%;">Nome/Razão social<br><b>${nomeClienteFinal}</b></td>
-              <td style="width: 20%;">Telefone<br>${clienteVenda?.telefone || 'N/A'}</td>
-              <td style="width: 20%;">CPF/CNPJ<br>${clienteVenda?.cpf || 'N/A'}</td>
-              <td style="width: 20%;">E-mail<br>${clienteVenda?.email || 'N/A'}</td>
-            </tr>
-          </table>
-
-          <!-- Produtos -->
-          <table>
-            <tr><td colspan="6" class="section-title">DADOS DO PRODUTO</td></tr>
-            <tr style="font-weight: bold; text-align: center;">
-              <td style="width: 10%;">Cód</td>
-              <td style="width: 45%; text-align: left;">Produto</td>
-              <td style="width: 5%;">Qtd</td>
-              <td style="width: 15%;">Valor Unitário</td>
-              <td style="width: 10%;">Desconto</td>
-              <td style="width: 15%;">Valor Total</td>
-            </tr>
-            ${itensHtmlA4}
-            <tr>
-              <td colspan="5" style="text-align: right; font-weight: bold;">Total</td>
-              <td style="text-align: right; font-weight: bold;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
-            </tr>
-          </table>
-
-          <!-- Termos de Garantia -->
-          <div style="margin-top: 10px; margin-bottom: 8px; padding: 10px; border: 1px solid #000;">
-            <div style="font-weight: bold; margin-bottom: 6px;">TERMO DE GARANTIA</div>
-            <div class="small-text">Garantia de ${venda.garantia || '90 dias'} a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</div>
-            <div class="small-text" style="margin-top: 6px;">Esta garantia não cobre:</div>
-            <ul class="small-text" style="margin: 4px 0 0 16px; padding: 0; list-style: disc inside;">
-              <li>Queda, umidade, líquidos ou danos acidentais;</li>
-              <li>Uso indevido, instalação incorreta ou violação do produto;</li>
-              <li>Abertura ou tentativa de conserto por terceiros não autorizados;</li>
-              <li>Não pode molhar e não pode abrir o aparelho.</li>
-            </ul>
-            <div class="small-text" style="margin-top: 6px;"><b>Apresente este recibo junto com o equipamento no atendimento.</b></div>
-          </div>
-
-          <!-- Assinaturas -->
-          <div class="signature-row">
-            <div class="signature-col">
-              <div class="signature-holder"></div>
-              <div class="signature-line">
-                Assinatura do Cliente
-                <span class="signature-subtitle">${nomeClienteFinal}</span>
-              </div>
-            </div>
-            <div class="signature-col">
-              <div class="signature-holder">
-                ${assinaturaEmpresaUrl ? `<img src="${assinaturaEmpresaUrl}" alt="Assinatura da loja" class="signature-image" onerror="this.style.display='none'" />` : ''}
-              </div>
-              <div class="signature-line">
-                Assinatura / Carimbo da Loja
-                <span class="signature-subtitle">${config.nomeLoja || 'LOJA NÃO CONFIGURADA'}</span>
-              </div>
-            </div>
-          </div>
-          <div style="text-align: center; margin-top: 16px; font-weight: bold;">
-            OBRIGADO PELA PREFERÊNCIA.
-          </div>
-        </div>
-        ${isForEmail ? '' : '<script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>'}
-      </body>
-      </html>
-    `;
+  // Função auxiliar para gerar o HTML do recibo A4
+  const getReciboA4Html = (venda: Venda, clienteVenda?: Cliente, isForEmail: boolean = false, overrideStoreData?: any) => {
+    const storeObj = overrideStoreData || {
+      nome: config.nomeLoja,
+      endereco: config.enderecoLoja,
+      cnpj: config.cnpjLoja,
+      telefone: config.telefoneLoja,
+      email: config.emailLoja,
+      logo_url: config.logoLoja,
+      assinatura_url: config.assinaturaLoja,
+    };
+    return generateReciboA4Html(venda, storeObj, clienteVenda, isForEmail);
   };
 
   const dispararEmailReciboComPdf = async (venda: Venda, clienteVenda: Cliente) => {
@@ -1848,8 +1708,40 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const handleGerarCupomTermico = async (venda: Venda) => {
     try {
-      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 48px; max-width: 120px; margin: 0 auto 8px auto; display: block;" />` : '';
-      const assinaturaEmpresaUrl = config.assinaturaLoja;
+      // Busca dados completos da loja no banco ou do config
+      let storeData = {
+        nomeLoja: config.nomeLoja || 'Phone Center',
+        enderecoLoja: config.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '',
+        cnpjLoja: config.cnpjLoja && config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '',
+        telefoneLoja: config.telefoneLoja && config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '',
+        emailLoja: config.emailLoja || '',
+        logoLoja: config.logoLoja || null,
+        assinaturaLoja: config.assinaturaLoja || null,
+      };
+
+      const targetLojaId = (venda as any).loja_id || (venda as any).lojaId || usuario?.lojaId;
+      if (targetLojaId) {
+        const { data: dbLoja } = await supabase
+          .from('lojas')
+          .select('*')
+          .eq('id', targetLojaId)
+          .maybeSingle();
+
+        if (dbLoja) {
+          storeData = {
+            nomeLoja: dbLoja.nome || storeData.nomeLoja,
+            enderecoLoja: dbLoja.endereco || storeData.enderecoLoja,
+            cnpjLoja: dbLoja.cnpj || storeData.cnpjLoja,
+            telefoneLoja: dbLoja.telefone || storeData.telefoneLoja,
+            emailLoja: dbLoja.email || storeData.emailLoja,
+            logoLoja: dbLoja.logo_url || storeData.logoLoja,
+            assinaturaLoja: dbLoja.assinatura_url || storeData.assinaturaLoja,
+          };
+        }
+      }
+
+      const logoHtml = storeData.logoLoja ? `<img src="${storeData.logoLoja}" style="max-height: 54px; max-width: 130px; margin: 0 auto 8px auto; display: block;" />` : '';
+      const assinaturaEmpresaUrl = storeData.assinaturaLoja;
       const itensHtml = (venda.itens && venda.itens.length > 0 ? venda.itens : [{ descricao: venda.descricao || 'Produto/serviço', quantidade: 1, valorExibir: venda.valor, total: venda.valor, desconto: venda.descontoTotal || 0, observacao: '' }])
         .map(item => `
           <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #222;">
@@ -1891,8 +1783,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         <body>
           <div class="center">
             ${logoHtml}
-            <div class="bold" style="font-size: 16px;">${config.nomeLoja || 'PHONE CENTER'}</div>
-            <div class="small">Assistência Técnica e Vendas</div>
+            <div class="bold" style="font-size: 16px;">${storeData.nomeLoja}</div>
+            ${storeData.enderecoLoja ? `<div class="small">${storeData.enderecoLoja}</div>` : ''}
+            ${(storeData.cnpjLoja || storeData.telefoneLoja) ? `<div class="small">${storeData.cnpjLoja ? `CNPJ: ${storeData.cnpjLoja}` : ''} ${storeData.telefoneLoja ? `| Tel: ${storeData.telefoneLoja}` : ''}</div>` : ''}
+            <div class="small" style="margin-top: 2px;">Assistência Técnica e Vendas</div>
           </div>
           <div class="divider"></div>
           <div class="bold">RECIBO DE VENDA</div>
@@ -1946,7 +1840,39 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const handleGerarReciboA4 = async (venda: Venda) => {
     try {
       const clienteVenda = clientes.find(c => c.id === venda.clienteId);
-      const conteudoHtml = getReciboA4Html(venda, clienteVenda);
+      
+      let storeData = {
+        nomeLoja: config.nomeLoja || 'Phone Center',
+        enderecoLoja: config.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '',
+        cnpjLoja: config.cnpjLoja && config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '',
+        telefoneLoja: config.telefoneLoja && config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '',
+        emailLoja: config.emailLoja || '',
+        logoLoja: config.logoLoja || null,
+        assinaturaLoja: config.assinaturaLoja || null,
+      };
+
+      const targetLojaId = (venda as any).loja_id || (venda as any).lojaId || usuario?.lojaId;
+      if (targetLojaId) {
+        const { data: dbLoja } = await supabase
+          .from('lojas')
+          .select('*')
+          .eq('id', targetLojaId)
+          .maybeSingle();
+
+        if (dbLoja) {
+          storeData = {
+            nomeLoja: dbLoja.nome || storeData.nomeLoja,
+            enderecoLoja: dbLoja.endereco || storeData.enderecoLoja,
+            cnpjLoja: dbLoja.cnpj || storeData.cnpjLoja,
+            telefoneLoja: dbLoja.telefone || storeData.telefoneLoja,
+            emailLoja: dbLoja.email || storeData.emailLoja,
+            logoLoja: dbLoja.logo_url || storeData.logoLoja,
+            assinaturaLoja: dbLoja.assinatura_url || storeData.assinaturaLoja,
+          };
+        }
+      }
+
+      const conteudoHtml = getReciboA4Html(venda, clienteVenda, false, storeData);
 
       const printWindow = window.open('', '_blank');
       if (printWindow) { 

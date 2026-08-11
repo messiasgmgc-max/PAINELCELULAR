@@ -134,7 +134,16 @@ export function useStoreConfig() {
       localStorage.setItem(key, JSON.stringify(novaConfig));
       setConfig(novaConfig);
 
-      if (lojaId) {
+      let targetId = lojaId;
+      if (!targetId) {
+        const { data: firstStore } = await supabase.from('lojas').select('id').limit(1).maybeSingle();
+        if (firstStore?.id) {
+          targetId = String(firstStore.id);
+          setLojaId(targetId);
+        }
+      }
+
+      if (targetId) {
         await supabase.from('lojas').update({
           nome: novaConfig.nomeLoja,
           logo_url: novaConfig.logoLoja,
@@ -143,7 +152,7 @@ export function useStoreConfig() {
           cnpj: novaConfig.cnpjLoja,
           telefone: novaConfig.telefoneLoja,
           email: novaConfig.emailLoja,
-        }).eq('id', lojaId);
+        }).eq('id', targetId);
       }
     } catch (error) {
       console.error('Erro ao salvar configuração:', error);
