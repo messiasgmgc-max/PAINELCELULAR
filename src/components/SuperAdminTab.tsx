@@ -29,6 +29,9 @@ import {
   Settings,
   Building2,
   FileCode2,
+  CreditCard,
+  Send,
+  Upload,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -42,6 +45,14 @@ interface Loja {
   logo_url?: string | null;
   assinatura_url?: string | null;
   plano?: string | null;
+  plano_status?: "ativo" | "pendente" | "vencido" | "bloqueado" | null;
+  valor_mensalidade?: number | null;
+  data_vencimento?: string | null;
+  chave_pix_cobranca?: string | null;
+  comprovante_url?: string | null;
+  solicitacao_liberacao_status?: string | null;
+  solicitacao_liberacao_at?: string | null;
+  observacao_plano?: string | null;
   ativo: boolean;
   created_at: string;
 }
@@ -71,7 +82,18 @@ export default function SuperAdminTab() {
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [statsMap, setStatsMap] = useState<Record<string, LojaStats>>({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "sql">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "planos" | "sql">("dashboard");
+  
+  // Modais de Plano
+  const [editingPlanoLoja, setEditingPlanoLoja] = useState<Loja | null>(null);
+  const [verComprovanteModal, setVerComprovanteModal] = useState<{ lojaNome: string; url: string; observacao?: string } | null>(null);
+  const [editPlanoForm, setEditPlanoForm] = useState({
+    plano_status: "ativo" as "ativo" | "pendente" | "vencido" | "bloqueado",
+    valor_mensalidade: 99.90,
+    data_vencimento: "",
+    chave_pix_cobranca: "financeiro@phonecenter.com.br",
+    observacao_plano: "",
+  });
   
   // Filtros
   const [searchTerm, setSearchTerm] = useState("");
@@ -282,6 +304,95 @@ export default function SuperAdminTab() {
       setLojas(lojas.map((l) => (l.id === loja.id ? { ...l, ativo: novoStatus } : l)));
     } catch (error: any) {
       toast.error("Erro ao alterar status da loja: " + error.message);
+    }
+  };
+
+  // ── AÇÕES DE GESTÃO DE PLANOS & MENSALIDADES ──
+
+  const handleAlterarStatusPlano = async (lojaId: string, novoStatus: "ativo" | "pendente" | "vencido" | "bloqueado") => {
+    try {
+      const { error } = await supabase
+        .from("lojas")
+        .update({ plano_status: novoStatus })
+        .eq("id", lojaId);
+
+      if (error) throw error;
+
+      toast.success(`Status do plano atualizado para "${novoStatus.toUpperCase()}".`);
+      setLojas(lojas.map((l) => (l.id === lojaId ? { ...l, plano_status: novoStatus } : l)));
+    } catch (error: any) {
+      toast.error("Erro ao alterar status do plano: " + error.message);
+    }
+  };
+
+  const handleAprovarLiberacao = async (loja: Loja) => {
+    try {
+      // Renova por +30 dias
+      const proximaData = new Date();
+      proximaData.setDate(proximaData.getDate() + 30);
+      const dataVencimentoIso = proximaData.toISOString().split("T")[0];
+
+      const { error } = await supabase
+        .from("lojas")
+        .update({
+          plano_status: "ativo",
+          solicitacao_liberacao_status: "aprovado",
+          data_vencimento: dataVencimentoIso,
+        })
+        .eq("id", loja.id);
+
+      if (error) throw error;
+
+      // Adiciona registro no histórico de pagamentos
+      await supabase.from("historico_pagamentos_planos").insert({
+        loja_id: loja.id,
+        valor: loja.valor_mensalidade || 99.90,
+        status: "aprovado",
+        comprovante_url: loja.comprovante_url || null,
+        observacao: "Liberação aprovada manualmente pelo SuperAdmin",
+      });
+
+      toast.success(`🟢 Acesso da loja "${loja.nome}" LIBERADO por +30 dias!`);
+      fetchDadosGlobais();
+    } catch (error: any) {
+      toast.error("Erro ao aprovar liberação: " + error.message);
+    }
+  };
+
+  const handleOpenEditPlano = (loja: Loja) => {
+    setEditingPlanoLoja(loja);
+    setEditPlanoForm({
+      plano_status: (loja.plano_status as any) || "ativo",
+      valor_mensalidade: loja.valor_mensalidade || 99.90,
+      data_vencimento: loja.data_vencimento || "",
+      chave_pix_cobranca: loja.chave_pix_cobranca || "financeiro@phonecenter.com.br",
+      observacao_plano: loja.observacao_plano || "",
+    });
+  };
+
+  const handleSaveEditPlano = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPlanoLoja) return;
+
+    try {
+      const { error } = await supabase
+        .from("lojas")
+        .update({
+          plano_status: editPlanoForm.plano_status,
+          valor_mensalidade: Number(editPlanoForm.valor_mensalidade),
+          data_vencimento: editPlanoForm.data_vencimento || null,
+          chave_pix_cobranca: editPlanoForm.chave_pix_cobranca.trim(),
+          observacao_plano: editPlanoForm.observacao_plano.trim() || null,
+        })
+        .eq("id", editingPlanoLoja.id);
+
+      if (error) throw error;
+
+      toast.success("Plano e mensalidade atualizados com sucesso!");
+      setEditingPlanoLoja(null);
+      fetchDadosGlobais();
+    } catch (error: any) {
+      toast.error("Erro ao atualizar plano: " + error.message);
     }
   };
 
@@ -499,6 +610,7 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
             { id: "dashboard", label: "Dashboard", icon: <BarChart3 className="w-4 h-4" /> },
             { id: "lojas", label: `Lojas (${lojas.length})`, icon: <Store className="w-4 h-4" /> },
             { id: "usuarios", label: `Usuários (${perfis.length})`, icon: <Users className="w-4 h-4" /> },
+            { id: "planos", label: `Planos & Mensalidades`, icon: <CreditCard className="w-4 h-4 text-emerald-400" /> },
             { id: "sql", label: "SQL & Permissões", icon: <FileCode2 className="w-4 h-4" /> },
           ].map((tab) => (
             <button
@@ -886,6 +998,161 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
         </GlassCard>
       )}
 
+      {/* GESTÃO DE PLANOS & MENSALIDADES */}
+      {activeTab === "planos" && (
+        <GlassCard className="rounded-3xl p-5 sm:p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-white/10">
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-emerald-400" /> Gestão de Planos & Mensalidades dos Lojistas
+              </h3>
+              <p className="text-xs text-slate-400">
+                Controle o status financeiro de cada loja, aprove solicitações de liberação por Pix e aplique bloqueios por falta de pagamento.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-xs px-3 py-1.5">
+                Receita Estimada: R$ {lojas.reduce((acc, l) => acc + (l.valor_mensalidade || 99.90), 0).toFixed(2).replace('.', ',')} / mês
+              </Badge>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto scrollbar-soft border border-white/10 rounded-2xl">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-slate-900/80 text-slate-300 border-b border-white/10">
+                  <th className="py-3 px-4">Loja / Nome</th>
+                  <th className="py-3 px-3">Mensalidade</th>
+                  <th className="py-3 px-3">Vencimento</th>
+                  <th className="py-3 px-3">Status do Plano</th>
+                  <th className="py-3 px-3">Solicitação de Liberação</th>
+                  <th className="py-3 px-4 text-right">Ações de Controle</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 text-slate-200">
+                {lojas.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
+                      Nenhuma loja cadastrada no sistema.
+                    </td>
+                  </tr>
+                ) : (
+                  lojas.map((loja) => {
+                    const statusPlano = (loja.plano_status || 'ativo').toLowerCase();
+                    const temSolicitacaoPendente = loja.solicitacao_liberacao_status === 'pendente_aprovacao';
+
+                    return (
+                      <tr key={loja.id} className="hover:bg-white/5 transition">
+                        <td className="py-3.5 px-4 font-bold text-white">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-blue-400 shrink-0" />
+                            <div>
+                              <p className="text-sm font-bold text-white">{loja.nome}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">ID: {loja.id.slice(0, 8)}...</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 font-mono font-bold text-emerald-400">
+                          R$ {(loja.valor_mensalidade || 99.90).toFixed(2).replace('.', ',')}
+                        </td>
+                        <td className="py-3.5 px-3 text-slate-300 font-mono">
+                          {loja.data_vencimento ? new Date(loja.data_vencimento).toLocaleDateString('pt-BR') : 'Não definido'}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          {statusPlano === 'ativo' && (
+                            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                              🟢 Ativo
+                            </Badge>
+                          )}
+                          {statusPlano === 'pendente' && (
+                            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+                              ⏳ Pendente
+                            </Badge>
+                          )}
+                          {statusPlano === 'vencido' && (
+                            <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">
+                              ⚠️ Vencido
+                            </Badge>
+                          )}
+                          {statusPlano === 'bloqueado' && (
+                            <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
+                              🔴 Bloqueado
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          {temSolicitacaoPendente ? (
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-amber-500/30 text-amber-300 border-amber-500/50 animate-pulse">
+                                📩 Comprovante Enviado
+                              </Badge>
+                              {loja.comprovante_url && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setVerComprovanteModal({ lojaNome: loja.nome, url: loja.comprovante_url!, observacao: loja.observacao_plano || undefined })}
+                                  className="h-7 text-[11px] text-blue-400 underline hover:text-blue-300 p-0"
+                                >
+                                  Ver Imagem
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-500">Nenhuma</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {temSolicitacaoPendente || statusPlano !== 'ativo' ? (
+                              <Button
+                                size="sm"
+                                onClick={() => handleAprovarLiberacao(loja)}
+                                className="h-8 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 rounded-xl shadow-md shadow-emerald-600/30"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Liberar (+30 dias)
+                              </Button>
+                            ) : null}
+
+                            {statusPlano === 'ativo' ? (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => handleAlterarStatusPlano(loja.id, 'bloqueado')}
+                                className="h-8 px-3 text-xs gap-1 rounded-xl"
+                              >
+                                <XCircle className="w-3.5 h-3.5" /> Bloquear
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleAlterarStatusPlano(loja.id, 'ativo')}
+                                className="h-8 px-3 text-xs gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20 rounded-xl"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Ativar
+                              </Button>
+                            )}
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenEditPlano(loja)}
+                              className="h-8 px-2.5 text-xs border-white/20 hover:bg-white/10 rounded-xl"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-blue-400" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      )}
+
       {/* SQL & INSTRUÇÕES DE BANCO */}
       {activeTab === "sql" && (
         <GlassCard className="rounded-3xl p-6 space-y-4">
@@ -1244,6 +1511,122 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                   onClick={handleDeletarLoja}
                 >
                   Confirmar Exclusão
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDITAR PLANO & MENSALIDADE DA LOJA */}
+      {editingPlanoLoja && (
+        <div className="modal-overlay">
+          <div className="modal-panel max-w-lg">
+            <div className="modal-header">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-emerald-400" /> Configurar Plano: {editingPlanoLoja.nome}
+              </h3>
+              <button onClick={() => setEditingPlanoLoja(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditPlano} className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold mb-1 block">Status do Plano</label>
+                  <select
+                    value={editPlanoForm.plano_status}
+                    onChange={(e) => setEditPlanoForm({ ...editPlanoForm, plano_status: e.target.value as any })}
+                    className="input-glass w-full text-sm py-2 px-3"
+                  >
+                    <option value="ativo">🟢 Ativo</option>
+                    <option value="pendente">⏳ Pendente</option>
+                    <option value="vencido">⚠️ Vencido</option>
+                    <option value="bloqueado">🔴 Bloqueado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold mb-1 block">Valor Mensalidade (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editPlanoForm.valor_mensalidade}
+                    onChange={(e) => setEditPlanoForm({ ...editPlanoForm, valor_mensalidade: parseFloat(e.target.value) || 0 })}
+                    className="input-glass w-full text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">Data de Vencimento</label>
+                <input
+                  type="date"
+                  value={editPlanoForm.data_vencimento}
+                  onChange={(e) => setEditPlanoForm({ ...editPlanoForm, data_vencimento: e.target.value })}
+                  className="input-glass w-full text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">Chave Pix de Cobrança da Loja</label>
+                <input
+                  type="text"
+                  value={editPlanoForm.chave_pix_cobranca}
+                  onChange={(e) => setEditPlanoForm({ ...editPlanoForm, chave_pix_cobranca: e.target.value })}
+                  className="input-glass w-full text-sm font-mono text-emerald-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">Observações / Anotações do Plano</label>
+                <textarea
+                  value={editPlanoForm.observacao_plano}
+                  onChange={(e) => setEditPlanoForm({ ...editPlanoForm, observacao_plano: e.target.value })}
+                  placeholder="Ex: Desconto acordado de 10%, vencimento personalizado..."
+                  className="input-glass w-full text-sm h-20 resize-none p-2.5"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/10">
+                <Button type="button" variant="ghost" onClick={() => setEditingPlanoLoja(null)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold">
+                  Salvar Configurações
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VER COMPROVANTE ENVIADO PELO LOJISTA */}
+      {verComprovanteModal && (
+        <div className="modal-overlay">
+          <div className="modal-panel max-w-xl">
+            <div className="modal-header">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" /> Comprovante de Pagamento: {verComprovanteModal.lojaNome}
+              </h3>
+              <button onClick={() => setVerComprovanteModal(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 text-center">
+              {verComprovanteModal.observacao && (
+                <div className="p-3 bg-slate-950 rounded-xl border border-white/10 text-xs text-slate-300 text-left">
+                  <p className="font-semibold text-slate-400 mb-1">Mensagem do Lojista:</p>
+                  <p>{verComprovanteModal.observacao}</p>
+                </div>
+              )}
+              <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-white/10 p-2 bg-slate-950 flex items-center justify-center">
+                <img src={verComprovanteModal.url} alt="Comprovante Pix" className="max-w-full h-auto object-contain rounded" />
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-white/10">
+                <Button type="button" variant="secondary" onClick={() => setVerComprovanteModal(null)}>
+                  Fechar
                 </Button>
               </div>
             </div>

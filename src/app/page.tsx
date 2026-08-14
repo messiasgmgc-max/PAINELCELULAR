@@ -22,11 +22,15 @@ import { MobileNav } from '@/components/MobileNav';
 import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
 import { EtiquetasTab } from '@/components/EtiquetasTab';
 import SuperAdminTab from '@/components/SuperAdminTab';
+import { UserAccountMenu } from '@/components/UserAccountMenu';
+import { MeuPlanoModal } from '@/components/MeuPlanoModal';
+import { PlanPaywallModal } from '@/components/PlanPaywallModal';
 import { 
   Smartphone, 
   LogOut,
   User,
-  Shield
+  Shield,
+  CreditCard
 } from 'lucide-react';
 
 export default function Home() {
@@ -40,6 +44,7 @@ export default function Home() {
   const [subtitulo, setSubtitulo] = useState('Sistema de Gestão');
   const [headerNomeLoja, setHeaderNomeLoja] = useState('');
   const [headerLogoLoja, setHeaderLogoLoja] = useState<string | null>(null);
+  const [showMeuPlanoModal, setShowMeuPlanoModal] = useState(false);
 
   const normalizeTabFromPath = (path: string) => {
     const segment = path.split('/').filter(Boolean)[0] || 'dashboard';
@@ -203,41 +208,38 @@ export default function Home() {
               </div>
             </div>
 
-            {/* User Info e Logout */}
+            {/* User Info, Meu Plano e Dropdown */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* Botão Meu Plano */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowMeuPlanoModal(true)}
+                className="gap-2 text-xs sm:text-sm h-9 sm:h-10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 rounded-2xl font-semibold"
+              >
+                <CreditCard className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline">Meu Plano</span>
+              </Button>
+
               {/* Botão Super Admin */}
               {checkIsSuperAdmin(usuario) && (
                 <Button
                   variant={currentTab === 'superadmin' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => handleTabChange('superadmin')}
-                  className="hidden sm:flex gap-2 h-9 sm:h-10"
+                  className="hidden sm:flex gap-2 h-9 sm:h-10 rounded-2xl"
                 >
                   <Shield className="w-4 h-4" />
                   <span className="hidden lg:inline">Admin</span>
                 </Button>
               )}
 
-              {usuario && (
-                <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-2 bg-gray-100/80 dark:bg-slate-800/80 rounded-xl border border-white/10">
-                  <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500 flex-shrink-0" />
-                  <div className="flex flex-col text-left">
-                    <span className="text-xs sm:text-sm font-medium text-gray-900 dark:text-gray-200 max-w-[80px] sm:max-w-[160px] truncate">{usuario.nome}</span>
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 capitalize leading-none hidden sm:block">{usuario.role}</span>
-                  </div>
-                </div>
-              )}
-              {usuario && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={logout}
-                  className="gap-2 text-xs sm:text-sm h-9 sm:h-10"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span className="hidden sm:inline">Sair</span>
-                </Button>
-              )}
+              {/* Menu de Usuário Expansível */}
+              <UserAccountMenu
+                onOpenMeuPlano={() => setShowMeuPlanoModal(true)}
+                onNavigateSuperAdmin={() => handleTabChange('superadmin')}
+                currentTab={currentTab}
+              />
             </div>
           </div>
         </div>
@@ -262,6 +264,10 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      {/* Modais Globais de Plano e Paywall */}
+      <MeuPlanoModal isOpen={showMeuPlanoModal} onClose={() => setShowMeuPlanoModal(false)} />
+      <PlanPaywallModal />
     </div>
   );
 }

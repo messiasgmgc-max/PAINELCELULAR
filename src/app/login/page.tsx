@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { AlertCircle, Smartphone, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
-  const SUCCESS_SCREEN_DURATION_MS = 3600;
+  const SUCCESS_SCREEN_DURATION_MS = 1200;
   // usa o loading e funções do hook centralizado
   const { login, registrar, loading: authLoading, usuario, authReady } = useAuth();
   const { config } = useStoreConfig();
