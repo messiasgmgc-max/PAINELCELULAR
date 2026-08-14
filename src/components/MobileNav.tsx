@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
-  ChevronLeft, LayoutGrid, Menu, Tag
+  ChevronLeft, LayoutGrid, Menu, Tag, FileText
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -27,6 +27,7 @@ const TABS: Tab[] = [
   { id: 'tecnicos', label: 'Equipe', icon: <Wrench className="w-5 h-5" /> },
   { id: 'agendamentos', label: 'Agenda', icon: <Calendar className="w-5 h-5" /> },
   { id: 'garantias', label: 'Garantias', icon: <Shield className="w-5 h-5" /> },
+  { id: 'logs', label: 'Logs & Auditoria', icon: <FileText className="w-5 h-5" /> },
   { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle className="w-5 h-5" /> },
   { id: 'configuracoes', label: 'Configurações', icon: <Settings className="w-5 h-5" /> },
 ];

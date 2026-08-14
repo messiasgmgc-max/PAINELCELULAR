@@ -32,10 +32,12 @@ import {
   CreditCard,
   Send,
   Upload,
+  FileText,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { LogsTab } from "@/components/LogsTab";
 
 interface Loja {
   id: string;
@@ -82,7 +84,7 @@ export default function SuperAdminTab() {
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [statsMap, setStatsMap] = useState<Record<string, LojaStats>>({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "planos" | "sql">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "planos" | "logs">("dashboard");
   
   // Modais de Plano
   const [editingPlanoLoja, setEditingPlanoLoja] = useState<Loja | null>(null);
@@ -607,6 +609,7 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
             { id: "lojas", label: `Lojas (${lojas.length})`, icon: <Store className="w-4 h-4" /> },
             { id: "usuarios", label: `Usuários (${perfis.length})`, icon: <Users className="w-4 h-4" /> },
             { id: "planos", label: `Planos & Mensalidades`, icon: <CreditCard className="w-4 h-4 text-emerald-400" /> },
+            { id: "logs", label: `Logs de Auditoria`, icon: <FileText className="w-4 h-4 text-purple-400" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1166,6 +1169,9 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
           </div>
         </GlassCard>
       )}
+
+      {/* LOGS DE AUDITORIA */}
+      {activeTab === "logs" && <LogsTab />}
 
 
 

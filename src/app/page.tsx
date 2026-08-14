@@ -22,6 +22,7 @@ import { MobileNav } from '@/components/MobileNav';
 import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
 import { EtiquetasTab } from '@/components/EtiquetasTab';
 import SuperAdminTab from '@/components/SuperAdminTab';
+import { LogsTab } from '@/components/LogsTab';
 import { UserAccountMenu } from '@/components/UserAccountMenu';
 import { MeuPlanoModal } from '@/components/MeuPlanoModal';
 import { PlanPaywallModal } from '@/components/PlanPaywallModal';
@@ -63,6 +64,7 @@ export default function Home() {
       'tecnicos',
       'agendamentos',
       'garantias',
+      'logs',
       'whatsapp',
       'configuracoes',
       'superadmin',
@@ -167,6 +169,8 @@ export default function Home() {
         return <AgendamentosTab />;
       case 'garantias':
         return <GarantiasTab />;
+      case 'logs':
+        return <LogsTab />;
       case 'vendas':
         return <VendasTab isSidebarCollapsed={isSidebarCollapsed} setSidebarCollapsed={setIsSidebarCollapsed} />;
       case 'taxas-maquininha':

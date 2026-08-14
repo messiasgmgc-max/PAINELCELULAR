@@ -315,10 +315,21 @@ export function TecnicosTab() {
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
-                  <h3 className="text-lg font-semibold text-blue-600">{tecnico.nome}</h3>
-                  <Badge variant={tecnico.tipo === 'vendedor' ? 'default' : 'secondary'} className={tecnico.tipo === 'vendedor' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}>
+                  <h3 className="text-lg font-semibold text-blue-600 dark:text-blue-400">{tecnico.nome}</h3>
+                  <Badge variant={tecnico.tipo === 'vendedor' ? 'default' : 'secondary'} className={tecnico.tipo === 'vendedor' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'}>
                     {tecnico.tipo === 'vendedor' ? 'Vendedor' : 'Técnico'}
                   </Badge>
+                  {tecnico.email ? (
+                    tecnico.status_conta === 'ativo' ? (
+                      <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px]">
+                        ✓ Login Ativo
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30 text-[10px]" title="Pode criar senha via Primeiro Acesso no Login">
+                        🔑 Acesso Liberado (Primeiro Acesso)
+                      </Badge>
+                    )
+                  ) : null}
                   {tecnico.especialidade && (
                     <Badge variant="outline" className="text-xs">
                       {tecnico.especialidade}
