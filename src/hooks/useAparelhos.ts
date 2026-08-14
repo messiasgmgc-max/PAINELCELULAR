@@ -69,7 +69,14 @@ export function useAparelhos(): UseAparelhosReturn {
       setLoading(true);
       setError(null);
       try {
-        const rawPayload: Record<string, any> = { ...dados, loja_id: usuario.lojaId };
+        const uniqueId = (dados as any)?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+        const rawPayload: Record<string, any> = {
+          id: uniqueId,
+          ...dados,
+          loja_id: usuario.lojaId,
+          ativo: (dados as any).ativo !== undefined ? (dados as any).ativo : true,
+          condicao: dados.condicao || 'seminovo',
+        };
 
         // Evita enviar string vazia para colunas opcionais.
         Object.keys(rawPayload).forEach((key) => {
@@ -176,6 +183,7 @@ export function useAparelhos(): UseAparelhosReturn {
           .from('aparelhos')
           .update({
             ativo: false,
+            condicao: 'vendido',
             observacoes: montarObservacaoBaixa(aparelhoAtual?.observacoes),
           })
           .eq('id', id)

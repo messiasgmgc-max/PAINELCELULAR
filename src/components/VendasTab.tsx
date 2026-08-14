@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles } from 'lucide-react';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -119,7 +119,7 @@ function ProdutoCombobox({
     }
   }, [open]);
 
-  const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido');
+  const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
   const selecionado = disponiveis.find(a => a.id === value);
 
   const filtrados = disponiveis.filter(a => {
@@ -280,8 +280,25 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showReenviarNotinhaPrompt, setShowReenviarNotinhaPrompt] = useState(false);
-  const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');
+  const [processingAiText, setProcessingAiText] = useState(false);
+  const [showDadosFaltantesModal, setShowDadosFaltantesModal] = useState(false);
+  const [aiParsedData, setAiParsedData] = useState<any>(null);
+  const [selectedStockAparelhoId, setSelectedStockAparelhoId] = useState('');
+  const [dadosFaltantesForm, setDadosFaltantesForm] = useState({
+    clienteNome: '',
+    clienteTelefone: '',
+    marca: 'Apple',
+    modelo: '',
+    capacidade: '128GB',
+    cor: '',
+    imei: '',
+    preco: '',
+    custo: '',
+    vendedor: '',
+    formaPagamento: 'pix',
+    observacoes: '',
+  });
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const closePOSTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -673,109 +690,183 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     setVendasPorPeriodo(Object.values(mapa).reverse());
   };
 
-  const handleProcessarPedido = async () => {
-    if (!textoPedido.trim()) {
-      alert('Cole o texto do formulário de pedido na área indicada.');
-      return;
-    }
-
+  const aplicarVendaAI = async (parsedData: any) => {
     try {
-      // Extrair dados do cliente
-      const nome = /Nome completo:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const cpf = /CPF:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const dataNascimento = /Data de nascimento:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const telefone = /(?:Telefone|WhatsApp):\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const email = /E-mail:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const rua = /Rua \/ Avenida:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const numero = /Número:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const complemento = /Complemento:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const bairro = /Bairro:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const cidade = /Cidade:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const cep = /CEP:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      toast.info('⚡ Montando a venda com as informações...');
 
-      // Extrair dados do pedido
-      const valorTotalStr = /Valor total:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
-      const formaPagamentoStr = /Forma de pagamento:\s*\(\s*X\s*\)\s*(Pix|Cartão de crédito|Cartão de débito|Dinheiro|Outro)/i.exec(textoPedido)?.[1].trim() || '';
-      const codAparelho = /COD:\s*(.*)/i.exec(textoPedido)?.[1].trim() || '';
+      // 1. Garantir Cliente
+      let clienteIdFinal = '';
+      let clienteNomeFinal = parsedData.cliente?.nome || 'Cliente Consumidor';
+      
+      if (parsedData.cliente?.nome) {
+        const clienteExistente = clientes.find(c => 
+          c.nome.toLowerCase() === parsedData.cliente.nome.toLowerCase() ||
+          (parsedData.cliente.telefone && c.telefone.replace(/\D/g, '') === parsedData.cliente.telefone.replace(/\D/g, ''))
+        );
 
-      if (!nome || !telefone) {
-        alert('Não foi possível encontrar o Nome e Telefone no formulário. Verifique o formato.');
-        return;
-      }
-
-      // 1. Procurar ou criar cliente
-      let cliente = clientes.find(c => c.telefone.replace(/\D/g, '') === telefone.replace(/\D/g, ''));
-      if (!cliente) {
-        cliente = await criarCliente({
-          nome,
-          cpf,
-          telefone,
-          email: email || 'sem@email.com',
-          endereco: `${rua}, ${numero} ${complemento}`,
-          bairro,
-          cidade,
-          cep,
-          ativo: true,
-        });
-        if (cliente) await fetchClientes(); // Atualiza a lista de clientes
-      }
-
-      if (!cliente) {
-        alert('Falha ao encontrar ou criar o cliente.');
-        return;
-      }
-
-      // 2. Procurar aparelho
-      let aparelho: Aparelho | undefined;
-      if (codAparelho) {
-        aparelho = aparelhos.find(a => a.id === codAparelho || a.imei === codAparelho || a.numeroSerie === codAparelho);
-        if (!aparelho) {
-          alert(`Aparelho com COD "${codAparelho}" não encontrado no estoque. Adicione-o manualmente no PDV.`);
+        if (clienteExistente) {
+          clienteIdFinal = clienteExistente.id;
+          clienteNomeFinal = clienteExistente.nome;
+        } else {
+          const { data: novoCli } = await supabase
+            .from('clientes')
+            .insert([{
+              nome: parsedData.cliente.nome,
+              telefone: parsedData.cliente.telefone || '00000000000',
+              email: parsedData.cliente.email || 'sem@email.com',
+              cpf: parsedData.cliente.cpf || '',
+              loja_id: usuario?.lojaId || null
+            }])
+            .select()
+            .single();
+          
+          if (novoCli) {
+            clienteIdFinal = novoCli.id;
+            clienteNomeFinal = novoCli.nome;
+            await fetchClientes();
+          }
         }
       }
 
-      // 3. Preencher o PDV
-      setPosDados(prev => ({
-        ...prev,
-        clienteId: cliente!.id,
-        clienteNome: cliente!.nome,
-      }));
+      // 2. Garantir Aparelho
+      let aparelhoFinal: Aparelho | null = null;
 
-      const valorTotalNumerico = parseCurrencyField(valorTotalStr.replace('R$', '').trim());
-      const metodoPagamento: Venda['metodo'] = formaPagamentoStr.toLowerCase().includes('pix') ? 'pix' :
-                                               formaPagamentoStr.toLowerCase().includes('crédito') ? 'cartao_credito' :
-                                               formaPagamentoStr.toLowerCase().includes('débito') ? 'cartao_debito' :
-                                               formaPagamentoStr.toLowerCase().includes('dinheiro') ? 'dinheiro' : 'outros';
-
-      setPosPagamento(prev => ({
-        ...prev,
-        pagamentos: [createPagamentoItem({
-          metodo: metodoPagamento,
-          valor: valorTotalNumerico,
-        })],
-      }));
-
-      if (aparelho) {
-        setCart([{
-          id: Date.now().toString(),
-          aparelhoId: aparelho.id,
-          descricao: `${aparelho.marca} ${aparelho.modelo} ${aparelho.capacidade}`,
-          quantidade: 1,
-          valorInterno: resolveAparelhoCusto(aparelho),
-          valorExibir: aparelho.preco,
-          desconto: 0,
-          tipoDesconto: 'R$',
-          total: aparelho.preco,
-          observacao: `COD: ${codAparelho}`
-        }]);
+      if (selectedStockAparelhoId) {
+        aparelhoFinal = aparelhos.find(a => a.id === selectedStockAparelhoId) || null;
       }
 
-      setShowImportarPedidoModal(false);
-      openPOSModal();
+      if (!aparelhoFinal && parsedData.aparelho?.modelo) {
+        const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+        aparelhoFinal = disponiveis.find(a => 
+          (parsedData.aparelho.imei && a.imei && a.imei.toLowerCase() === parsedData.aparelho.imei.toLowerCase()) ||
+          (`${a.marca} ${a.modelo}`.toLowerCase().includes(parsedData.aparelho.modelo.toLowerCase()))
+        ) || null;
+      }
 
-    } catch (error) {
-      console.error('Erro ao processar pedido:', error);
-      alert('Erro ao processar pedido. Verifique o formato ou tente novamente.');
+      if (!aparelhoFinal && parsedData.aparelho?.modelo) {
+        const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const { data: novoAp } = await supabase
+          .from('aparelhos')
+          .insert([{
+            id: uniqueId,
+            marca: parsedData.aparelho.marca || 'Apple',
+            modelo: parsedData.aparelho.modelo,
+            capacidade: parsedData.aparelho.capacidade || '128GB',
+            cor: parsedData.aparelho.cor || 'Preto',
+            imei: parsedData.aparelho.imei || '',
+            preco: Number(parsedData.aparelho.preco || parsedData.valorTotal || 0),
+            custo: Number(parsedData.aparelho.custo || 0),
+            condicao: 'seminovo',
+            ativo: true,
+            loja_id: usuario?.lojaId || null
+          }])
+          .select()
+          .single();
+
+        if (novoAp) {
+          aparelhoFinal = novoAp as Aparelho;
+          await fetchAparelhos();
+        }
+      }
+
+      const valorVenda = Number(parsedData.valorTotal || parsedData.aparelho?.preco || 0);
+      const custoVenda = Number(parsedData.aparelho?.custo || aparelhoFinal?.custo || 0);
+      const metodoPgto: Venda['metodo'] = parsedData.formaPagamento === 'pix' ? 'pix' :
+                                         parsedData.formaPagamento === 'cartao_credito' ? 'cartao_credito' :
+                                         parsedData.formaPagamento === 'cartao_debito' ? 'cartao_debito' :
+                                         parsedData.formaPagamento === 'dinheiro' ? 'dinheiro' : 'outros';
+
+      const cartItem: VendaItem = {
+        id: Date.now().toString(),
+        aparelhoId: aparelhoFinal?.id,
+        descricao: `${parsedData.aparelho?.marca || 'Aparelho'} ${parsedData.aparelho?.modelo || ''} ${parsedData.aparelho?.capacidade || ''}`.trim(),
+        quantidade: 1,
+        valorInterno: custoVenda,
+        valorExibir: valorVenda,
+        desconto: 0,
+        tipoDesconto: 'R$',
+        total: valorVenda,
+        observacao: parsedData.observacoes || (parsedData.aparelho?.imei ? `IMEI: ${parsedData.aparelho.imei}` : '')
+      };
+
+      setPosDados({
+        tipoVenda: 'Venda',
+        clienteId: clienteIdFinal,
+        clienteNome: clienteNomeFinal,
+        vendedor: parsedData.vendedor || posDados.vendedor || '',
+        tipoEntrega: 'Retirada',
+        dataVenda: formatForDatetimeLocal()
+      });
+
+      setCart([cartItem]);
+      setPosPagamento({
+        metodo: metodoPgto,
+        parcelas: 1,
+        detalhes: '',
+        valorPago: valorVenda,
+        status: 'pago',
+        garantia: '90 dias',
+        descontoGlobal: 0,
+        tipoDescontoGlobal: 'R$',
+        pagamentos: [createPagamentoItem({ metodo: metodoPgto, valor: valorVenda })]
+      });
+
+      openPOSModal();
+    } catch (err: any) {
+      console.error('Erro ao aplicar venda AI:', err);
+      toast.error('Erro ao montar venda com IA');
+    }
+  };
+
+  const handleProcessarPedido = async () => {
+    if (!textoPedido.trim()) {
+      toast.error('Cole o texto da venda na área indicada.');
+      return;
+    }
+
+    setProcessingAiText(true);
+    try {
+      const res = await fetch('/api/ai/parse-venda', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto: textoPedido, lojaId: usuario?.lojaId }),
+      });
+
+      const result = await res.json();
+      if (!res.ok || !result.ok) {
+        throw new Error(result.error || 'Falha ao ler o texto com a IA.');
+      }
+
+      const parsed = result.data;
+      setShowImportarPedidoModal(false);
+
+      const faltantes = parsed.camposFaltantes || [];
+
+      if (faltantes.length > 0) {
+        setAiParsedData(parsed);
+        setDadosFaltantesForm({
+          clienteNome: parsed.cliente?.nome || '',
+          clienteTelefone: parsed.cliente?.telefone || '',
+          marca: parsed.aparelho?.marca || 'Apple',
+          modelo: parsed.aparelho?.modelo || '',
+          capacidade: parsed.aparelho?.capacidade || '128GB',
+          cor: parsed.aparelho?.cor || '',
+          imei: parsed.aparelho?.imei || '',
+          preco: parsed.aparelho?.preco ? String(parsed.aparelho.preco) : parsed.valorTotal ? String(parsed.valorTotal) : '',
+          custo: parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
+          vendedor: parsed.vendedor || posDados.vendedor || '',
+          formaPagamento: parsed.formaPagamento || 'pix',
+          observacoes: parsed.observacoes || '',
+        });
+        setSelectedStockAparelhoId('');
+        setShowDadosFaltantesModal(true);
+      } else {
+        await aplicarVendaAI(parsed);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao processar texto por IA');
+    } finally {
+      setProcessingAiText(false);
     }
   };
 
@@ -863,7 +954,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           .update({ ativo: false, condicao: 'vendido' }) 
           .in('id', aparelhosIds);
           
-        if (erroEstoque) console.error('Fudeu o estoque:', erroEstoque);
+        if (erroEstoque) console.error('Erro ao dar baixa no estoque:', erroEstoque);
+        await fetchAparelhos();
       }
 
        
@@ -2966,35 +3058,288 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         document.body
       )}
 
-      {/* Modal Importar Pedido */}
+      {/* Modal Importar Pedido via Groq IA */}
       {isClient && showImportarPedidoModal && createPortal(
         <div className="modal-overlay modal-overlay-fit z-[60]">
           <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
             <div className="modal-header">
               <div>
-                <h3 className="modal-title">Importar Pedido</h3>
-                <p className="modal-subtitle">Cole o formulário de pedido para preencher o PDV automaticamente.</p>
+                <h3 className="modal-title flex items-center gap-2 text-blue-400 font-bold">
+                  <Sparkles className="w-5 h-5 text-blue-400 animate-pulse" /> Venda por Texto Inteligente (Groq IA)
+                </h3>
+                <p className="modal-subtitle">
+                  Cole qualquer texto de venda (mensagens do WhatsApp, formulários ou anotações) para gerar a venda automaticamente.
+                </p>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowImportarPedidoModal(false)}><X className="w-4 h-4" /></Button>
+              <Button variant="ghost" size="icon" onClick={() => setShowImportarPedidoModal(false)}>
+                <X className="w-4 h-4" />
+              </Button>
             </div>
             <div className="modal-body-scroll">
               <form onSubmit={(e) => { e.preventDefault(); handleProcessarPedido(); }} className="space-y-4">
                 <textarea
-                  className="input-glass min-h-[200px]"
-                  placeholder="Cole o formulário de pedido aqui..."
+                  className="input-glass min-h-[220px] font-sans text-sm p-3 border-blue-500/20 focus:border-blue-500"
+                  placeholder="Ex: Vendi um iPhone 13 Pro 128GB Grafite IMEI 358921098492041 para o cliente Carlos Silva por R$ 3.500 no Pix pelo vendedor Lucas..."
                   value={textoPedido}
                   onChange={(e) => setTextoPedido(e.target.value)}
+                  disabled={processingAiText}
                   required
                 />
                 <div className="flex gap-2 pt-2">
-                  <Button type="button" variant="outline" className="flex-1" onClick={() => setShowImportarPedidoModal(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setShowImportarPedidoModal(false)}
+                    disabled={processingAiText}
+                  >
                     Cancelar
                   </Button>
-                  <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">
-                    Processar Pedido
+                  <Button
+                    type="submit"
+                    disabled={processingAiText}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 font-bold gap-2 shadow-lg shadow-blue-500/20"
+                  >
+                    {processingAiText ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" /> Lendo texto com IA...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" /> Processar e Gerar Venda
+                      </>
+                    )}
                   </Button>
                 </div>
               </form>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal Popup de Preenchimento de Dados Faltantes */}
+      {isClient && showDadosFaltantesModal && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[75]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full max-w-xl my-4 border-amber-500/30">
+            <div className="modal-header bg-amber-500/10 border-b border-amber-500/20">
+              <div>
+                <h3 className="modal-title flex items-center gap-2 text-amber-400 font-bold">
+                  <AlertCircle className="w-5 h-5 text-amber-400 animate-bounce" />
+                  Dados Pendentes para Concluir Venda
+                </h3>
+                <p className="modal-subtitle text-slate-300">
+                  A IA leu seu texto, mas identificou que faltam informações cruciais. Preencha abaixo para finalizar:
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowDadosFaltantesModal(false)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="modal-body-scroll p-4 space-y-4">
+              {/* Opção de Seleção de Aparelho do Estoque */}
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl space-y-1.5">
+                <label className="text-xs font-bold text-blue-400 uppercase flex items-center gap-1.5">
+                  <ShoppingCart className="w-4 h-4" /> Selecionar Aparelho do Estoque (Opcional)
+                </label>
+                <select
+                  className="input-glass text-xs"
+                  value={selectedStockAparelhoId}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    setSelectedStockAparelhoId(selectedId);
+                    if (selectedId) {
+                      const ap = aparelhos.find(a => a.id === selectedId);
+                      if (ap) {
+                        setDadosFaltantesForm(prev => ({
+                          ...prev,
+                          marca: ap.marca,
+                          modelo: ap.modelo,
+                          capacidade: ap.capacidade || '128GB',
+                          cor: ap.cor || '',
+                          imei: ap.imei || ap.numeroSerie || '',
+                          preco: String(ap.preco),
+                          custo: String((ap as any).custo || 0)
+                        }));
+                      }
+                    }
+                  }}
+                >
+                  <option value="">-- Escolha um aparelho do estoque ou preencha manualmente abaixo --</option>
+                  {aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido').map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.marca} {a.modelo} {a.capacidade} ({a.cor || 'Sem cor'}) - IMEI: {a.imei || 'N/A'} - R$ {a.preco}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Formulário de Preenchimento Manual Rápido */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Nome do Cliente</label>
+                  <input
+                    type="text"
+                    className="input-glass mt-1"
+                    placeholder="Ex: Carlos Silva"
+                    value={dadosFaltantesForm.clienteNome}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, clienteNome: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Telefone Cliente</label>
+                  <input
+                    type="tel"
+                    className="input-glass mt-1"
+                    placeholder="Ex: 31999998888"
+                    value={dadosFaltantesForm.clienteTelefone}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, clienteTelefone: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>Modelo do Celular <span className="text-red-400">*</span></span>
+                    {aiParsedData?.camposFaltantes?.includes('modelo') && (
+                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    className="input-glass mt-1"
+                    placeholder="Ex: iPhone 13 Pro"
+                    value={dadosFaltantesForm.modelo}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, modelo: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>Capacidade GB <span className="text-red-400">*</span></span>
+                    {aiParsedData?.camposFaltantes?.includes('capacidade') && (
+                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                    )}
+                  </label>
+                  <select
+                    className="input-glass mt-1"
+                    value={dadosFaltantesForm.capacidade}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, capacidade: e.target.value})}
+                  >
+                    <option value="64GB">64GB</option>
+                    <option value="128GB">128GB</option>
+                    <option value="256GB">256GB</option>
+                    <option value="512GB">512GB</option>
+                    <option value="1TB">1TB</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>IMEI / Nº de Série <span className="text-red-400">*</span></span>
+                    {aiParsedData?.camposFaltantes?.includes('imei') && (
+                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    className="input-glass mt-1 font-mono"
+                    placeholder="Ex: 358921098492041"
+                    value={dadosFaltantesForm.imei}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, imei: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>Valor Total (R$) <span className="text-red-400">*</span></span>
+                    {aiParsedData?.camposFaltantes?.includes('valorTotal') && (
+                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                    )}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    className="input-glass mt-1 font-bold text-emerald-400"
+                    placeholder="Ex: 3500"
+                    value={dadosFaltantesForm.preco}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, preco: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>Forma de Pagamento <span className="text-red-400">*</span></span>
+                    {aiParsedData?.camposFaltantes?.includes('formaPagamento') && (
+                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                    )}
+                  </label>
+                  <select
+                    className="input-glass mt-1"
+                    value={dadosFaltantesForm.formaPagamento}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, formaPagamento: e.target.value})}
+                  >
+                    <option value="pix">Pix</option>
+                    <option value="dinheiro">Dinheiro</option>
+                    <option value="cartao_credito">Cartão de Crédito</option>
+                    <option value="cartao_debito">Cartão de Débito</option>
+                    <option value="parcelado">Parcelado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Vendedor</label>
+                  <select
+                    className="input-glass mt-1"
+                    value={dadosFaltantesForm.vendedor}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, vendedor: e.target.value})}
+                  >
+                    <option value="">Vendedor</option>
+                    {tecnicos.map(t => <option key={t.id} value={t.nome}>{t.nome}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-3 border-t border-white/10">
+                <Button type="button" variant="outline" className="flex-1" onClick={() => setShowDadosFaltantesModal(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1 bg-green-600 hover:bg-green-700 font-bold shadow-lg shadow-green-500/20"
+                  onClick={async () => {
+                    if (!dadosFaltantesForm.modelo || !dadosFaltantesForm.imei || !dadosFaltantesForm.preco) {
+                      toast.error('Preencha o modelo, IMEI e valor do aparelho!');
+                      return;
+                    }
+                    setShowDadosFaltantesModal(false);
+                    await aplicarVendaAI({
+                      cliente: {
+                        nome: dadosFaltantesForm.clienteNome,
+                        telefone: dadosFaltantesForm.clienteTelefone,
+                      },
+                      aparelho: {
+                        marca: dadosFaltantesForm.marca,
+                        modelo: dadosFaltantesForm.modelo,
+                        capacidade: dadosFaltantesForm.capacidade,
+                        cor: dadosFaltantesForm.cor,
+                        imei: dadosFaltantesForm.imei,
+                        preco: Number(dadosFaltantesForm.preco),
+                        custo: Number(dadosFaltantesForm.custo),
+                      },
+                      vendedor: dadosFaltantesForm.vendedor,
+                      formaPagamento: dadosFaltantesForm.formaPagamento,
+                      valorTotal: Number(dadosFaltantesForm.preco),
+                      observacoes: dadosFaltantesForm.observacoes,
+                    });
+                  }}
+                >
+                  Confirmar e Gerar Venda
+                </Button>
+              </div>
             </div>
           </GlassCard>
         </div>,

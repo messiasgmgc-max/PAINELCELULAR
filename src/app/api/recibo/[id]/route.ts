@@ -12,7 +12,7 @@ export async function GET(
     }
 
     // 1. Buscar a venda pelo ID (exato ou sufixo)
-    let { data: venda, error: vendaError } = await supabaseAdmin
+    let { data: venda } = await supabaseAdmin
       .from('vendas')
       .select('*')
       .eq('id', id)
@@ -31,7 +31,7 @@ export async function GET(
       return NextResponse.json({ error: 'Recibo não encontrado' }, { status: 404 });
     }
 
-    // 2. Buscar dados da loja vinculada (com suporte a loja_id, lojaId e fallback para a loja principal)
+    // 2. Buscar dados da loja vinculada
     let loja = null;
     const targetLojaId = venda.loja_id || venda.lojaId;
 
@@ -44,16 +44,47 @@ export async function GET(
       if (lojaData) loja = lojaData;
     }
 
-    if (!loja) {
-      const { data: primeiraLoja } = await supabaseAdmin
-        .from('lojas')
-        .select('*')
-        .limit(1)
+    // Fallback inteligente: Se o loja_id não estiver salvo na venda antiga, tenta encontrar a loja do vendedor em perfis
+    if (!loja && (venda.vendedor || venda.usuario_email)) {
+      const termoVendedor = venda.vendedor || venda.usuario_email;
+      const { data: perfil } = await supabaseAdmin
+        .from('perfis')
+        .select('loja_id')
+        .or(`email.ilike.%${termoVendedor}%,nome.ilike.%${termoVendedor}%`)
         .maybeSingle();
-      if (primeiraLoja) loja = primeiraLoja;
+
+      if (perfil?.loja_id) {
+        const { data: lojaPerfil } = await supabaseAdmin
+          .from('lojas')
+          .select('*')
+          .eq('id', perfil.loja_id)
+          .maybeSingle();
+        if (lojaPerfil) loja = lojaPerfil;
+      }
     }
 
-    // 3. Buscar dados do cliente vinculado (com suporte a cliente_id e clienteId)
+    // Se ainda não encontrou, busca a loja com nome personalizado (que não seja a 'Phone Center' genérica de id 00000)
+    if (!loja) {
+      const { data: lojaPersonalizada } = await supabaseAdmin
+        .from('lojas')
+        .select('*')
+        .neq('nome', 'Phone Center')
+        .limit(1)
+        .maybeSingle();
+
+      if (lojaPersonalizada) {
+        loja = lojaPersonalizada;
+      } else {
+        const { data: primeiraLoja } = await supabaseAdmin
+          .from('lojas')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+        if (primeiraLoja) loja = primeiraLoja;
+      }
+    }
+
+    // 3. Buscar dados do cliente vinculado
     let cliente = null;
     const targetClienteId = venda.cliente_id || venda.clienteId;
     if (targetClienteId) {
