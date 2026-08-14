@@ -42,13 +42,14 @@ Estrutura JSON obrigatória:
   "vendedor": string ou null (nome do funcionário/vendedor),
   "formaPagamento": string ou null (deve ser um de: "pix", "dinheiro", "cartao_credito", "cartao_debito", "parcelado"),
   "valorTotal": number ou null (valor total final da venda em R$),
+  "dataVenda": string ou null (formato YYYY-MM-DD se informado no texto),
   "observacoes": string ou null,
   "camposFaltantes": string[] (array contendo as chaves dos campos essenciais que NÃO foram informados no texto ou estão em branco)
 }
 
 Regras para os camposFaltantes:
-- Um celular exige obrigatoriamente: "modelo", "capacidade", "imei", "valorTotal" e "formaPagamento".
-- Se algum desses 5 campos cruciais não puder ser identificado com clareza no texto, adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["imei", "capacidade"].
+- Um celular exige obrigatoriamente: "modelo", "capacidade", "imei", "valorTotal", "formaPagamento" e "dataVenda".
+- Se algum desses 6 campos cruciais não puder ser identificado com clareza no texto, adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["imei", "dataVenda"].
 - Se todos estiverem preenchidos no texto, "camposFaltantes" deve ser um array vazio [].
 - Retorne APENAS o JSON puro.`;
 
@@ -117,6 +118,9 @@ Regras para os camposFaltantes:
     }
     if (!parsedJson.formaPagamento && !camposFaltantes.includes('formaPagamento')) {
       camposFaltantes.push('formaPagamento');
+    }
+    if (!parsedJson.dataVenda && !camposFaltantes.includes('dataVenda')) {
+      camposFaltantes.push('dataVenda');
     }
 
     parsedJson.camposFaltantes = Array.from(new Set(camposFaltantes));

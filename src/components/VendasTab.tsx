@@ -297,6 +297,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     custo: '',
     vendedor: '',
     formaPagamento: 'pix',
+    dataVenda: new Date().toISOString().slice(0, 10),
     observacoes: '',
   });
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -789,13 +790,17 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         observacao: parsedData.observacoes || (parsedData.aparelho?.imei ? `IMEI: ${parsedData.aparelho.imei}` : '')
       };
 
+      const dataVendaFinal = parsedData.dataVenda
+        ? formatForDatetimeLocal(new Date(parsedData.dataVenda.includes('T') ? parsedData.dataVenda : `${parsedData.dataVenda}T12:00:00`))
+        : formatForDatetimeLocal();
+
       setPosDados({
         tipoVenda: 'Venda',
         clienteId: clienteIdFinal,
         clienteNome: clienteNomeFinal,
         vendedor: parsedData.vendedor || posDados.vendedor || '',
         tipoEntrega: 'Retirada',
-        dataVenda: formatForDatetimeLocal()
+        dataVenda: dataVendaFinal
       });
 
       setCart([cartItem]);
@@ -856,6 +861,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           custo: parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
           formaPagamento: parsed.formaPagamento || 'pix',
+          dataVenda: parsed.dataVenda ? parsed.dataVenda.slice(0, 10) : new Date().toISOString().slice(0, 10),
           observacoes: parsed.observacoes || '',
         });
         setSelectedStockAparelhoId('');
@@ -3312,6 +3318,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
 
                 <div>
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>Data da Venda <span className="text-red-400">*</span></span>
+                    {aiParsedData?.camposFaltantes?.includes('dataVenda') && (
+                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                    )}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    className="input-glass mt-1"
+                    value={dadosFaltantesForm.dataVenda}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, dataVenda: e.target.value})}
+                  />
+                </div>
+
+                <div>
                   <label className="text-xs font-bold text-slate-300">Vendedor</label>
                   <select
                     className="input-glass mt-1"
@@ -3332,8 +3354,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   type="button"
                   className="flex-1 bg-green-600 hover:bg-green-700 font-bold shadow-lg shadow-green-500/20"
                   onClick={async () => {
-                    if (!dadosFaltantesForm.modelo || !dadosFaltantesForm.imei || !dadosFaltantesForm.preco) {
-                      toast.error('Preencha o modelo, IMEI e valor do aparelho!');
+                    if (!dadosFaltantesForm.modelo || !dadosFaltantesForm.imei || !dadosFaltantesForm.preco || !dadosFaltantesForm.dataVenda) {
+                      toast.error('Preencha a Data da Venda, modelo, IMEI e valor do aparelho!');
                       return;
                     }
                     setShowDadosFaltantesModal(false);
@@ -3354,6 +3376,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       vendedor: dadosFaltantesForm.vendedor,
                       formaPagamento: dadosFaltantesForm.formaPagamento,
                       valorTotal: Number(dadosFaltantesForm.preco),
+                      dataVenda: dadosFaltantesForm.dataVenda,
                       observacoes: dadosFaltantesForm.observacoes,
                     });
                   }}
