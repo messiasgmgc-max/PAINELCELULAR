@@ -24,7 +24,7 @@ interface Configuracao {
 
 export function ConfiguracoesTab() {
   const { usuario, logout } = useAuth();
-  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja, atualizarDadosEmpresa, removerLogo, removerAssinatura } = useStoreConfig();
+  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja, atualizarDadosEmpresa, removerLogo, removerAssinatura } = useStoreConfig(usuario?.lojaId);
   const { colorTheme, setColorTheme } = useColorTheme();
   
   const [nomeEmpresa, setNomeEmpresa] = useState('Phone Center');

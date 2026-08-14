@@ -38,7 +38,7 @@ export default function Home() {
   const router = useRouter();
   const pathname = usePathname();
   const { usuario, logout, loading, authReady } = useAuth();
-  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja } = useStoreConfig();
+  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja } = useStoreConfig(usuario?.lojaId);
   
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);

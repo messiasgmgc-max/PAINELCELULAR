@@ -25,12 +25,19 @@ const DEFAULT_CONFIG: StoreConfig = {
   emailLoja: 'contato@loja.com',
 };
 
-export function useStoreConfig() {
+export function useStoreConfig(providedLojaId?: string | null) {
   const [config, setConfig] = useState<StoreConfig>(DEFAULT_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
-  const [lojaId, setLojaId] = useState<string | null>(null);
+  const [activeLojaId, setActiveLojaId] = useState<string | null>(providedLojaId || null);
 
-  // Busca dados diretamente do Supabase sem NENHUM CACHE de localStorage
+  // Sincroniza activeLojaId sempre que providedLojaId mudar
+  useEffect(() => {
+    if (providedLojaId) {
+      setActiveLojaId(providedLojaId);
+    }
+  }, [providedLojaId]);
+
+  // Busca dados oficiais diretamente da tabela 'lojas' no Supabase sem NENHUM cache local
   const fetchStoreConfig = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -44,26 +51,28 @@ export function useStoreConfig() {
         });
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = session?.user?.email;
+      let currentLojaId: string | null = providedLojaId || activeLojaId;
 
-      let currentLojaId: string | null = null;
+      // Se não foi passado via parâmetro, busca da sessão + tabela 'perfis'
+      if (!currentLojaId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const userEmail = session?.user?.email;
 
-      if (userEmail) {
-        const { data: perfil } = await supabase
-          .from('perfis')
-          .select('loja_id')
-          .eq('email', userEmail)
-          .maybeSingle();
+        if (userEmail) {
+          const { data: perfil } = await supabase
+            .from('perfis')
+            .select('loja_id')
+            .eq('email', userEmail)
+            .maybeSingle();
 
-        if (perfil?.loja_id) {
-          currentLojaId = String(perfil.loja_id);
+          if (perfil?.loja_id) {
+            currentLojaId = String(perfil.loja_id);
+          }
         }
       }
 
-      setLojaId(currentLojaId);
-
       if (currentLojaId) {
+        setActiveLojaId(currentLojaId);
         const { data: lojaDb, error } = await supabase
           .from('lojas')
           .select('*')
@@ -71,7 +80,7 @@ export function useStoreConfig() {
           .maybeSingle();
 
         if (error) {
-          console.error('Erro ao buscar loja no Supabase:', error);
+          console.error('Erro ao buscar dados da loja no Supabase:', error);
         }
 
         if (lojaDb) {
@@ -94,7 +103,7 @@ export function useStoreConfig() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [providedLojaId, activeLojaId]);
 
   useEffect(() => {
     fetchStoreConfig();
@@ -108,13 +117,13 @@ export function useStoreConfig() {
     };
   }, [fetchStoreConfig]);
 
-  // Salva no banco de dados e atualiza o estado imediatamente
+  // Salva no banco de dados da loja correta e atualiza o estado imediatamente
   const salvarConfig = async (novaConfig: Partial<StoreConfig>) => {
     try {
       const configAtualizada: StoreConfig = { ...config, ...novaConfig };
       setConfig(configAtualizada);
 
-      let targetId = lojaId;
+      let targetId = providedLojaId || activeLojaId;
 
       if (!targetId) {
         const { data: { session } } = await supabase.auth.getSession();
@@ -145,9 +154,12 @@ export function useStoreConfig() {
           .eq('id', targetId);
 
         if (error) {
-          console.error('Erro ao salvar loja no Supabase:', error);
+          console.error('Erro ao atualizar dados da loja no Supabase:', error);
           throw error;
         }
+
+        // Recarrega as configurações para garantir consistência total
+        await fetchStoreConfig();
       }
     } catch (error) {
       console.error('Erro ao salvar configuração no banco:', error);
@@ -186,7 +198,7 @@ export function useStoreConfig() {
   return {
     config,
     isLoading,
-    lojaId,
+    lojaId: activeLojaId,
     fetchStoreConfig,
     salvarConfig,
     atualizarNomeLoja,
