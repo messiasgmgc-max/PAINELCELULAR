@@ -84,7 +84,7 @@ export default function SuperAdminTab() {
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [statsMap, setStatsMap] = useState<Record<string, LojaStats>>({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "planos" | "logs">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "planos" | "logs" | "aprovacoes">("dashboard");
   
   // Modais de Plano
   const [editingPlanoLoja, setEditingPlanoLoja] = useState<Loja | null>(null);
@@ -530,6 +530,12 @@ export default function SuperAdminTab() {
     );
   }, [lojas, searchTerm]);
 
+  const lojasPendentes = useMemo(() => {
+    return lojas.filter(
+      (l) => !l.ativo || l.plano_status === 'pendente' || l.solicitacao_liberacao_status === 'pendente_aprovacao'
+    );
+  }, [lojas]);
+
   const perfisFiltrados = useMemo(() => {
     return perfis.filter((p) => {
       const matchSearch =
@@ -609,6 +615,7 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
             { id: "lojas", label: `Lojas (${lojas.length})`, icon: <Store className="w-4 h-4" /> },
             { id: "usuarios", label: `Usuários (${perfis.length})`, icon: <Users className="w-4 h-4" /> },
             { id: "planos", label: `Planos & Mensalidades`, icon: <CreditCard className="w-4 h-4 text-emerald-400" /> },
+            { id: "aprovacoes", label: `Aprovações (${lojasPendentes.length})`, icon: <CheckCircle2 className="w-4 h-4 text-amber-400 animate-pulse" /> },
             { id: "logs", label: `Logs de Auditoria`, icon: <FileText className="w-4 h-4 text-purple-400" /> },
           ].map((tab) => (
             <button
@@ -1172,6 +1179,112 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
 
       {/* LOGS DE AUDITORIA */}
       {activeTab === "logs" && <LogsTab />}
+
+      {/* APROVAÇÕES DE NOVAS LOJAS */}
+      {activeTab === "aprovacoes" && (
+        <GlassCard className="rounded-3xl p-5 sm:p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-white/10">
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-amber-400" /> Aprovação de Novas Lojas & Contato Comercial
+              </h3>
+              <p className="text-xs text-slate-400">
+                Analise os pedidos de cadastro de novas lojas, entre em contato direto pelo WhatsApp e aprove o acesso à plataforma.
+              </p>
+            </div>
+            <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-xs px-3 py-1.5">
+              {lojasPendentes.length} {lojasPendentes.length === 1 ? 'Solicitação Pendente' : 'Solicitações Pendentes'}
+            </Badge>
+          </div>
+
+          <div className="overflow-x-auto scrollbar-soft border border-white/10 rounded-2xl">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-slate-900/80 text-slate-300 border-b border-white/10">
+                  <th className="py-3 px-4">Loja / Nome</th>
+                  <th className="py-3 px-3">Telefone / WhatsApp</th>
+                  <th className="py-3 px-3">Data Vencimento</th>
+                  <th className="py-3 px-3">Status</th>
+                  <th className="py-3 px-4 text-right">Ações de Aprovação & Contato</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 text-slate-200">
+                {lojasPendentes.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                      Nenhuma loja pendente de aprovação no momento.
+                    </td>
+                  </tr>
+                ) : (
+                  lojasPendentes.map((loja) => {
+                    const cleanPhone = (loja.telefone || '').replace(/\D/g, '');
+                    const whatsappUrl = cleanPhone
+                      ? `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(`Olá, tudo bem? Vi que você cadastrou a loja "${loja.nome}" no Phone Center OS! Gostaria de confirmar seu cadastro para liberar seu acesso.`)}`
+                      : null;
+
+                    return (
+                      <tr key={loja.id} className="hover:bg-white/5 transition">
+                        <td className="py-3.5 px-4 font-bold text-white">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
+                            <div>
+                              <p className="text-sm font-bold text-white">{loja.nome}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">ID: {loja.id.slice(0, 8)}...</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 text-slate-300 font-mono">
+                          {loja.telefone || 'Não informado'}
+                        </td>
+                        <td className="py-3.5 px-3 text-slate-300 font-mono">
+                          {loja.data_vencimento ? new Date(loja.data_vencimento).toLocaleDateString('pt-BR') : 'Aguardando'}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse">
+                            ⏳ Aguardando Aprovação
+                          </Badge>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {whatsappUrl && (
+                              <a
+                                href={whatsappUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="h-8 px-3 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition"
+                              >
+                                💬 WhatsApp
+                              </a>
+                            )}
+
+                            <Button
+                              size="sm"
+                              onClick={() => handleAprovarLiberacao(loja)}
+                              className="h-8 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 rounded-xl shadow-md shadow-emerald-600/30"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Aprovar & Liberar
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => setDeletingLoja(loja)}
+                              className="h-8 px-2.5 rounded-xl"
+                              title="Rejeitar solicitação"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      )}
 
 
 
