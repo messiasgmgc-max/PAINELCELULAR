@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
+import { Button } from '@/components/ui/button';
 import { AlertCircle, Smartphone, Eye, EyeOff, UserCheck, KeyRound, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -252,6 +253,7 @@ export default function LoginPage() {
                         <input
                           type="email"
                           required
+                          suppressHydrationWarning
                           value={primeiroAcessoEmail}
                           onChange={(e) => setPrimeiroAcessoEmail(e.target.value)}
                           placeholder="seu@email.com"
@@ -377,6 +379,7 @@ export default function LoginPage() {
                         <input
                           name="nome"
                           type="text"
+                          suppressHydrationWarning
                           value={formData.nome}
                           onChange={handleInputChange}
                           placeholder="Seu nome"
@@ -393,6 +396,7 @@ export default function LoginPage() {
                       <input
                         name="email"
                         type="email"
+                        suppressHydrationWarning
                         value={formData.email}
                         onChange={handleInputChange}
                         placeholder="seu@email.com"
@@ -408,6 +412,7 @@ export default function LoginPage() {
                       <input
                         name="senha"
                         type={showPassword ? 'text' : 'password'}
+                        suppressHydrationWarning
                         value={formData.senha}
                         onChange={handleInputChange}
                         placeholder={isLogin ? 'Sua senha' : 'Mínimo 6 caracteres'}
