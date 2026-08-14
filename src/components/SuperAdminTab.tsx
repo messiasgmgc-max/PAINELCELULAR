@@ -130,6 +130,7 @@ export default function SuperAdminTab() {
 
   const [novoPerfilForm, setNovoPerfilForm] = useState({
     email: "",
+    senha: "",
     nome: "",
     role: "admin" as Perfil["role"],
     loja_id: "",
@@ -419,39 +420,34 @@ export default function SuperAdminTab() {
 
   const handleCriarPerfil = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!novoPerfilForm.email.trim()) return toast.error("O email é obrigatório.");
-
-    const generateUUID = () => {
-      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-      });
-    };
+    if (!novoPerfilForm.email.trim() || !novoPerfilForm.senha.trim()) {
+      return toast.error("O e-mail e a senha inicial são obrigatórios para criar a conta.");
+    }
 
     try {
-      const { data, error } = await supabase
-        .from("perfis")
-        .insert([
-          {
-            id: generateUUID(),
-            email: novoPerfilForm.email.trim().toLowerCase(),
-            nome: novoPerfilForm.nome.trim() || novoPerfilForm.email.split("@")[0],
-            role: novoPerfilForm.role,
-            loja_id: novoPerfilForm.loja_id || null,
-          },
-        ])
-        .select()
-        .single();
+      const res = await fetch("/api/admin/criar-usuario", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: novoPerfilForm.email.trim(),
+          senha: novoPerfilForm.senha.trim(),
+          nome: novoPerfilForm.nome.trim(),
+          role: novoPerfilForm.role,
+          loja_id: novoPerfilForm.loja_id || null,
+        }),
+      });
 
-      if (error) throw error;
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Erro ao criar login de usuário");
+      }
 
-      toast.success(`👤 Perfil "${data.email}" vinculado com sucesso!`);
+      toast.success(`👤 Login "${novoPerfilForm.email}" criado com sucesso! Senha: ${novoPerfilForm.senha}`);
       setShowNovoPerfil(false);
-      setNovoPerfilForm({ email: "", nome: "", role: "admin", loja_id: "" });
+      setNovoPerfilForm({ email: "", senha: "", nome: "", role: "admin", loja_id: "" });
       fetchDadosGlobais();
     } catch (error: any) {
-      toast.error("Erro ao criar perfil: " + error.message);
+      toast.error("Erro ao criar login: " + error.message);
     }
   };
 
@@ -1340,10 +1336,34 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
               </div>
 
               <div>
-                <label className="text-xs text-slate-300 font-semibold mb-1 block">Nome do Usuário</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-300 font-semibold">Senha Inicial de Acesso *</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const randomPass = Math.random().toString(36).slice(-8) + 'A1!';
+                      setNovoPerfilForm({ ...novoPerfilForm, senha: randomPass });
+                    }}
+                    className="text-[11px] text-blue-400 hover:text-blue-300 underline font-semibold"
+                  >
+                    Gerar Senha
+                  </button>
+                </div>
                 <input
                   type="text"
-                  placeholder="Nome do operador/vendedor"
+                  required
+                  placeholder="Mínimo 6 caracteres"
+                  value={novoPerfilForm.senha}
+                  onChange={(e) => setNovoPerfilForm({ ...novoPerfilForm, senha: e.target.value })}
+                  className="input-glass w-full text-sm font-mono text-emerald-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">Nome Completo</label>
+                <input
+                  type="text"
+                  placeholder="Nome do lojista/operador"
                   value={novoPerfilForm.nome}
                   onChange={(e) => setNovoPerfilForm({ ...novoPerfilForm, nome: e.target.value })}
                   className="input-glass w-full text-sm"
