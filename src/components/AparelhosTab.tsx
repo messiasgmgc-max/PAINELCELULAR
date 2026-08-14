@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { Aparelho } from "@/lib/db/types";
@@ -500,6 +500,138 @@ export function AparelhosTab() {
     } catch (error: any) {
       console.error("Erro ao importar MercadoPhone:", error);
       toast.error(`Erro ao importar: ${error.message || 'Falha no processamento'}`, { id: toastId });
+    } finally {
+      setImportingMercadoPhone(false);
+    }
+  };
+
+  const handleRemontarEstoqueMercadoPhone = async () => {
+    if (!currentLojaId) return;
+
+    const margem = parseFloat(mercadoPhoneMargem) || 0;
+    const itensImportados = parseMercadoPhoneList(mercadoPhoneText, margem);
+
+    if (itensImportados.length === 0) {
+      toast.error('Nenhum aparelho válido identificado no texto.');
+      return;
+    }
+
+    if (!window.confirm(`ATENÇÃO: Deseja REMONTAR o estoque com base nesta lista?
+- Aparelhos que NÃO estiverem nesta lista serão marcados como VENDIDOS.
+- Novos aparelhos da lista serão CADASTRADOS no estoque.
+- Aparelhos mantidos terão seus dados e preço atualizados.`)) {
+      return;
+    }
+
+    setImportingMercadoPhone(true);
+    const toastId = toast.loading('Remontando estoque com a nova lista...');
+
+    try {
+      // 1. Buscar todos os aparelhos ATIVOS da loja no banco
+      const { data: aparelhosDoBanco, error: fetchErr } = await supabase
+        .from('aparelhos')
+        .select('*')
+        .eq('loja_id', currentLojaId)
+        .eq('ativo', true);
+
+      if (fetchErr) throw fetchErr;
+
+      const ativosAtuais = (aparelhosDoBanco || []).filter(a => a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+
+      const ativosMantidosIds = new Set<string>();
+      let novosInseridos = 0;
+      let atualizados = 0;
+
+      for (const item of itensImportados) {
+        // Procura no banco se já existe equivalente ativo
+        const equivalente = ativosAtuais.find(a => 
+          (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) ||
+          (item.idEtiqueta && a.numeroSerie === item.idEtiqueta)
+        );
+
+        const idEtiquetaFinal = equivalente?.numeroSerie || item.idEtiqueta;
+        const obsString = [
+          item.observacoes ? `Obs: ${item.observacoes}` : '',
+          `ID Etiqueta: ${idEtiquetaFinal}`,
+          item.bateria ? `Bateria: ${item.bateria}` : '',
+          item.sufixoSerial ? `IMEI (últimos dígitos): ${item.sufixoSerial}` : ''
+        ].filter(Boolean).join(' | ');
+
+        if (equivalente) {
+          ativosMantidosIds.add(equivalente.id);
+          const { error: updateErr } = await supabase
+            .from('aparelhos')
+            .update({
+              modelo: item.modelo,
+              capacidade: item.capacidade,
+              cor: item.cor,
+              condicao: item.condicao,
+              preco: item.preco,
+              custo: item.custo > 0 ? item.custo : equivalente.custo,
+              observacoes: obsString,
+              ativo: true,
+            })
+            .eq('id', equivalente.id);
+
+          if (updateErr) console.error('Erro ao atualizar aparelho:', updateErr);
+          else atualizados++;
+        } else {
+          const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+          const { error: insertErr } = await supabase
+            .from('aparelhos')
+            .insert({
+              id: uniqueId,
+              loja_id: currentLojaId,
+              marca: item.marca,
+              modelo: item.modelo,
+              imei: item.sufixoSerial || idEtiquetaFinal,
+              numeroSerie: idEtiquetaFinal,
+              cor: item.cor,
+              capacidade: item.capacidade,
+              condicao: item.condicao,
+              preco: item.preco,
+              custo: item.custo,
+              descricao: item.raw,
+              cliente: '',
+              clienteId: null,
+              acessorios: '',
+              observacoes: obsString,
+              ativo: true,
+            });
+
+          if (insertErr) console.error('Erro ao cadastrar novo aparelho:', insertErr);
+          else novosInseridos++;
+        }
+      }
+
+      // 2. Dar baixa nos aparelhos ativos que sobram e NÃO vieram na nova lista
+      const aparelhosParaDarBaixa = ativosAtuais.filter(a => !ativosMantidosIds.has(a.id));
+      let baixados = 0;
+
+      if (aparelhosParaDarBaixa.length > 0) {
+        const idsBaixa = aparelhosParaDarBaixa.map(a => a.id);
+        const { error: baixaErr } = await supabase
+          .from('aparelhos')
+          .update({
+            ativo: false,
+            condicao: 'vendido',
+          })
+          .in('id', idsBaixa);
+
+        if (baixaErr) {
+          console.error('Erro ao dar baixa nos sobravam:', baixaErr);
+        } else {
+          baixados = idsBaixa.length;
+        }
+      }
+
+      toast.success(`⚡ Estoque Remontado! ${novosInseridos} novos cadastrados, ${atualizados} atualizados e ${baixados} marcados como vendidos.`, { id: toastId });
+      await fetchAparelhos();
+      setShowMercadoPhoneModal(false);
+      setMercadoPhoneText("");
+    } catch (error: any) {
+      console.error("Erro ao remontar estoque:", error);
+      toast.error(`Erro ao remontar estoque: ${error.message || 'Falha no processamento'}`, { id: toastId });
     } finally {
       setImportingMercadoPhone(false);
     }
@@ -1798,11 +1930,19 @@ export function AparelhosTab() {
                     </div>
                   )}
 
-                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
+                  <div className="flex flex-wrap gap-2 justify-end pt-4 border-t border-white/10">
                     <Button variant="outline" onClick={() => setShowMercadoPhoneModal(false)}>Cancelar</Button>
                     <Button
+                      onClick={handleRemontarEstoqueMercadoPhone}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 gap-1.5 shadow-lg shadow-blue-500/20"
+                      disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      {importingMercadoPhone ? 'Remontando...' : 'Atualizar Estoque por esta Lista'}
+                    </Button>
+                    <Button
                       onClick={handleProcessMercadoPhoneList}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 shadow-lg shadow-emerald-500/20"
                       disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
                     >
                       {importingMercadoPhone ? 'Processando...' : `Confirmar e Cadastrar no Estoque`}
