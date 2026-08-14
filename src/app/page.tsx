@@ -42,9 +42,9 @@ export default function Home() {
   
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [subtitulo, setSubtitulo] = useState('Sistema de Gestão');
-  const [headerNomeLoja, setHeaderNomeLoja] = useState('');
-  const [headerLogoLoja, setHeaderLogoLoja] = useState<string | null>(null);
+  const headerNomeLoja = config.nomeLoja || 'Phone Center';
+  const subtitulo = config.subtituloLoja || 'Sistema de Gestão';
+  const headerLogoLoja = config.logoLoja;
   const [showMeuPlanoModal, setShowMeuPlanoModal] = useState(false);
 
   const normalizeTabFromPath = (path: string) => {
@@ -97,32 +97,7 @@ export default function Home() {
     }
   }, [currentTab, usuario, authReady, loading, router]);
 
-  useEffect(() => {
-    // Atualiza via store (configuracoes) caso seja alterado em tempo real na aba Configurações
-    if (config.nomeLoja) setHeaderNomeLoja(config.nomeLoja);
-    if (config.logoLoja !== undefined) setHeaderLogoLoja(config.logoLoja);
-  }, [config.nomeLoja, config.logoLoja]);
 
-  useEffect(() => {
-    const fetchLoja = async () => {
-      if (usuario?.lojaId) {
-        const { data } = await supabase.from('lojas').select('nome, subtitulo, logo_url, assinatura_url').eq('id', usuario.lojaId).single();
-        if (data) {
-          if (data.subtitulo) setSubtitulo(data.subtitulo);
-          if (data.nome) {
-            setHeaderNomeLoja(data.nome); // Força visualização real time do BD
-            atualizarNomeLoja(data.nome);
-          }
-          if (data.logo_url) {
-            setHeaderLogoLoja(data.logo_url);
-            atualizarLogoLoja(data.logo_url);
-          }
-          atualizarAssinaturaLoja(data.assinatura_url || null);
-        }
-      }
-    };
-    fetchLoja();
-  }, [usuario?.lojaId]); // Dependências limpas para não dar loop com o cache
 
   console.debug('Dashboard: render check', { loading, authReady, usuario: usuario?.email });
 

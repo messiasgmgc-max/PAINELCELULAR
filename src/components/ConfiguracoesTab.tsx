@@ -56,49 +56,22 @@ export function ConfiguracoesTab() {
   const [backup, setBackup] = useState(false);
   const [ultimoBackup, setUltimoBackup] = useState<Date | null>(null);
 
-  // Carregar config ao montar
-  useEffect(() => {
-    const carregarDadosLoja = async () => {
-      if (!usuario?.lojaId) return;
-
-      try {
-        const { data, error } = await supabase
-          .from('lojas')
-          .select('*')
-          .eq('id', usuario.lojaId)
-          .single();
-
-        if (data) {
-          const nomeFinal = data.nome || config.nomeLoja || 'Phone Center';
-          setNomeLoja(nomeFinal);
-          setNomeEmpresa(nomeFinal);
-          setSubtituloLoja(data.subtitulo || '');
-          setLogoLoja(data.logo_url || null);
-          setPreviewLogo(data.logo_url || null);
-          setAssinaturaLoja(data.assinatura_url || null);
-          setPreviewAssinatura(data.assinatura_url || null);
-          setEnderecoEmpresa(data.endereco || config.enderecoLoja || '');
-          setCnpj(data.cnpj || config.cnpjLoja || '');
-          setTelefoneEmpresa(data.telefone || config.telefoneLoja || '');
-          setEmailEmpresa(data.email || config.emailLoja || '');
-        }
-      } catch (err) {
-        console.error("Erro ao carregar dados da loja", err);
-      }
-    }
-    carregarDadosLoja();
-  }, [usuario?.lojaId]);
-
-  // Sincroniza os dados do formulário sempre que o hook `useStoreConfig` carregar do Supabase
+  // Sincroniza os dados do formulário com as configurações reais do Supabase
   useEffect(() => {
     if (config) {
-      if (config.nomeLoja && config.nomeLoja !== 'Phone Center') setNomeEmpresa(prev => prev || config.nomeLoja);
-      if (config.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado') setEnderecoEmpresa(prev => prev || config.enderecoLoja);
-      if (config.cnpjLoja && config.cnpjLoja !== 'Não informado') setCnpj(prev => prev || config.cnpjLoja);
-      if (config.telefoneLoja && config.telefoneLoja !== 'Não informado') setTelefoneEmpresa(prev => prev || config.telefoneLoja);
-      if (config.emailLoja && config.emailLoja !== 'contato@loja.com') setEmailEmpresa(prev => prev || config.emailLoja);
-      if (config.logoLoja) { setLogoLoja(config.logoLoja); setPreviewLogo(config.logoLoja); }
-      if (config.assinaturaLoja) { setAssinaturaLoja(config.assinaturaLoja); setPreviewAssinatura(config.assinaturaLoja); }
+      if (config.nomeLoja) {
+        setNomeLoja(config.nomeLoja);
+        setNomeEmpresa(config.nomeLoja);
+      }
+      setSubtituloLoja(config.subtituloLoja || '');
+      setLogoLoja(config.logoLoja);
+      setPreviewLogo(config.logoLoja);
+      setAssinaturaLoja(config.assinaturaLoja);
+      setPreviewAssinatura(config.assinaturaLoja);
+      setEnderecoEmpresa(config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '');
+      setCnpj(config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '');
+      setTelefoneEmpresa(config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '');
+      setEmailEmpresa(config.emailLoja !== 'contato@loja.com' ? config.emailLoja : '');
     }
   }, [config]);
 
