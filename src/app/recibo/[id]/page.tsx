@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 import { generateReciboA4Html } from "@/lib/reciboA4";
-import { ShieldCheck, Printer, Share2, CheckCircle2, Building2, User, FileText, Phone, Mail, MapPin } from "lucide-react";
+import { ShieldCheck, Printer, Share2, CheckCircle2, Building2, User, FileText, Phone, MapPin, CreditCard, Smartphone } from "lucide-react";
 
 export default function ReciboPublicoPage() {
   const params = useParams();
@@ -60,6 +59,29 @@ export default function ReciboPublicoPage() {
     } else {
       window.print();
     }
+  };
+
+  const formatarPagamentos = (vendaData: any) => {
+    const metodosLabels: Record<string, string> = {
+      pix: 'Pix',
+      dinheiro: 'Dinheiro',
+      cartao_credito: 'Cartão de Crédito',
+      cartao_debito: 'Cartão de Débito',
+      parcelado: 'Parcelado / Crediário',
+      outros: 'Outros',
+    };
+
+    if (vendaData?.pagamentos && Array.isArray(vendaData.pagamentos) && vendaData.pagamentos.length > 0) {
+      return vendaData.pagamentos.map((p: any) => {
+        const label = metodosLabels[p.metodo] || p.metodo || 'Pagamento';
+        const valorStr = p.valor ? ` (R$ ${Number(p.valor).toFixed(2).replace('.', ',')})` : '';
+        const parcStr = p.parcelas && p.parcelas > 1 ? ` em ${p.parcelas}x` : '';
+        return `${label}${parcStr}${valorStr}`;
+      }).join(' + ');
+    }
+
+    const m = vendaData?.metodo || vendaData?.formaPagamento || 'pix';
+    return metodosLabels[String(m).toLowerCase()] || String(m).toUpperCase();
   };
 
   if (loading) {
@@ -166,17 +188,17 @@ export default function ReciboPublicoPage() {
             </div>
           </div>
 
-          {/* Lista de Produtos/Serviços */}
+          {/* Lista de Produtos/Serviços e Aparelhos */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 print:text-slate-700 mb-3 flex items-center gap-1.5">
-              <FileText className="w-4 h-4 text-emerald-500" /> Itens do Pedido
+              <Smartphone className="w-4 h-4 text-emerald-500" /> Itens do Pedido / Detalhes do Aparelho
             </h3>
             
             <div className="overflow-hidden border border-slate-800 print:border-slate-300 rounded-2xl">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-800/60 print:bg-slate-100 text-slate-300 print:text-black font-semibold border-b border-slate-800 print:border-slate-300">
-                    <th className="p-3">Item / Descrição</th>
+                    <th className="p-3">Item / Aparelho (Marca, Modelo, Capacidade, Cor, IMEI)</th>
                     <th className="p-3 text-center">Qtd</th>
                     <th className="p-3 text-right">Valor Unit.</th>
                     <th className="p-3 text-right">Total</th>
@@ -187,12 +209,16 @@ export default function ReciboPublicoPage() {
                     venda.itens.map((item: any, idx: number) => (
                       <tr key={idx} className="hover:bg-slate-800/30 print:hover:bg-transparent">
                         <td className="p-3">
-                          <p className="font-bold text-white print:text-black">{item.descricao}</p>
-                          {item.observacao && <p className="text-[11px] text-slate-400 print:text-slate-600 mt-0.5">{item.observacao}</p>}
+                          <p className="font-bold text-white print:text-black text-sm">{item.descricao}</p>
+                          {item.observacao && (
+                            <p className="text-xs text-emerald-400 print:text-emerald-800 mt-1 font-mono font-medium bg-emerald-950/40 print:bg-emerald-50 p-1.5 rounded border border-emerald-500/20 inline-block">
+                              {item.observacao}
+                            </p>
+                          )}
                         </td>
-                        <td className="p-3 text-center">{item.quantidade || 1}</td>
+                        <td className="p-3 text-center font-bold">{item.quantidade || 1}</td>
                         <td className="p-3 text-right font-mono">R$ {(item.valorExibir || item.valor || 0).toFixed(2).replace(".", ",")}</td>
-                        <td className="p-3 text-right font-mono font-bold">R$ {(item.total || item.valor || 0).toFixed(2).replace(".", ",")}</td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-black">R$ {(item.total || item.valor || 0).toFixed(2).replace(".", ",")}</td>
                       </tr>
                     ))
                   ) : (
@@ -208,14 +234,18 @@ export default function ReciboPublicoPage() {
             </div>
           </div>
 
-          {/* Resumo de Valores */}
+          {/* Resumo de Valores e Forma de Pagamento */}
           <div className="bg-emerald-950/20 print:bg-emerald-50/50 p-4 rounded-2xl border border-emerald-500/20 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <p className="text-xs text-slate-400 print:text-slate-700">Forma de Pagamento</p>
-              <p className="text-sm font-bold text-emerald-400 print:text-emerald-800 uppercase">{venda.formaPagamento || "À Vista"}</p>
+              <p className="text-xs text-slate-400 print:text-slate-700 flex items-center gap-1 font-medium">
+                <CreditCard className="w-3.5 h-3.5 text-emerald-400" /> Forma(s) de Pagamento:
+              </p>
+              <p className="text-sm font-bold text-emerald-400 print:text-emerald-800 uppercase mt-0.5">
+                {formatarPagamentos(venda)}
+              </p>
             </div>
             <div className="text-left sm:text-right w-full sm:w-auto">
-              <p className="text-xs text-slate-400 print:text-slate-700">Valor Total Pago</p>
+              <p className="text-xs text-slate-400 print:text-slate-700 font-medium">Valor Total Pago</p>
               <p className="text-2xl font-black text-emerald-400 print:text-emerald-700 font-mono">
                 R$ {totalVenda.toFixed(2).replace(".", ",")}
               </p>
@@ -228,7 +258,7 @@ export default function ReciboPublicoPage() {
               <ShieldCheck className="w-4 h-4 text-emerald-500" /> Termo de Garantia ({venda.garantia || "90 dias"})
             </h4>
             <p className="text-slate-400 print:text-slate-700 leading-relaxed text-[11px]">
-              Garantia legal de 90 dias referente aos serviços ou peças fornecidos. A garantia é anulada em casos de quedas, oxidação por líquidos, mau uso, lacre violado ou manutenção efetuada por terceiros.
+              Garantia legal de {venda.garantia || "90 dias"} referente aos serviços ou peças fornecidos. A garantia é anulada em casos de quedas, oxidação por líquidos, mau uso, lacre violado ou manutenção efetuada por terceiros.
             </p>
           </div>
 

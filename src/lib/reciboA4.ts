@@ -3,28 +3,56 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
     ? new Date(venda.dataPagamento).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
 
+  const horaAtual = venda.dataPagamento
+    ? new Date(venda.dataPagamento).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
   const assinaturaEmpresaUrl = loja?.assinatura_url || loja?.assinaturaLoja;
   const logoUrl = loja?.logo_url || loja?.logoLoja;
   const logoHtml = logoUrl ? `<img src="${logoUrl}" style="max-height: 80px; max-width: 140px; display: block;" />` : '';
 
+  const formatarMetodoLabel = (m: string) => {
+    const map: Record<string, string> = {
+      pix: 'PIX',
+      dinheiro: 'DINHEIRO',
+      cartao_credito: 'CARTÃO DE CRÉDITO',
+      cartao_debito: 'CARTÃO DE DÉBITO',
+      parcelado: 'PARCELADO / CREDIÁRIO',
+      outros: 'OUTROS',
+    };
+    return map[String(m || '').toLowerCase()] || String(m || 'PIX').toUpperCase();
+  };
+
+  const pagamentosTexto = venda.pagamentos && Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0
+    ? venda.pagamentos.map((p: any) => {
+        const label = formatarMetodoLabel(p.metodo);
+        const valorStr = p.valor ? ` - R$ ${Number(p.valor).toFixed(2).replace('.', ',')}` : '';
+        const parcStr = p.parcelas && p.parcelas > 1 ? ` (${p.parcelas}x)` : '';
+        return `${label}${parcStr}${valorStr}`;
+      }).join(' | ')
+    : formatarMetodoLabel(venda.metodo || venda.formaPagamento || 'PIX');
+
   const itensHtmlA4 = venda.itens && venda.itens.length > 0
-    ? venda.itens.map((item: any) => `
+    ? venda.itens.map((item: any, index: number) => `
         <tr>
-          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.codigo || ''}</td>
-          <td style="border: 1px solid #000; padding: 5px;">${item.descricao} <br><small style="color: #666;">${item.observacao || ''}</small></td>
-          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.quantidade || 1}</td>
-          <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${(item.valorExibir || item.valor || 0).toFixed(2).replace('.', ',')}</td>
-          <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
-          <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 5px;">R$ ${(item.total || item.valor || 0).toFixed(2).replace('.', ',')}</td>
+          <td style="text-align: center; border: 1px solid #000; padding: 6px;">${item.codigo || index + 1}</td>
+          <td style="border: 1px solid #000; padding: 6px;">
+            <b style="font-size: 12px; color: #000;">${item.descricao}</b>
+            ${item.observacao ? `<br><span style="color: #333; font-[500]; font-size: 10px;">${item.observacao}</span>` : ''}
+          </td>
+          <td style="text-align: center; border: 1px solid #000; padding: 6px;">${item.quantidade || 1}</td>
+          <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ ${(item.valorExibir || item.valor || 0).toFixed(2).replace('.', ',')}</td>
+          <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
+          <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 6px;">R$ ${(item.total || item.valor || 0).toFixed(2).replace('.', ',')}</td>
         </tr>
       `).join('')
     : `<tr>
-         <td style="text-align: center; border: 1px solid #000; padding: 5px;">-</td>
-         <td style="border: 1px solid #000; padding: 5px;">${venda.descricao || 'Produto Genérico'}</td>
-         <td style="text-align: center; border: 1px solid #000; padding: 5px;">1</td>
-         <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</td>
-         <td style="text-align: right; border: 1px solid #000; padding: 5px;">R$ 0,00</td>
-         <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 5px;">R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</td>
+         <td style="text-align: center; border: 1px solid #000; padding: 6px;">1</td>
+         <td style="border: 1px solid #000; padding: 6px;"><b style="font-size: 12px;">${venda.descricao || 'Produto Celular / Eletrônico'}</b></td>
+         <td style="text-align: center; border: 1px solid #000; padding: 6px;">1</td>
+         <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</td>
+         <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ 0,00</td>
+         <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 6px;">R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</td>
        </tr>`;
 
   const valorTotalVenda = (venda.valorTotal || venda.valor || 0);
@@ -45,7 +73,7 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
         table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
         th, td { border: 1px solid #000; padding: 5px; text-align: left; }
         .no-border, .no-border td { border: none; padding: 2px; }
-        .section-title { background-color: #f0f0f0; font-weight: bold; text-align: center; padding: 6px 4px; }
+        .section-title { background-color: #f0f0f0; font-weight: bold; text-align: center; padding: 6px 4px; font-size: 11px; text-transform: uppercase; }
         .small-text { font-size: 10px; line-height: 1.3; }
         .signature-row { display: flex; gap: 24px; justify-content: space-between; align-items: flex-end; margin-top: 20px; }
         .signature-col { width: 48%; text-align: center; }
@@ -65,7 +93,7 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
           <tr>
             <td style="width: 30%;">Data de recebimento<br><br>___/___/______</td>
             <td style="width: 40%;">Identificação e assinatura do recebedor<br><br>_________________________________________</td>
-            <td style="width: 30%; text-align: center;">Recibo da venda:<br><b>${venda.id || ''}</b></td>
+            <td style="width: 30%; text-align: center;">Recibo da venda:<br><b>#${(venda.id || '').slice(-6).toUpperCase()}</b></td>
           </tr>
         </table>
 
@@ -81,16 +109,16 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
               <div class="small-text">CPF/CNPJ: ${cnpjLoja} | Tel: ${telefoneLoja}</div>
             </td>
             <td style="text-align: right; vertical-align: top; font-size: 11px;">
-              Data: ${dataAtual}<br>
+              Data: ${dataAtual} às ${horaAtual}<br>
               VENDEDOR: ${venda.vendedor || 'Não informado'}<br>
-              <b>RECIBO DA VENDA: ${venda.id || ''}</b>
+              <b>RECIBO DA VENDA: #${(venda.id || '').slice(-6).toUpperCase()}</b>
             </td>
           </tr>
         </table>
 
         <!-- Dados do Cliente -->
         <table>
-          <tr><td colspan="4" class="section-title">DESTINATÁRIO/REMETENTE</td></tr>
+          <tr><td colspan="4" class="section-title">DESTINATÁRIO / CLIENTE</td></tr>
           <tr>
             <td style="width: 40%;">Nome/Razão social<br><b>${nomeClienteFinal}</b></td>
             <td style="width: 20%;">Telefone<br>${cliente?.telefone || 'N/A'}</td>
@@ -99,28 +127,45 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
           </tr>
         </table>
 
-        <!-- Produtos -->
+        <!-- Produtos e Detalhes do Aparelho -->
         <table>
-          <tr><td colspan="6" class="section-title">DADOS DO PRODUTO</td></tr>
-          <tr style="font-weight: bold; text-align: center;">
-            <td style="width: 10%;">Cód</td>
-            <td style="width: 45%; text-align: left;">Produto</td>
+          <tr><td colspan="6" class="section-title">DADOS DO PRODUTO / APARELHO</td></tr>
+          <tr style="font-weight: bold; text-align: center; background-color: #fafafa;">
+            <td style="width: 8%;">Cód</td>
+            <td style="width: 47%; text-align: left;">Descrição do Aparelho (Marca, Modelo, Capacidade, Cor, IMEI)</td>
             <td style="width: 5%;">Qtd</td>
-            <td style="width: 15%;">Valor Unitário</td>
-            <td style="width: 10%;">Desconto</td>
+            <td style="width: 13%;">Valor Unit.</td>
+            <td style="width: 12%;">Desconto</td>
             <td style="width: 15%;">Valor Total</td>
           </tr>
           ${itensHtmlA4}
           <tr>
-            <td colspan="5" style="text-align: right; font-weight: bold;">Total</td>
-            <td style="text-align: right; font-weight: bold;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
+            <td colspan="5" style="text-align: right; font-weight: bold; font-size: 12px;">TOTAL DA VENDA</td>
+            <td style="text-align: right; font-weight: bold; font-size: 12px;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
+          </tr>
+        </table>
+
+        <!-- Formas de Pagamento -->
+        <table>
+          <tr><td class="section-title">FORMA(S) DE PAGAMENTO & STATUS</td></tr>
+          <tr>
+            <td style="font-size: 11px; padding: 8px; background-color: #fafafa;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <b>Forma(s) de Pagamento:</b> <span style="color: #000; font-weight: bold;">${pagamentosTexto}</span>
+                </div>
+                <div>
+                  <b>Status:</b> <span style="color: green; font-weight: bold;">${venda.status === 'pago' ? 'PAGO / CONCLUÍDO' : 'PENDENTE'}</span>
+                </div>
+              </div>
+            </td>
           </tr>
         </table>
 
         <!-- Termos de Garantia -->
         <div style="margin-top: 10px; margin-bottom: 8px; padding: 10px; border: 1px solid #000;">
           <div style="font-weight: bold; margin-bottom: 6px;">TERMO DE GARANTIA</div>
-          <div class="small-text">Garantia de ${venda.garantia || '90 dias'} a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</div>
+          <div class="small-text">Garantia de <b>${venda.garantia || '90 dias'}</b> a partir da data da compra. Válida somente para serviços e peças fornecidos pela empresa.</div>
           <div class="small-text" style="margin-top: 6px;">Esta garantia não cobre:</div>
           <ul class="small-text" style="margin: 4px 0 0 16px; padding: 0; list-style: disc inside;">
             <li>Queda, umidade, líquidos ou danos acidentais;</li>
@@ -151,7 +196,7 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
           </div>
         </div>
         <div style="text-align: center; margin-top: 16px; font-weight: bold;">
-          OBRIGADO PELA PREFERÊNCIA.
+          OBRIGADO PELA PREFERÊNCIA!
         </div>
       </div>
       ${isForEmail ? '' : '<script>window.onload = function() { window.print(); window.onafterprint = function(){ window.close(); } };</script>'}

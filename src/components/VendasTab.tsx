@@ -1848,6 +1848,27 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           </div>
         `).join('');
 
+      const formatarMetodoCupom = (m: string) => {
+        const map: Record<string, string> = {
+          pix: 'PIX',
+          dinheiro: 'DINHEIRO',
+          cartao_credito: 'CARTÃO DE CRÉDITO',
+          cartao_debito: 'CARTÃO DE DÉBITO',
+          parcelado: 'PARCELADO',
+          outros: 'OUTROS',
+        };
+        return map[String(m || '').toLowerCase()] || String(m || 'PIX').toUpperCase();
+      };
+
+      const pagamentosCupomTexto = (venda as any).pagamentos && Array.isArray((venda as any).pagamentos) && (venda as any).pagamentos.length > 0
+        ? (venda as any).pagamentos.map((p: any) => {
+            const label = formatarMetodoCupom(p.metodo);
+            const valorStr = p.valor ? ` R$ ${Number(p.valor).toFixed(2).replace('.', ',')}` : '';
+            const parcStr = p.parcelas && p.parcelas > 1 ? ` (${p.parcelas}x)` : '';
+            return `${label}${parcStr}${valorStr}`;
+          }).join(' + ')
+        : formatarMetodoCupom(venda.metodo || (venda as any).formaPagamento || 'PIX');
+
       const publicReceiptUrl = `${window.location.origin}/recibo/${venda.id}`;
       const qrData = encodeURIComponent(publicReceiptUrl);
       const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${qrData}`;
@@ -1886,7 +1907,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           <div class="small">Data: ${new Date(venda.dataPagamento).toLocaleString('pt-BR')}</div>
           <div class="small">Cliente: ${venda.clienteNome || 'Não informado'}</div>
           <div class="small">Vendedor: ${venda.vendedor || 'Não informado'}</div>
-          <div class="small">Forma de Pagto: ${venda.metodo ? venda.metodo.toUpperCase().replace('_', ' ') : 'NÃO INFORMADO'}</div>
+          <div class="small">Forma(s) de Pagto: <b>${pagamentosCupomTexto}</b></div>
           <div class="divider"></div>
           ${itensHtml}
           <div class="divider"></div>
