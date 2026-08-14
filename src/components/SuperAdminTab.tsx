@@ -1012,6 +1012,25 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
             </div>
           </div>
 
+          {/* Barra de busca por nome ou ID */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="relative flex-1 w-full sm:w-80">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Buscar por nome da loja ou ID..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="input-glass pl-9 w-full text-sm"
+              />
+            </div>
+            {searchTerm && (
+              <span className="text-xs text-slate-400">
+                Exibindo {lojasFiltradas.length} de {lojas.length} lojas
+              </span>
+            )}
+          </div>
+
           <div className="overflow-x-auto scrollbar-soft border border-white/10 rounded-2xl">
             <table className="w-full text-left text-xs">
               <thead>
@@ -1025,14 +1044,14 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-slate-200">
-                {lojas.length === 0 ? (
+                {lojasFiltradas.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400">
-                      Nenhuma loja cadastrada no sistema.
+                      Nenhuma loja encontrada.
                     </td>
                   </tr>
                 ) : (
-                  lojas.map((loja) => {
+                  lojasFiltradas.map((loja) => {
                     const statusPlano = (loja.plano_status || 'ativo').toLowerCase();
                     const temSolicitacaoPendente = loja.solicitacao_liberacao_status === 'pendente_aprovacao';
 
