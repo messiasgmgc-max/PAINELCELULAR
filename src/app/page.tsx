@@ -231,7 +231,7 @@ export default function Home() {
                   className="hidden sm:flex gap-2 h-9 sm:h-10 rounded-2xl"
                 >
                   <Shield className="w-4 h-4" />
-                  <span className="hidden lg:inline">Admin</span>
+                  <span className="hidden lg:inline">Super Admin</span>
                 </Button>
               )}
 

@@ -10,16 +10,12 @@ export function checkIsSuperAdmin(usuario: any) {
   const role = String(usuario.role || '').toLowerCase();
   const email = String(usuario.email || '').toLowerCase();
 
-  // Apenas super_admin oficial da plataforma ou e-mails mestres do Phone Center
+  // Apenas a role explícita 'super_admin' ou o e-mail mestre do criador da plataforma
   const masterEmails = [
     'guiguigamer125@gmail.com',
-    'lucasimports031@gmail.com',
-    'messiasgmgc@gmail.com',
   ];
 
-  const isMasterEmail = masterEmails.some(
-    (master) => email === master || email.includes('guiguigamer125') || email.includes('lucasimports031')
-  );
+  const isMasterEmail = masterEmails.includes(email);
   return role === 'super_admin' || isMasterEmail;
 }
 
