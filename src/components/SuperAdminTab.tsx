@@ -607,7 +607,6 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
             { id: "lojas", label: `Lojas (${lojas.length})`, icon: <Store className="w-4 h-4" /> },
             { id: "usuarios", label: `Usuários (${perfis.length})`, icon: <Users className="w-4 h-4" /> },
             { id: "planos", label: `Planos & Mensalidades`, icon: <CreditCard className="w-4 h-4 text-emerald-400" /> },
-            { id: "sql", label: "SQL & Permissões", icon: <FileCode2 className="w-4 h-4" /> },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1149,36 +1148,7 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
         </GlassCard>
       )}
 
-      {/* SQL & INSTRUÇÕES DE BANCO */}
-      {activeTab === "sql" && (
-        <GlassCard className="rounded-3xl p-6 space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-white/10">
-            <div>
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <FileCode2 className="w-5 h-5 text-indigo-400" />
-                Script SQL de Liberação do SuperAdmin
-              </h3>
-              <p className="text-xs text-slate-400">
-                Execute este script no Editor SQL do Supabase caso alguma política de segurança (RLS) esteja bloqueando acessos.
-              </p>
-            </div>
-            <Button
-              onClick={() => {
-                navigator.clipboard.writeText(sqlScript);
-                toast.success("Script SQL copiado com sucesso!");
-              }}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
-            >
-              <Copy className="w-4 h-4" />
-              Copiar SQL
-            </Button>
-          </div>
 
-          <pre className="p-4 rounded-2xl bg-slate-950 border border-white/10 text-xs font-mono text-indigo-300 overflow-x-auto scrollbar-soft">
-            {sqlScript}
-          </pre>
-        </GlassCard>
-      )}
 
       {/* MODAL: NOVA LOJA */}
       {showNovaLoja && (
