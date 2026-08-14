@@ -89,10 +89,11 @@ export default function Home() {
   }, [pathname]);
 
   useEffect(() => {
+    if (!authReady || loading) return;
     if (currentTab === 'superadmin' && !checkIsSuperAdmin(usuario)) {
       router.replace('/');
     }
-  }, [currentTab, usuario, router]);
+  }, [currentTab, usuario, authReady, loading, router]);
 
   useEffect(() => {
     // Atualiza via store (configuracoes) caso seja alterado em tempo real na aba Configurações
