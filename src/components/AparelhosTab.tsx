@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export function AparelhosTab() {
+  const { usuario } = useAuth();
   const {
     aparelhos,
     loading,
