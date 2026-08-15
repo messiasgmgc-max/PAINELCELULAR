@@ -22,6 +22,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
+import { getAparelhoCodigo } from '@/lib/utils';
 import { toast } from 'sonner';
 import { generateReciboA4Html } from '@/lib/reciboA4';
 import {
@@ -125,12 +126,14 @@ function ProdutoCombobox({
   const filtrados = disponiveis.filter(a => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
+    const codigoStr = getAparelhoCodigo(a).toLowerCase();
     const imeiStr = (a.imei || a.numeroSerie || '').toLowerCase();
     const modeloStr = (a.modelo || '').toLowerCase();
     const marcaStr = (a.marca || '').toLowerCase();
     const corStr = (a.cor || '').toLowerCase();
     const capStr = (a.capacidade || '').toLowerCase();
     return (
+      codigoStr.includes(term) ||
       imeiStr.includes(term) ||
       modeloStr.includes(term) ||
       marcaStr.includes(term) ||
@@ -141,12 +144,14 @@ function ProdutoCombobox({
   });
 
   const formatSelectedText = (a: Aparelho) => {
+    const cod = getAparelhoCodigo(a);
     const imei = a.imei || a.numeroSerie || '';
+    const idTag = `[ID: ${cod}] `;
     const imeiTag = imei ? `[IMEI: ${imei}] ` : '';
     const capTag = a.capacidade ? ` ${a.capacidade}` : '';
     const corTag = a.cor ? ` - ${a.cor}` : '';
     const precoStr = ` - R$ ${(a.preco || 0).toFixed(2).replace('.', ',')}`;
-    return `${imeiTag}${a.marca || ''} ${a.modelo || ''}${capTag}${corTag}${precoStr}`;
+    return `${idTag}${imeiTag}${a.marca || ''} ${a.modelo || ''}${capTag}${corTag}${precoStr}`;
   };
 
   return (
@@ -162,7 +167,7 @@ function ProdutoCombobox({
               {formatSelectedText(selecionado)}
             </span>
           ) : (
-            <span className="text-muted-foreground font-sans">🔍 Pesquisar aparelho por IMEI ou Modelo...</span>
+            <span className="text-muted-foreground font-sans">🔍 Pesquisar por ID, IMEI ou Modelo...</span>
           )}
         </span>
         <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -176,7 +181,7 @@ function ProdutoCombobox({
               ref={inputRef}
               type="text"
               className="bg-transparent border-none outline-none text-xs w-full text-white placeholder-slate-400 font-mono"
-              placeholder="Digite o IMEI (ex: 9551984) ou Modelo (ex: 11 Pro Max)..."
+              placeholder="Digite o ID (ex: 8665041), IMEI (ex: 9551984) ou Modelo..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -196,6 +201,7 @@ function ProdutoCombobox({
               filtrados.map((a) => {
                 const imei = a.imei || a.numeroSerie || '';
                 const isSelected = a.id === value;
+                const cod = getAparelhoCodigo(a);
                 return (
                   <div
                     key={a.id}
@@ -210,6 +216,9 @@ function ProdutoCombobox({
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-blue-400 bg-blue-950/90 px-2 py-0.5 rounded border border-blue-500/40 text-[11px]">
+                          ID: {cod}
+                        </span>
                         {imei && (
                           <span className="font-bold text-emerald-400 bg-emerald-950/90 px-2 py-0.5 rounded border border-emerald-500/40 text-[11px]">
                             IMEI: {imei}
@@ -3261,7 +3270,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   <option value="">-- Escolha um aparelho do estoque ou preencha manualmente abaixo --</option>
                   {aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido').map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.marca} {a.modelo} {a.capacidade} ({a.cor || 'Sem cor'}) - IMEI: {a.imei || 'N/A'} - R$ {a.preco}
+                      [ID: {getAparelhoCodigo(a)}] {a.marca} {a.modelo} {a.capacidade} ({a.cor || 'Sem cor'}) - IMEI: {a.imei || 'N/A'} - R$ {a.preco}
                     </option>
                   ))}
                 </select>

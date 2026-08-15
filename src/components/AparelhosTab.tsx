@@ -10,6 +10,7 @@ import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
+import { getAparelhoCodigo } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function AparelhosTab() {
@@ -47,6 +48,7 @@ export function AparelhosTab() {
     cor: "",
     capacidade: "64GB" as string,
     condicao: "seminovo" as "novo" | "seminovo" | "usado" | "danificado",
+    saudeBateria: "",
     preco: "",
     custo: "",
     descricao: "",
@@ -94,13 +96,18 @@ export function AparelhosTab() {
 
   // Filtrar aparelhos por busca
   const aparelhosAtivos = aparelhos.filter((aparelho: any) => aparelho.ativo !== false);
-  const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) =>
-    aparelho.modelo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    aparelho.marca.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    aparelho.imei?.includes(searchTerm) ||
-    aparelho.numeroSerie?.includes(searchTerm) ||
-    aparelho.cliente?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) => {
+    const cod = getAparelhoCodigo(aparelho).toLowerCase();
+    const term = searchTerm.toLowerCase();
+    return (
+      aparelho.modelo.toLowerCase().includes(term) ||
+      aparelho.marca.toLowerCase().includes(term) ||
+      cod.includes(term) ||
+      aparelho.imei?.includes(searchTerm) ||
+      aparelho.numeroSerie?.includes(searchTerm) ||
+      aparelho.cliente?.toLowerCase().includes(term)
+    );
+  });
 
   const romOptions = ["64GB", "128GB", "256GB", "512GB", "1TB", "2TB"];
 
@@ -166,6 +173,7 @@ export function AparelhosTab() {
       cor: aparelho.cor || "",
       capacidade: aparelho.capacidade || "64GB",
       condicao: aparelho.condicao,
+      saudeBateria: (aparelho as any).saude_bateria || (aparelho as any).saudeBateria || "",
       preco: String(Math.round(aparelho.preco * 100)),
       custo: String(Math.round(((aparelho as any).custo || 0) * 100)),
       descricao: aparelho.descricao || "",
@@ -648,20 +656,19 @@ export function AparelhosTab() {
     const precoNumerico = formData.preco ? parseInt(formData.preco) / 100 : 0;
     const custoNumerico = formData.custo ? parseInt(formData.custo) / 100 : 0;
 
+    const payload = {
+      ...formData,
+      preco: precoNumerico,
+      custo: custoNumerico,
+      saude_bateria: formData.saudeBateria,
+      saudeBateria: formData.saudeBateria,
+      ativo: true,
+    };
+
     if (editingId) {
-      await atualizarAparelho(editingId, {
-        ...formData,
-        preco: precoNumerico,
-        custo: custoNumerico,
-        ativo: true,
-      });
+      await atualizarAparelho(editingId, payload);
     } else {
-      await criarAparelho({
-        ...formData,
-        preco: precoNumerico,
-        custo: custoNumerico,
-        ativo: true,
-      });
+      await criarAparelho(payload);
     }
 
     handleCancel();
@@ -1206,6 +1213,7 @@ export function AparelhosTab() {
       cor: "",
       capacidade: "64GB",
       condicao: "seminovo",
+      saudeBateria: "",
       preco: "",
       custo: "",
       descricao: "",
@@ -1527,17 +1535,25 @@ export function AparelhosTab() {
                   className="flex items-start justify-between gap-4 border-b pb-4 last:border-0 hover:bg-muted/30 p-2 rounded transition-colors"
                 >
                   <div className="flex-1 space-y-1 min-w-0">
-                    <div className="text-sm font-semibold">
-                      {condicaoEmoji(aparelho.condicao)} {aparelho.marca} {aparelho.modelo}
-                      {aparelho.clienteId && (
-                        <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700 border-yellow-200">
-                          MANUTENÇÃO - {aparelho.cliente}
-                        </Badge>
-                      )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-blue-400 bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded-md shrink-0">
+                        ID: {getAparelhoCodigo(aparelho)}
+                      </span>
+                      <div className="text-sm font-semibold">
+                        {condicaoEmoji(aparelho.condicao)} {aparelho.marca} {aparelho.modelo}
+                        {aparelho.clienteId && (
+                          <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700 border-yellow-200">
+                            MANUTENÇÃO - {aparelho.cliente}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground pt-1">
                       {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
                       {aparelho.capacidade && <span>💾 {aparelho.capacidade}</span>}
+                      {((aparelho as any).saude_bateria || (aparelho as any).saudeBateria) && (
+                        <span className="text-emerald-400 font-semibold">🔋 Bateria: {(aparelho as any).saude_bateria || (aparelho as any).saudeBateria}</span>
+                      )}
                       {aparelho.imei && <span>📱 IMEI: {aparelho.imei}</span>}
                       {aparelho.cliente && <span>👤 {aparelho.cliente}</span>}
                     </div>
@@ -1599,111 +1615,134 @@ export function AparelhosTab() {
       {/* Modal de Novo/Editar Aparelho */}
       {showForm && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg modal-panel-tall w-full my-4">
-              <div className="modal-header">
-                <h3 className="modal-title">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
+            <div className="bg-slate-900/98 border border-white/20 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative my-auto animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Smartphone className="w-5 h-5 text-blue-400" />
                   {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
                 </h3>
-                <Button variant="ghost" size="icon" onClick={handleCancel}>
+                <Button variant="ghost" size="icon" onClick={handleCancel} className="text-slate-400 hover:text-white rounded-full">
                   <X className="h-5 w-5" />
                 </Button>
               </div>
 
-              <div className="modal-body-scroll">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  {/* Linha 1: Marca e Modelo */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Linha 1: Marca e Modelo */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Marca *</label>
                     <input
                       type="text"
                       name="marca"
-                      placeholder="Marca *"
+                      placeholder="Ex: Apple"
                       value={formData.marca}
                       onChange={handleInputChange}
                       required
-                      className="input-glass"
+                      className="input-glass w-full"
                     />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Modelo *</label>
                     <input
                       type="text"
                       name="modelo"
-                      placeholder="Modelo *"
+                      placeholder="Ex: iPhone 11 Pro Max"
                       value={formData.modelo}
                       onChange={handleInputChange}
                       required
-                      className="input-glass"
+                      className="input-glass w-full"
                     />
                   </div>
+                </div>
 
-                  {/* Linha 2: IMEI e Série */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <input
-                        type="text"
-                        name="imei"
-                        placeholder="IMEI (15 dígitos máximo)"
-                        value={formData.imei}
-                        onChange={handleIMEIChange}
-                        maxLength={15}
-                        inputMode="numeric"
-                        className="input-glass"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {formData.imei.length}/15 dígitos
-                      </p>
-                    </div>
+                {/* Linha 2: IMEI e Série */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">IMEI (opcional)</label>
+                    <input
+                      type="text"
+                      name="imei"
+                      placeholder="15 dígitos máx"
+                      value={formData.imei}
+                      onChange={handleIMEIChange}
+                      maxLength={15}
+                      inputMode="numeric"
+                      className="input-glass w-full"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {formData.imei.length}/15 dígitos
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">Número de Série (opcional)</label>
                     <input
                       type="text"
                       name="numeroSerie"
-                      placeholder="Número de Série (opcional)"
+                      placeholder="Ex: F17C..."
                       value={formData.numeroSerie}
                       onChange={handleInputChange}
-                      className="input-glass"
+                      className="input-glass w-full"
                     />
                   </div>
+                </div>
 
-                  {/* Linha 4: Condição e Preço */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Condição</label>
-                      <select
-                        name="condicao"
-                        value={formData.condicao}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                      >
-                        <option value="novo">🆕 Novo</option>
-                        <option value="seminovo">⭐ Seminovo</option>
-                        <option value="usado">♻️ Usado</option>
-                        <option value="danificado">⚠️ Danificado</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-blue-500 ml-1 uppercase">Preço de Custo</label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        name="custo"
-                        placeholder="R$ 0,00"
-                        value={formatarPreco(formData.custo)}
-                        onChange={handleCustoChange}
-                        className="input-glass"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-green-500 ml-1 uppercase">Preço de Venda</label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        name="preco"
-                        placeholder="R$ 0,00"
-                        value={formatarPreco(formData.preco)}
-                        onChange={handlePrecoChange}
-                        className="input-glass"
-                      />
-                    </div>
+                {/* Linha 3: Condição, Saúde Bateria, Custo e Venda */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">Condição</label>
+                    <select
+                      name="condicao"
+                      value={formData.condicao}
+                      onChange={handleInputChange}
+                      className="input-glass w-full"
+                    >
+                      <option value="novo">🆕 Novo</option>
+                      <option value="seminovo">⭐ Seminovo</option>
+                      <option value="usado">♻️ Usado</option>
+                      <option value="danificado">⚠️ Danificado</option>
+                    </select>
                   </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">Bateria (%)</label>
+                    <input
+                      type="text"
+                      name="saudeBateria"
+                      placeholder="Ex: 85% ou 100"
+                      value={formData.saudeBateria}
+                      onChange={handleInputChange}
+                      className="input-glass w-full font-bold text-emerald-400 placeholder:font-normal placeholder:text-slate-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-blue-400 uppercase block mb-1">Custo</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      name="custo"
+                      placeholder="R$ 0,00"
+                      value={formatarPreco(formData.custo)}
+                      onChange={handleCustoChange}
+                      className="input-glass w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-green-400 uppercase block mb-1">Venda</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      name="preco"
+                      placeholder="R$ 0,00"
+                      value={formatarPreco(formData.preco)}
+                      onChange={handlePrecoChange}
+                      className="input-glass w-full font-bold text-green-400"
+                    />
+                  </div>
+                </div>
 
-                  {/* Cliente */}
+                {/* Cliente */}
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">Cliente Proprietário (Manutenção/Venda)</label>
                   <div className="flex gap-2">
                     <select
                       name="cliente"
@@ -1730,37 +1769,44 @@ export function AparelhosTab() {
                       variant="outline"
                       size="icon"
                       onClick={() => setShowNovoClientePopup(true)}
+                      className="rounded-xl border-white/20"
                     >
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
+                </div>
 
-                  <div className="rounded-xl border border-white/10 bg-white/10 dark:bg-black/10 p-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowOptionalFields((prev) => !prev)}
-                      className="w-full flex items-center justify-between text-sm font-semibold"
-                    >
-                      <span>Campos opcionais (descrição, acessórios e observações)</span>
-                      {showOptionalFields ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    </button>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowOptionalFields((prev) => !prev)}
+                    className="w-full flex items-center justify-between text-xs font-semibold text-slate-300"
+                  >
+                    <span>Campos Opcionais (Cor, Capacidade, Descrição, Acessórios)</span>
+                    {showOptionalFields ? <ChevronUp className="h-4 w-4 text-blue-400" /> : <ChevronDown className="h-4 w-4 text-blue-400" />}
+                  </button>
 
-                    {showOptionalFields && (
-                      <div className="mt-3 space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {showOptionalFields && (
+                    <div className="mt-3 space-y-3 pt-3 border-t border-white/10">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Cor</label>
                           <input
                             type="text"
                             name="cor"
-                            placeholder="Cor (opcional)"
+                            placeholder="Ex: Preto, Azul, Branco"
                             value={formData.cor}
                             onChange={handleInputChange}
-                            className="input-glass"
+                            className="input-glass w-full"
                           />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 block mb-1">Capacidade</label>
                           <select
                             name="capacidade"
                             value={formData.capacidade}
                             onChange={handleInputChange}
-                            className="input-glass"
+                            className="input-glass w-full"
                           >
                             {romOptions.map((rom) => (
                               <option key={rom} value={rom}>
@@ -1769,50 +1815,59 @@ export function AparelhosTab() {
                             ))}
                           </select>
                         </div>
+                      </div>
 
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Descrição</label>
                         <textarea
                           name="descricao"
-                          placeholder="Descrição do aparelho (opcional)"
+                          placeholder="Descrição do aparelho..."
                           value={formData.descricao}
                           onChange={handleInputChange}
                           rows={2}
-                          className="input-glass"
+                          className="input-glass w-full"
                         />
+                      </div>
 
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Acessórios Inclusos</label>
                         <textarea
                           name="acessorios"
-                          placeholder="Acessórios inclusos (opcional)"
+                          placeholder="Ex: Capinha, Película, Carregador..."
                           value={formData.acessorios}
                           onChange={handleInputChange}
                           rows={2}
-                          className="input-glass"
+                          className="input-glass w-full"
                         />
+                      </div>
 
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Observações Internas</label>
                         <textarea
                           name="observacoes"
-                          placeholder="Observações adicionais (opcional)"
+                          placeholder="Observações de garantia ou detalhes..."
                           value={formData.observacoes}
                           onChange={handleInputChange}
                           rows={2}
-                          className="input-glass"
+                          className="input-glass w-full"
                         />
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
+                </div>
 
-                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
-                    <Button type="button" variant="outline" onClick={handleCancel}>
-                      Cancelar
-                    </Button>
-                    <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                      {loading ? "Processando..." : editingId ? "Atualizar Aparelho" : "Salvar Aparelho"}
-                    </Button>
-                  </div>
+                <div className="flex gap-3 justify-end pt-4 border-t border-white/10">
+                  <Button type="button" variant="outline" onClick={handleCancel} className="rounded-xl">
+                    Cancelar
+                  </Button>
+                  <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 font-bold rounded-xl shadow-lg shadow-blue-500/20">
+                    {loading ? "Processando..." : editingId ? "Atualizar Aparelho" : "Salvar Aparelho"}
+                  </Button>
+                </div>
 
-                  {error && <p className="text-sm text-red-500 text-center">{error}</p>}
-                </form>
-              </div>
-            </GlassCard>
+                {error && <p className="text-sm text-red-400 text-center font-medium">{error}</p>}
+              </form>
+            </div>
           </div>
         </ModalPortal>
       )}

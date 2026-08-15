@@ -46,6 +46,9 @@ export interface Aparelho {
   condicao: "novo" | "seminovo" | "usado" | "danificado";
   preco: number;
   custo?: number;
+  saudeBateria?: string;
+  saude_bateria?: string;
+  codigo?: string;
   descricao?: string;
   cliente?: string; // Nome do cliente proprietário
   clienteId?: string; // ID do cliente

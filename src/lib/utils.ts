@@ -25,3 +25,14 @@ export function checkIsStoreAdmin(usuario: any) {
   return checkIsSuperAdmin(usuario) || role === 'admin' || role === 'gerente';
 }
 
+export function getAparelhoCodigo(aparelho: any): string {
+  if (!aparelho) return '';
+  if (aparelho.codigo) return String(aparelho.codigo);
+  if (aparelho.codigoUnico) return String(aparelho.codigoUnico);
+  const idStr = String(aparelho.id || '');
+  if (/^\d{4,8}$/.test(idStr)) return idStr;
+  const imeiLimpo = String(aparelho.imei || '').replace(/\D/g, '');
+  if (imeiLimpo.length >= 4) return imeiLimpo.slice(-4);
+  return idStr.replace(/-/g, '').slice(-6).toUpperCase();
+}
+
