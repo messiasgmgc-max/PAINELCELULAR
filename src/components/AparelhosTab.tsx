@@ -525,7 +525,6 @@ export function AparelhosTab() {
             ativo: true,
           };
           if (item.bateria) {
-            updatePayload.saudeBateria = item.bateria;
             updatePayload.saude_bateria = item.bateria;
           }
 
@@ -534,8 +533,7 @@ export function AparelhosTab() {
             .update(updatePayload)
             .eq('id', existente.id);
 
-          if (updateErr) {
-            delete updatePayload.saudeBateria;
+          if (updateErr && updateErr.code === 'PGRST204') {
             delete updatePayload.saude_bateria;
             await supabase.from('aparelhos').update(updatePayload).eq('id', existente.id);
           }
@@ -550,7 +548,7 @@ export function AparelhosTab() {
             cor: item.cor,
             capacidade: item.capacidade,
             condicao: item.condicao,
-            saudeBateria: item.bateria || '',
+            saude_bateria: item.bateria || '',
             preco: String(item.preco),
             custo: String(item.custo),
             descricao: item.raw,
@@ -635,7 +633,6 @@ export function AparelhosTab() {
             ativo: true,
           };
           if (item.bateria) {
-            updatePayload.saudeBateria = item.bateria;
             updatePayload.saude_bateria = item.bateria;
           }
 
@@ -644,8 +641,7 @@ export function AparelhosTab() {
             .update(updatePayload)
             .eq('id', equivalente.id);
 
-          if (updateErr) {
-            delete updatePayload.saudeBateria;
+          if (updateErr && updateErr.code === 'PGRST204') {
             delete updatePayload.saude_bateria;
             await supabase.from('aparelhos').update(updatePayload).eq('id', equivalente.id);
           }
@@ -660,7 +656,7 @@ export function AparelhosTab() {
             cor: item.cor,
             capacidade: item.capacidade,
             condicao: item.condicao,
-            saudeBateria: item.bateria || '',
+            saude_bateria: item.bateria || '',
             preco: String(item.preco),
             custo: String(item.custo),
             descricao: item.raw,
