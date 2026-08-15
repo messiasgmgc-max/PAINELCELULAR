@@ -379,6 +379,17 @@ export function AparelhosTab() {
         sufixoSerial = parts.slice(1).join('-').trim();
       }
 
+      // Detecção de quantidade (ex: 2 unidades, 3 un, 2x)
+      let quantidade = 1;
+      const matchQtd = mainPart.match(/\((\d+)\s*(?:unidades|unidade|unid|un|peças|pecas|x)[^)]*\)/i) ||
+                       mainPart.match(/\b(\d+)\s*(?:unidades|unidade|unid|un|peças|pecas)\b/i) ||
+                       mainPart.match(/\b(\d+)x\b/i) ||
+                       rawLine.match(/\((\d+)\s*(?:unidades|unidade|unid|un|peças|pecas|x)[^)]*\)/i);
+      if (matchQtd) {
+        quantidade = parseInt(matchQtd[1], 10) || 1;
+        mainPart = mainPart.replace(matchQtd[0], '').trim();
+      }
+
       let bateria = '';
       let condicao: "novo" | "seminovo" = "seminovo";
       if (mainPart.toLowerCase().includes('lacrado') || sufixoSerial.toLowerCase().includes('lacrado') || rawLine.toLowerCase().includes('lacrado')) {
@@ -409,15 +420,25 @@ export function AparelhosTab() {
 
       const { marca: marcaExtraida, modelo, cor: corExtraida } = extractAparelhoBrandModelAndColor(mainPart);
 
+      // Dispositivos que NÃO possuem IMEI (MacBooks, Consoles, Pencil, AirPods, Tablets Wi-Fi, etc.)
+      const isNonCellular = /\b(macbook|mac\s*book|ps5|ps4|playstation|xbox|nintendo|switch|pencil|airpods|airpod|ipad|tablet)\b/i.test(mainPart) ||
+                            /\b(macbook|mac\s*book|ps5|ps4|playstation|xbox|nintendo|switch|pencil|airpods|airpod|ipad|tablet)\b/i.test(modelo) ||
+                            ['Sony', 'Microsoft', 'Nintendo'].includes(marcaExtraida);
+
+      const finalImei = isNonCellular ? '' : (sufixoSerial || '');
+
       let observacoesPartes: string[] = [];
 
-      if (sufixoSerial) {
+      if (sufixoSerial && !isNonCellular) {
         const matchSerialWithObs = sufixoSerial.match(/^([A-Za-z0-9]{3,6})\s+(.+)$/);
         if (matchSerialWithObs) {
           sufixoSerial = matchSerialWithObs[1];
           const obsTxt = matchSerialWithObs[2].trim();
           if (obsTxt) observacoesPartes.push(obsTxt);
         }
+      } else if (sufixoSerial && isNonCellular) {
+        const cleanObs = sufixoSerial.replace(/lacrado/gi, '').trim();
+        if (cleanObs) observacoesPartes.push(cleanObs);
       }
 
       const regexObsKeywords = /\b(msg\s*degradada|msgdegradada|msg\s*bateria|msgbateria|msg\s*bat|msg\s*tela|msg\s*camera|msg\s*peça|msg\s*peca|traseira\s*[\w\s]*|tampa\s*[\w\s]*|tela\s*trocada|trincad[oa]|detalhe|face\s*id\s*off)\b/gi;
@@ -449,20 +470,25 @@ export function AparelhosTab() {
 
       const precoVenda = custoNumerico > 0 ? custoNumerico + margemAdicional : margemAdicional;
 
-      aparelhosFormatados.push({
-        raw: rawLine,
-        idEtiqueta,
-        marca: marcaExtraida || 'Apple',
-        modelo,
-        capacidade: capacidade || (marcaExtraida === 'Apple' && modelo.includes('iPhone') ? '128GB' : ''),
-        cor,
-        condicao,
-        bateria,
-        sufixoSerial,
-        observacoes,
-        custo: custoNumerico,
-        preco: precoVenda,
-      });
+      // Se houver quantidade > 1 (ex: PS5 2 unidades), expande cada unidade com seu próprio ID único de 8 dígitos
+      for (let q = 0; q < quantidade; q++) {
+        const idUnico = q === 0 ? idEtiqueta : String(Math.floor(10000000 + Math.random() * 90000000));
+        aparelhosFormatados.push({
+          raw: rawLine,
+          idEtiqueta: idUnico,
+          marca: marcaExtraida || 'Apple',
+          modelo,
+          capacidade: capacidade || (marcaExtraida === 'Apple' && modelo.includes('iPhone') ? '128GB' : ''),
+          cor,
+          condicao,
+          bateria,
+          sufixoSerial: finalImei,
+          observacoes,
+          custo: custoNumerico,
+          preco: precoVenda,
+          isCellular: !isNonCellular,
+        });
+      }
     }
 
     return aparelhosFormatados;
@@ -499,7 +525,7 @@ export function AparelhosTab() {
         const existente = existentes.find(a => {
           const cod = getAparelhoCodigo(a);
           if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
-          if (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
+          if (item.isCellular && item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
           if (item.idEtiqueta && a.numeroSerie && a.numeroSerie === item.idEtiqueta) return true;
           if (item.idEtiqueta && a.observacoes && a.observacoes.includes(item.idEtiqueta)) return true;
           return false;
@@ -510,7 +536,7 @@ export function AparelhosTab() {
           item.observacoes ? `Obs: ${item.observacoes}` : '',
           `ID: ${idEtiquetaFinal}`,
           item.bateria ? `Bateria: ${item.bateria}` : '',
-          item.sufixoSerial ? `IMEI: ${item.sufixoSerial}` : ''
+          (item.isCellular && item.sufixoSerial) ? `IMEI: ${item.sufixoSerial}` : ''
         ].filter(Boolean).join(' | ');
 
         if (existente) {
@@ -543,7 +569,7 @@ export function AparelhosTab() {
           await criarAparelho({
             marca: item.marca,
             modelo: item.modelo,
-            imei: item.sufixoSerial || idEtiquetaFinal,
+            imei: item.isCellular ? (item.sufixoSerial || '') : '',
             numeroSerie: idEtiquetaFinal,
             codigo: idEtiquetaFinal,
             cor: item.cor,
@@ -607,7 +633,7 @@ export function AparelhosTab() {
         const equivalente = ativosAtuais.find(a => {
           const cod = getAparelhoCodigo(a);
           if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
-          if (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
+          if (item.isCellular && item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
           if (item.idEtiqueta && a.numeroSerie && a.numeroSerie === item.idEtiqueta) return true;
           if (item.idEtiqueta && a.observacoes && a.observacoes.includes(item.idEtiqueta)) return true;
           return false;
@@ -618,7 +644,7 @@ export function AparelhosTab() {
           item.observacoes ? `Obs: ${item.observacoes}` : '',
           `ID: ${idEtiquetaFinal}`,
           item.bateria ? `Bateria: ${item.bateria}` : '',
-          item.sufixoSerial ? `IMEI: ${item.sufixoSerial}` : ''
+          (item.isCellular && item.sufixoSerial) ? `IMEI: ${item.sufixoSerial}` : ''
         ].filter(Boolean).join(' | ');
 
         if (equivalente) {
@@ -652,7 +678,7 @@ export function AparelhosTab() {
           await criarAparelho({
             marca: item.marca,
             modelo: item.modelo,
-            imei: item.sufixoSerial || idEtiquetaFinal,
+            imei: item.isCellular ? (item.sufixoSerial || '') : '',
             numeroSerie: idEtiquetaFinal,
             codigo: idEtiquetaFinal,
             cor: item.cor,
