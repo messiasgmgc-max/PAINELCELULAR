@@ -533,8 +533,9 @@ export function AparelhosTab() {
             .update(updatePayload)
             .eq('id', existente.id);
 
-          if (updateErr && updateErr.code === 'PGRST204') {
+          if (updateErr) {
             delete updatePayload.saude_bateria;
+            delete updatePayload.codigo;
             await supabase.from('aparelhos').update(updatePayload).eq('id', existente.id);
           }
           existentesAtualizados++;
@@ -641,8 +642,9 @@ export function AparelhosTab() {
             .update(updatePayload)
             .eq('id', equivalente.id);
 
-          if (updateErr && updateErr.code === 'PGRST204') {
+          if (updateErr) {
             delete updatePayload.saude_bateria;
+            delete updatePayload.codigo;
             await supabase.from('aparelhos').update(updatePayload).eq('id', equivalente.id);
           }
           atualizados++;

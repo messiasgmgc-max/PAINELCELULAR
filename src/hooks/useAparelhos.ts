@@ -107,8 +107,8 @@ export function useAparelhos(): UseAparelhosReturn {
           lastError = response.error;
 
           const errorText = `${response.error.message || ''} ${response.error.details || ''}`;
-          const columnMatch = errorText.match(/'([^']+)'/);
-          const invalidColumn = response.error.code === 'PGRST204' ? columnMatch?.[1] : null;
+          const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
+          const invalidColumn = columnMatch?.[1];
 
           if (invalidColumn && Object.prototype.hasOwnProperty.call(payload, invalidColumn)) {
             delete payload[invalidColumn];
@@ -164,8 +164,8 @@ export function useAparelhos(): UseAparelhosReturn {
 
           lastError = response.error;
           const errorText = `${response.error.message || ''} ${response.error.details || ''}`;
-          const columnMatch = errorText.match(/'([^']+)'/);
-          const invalidColumn = response.error.code === 'PGRST204' ? columnMatch?.[1] : null;
+          const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
+          const invalidColumn = columnMatch?.[1];
 
           if (invalidColumn && Object.prototype.hasOwnProperty.call(payload, invalidColumn)) {
             delete payload[invalidColumn];
