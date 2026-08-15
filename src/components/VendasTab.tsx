@@ -288,6 +288,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [dadosFaltantesForm, setDadosFaltantesForm] = useState({
     clienteNome: '',
     clienteTelefone: '',
+    clienteEmail: '',
     marca: 'Apple',
     modelo: '',
     capacidade: '128GB',
@@ -693,29 +694,42 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const aplicarVendaAI = async (parsedData: any) => {
     try {
-      toast.info('⚡ Montando a venda com as informações...');
+      toast.info('⚡ Finalizando venda e registrando e-mail...');
 
-      // 1. Garantir Cliente
+      // 1. Garantir e atualizar Cliente com E-mail
       let clienteIdFinal = '';
       let clienteNomeFinal = parsedData.cliente?.nome || 'Cliente Consumidor';
+      let clienteObj: Cliente | null = null;
+      const emailFinal = parsedData.cliente?.email && parsedData.cliente.email !== '' ? parsedData.cliente.email : 'sem@email.com';
       
-      if (parsedData.cliente?.nome) {
+      if (parsedData.cliente?.nome || parsedData.cliente?.email) {
         const clienteExistente = clientes.find(c => 
-          c.nome.toLowerCase() === parsedData.cliente.nome.toLowerCase() ||
-          (parsedData.cliente.telefone && c.telefone.replace(/\D/g, '') === parsedData.cliente.telefone.replace(/\D/g, ''))
+          (parsedData.cliente?.email && c.email && c.email.toLowerCase() === parsedData.cliente.email.toLowerCase()) ||
+          (parsedData.cliente?.nome && c.nome.toLowerCase() === parsedData.cliente.nome.toLowerCase()) ||
+          (parsedData.cliente?.telefone && c.telefone.replace(/\D/g, '') === parsedData.cliente.telefone.replace(/\D/g, ''))
         );
 
         if (clienteExistente) {
           clienteIdFinal = clienteExistente.id;
           clienteNomeFinal = clienteExistente.nome;
+          clienteObj = clienteExistente;
+
+          if (emailFinal !== 'sem@email.com' && (!clienteExistente.email || clienteExistente.email === 'sem@email.com')) {
+            await supabase
+              .from('clientes')
+              .update({ email: emailFinal })
+              .eq('id', clienteExistente.id);
+            clienteObj = { ...clienteExistente, email: emailFinal };
+            await fetchClientes();
+          }
         } else {
           const { data: novoCli } = await supabase
             .from('clientes')
             .insert([{
-              nome: parsedData.cliente.nome,
-              telefone: parsedData.cliente.telefone || '00000000000',
-              email: parsedData.cliente.email || 'sem@email.com',
-              cpf: parsedData.cliente.cpf || '',
+              nome: parsedData.cliente?.nome || 'Cliente Consumidor',
+              telefone: parsedData.cliente?.telefone || '00000000000',
+              email: emailFinal,
+              cpf: parsedData.cliente?.cpf || '',
               loja_id: usuario?.lojaId || null
             }])
             .select()
@@ -724,6 +738,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           if (novoCli) {
             clienteIdFinal = novoCli.id;
             clienteNomeFinal = novoCli.nome;
+            clienteObj = novoCli as Cliente;
             await fetchClientes();
           }
         }
@@ -790,36 +805,72 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         observacao: parsedData.observacoes || (parsedData.aparelho?.imei ? `IMEI: ${parsedData.aparelho.imei}` : '')
       };
 
-      const dataVendaFinal = parsedData.dataVenda
-        ? formatForDatetimeLocal(new Date(parsedData.dataVenda.includes('T') ? parsedData.dataVenda : `${parsedData.dataVenda}T12:00:00`))
-        : formatForDatetimeLocal();
+      const dataPagamentoIso = parsedData.dataVenda
+        ? (parsedData.dataVenda.includes('T') ? new Date(parsedData.dataVenda).toISOString() : new Date(`${parsedData.dataVenda}T12:00:00`).toISOString())
+        : new Date().toISOString();
 
-      setPosDados({
-        tipoVenda: 'Venda',
-        clienteId: clienteIdFinal,
+      const lucroVenda = valorVenda - custoVenda;
+      const percentualLucro = valorVenda > 0 ? (lucroVenda / valorVenda) * 100 : 0;
+
+      // 3. Inserir e FINALIZAR A VENDA DIRETO no banco de dados!
+      const vendaPayload = {
+        clienteId: clienteIdFinal || null,
         clienteNome: clienteNomeFinal,
-        vendedor: parsedData.vendedor || posDados.vendedor || '',
+        vendedor: parsedData.vendedor || posDados.vendedor || 'Sistema IA',
         tipoEntrega: 'Retirada',
-        dataVenda: dataVendaFinal
-      });
-
-      setCart([cartItem]);
-      setPosPagamento({
-        metodo: metodoPgto,
-        parcelas: 1,
-        detalhes: '',
-        valorPago: valorVenda,
+        itens: [cartItem],
+        valor: valorVenda,
+        custo: custoVenda,
+        lucro: lucroVenda,
+        percentualLucro,
+        dataPagamento: dataPagamentoIso,
         status: 'pago',
+        metodo: metodoPgto,
+        descricao: `Venda Gerada por IA - ${cartItem.descricao}`,
         garantia: '90 dias',
-        descontoGlobal: 0,
-        tipoDescontoGlobal: 'R$',
-        pagamentos: [createPagamentoItem({ metodo: metodoPgto, valor: valorVenda })]
-      });
+        descontoTotal: 0,
+        pagamentos: [{ id: Date.now().toString(), metodo: metodoPgto, valor: valorVenda, parcelas: 1 }],
+        loja_id: usuario?.lojaId || null
+      };
 
-      openPOSModal();
+      const { data: vendaCriada, error: erroVenda } = await supabase
+        .from('vendas')
+        .insert([vendaPayload])
+        .select()
+        .single();
+
+      if (erroVenda) throw erroVenda;
+
+      // 4. Dar baixa no aparelho no estoque imediatamente
+      if (aparelhoFinal?.id) {
+        await supabase
+          .from('aparelhos')
+          .update({ ativo: false, condicao: 'vendido' })
+          .eq('id', aparelhoFinal.id);
+        await fetchAparelhos();
+      }
+
+      await carregarVendas();
+      setShowSaleCelebration(true);
+      playSaleSuccessSound();
+
+      // 5. Disparar e-mail de recibo pro cliente se houver e-mail válido
+      if (clienteObj && clienteObj.email && clienteObj.email !== 'sem@email.com') {
+        const emailEnviado = await dispararEmailReciboComPdf(vendaCriada, clienteObj);
+        if (emailEnviado) {
+          toast.success(`🚀 Venda finalizada! Recibo enviado para ${clienteObj.email}`);
+        } else {
+          toast.success('🚀 Venda finalizada com sucesso! (Erro ao disparar e-mail)');
+        }
+      } else {
+        toast.success('🚀 Venda finalizada com sucesso!');
+      }
+
+      // 6. Gerar Notinha / Recibo A4 automaticamente
+      handleGerarReciboA4(vendaCriada);
     } catch (err: any) {
-      console.error('Erro ao aplicar venda AI:', err);
-      toast.error('Erro ao montar venda com IA');
+      console.error('Erro ao aplicar e finalizar venda AI:', err);
+      toast.error(`Erro ao finalizar venda: ${err?.message || 'Falha no processamento'}`);
     }
   };
 
@@ -3227,6 +3278,17 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
 
                 <div>
+                  <label className="text-xs font-bold text-slate-300">E-mail do Cliente (Para envio de recibo)</label>
+                  <input
+                    type="email"
+                    className="input-glass mt-1"
+                    placeholder="Ex: cliente@email.com"
+                    value={dadosFaltantesForm.clienteEmail}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, clienteEmail: e.target.value})}
+                  />
+                </div>
+
+                <div>
                   <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
                     <span>Modelo do Celular <span className="text-red-400">*</span></span>
                     {aiParsedData?.camposFaltantes?.includes('modelo') && (
@@ -3363,6 +3425,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       cliente: {
                         nome: dadosFaltantesForm.clienteNome,
                         telefone: dadosFaltantesForm.clienteTelefone,
+                        email: dadosFaltantesForm.clienteEmail,
                       },
                       aparelho: {
                         marca: dadosFaltantesForm.marca,
