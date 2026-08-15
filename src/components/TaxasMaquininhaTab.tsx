@@ -166,7 +166,7 @@ export function TaxasMaquininhaTab() {
       // MODO: BUSCAR PARCELA ESPECÍFICA
       const perfilExato = grupo.itens.find(p => p.nome?.endsWith(` | ${calcParcelaSelecionada}x`));
       if (!perfilExato) {
-        alert('Ô sô, essa quantidade de parcelas não tá cadastrada nesse perfil não!');
+        alert('Esta quantidade de parcelas não está cadastrada neste perfil de taxa.');
         return;
       }
       setCalcResultado(processarItem(perfilExato));

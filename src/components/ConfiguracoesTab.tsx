@@ -434,7 +434,7 @@ export function ConfiguracoesTab() {
                     <User className="w-5 h-5" /> Equipe (Técnicos e Vendedores)
                   </h3>
                   <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
-                    Cadastre a galera que vai aparecer na lista de vendas e ordens de serviço.
+                    Cadastre os colaboradores que estarão disponíveis nas vendas e ordens de serviço.
                   </p>
                 </div>
                 
@@ -444,13 +444,13 @@ export function ConfiguracoesTab() {
                       type="text"
                       value={novoTecnico}
                       onChange={(e) => setNovoTecnico(e.target.value)}
-                      placeholder="Nome do caboclo..."
+                      placeholder="Nome do colaborador..."
                       className="input-glass flex-1"
                     />
                     <Button 
                       onClick={async () => {
                         if (!novoTecnico.trim()) {
-                          alert('Digite o nome do caboclo, sô!');
+                          alert('Por favor, informe o nome do colaborador.');
                           return;
                         }
                         try {

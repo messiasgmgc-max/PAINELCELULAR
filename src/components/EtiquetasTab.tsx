@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { supabase } from '@/lib/supabaseClient';
-import { CheckSquare, Pencil, Printer, Plus, Search, Square, Tag } from 'lucide-react';
+import { CheckSquare, Pencil, Printer, Plus, Search, Square, Tag, X } from 'lucide-react';
 
 type CampoEtiqueta = 'marcaModelo' | 'codigo' | 'capacidade' | 'condicao' | 'imei' | 'cor' | 'saudeBateria' | 'preco';
 
@@ -721,26 +721,38 @@ export function EtiquetasTab() {
       </GlassCard>
 
       {showEditor && (
-        <div className="modal-overlay modal-overlay-fit">
-          <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full space-y-4">
-            <div className="modal-header block">
-              <h3 className="modal-title">{modeloEmEdicao.id === 'novo' ? 'Novo Modelo Global' : 'Editar Modelo Global'}</h3>
-              <p className="modal-subtitle">Esses modelos ficam disponíveis para todas as lojas.</p>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
+          <div className="bg-slate-900/95 border border-white/20 rounded-3xl max-w-2xl w-full p-6 space-y-6 shadow-2xl relative my-auto animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-blue-400" />
+                  {modeloEmEdicao.id === 'novo' ? 'Novo Modelo Global' : 'Editar Modelo Global'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">Esses modelos ficam disponíveis para todas as lojas.</p>
+              </div>
+              <button
+                onClick={() => setShowEditor(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="modal-body grid grid-cols-1 md:grid-cols-3 gap-3 pt-0">
-              <div className="md:col-span-2">
-                <label className="text-xs font-bold text-muted-foreground uppercase">Nome</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <label className="text-xs font-bold text-slate-300 block mb-1">Nome do Modelo</label>
                 <input
-                  className="input-glass mt-1"
+                  className="input-glass w-full"
                   value={modeloEmEdicao.nome}
                   onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, nome: event.target.value }))}
+                  placeholder="Ex: MercadoPhone 3 Colunas"
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Colunas</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Colunas</label>
                 <select
-                  className="input-glass mt-1"
+                  className="input-glass w-full"
                   value={modeloEmEdicao.colunas}
                   onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, colunas: Number(event.target.value) as 1 | 2 | 3 }))}
                 >
@@ -751,52 +763,52 @@ export function EtiquetasTab() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Largura página (mm)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.larguraPaginaMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, larguraPaginaMm: Math.max(40, Number(event.target.value) || 210) }))} />
+                <label className="text-xs font-bold text-slate-300 block mb-1">Largura Página (mm)</label>
+                <input type="number" className="input-glass w-full font-bold text-emerald-400" value={modeloEmEdicao.larguraPaginaMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, larguraPaginaMm: Math.max(40, Number(event.target.value) || 210) }))} />
               </div>
               <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Altura página (mm)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.alturaPaginaMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, alturaPaginaMm: Math.max(40, Number(event.target.value) || 297) }))} />
+                <label className="text-xs font-bold text-slate-300 block mb-1">Altura Página (mm)</label>
+                <input type="number" className="input-glass w-full font-bold text-emerald-400" value={modeloEmEdicao.alturaPaginaMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, alturaPaginaMm: Math.max(40, Number(event.target.value) || 297) }))} />
               </div>
               <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Margem (mm)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.margemMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, margemMm: Math.max(0, Number(event.target.value) || 8) }))} />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Espaçamento (mm)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.espacamentoMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, espacamentoMm: Math.max(0, Number(event.target.value) || 4) }))} />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Altura min etiqueta (mm)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.alturaMinimaEtiquetaMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, alturaMinimaEtiquetaMm: Math.max(10, Number(event.target.value) || 32) }))} />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Fonte título (px)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.fonteTituloPx} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, fonteTituloPx: Math.max(8, Number(event.target.value) || 12) }))} />
+                <label className="text-xs font-bold text-slate-300 block mb-1">Margem (mm)</label>
+                <input type="number" className="input-glass w-full font-bold" value={modeloEmEdicao.margemMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, margemMm: Math.max(0, Number(event.target.value) || 8) }))} />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Fonte texto (px)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.fonteTextoPx} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, fonteTextoPx: Math.max(7, Number(event.target.value) || 10) }))} />
+                <label className="text-xs font-bold text-slate-300 block mb-1">Espaçamento (mm)</label>
+                <input type="number" className="input-glass w-full font-bold" value={modeloEmEdicao.espacamentoMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, espacamentoMm: Math.max(0, Number(event.target.value) || 4) }))} />
               </div>
               <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase">Fonte preço (px)</label>
-                <input type="number" className="input-glass mt-1" value={modeloEmEdicao.fontePrecoPx} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, fontePrecoPx: Math.max(8, Number(event.target.value) || 13) }))} />
+                <label className="text-xs font-bold text-slate-300 block mb-1">Alt. Mín. Etiqueta (mm)</label>
+                <input type="number" className="input-glass w-full font-bold" value={modeloEmEdicao.alturaMinimaEtiquetaMm} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, alturaMinimaEtiquetaMm: Math.max(10, Number(event.target.value) || 32) }))} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Fonte Título (px)</label>
+                <input type="number" className="input-glass w-full font-bold" value={modeloEmEdicao.fonteTituloPx} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, fonteTituloPx: Math.max(8, Number(event.target.value) || 12) }))} />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Fonte Texto (px)</label>
+                <input type="number" className="input-glass w-full font-bold" value={modeloEmEdicao.fonteTextoPx} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, fonteTextoPx: Math.max(7, Number(event.target.value) || 10) }))} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Fonte Preço (px)</label>
+                <input type="number" className="input-glass w-full font-bold" value={modeloEmEdicao.fontePrecoPx} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, fontePrecoPx: Math.max(8, Number(event.target.value) || 13) }))} />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={modeloEmEdicao.mostrarCapacidade} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCapacidade: event.target.checked }))} /> Mostrar capacidade</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={modeloEmEdicao.mostrarCondicao} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCondicao: event.target.checked }))} /> Mostrar condição</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={modeloEmEdicao.mostrarImei} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarImei: event.target.checked }))} /> Mostrar IMEI</label>
+            <div className="pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm font-medium">
+              <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCapacidade} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCapacidade: event.target.checked }))} /> Mostrar capacidade</label>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCondicao} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCondicao: event.target.checked }))} /> Mostrar condição</label>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarImei} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarImei: event.target.checked }))} /> Mostrar IMEI</label>
             </div>
 
-            <div className="flex justify-end gap-2 px-[1.125rem] pb-[1.125rem]">
-              <Button variant="outline" onClick={() => setShowEditor(false)}>Cancelar</Button>
-              <Button onClick={salvarModelo}>Salvar Modelo</Button>
+            <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
+              <Button variant="outline" onClick={() => setShowEditor(false)} className="rounded-xl">Cancelar</Button>
+              <Button onClick={salvarModelo} className="bg-blue-600 hover:bg-blue-700 font-bold rounded-xl shadow-lg shadow-blue-500/20">Salvar Modelo</Button>
             </div>
-          </GlassCard>
+          </div>
         </div>
       )}
     </div>

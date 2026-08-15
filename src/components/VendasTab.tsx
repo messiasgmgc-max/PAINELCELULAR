@@ -1244,12 +1244,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           }
         }
 
-        toast.success('Venda apagada e estoque recuperado, sô!');
+        toast.success('Venda excluída e estoque recuperado com sucesso.');
         await carregarVendas();
       } catch (error: any) {
-        console.error('Erro macabro ao deletar venda:', error);
-        // Agora cê vai ver na cara qual é o erro que o Supabase tá dando!
-        toast.error(`Deu merda: ${error?.message || 'Falha desconhecida, abre o F12 aí'}`);
+        console.error('Erro ao excluir venda:', error);
+        toast.error('Erro ao excluir venda: ' + (error?.message || 'Falha no servidor'));
       }
     }
   };
