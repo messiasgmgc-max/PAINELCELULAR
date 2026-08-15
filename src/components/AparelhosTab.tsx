@@ -12,6 +12,13 @@ import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
 import { getAparelhoCodigo } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function AparelhosTab() {
   const {
@@ -1319,48 +1326,42 @@ export function AparelhosTab() {
                 <History className="h-4 w-4" /> Saídas
               </Button>
               {/* Dropdown Exportar */}
-              <div className="relative shrink-0">
-                <Button
-                  variant="outline"
-                  disabled={aparelhosAtivos.length === 0}
-                  onClick={() => setShowExportMenu((v) => !v)}
-                  className="whitespace-nowrap h-9 gap-1.5"
-                >
-                  <Download className="h-4 w-4" />
-                  Exportar
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showExportMenu ? "rotate-180" : ""}`} />
-                </Button>
-
-                {showExportMenu && (
-                  <>
-                    {/* fechar ao clicar fora */}
-                    <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
-                    <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[180px] rounded-xl border border-white/15 bg-slate-900/98 dark:bg-slate-950/98 shadow-2xl backdrop-blur-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-                      <button
-                        onClick={() => { handleExportCSV(); setShowExportMenu(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-slate-200 hover:bg-white/10 transition-colors text-left"
-                      >
-                        <FileSpreadsheet className="h-4 w-4 text-emerald-400" />
-                        <div>
-                          <div className="font-medium">Exportar CSV</div>
-                          <div className="text-[10px] text-slate-400">Planilha completa</div>
-                        </div>
-                      </button>
-                      <div className="h-px bg-white/8 mx-3" />
-                      <button
-                        onClick={() => { handleExportWhatsApp(); setShowExportMenu(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-slate-200 hover:bg-white/10 transition-colors text-left"
-                      >
-                        <MessageCircle className="h-4 w-4 text-green-400" />
-                        <div>
-                          <div className="font-medium">Lista WhatsApp</div>
-                          <div className="text-[10px] text-slate-400">Copia pro grupo de estoque</div>
-                        </div>
-                      </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    disabled={aparelhosAtivos.length === 0}
+                    className="whitespace-nowrap h-9 gap-1.5 shrink-0 border-white/20 hover:bg-white/10"
+                  >
+                    <Download className="h-4 w-4 text-blue-400" />
+                    Exportar
+                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56 bg-slate-900 border border-white/20 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
+                  <DropdownMenuItem
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-white/10 focus:bg-white/10 cursor-pointer text-slate-200"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Exportar CSV</div>
+                      <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
                     </div>
-                  </>
-                )}
-              </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-white/10 my-1" />
+                  <DropdownMenuItem
+                    onClick={handleExportWhatsApp}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-white/10 focus:bg-white/10 cursor-pointer text-slate-200"
+                  >
+                    <MessageCircle className="h-4 w-4 text-green-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Lista WhatsApp</div>
+                      <div className="text-[10px] text-slate-400">Copia formatada para enviar no grupo</div>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap h-9">
                 <List className="h-4 w-4" /> Lista Fornecedor
               </Button>
