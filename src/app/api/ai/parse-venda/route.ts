@@ -32,6 +32,7 @@ Estrutura JSON obrigatória:
     "email": string ou null (ex: thiagoamorimc10@yahoo.com.br - PROCURE POR E-mail OU email NO TEXTO!)
   },
   "aparelho": {
+    "codigo": string ou null (opcional: Código/ID do aparelho se informado ex: COD: 8665041, COD 8665041, ID: 8665041 ou #8665041),
     "marca": string ou null (ex: Apple, Samsung, Xiaomi, Motorola),
     "modelo": string ou null (ex: iPhone 13 Pro, Galaxy S23, Redmi Note 12),
     "capacidade": string ou null (ex: 128GB, 256GB, 512GB, 64GB),
@@ -172,6 +173,16 @@ Regras para os camposFaltantes:
         parsedJson.aparelho.condicao = 'novo';
       } else {
         parsedJson.aparelho.condicao = 'seminovo';
+      }
+    }
+
+    // 9. Código / ID do Aparelho Fallback
+    if (!parsedJson.aparelho.codigo) {
+      const codMatch = texto.match(/(?:COD|CÓD|CODIGO|CÓDIGO|ID|ID APARELHO):\s*#?([0-9A-Za-z]{6,12})/i) ||
+                       texto.match(/(?:COD|CÓD)\s+([0-9A-Za-z]{6,12})/i) ||
+                       texto.match(/#([0-9]{6,10})/);
+      if (codMatch) {
+        parsedJson.aparelho.codigo = codMatch[1].trim();
       }
     }
 

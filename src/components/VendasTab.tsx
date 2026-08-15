@@ -174,7 +174,7 @@ function ProdutoCombobox({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1.5 w-full min-w-[320px] md:min-w-[460px] bg-slate-900/98 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl z-[999] overflow-hidden flex flex-col max-h-80 animate-in fade-in slide-in-from-top-1 duration-150">
+        <div className="absolute left-0 top-full mt-1.5 w-full min-w-[340px] sm:min-w-[500px] md:min-w-[620px] bg-slate-900/98 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-[9999] overflow-hidden flex flex-col max-h-84 animate-in fade-in slide-in-from-top-1 duration-150">
           <div className="p-2.5 border-b border-white/10 bg-black/40 flex items-center gap-2">
             <Search className="w-4 h-4 text-emerald-400 shrink-0 ml-1" />
             <input
@@ -920,26 +920,44 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       const faltantes = parsed.camposFaltantes || [];
 
+      // Tenta encontrar e pré-selecionar o aparelho do estoque por Código/ID, IMEI ou Modelo
+      let matchedStockId = '';
+      const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+      const codAi = String(parsed.aparelho?.codigo || '').toLowerCase().replace(/\D/g, '');
+      if (codAi) {
+        const apMatch = disponiveis.find(a => getAparelhoCodigo(a).includes(codAi));
+        if (apMatch) matchedStockId = apMatch.id;
+      }
+      if (!matchedStockId && parsed.aparelho?.imei) {
+        const apMatch = disponiveis.find(a => a.imei && a.imei.toLowerCase() === parsed.aparelho.imei.toLowerCase());
+        if (apMatch) matchedStockId = apMatch.id;
+      }
+      if (!matchedStockId && parsed.aparelho?.modelo) {
+        const apMatch = disponiveis.find(a => `${a.marca} ${a.modelo}`.toLowerCase().includes(parsed.aparelho.modelo.toLowerCase()));
+        if (apMatch) matchedStockId = apMatch.id;
+      }
+
       if (faltantes.length > 0) {
         setAiParsedData(parsed);
+        const apPreSel = matchedStockId ? disponiveis.find(a => a.id === matchedStockId) : null;
         setDadosFaltantesForm({
           clienteNome: parsed.cliente?.nome || '',
           clienteTelefone: parsed.cliente?.telefone || '',
           clienteEmail: parsed.cliente?.email || '',
-          marca: parsed.aparelho?.marca || 'Apple',
-          modelo: parsed.aparelho?.modelo || '',
-          capacidade: parsed.aparelho?.capacidade || '128GB',
-          cor: parsed.aparelho?.cor || '',
-          condicao: (parsed.aparelho?.condicao === 'novo' ? 'novo' : 'seminovo') as 'seminovo' | 'novo',
-          imei: parsed.aparelho?.imei || '',
-          preco: parsed.aparelho?.preco ? String(parsed.aparelho.preco) : parsed.valorTotal ? String(parsed.valorTotal) : '',
-          custo: parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
+          marca: apPreSel ? apPreSel.marca : parsed.aparelho?.marca || 'Apple',
+          modelo: apPreSel ? apPreSel.modelo : parsed.aparelho?.modelo || '',
+          capacidade: apPreSel ? (apPreSel.capacidade || '128GB') : parsed.aparelho?.capacidade || '128GB',
+          cor: apPreSel ? (apPreSel.cor || '') : parsed.aparelho?.cor || '',
+          condicao: (apPreSel ? apPreSel.condicao : parsed.aparelho?.condicao === 'novo' ? 'novo' : 'seminovo') as 'seminovo' | 'novo',
+          imei: apPreSel ? (apPreSel.imei || apPreSel.numeroSerie || '') : parsed.aparelho?.imei || '',
+          preco: apPreSel ? String(apPreSel.preco) : parsed.aparelho?.preco ? String(parsed.aparelho.preco) : parsed.valorTotal ? String(parsed.valorTotal) : '',
+          custo: apPreSel ? String((apPreSel as any).custo || 0) : parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
           formaPagamento: parsed.formaPagamento || 'pix',
           dataVenda: parsed.dataVenda ? parsed.dataVenda.slice(0, 10) : new Date().toISOString().slice(0, 10),
           observacoes: parsed.observacoes || '',
         });
-        setSelectedStockAparelhoId('');
+        setSelectedStockAparelhoId(matchedStockId);
         setShowDadosFaltantesModal(true);
       } else {
         await aplicarVendaAI(parsed);
@@ -2514,7 +2532,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           <div>
                             <label className="text-[11px] text-gray-500 ml-1">Método {index + 1}</label>
                             <select
-                              className="input-glass"
+                              className="input-glass bg-slate-950/80 text-white border border-white/20 focus:bg-slate-950 focus:text-white"
                               value={pagamento.metodo}
                               onChange={(e) => handleUpdatePagamento(pagamento.id, { metodo: e.target.value as Venda['metodo'] })}
                             >
@@ -2530,7 +2548,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                             <input
                               type="text"
                               inputMode="numeric"
-                              className="input-glass font-bold text-green-600"
+                              className="input-glass font-bold text-emerald-400 bg-slate-950/90 border border-white/20 focus:bg-slate-950 focus:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                               placeholder="0,00"
                               value={formatCurrencyField(pagamento.valor || 0)}
                               onChange={(e) => handleUpdatePagamento(pagamento.id, { valor: parseCurrencyField(e.target.value) })}
@@ -2539,7 +2557,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           <div>
                             <label className="text-[11px] text-gray-500 ml-1">Parcelas</label>
                             <select
-                              className="input-glass"
+                              className="input-glass bg-slate-950/80 text-white border border-white/20 focus:bg-slate-950 focus:text-white"
                               value={pagamento.parcelas}
                               disabled={pagamento.metodo !== 'cartao_credito'}
                               onChange={(e) => handleUpdatePagamento(pagamento.id, { parcelas: parseInt(e.target.value) })}
@@ -3244,11 +3262,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 <label className="text-xs font-bold text-blue-400 uppercase flex items-center gap-1.5">
                   <ShoppingCart className="w-4 h-4" /> Selecionar Aparelho do Estoque (Opcional)
                 </label>
-                <select
-                  className="input-glass text-xs"
+                <ComboboxAparelhos
+                  aparelhos={aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido')}
                   value={selectedStockAparelhoId}
-                  onChange={(e) => {
-                    const selectedId = e.target.value;
+                  onChange={(selectedId) => {
                     setSelectedStockAparelhoId(selectedId);
                     if (selectedId) {
                       const ap = aparelhos.find(a => a.id === selectedId);
@@ -3266,14 +3283,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       }
                     }
                   }}
-                >
-                  <option value="">-- Escolha um aparelho do estoque ou preencha manualmente abaixo --</option>
-                  {aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido').map(a => (
-                    <option key={a.id} value={a.id}>
-                      [ID: {getAparelhoCodigo(a)}] {a.marca} {a.modelo} {a.capacidade} ({a.cor || 'Sem cor'}) - IMEI: {a.imei || 'N/A'} - R$ {a.preco}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               {/* Formulário de Preenchimento Manual Rápido */}
