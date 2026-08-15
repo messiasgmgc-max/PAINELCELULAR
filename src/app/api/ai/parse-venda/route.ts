@@ -35,7 +35,8 @@ Estrutura JSON obrigatória:
     "modelo": string ou null (ex: iPhone 13 Pro, Galaxy S23, Redmi Note 12),
     "capacidade": string ou null (ex: 128GB, 256GB, 512GB, 64GB),
     "cor": string ou null (ex: Grafite, Preto, Azul, Dourado, Branco),
-    "imei": string ou null (apenas números ou texto do IMEI/Série se informado),
+    "condicao": string ou null (deve ser "novo" se for lacrado/novo ou "seminovo" se usado/seminovo),
+    "imei": string ou null (opcional: IMEI/Nº de Série se informado),
     "preco": number ou null (valor unitário do aparelho em R$),
     "custo": number ou null (valor de custo em R$ se informado)
   },
@@ -48,8 +49,8 @@ Estrutura JSON obrigatória:
 }
 
 Regras para os camposFaltantes:
-- Um celular exige obrigatoriamente: "modelo", "capacidade", "imei", "valorTotal", "formaPagamento" e "dataVenda".
-- Se algum desses 6 campos cruciais não puder ser identificado com clareza no texto, adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["imei", "dataVenda"].
+- Um celular exige obrigatoriamente: "modelo", "capacidade", "valorTotal", "formaPagamento" e "dataVenda" (O IMEI É OPCIONAL, NÃO coloque imei em camposFaltantes).
+- Se algum desses 5 campos cruciais não puder ser identificado com clareza no texto, adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["dataVenda"].
 - Se todos estiverem preenchidos no texto, "camposFaltantes" deve ser um array vazio [].
 - Retorne APENAS o JSON puro.`;
 
@@ -156,18 +157,25 @@ Regras para os camposFaltantes:
       }
     }
 
-    // Pós-processamento e sanitização dos camposFaltantes
-    const camposFaltantes: string[] = Array.isArray(parsedJson.camposFaltantes) ? parsedJson.camposFaltantes : [];
+    // 7. Condição Fallback (novo vs seminovo)
+    if (!parsedJson.aparelho.condicao) {
+      if (/lacrado|novo|caixa fechada/i.test(texto)) {
+        parsedJson.aparelho.condicao = 'novo';
+      } else {
+        parsedJson.aparelho.condicao = 'seminovo';
+      }
+    }
+
+    // Pós-processamento e sanitização dos camposFaltantes (IMEI É OPCIONAL)
+    const camposFaltantes: string[] = (Array.isArray(parsedJson.camposFaltantes) ? parsedJson.camposFaltantes : [])
+      .filter((c: string) => c !== 'imei'); // Remover IMEI de campos faltantes
     
-    // Verificação de segurança adicional para campos cruciais
+    // Verificação de segurança para campos cruciais (sem IMEI)
     if (!parsedJson.aparelho?.modelo && !camposFaltantes.includes('modelo')) {
       camposFaltantes.push('modelo');
     }
     if (!parsedJson.aparelho?.capacidade && !camposFaltantes.includes('capacidade')) {
       camposFaltantes.push('capacidade');
-    }
-    if (!parsedJson.aparelho?.imei && !camposFaltantes.includes('imei')) {
-      camposFaltantes.push('imei');
     }
     if ((parsedJson.valorTotal === null || parsedJson.valorTotal === undefined || parsedJson.valorTotal <= 0) && !camposFaltantes.includes('valorTotal')) {
       camposFaltantes.push('valorTotal');

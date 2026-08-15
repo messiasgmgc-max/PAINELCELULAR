@@ -293,6 +293,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     modelo: '',
     capacidade: '128GB',
     cor: '',
+    condicao: 'seminovo' as 'seminovo' | 'novo',
     imei: '',
     preco: '',
     custo: '',
@@ -768,11 +769,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             marca: parsedData.aparelho.marca || 'Apple',
             modelo: parsedData.aparelho.modelo,
             capacidade: parsedData.aparelho.capacidade || '128GB',
-            cor: parsedData.aparelho.cor || 'Preto',
+            cor: parsedData.aparelho.cor || '',
             imei: parsedData.aparelho.imei || '',
             preco: Number(parsedData.aparelho.preco || parsedData.valorTotal || 0),
             custo: Number(parsedData.aparelho.custo || 0),
-            condicao: 'seminovo',
+            condicao: parsedData.aparelho.condicao || 'seminovo',
             ativo: true,
             loja_id: usuario?.lojaId || null
           }])
@@ -792,10 +793,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                          parsedData.formaPagamento === 'cartao_debito' ? 'cartao_debito' :
                                          parsedData.formaPagamento === 'dinheiro' ? 'dinheiro' : 'outros';
 
+      const condicaoTexto = (parsedData.aparelho?.condicao || aparelhoFinal?.condicao) === 'novo' ? 'Lacrado' : 'Seminovo';
       const cartItem: VendaItem = {
         id: Date.now().toString(),
         aparelhoId: aparelhoFinal?.id,
-        descricao: `${parsedData.aparelho?.marca || 'Aparelho'} ${parsedData.aparelho?.modelo || ''} ${parsedData.aparelho?.capacidade || ''}`.trim(),
+        descricao: `${parsedData.aparelho?.marca || 'Aparelho'} ${parsedData.aparelho?.modelo || ''} ${parsedData.aparelho?.capacidade || ''} ${parsedData.aparelho?.cor || ''} (${condicaoTexto})`.trim(),
         quantidade: 1,
         valorInterno: custoVenda,
         valorExibir: valorVenda,
@@ -908,6 +910,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           modelo: parsed.aparelho?.modelo || '',
           capacidade: parsed.aparelho?.capacidade || '128GB',
           cor: parsed.aparelho?.cor || '',
+          condicao: (parsed.aparelho?.condicao === 'novo' ? 'novo' : 'seminovo') as 'seminovo' | 'novo',
           imei: parsed.aparelho?.imei || '',
           preco: parsed.aparelho?.preco ? String(parsed.aparelho.preco) : parsed.valorTotal ? String(parsed.valorTotal) : '',
           custo: parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
@@ -3327,15 +3330,32 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                    <span>IMEI / Nº de Série <span className="text-red-400">*</span></span>
-                    {aiParsedData?.camposFaltantes?.includes('imei') && (
-                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
-                    )}
-                  </label>
+                  <label className="text-xs font-bold text-slate-300">Condição do Aparelho</label>
+                  <select
+                    className="input-glass mt-1 font-semibold text-emerald-400"
+                    value={dadosFaltantesForm.condicao}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, condicao: e.target.value as 'seminovo' | 'novo'})}
+                  >
+                    <option value="seminovo">Seminovo</option>
+                    <option value="novo">Novo / Lacrado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Cor do Aparelho</label>
                   <input
                     type="text"
-                    required
+                    className="input-glass mt-1"
+                    placeholder="Ex: Grafite, Preto, Azul, Dourado..."
+                    value={dadosFaltantesForm.cor}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, cor: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300">IMEI / Nº de Série (Opcional)</label>
+                  <input
+                    type="text"
                     className="input-glass mt-1 font-mono"
                     placeholder="Ex: 358921098492041"
                     value={dadosFaltantesForm.imei}
@@ -3417,8 +3437,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   type="button"
                   className="flex-1 bg-green-600 hover:bg-green-700 font-bold shadow-lg shadow-green-500/20"
                   onClick={async () => {
-                    if (!dadosFaltantesForm.modelo || !dadosFaltantesForm.imei || !dadosFaltantesForm.preco || !dadosFaltantesForm.dataVenda) {
-                      toast.error('Preencha a Data da Venda, modelo, IMEI e valor do aparelho!');
+                    if (!dadosFaltantesForm.modelo || !dadosFaltantesForm.preco || !dadosFaltantesForm.dataVenda) {
+                      toast.error('Preencha a Data da Venda, modelo e valor do aparelho!');
                       return;
                     }
                     setShowDadosFaltantesModal(false);
@@ -3433,6 +3453,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         modelo: dadosFaltantesForm.modelo,
                         capacidade: dadosFaltantesForm.capacidade,
                         cor: dadosFaltantesForm.cor,
+                        condicao: dadosFaltantesForm.condicao,
                         imei: dadosFaltantesForm.imei,
                         preco: Number(dadosFaltantesForm.preco),
                         custo: Number(dadosFaltantesForm.custo),
