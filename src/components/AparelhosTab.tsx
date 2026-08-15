@@ -406,23 +406,6 @@ export function AparelhosTab() {
   };
 
   const handleProcessMercadoPhoneList = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    let currentLojaId = null;
-
-    if (session?.user?.email) {
-      const { data: perfil } = await supabase
-        .from('perfis')
-        .select('loja_id')
-        .eq('email', session.user.email)
-        .maybeSingle();
-      if (perfil?.loja_id) currentLojaId = perfil.loja_id;
-    }
-
-    if (!currentLojaId) {
-      toast.error('Loja não identificada para o cadastro.');
-      return;
-    }
-
     const margem = parseFloat(mercadoPhoneMargem) || 0;
     const itens = parseMercadoPhoneList(mercadoPhoneText, margem);
 
@@ -435,76 +418,84 @@ export function AparelhosTab() {
     const toastId = toast.loading(`Processando ${itens.length} aparelhos...`);
 
     try {
-      // 1. Buscar todos os aparelhos existentes da loja para verificar duplicidade por IMEI / Número de Série
       const { data: aparelhosExistentes, error: searchError } = await supabase
         .from('aparelhos')
         .select('*')
-        .eq('loja_id', currentLojaId);
+        .eq('loja_id', currentLojaId || usuario?.lojaId);
 
-      if (searchError) throw searchError;
+      if (searchError) console.warn('Erro ao buscar existentes:', searchError);
 
-      const existentes = aparelhosExistentes || [];
+      const existentes = aparelhosExistentes || aparelhos || [];
       let novosCadastrados = 0;
       let existentesAtualizados = 0;
 
       for (const item of itens) {
-        // Busca se já existe por IMEI (4 últimos dígitos) ou ID de etiqueta
-        const existente = existentes.find(a => 
-          (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) ||
-          (item.idEtiqueta && a.numeroSerie === item.idEtiqueta)
-        );
+        // Busca equivalente existente no banco por Código, ID de Etiqueta, IMEI ou Número de Série
+        const existente = existentes.find(a => {
+          const cod = getAparelhoCodigo(a);
+          if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
+          if (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
+          if (item.idEtiqueta && a.numeroSerie && a.numeroSerie === item.idEtiqueta) return true;
+          if (item.idEtiqueta && a.observacoes && a.observacoes.includes(item.idEtiqueta)) return true;
+          return false;
+        });
 
-        const idEtiquetaFinal = existente?.numeroSerie || item.idEtiqueta;
+        const idEtiquetaFinal = existente ? getAparelhoCodigo(existente) : item.idEtiqueta;
         const obsString = [
           item.observacoes ? `Obs: ${item.observacoes}` : '',
-          `ID Etiqueta: ${idEtiquetaFinal}`,
+          `ID: ${idEtiquetaFinal}`,
           item.bateria ? `Bateria: ${item.bateria}` : '',
-          item.sufixoSerial ? `IMEI (últimos dígitos): ${item.sufixoSerial}` : ''
+          item.sufixoSerial ? `IMEI: ${item.sufixoSerial}` : ''
         ].filter(Boolean).join(' | ');
 
         if (existente) {
-          // Atualiza dados do aparelho existente com as novas informações da lista diária
+          const updatePayload: any = {
+            modelo: item.modelo,
+            capacidade: item.capacidade,
+            cor: item.cor,
+            condicao: item.condicao,
+            preco: item.preco,
+            custo: item.custo > 0 ? item.custo : existente.custo,
+            observacoes: obsString,
+            ativo: true,
+          };
+          if (item.bateria) {
+            updatePayload.saudeBateria = item.bateria;
+            updatePayload.saude_bateria = item.bateria;
+          }
+
           const { error: updateErr } = await supabase
             .from('aparelhos')
-            .update({
-              modelo: item.modelo,
-              capacidade: item.capacidade,
-              cor: item.cor,
-              condicao: item.condicao,
-              preco: item.preco,
-              custo: item.custo > 0 ? item.custo : existente.custo,
-              observacoes: obsString,
-              ativo: true,
-            })
+            .update(updatePayload)
             .eq('id', existente.id);
 
-          if (updateErr) console.error('Erro ao atualizar aparelho:', updateErr);
-          else existentesAtualizados++;
+          if (updateErr) {
+            delete updatePayload.saudeBateria;
+            delete updatePayload.saude_bateria;
+            await supabase.from('aparelhos').update(updatePayload).eq('id', existente.id);
+          }
+          existentesAtualizados++;
         } else {
-          // Cadastra novo aparelho se não encontrou IMEI/ID existente
-          const { error: insertErr } = await supabase
-            .from('aparelhos')
-            .insert({
-              loja_id: currentLojaId,
-              marca: item.marca,
-              modelo: item.modelo,
-              imei: item.sufixoSerial || idEtiquetaFinal,
-              numeroSerie: idEtiquetaFinal,
-              cor: item.cor,
-              capacidade: item.capacidade,
-              condicao: item.condicao,
-              preco: item.preco,
-              custo: item.custo,
-              descricao: item.raw,
-              cliente: '',
-              clienteId: null,
-              acessorios: '',
-              observacoes: obsString,
-              ativo: true,
-            });
-
-          if (insertErr) console.error('Erro ao cadastrar novo aparelho:', insertErr);
-          else novosCadastrados++;
+          await criarAparelho({
+            marca: item.marca,
+            modelo: item.modelo,
+            imei: item.sufixoSerial || idEtiquetaFinal,
+            numeroSerie: idEtiquetaFinal,
+            codigo: idEtiquetaFinal,
+            cor: item.cor,
+            capacidade: item.capacidade,
+            condicao: item.condicao,
+            saudeBateria: item.bateria || '',
+            preco: String(item.preco),
+            custo: String(item.custo),
+            descricao: item.raw,
+            cliente: '',
+            clienteId: null,
+            acessorios: '',
+            observacoes: obsString,
+            ativo: true,
+          } as any);
+          novosCadastrados++;
         }
       }
 
@@ -521,8 +512,6 @@ export function AparelhosTab() {
   };
 
   const handleRemontarEstoqueMercadoPhone = async () => {
-    if (!currentLojaId) return;
-
     const margem = parseFloat(mercadoPhoneMargem) || 0;
     const itensImportados = parseMercadoPhoneList(mercadoPhoneText, margem);
 
@@ -531,95 +520,93 @@ export function AparelhosTab() {
       return;
     }
 
-    if (!window.confirm(`ATENÇÃO: Deseja REMONTAR o estoque com base nesta lista?
-- Aparelhos que NÃO estiverem nesta lista serão marcados como VENDIDOS.
-- Novos aparelhos da lista serão CADASTRADOS no estoque.
-- Aparelhos mantidos terão seus dados e preço atualizados.`)) {
-      return;
-    }
-
     setImportingMercadoPhone(true);
-    const toastId = toast.loading('Remontando estoque com a nova lista...');
+    const toastId = toast.loading(`Remontando estoque (${itensImportados.length} aparelhos)...`);
 
     try {
-      // 1. Buscar todos os aparelhos ATIVOS da loja no banco
       const { data: aparelhosDoBanco, error: fetchErr } = await supabase
         .from('aparelhos')
         .select('*')
-        .eq('loja_id', currentLojaId)
-        .eq('ativo', true);
+        .eq('loja_id', currentLojaId || usuario?.lojaId);
 
-      if (fetchErr) throw fetchErr;
+      if (fetchErr) console.warn('Aviso ao buscar banco:', fetchErr);
 
-      const ativosAtuais = (aparelhosDoBanco || []).filter(a => a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+      const ativosAtuais = (aparelhosDoBanco || aparelhos || []).filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
 
       const ativosMantidosIds = new Set<string>();
       let novosInseridos = 0;
       let atualizados = 0;
 
       for (const item of itensImportados) {
-        // Procura no banco se já existe equivalente ativo
-        const equivalente = ativosAtuais.find(a => 
-          (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) ||
-          (item.idEtiqueta && a.numeroSerie === item.idEtiqueta)
-        );
+        const equivalente = ativosAtuais.find(a => {
+          const cod = getAparelhoCodigo(a);
+          if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
+          if (item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
+          if (item.idEtiqueta && a.numeroSerie && a.numeroSerie === item.idEtiqueta) return true;
+          if (item.idEtiqueta && a.observacoes && a.observacoes.includes(item.idEtiqueta)) return true;
+          return false;
+        });
 
-        const idEtiquetaFinal = equivalente?.numeroSerie || item.idEtiqueta;
+        const idEtiquetaFinal = equivalente ? getAparelhoCodigo(equivalente) : item.idEtiqueta;
         const obsString = [
           item.observacoes ? `Obs: ${item.observacoes}` : '',
-          `ID Etiqueta: ${idEtiquetaFinal}`,
+          `ID: ${idEtiquetaFinal}`,
           item.bateria ? `Bateria: ${item.bateria}` : '',
-          item.sufixoSerial ? `IMEI (últimos dígitos): ${item.sufixoSerial}` : ''
+          item.sufixoSerial ? `IMEI: ${item.sufixoSerial}` : ''
         ].filter(Boolean).join(' | ');
 
         if (equivalente) {
           ativosMantidosIds.add(equivalente.id);
+          const updatePayload: any = {
+            modelo: item.modelo,
+            capacidade: item.capacidade,
+            cor: item.cor,
+            condicao: item.condicao,
+            preco: item.preco,
+            custo: item.custo > 0 ? item.custo : equivalente.custo,
+            observacoes: obsString,
+            ativo: true,
+          };
+          if (item.bateria) {
+            updatePayload.saudeBateria = item.bateria;
+            updatePayload.saude_bateria = item.bateria;
+          }
+
           const { error: updateErr } = await supabase
             .from('aparelhos')
-            .update({
-              modelo: item.modelo,
-              capacidade: item.capacidade,
-              cor: item.cor,
-              condicao: item.condicao,
-              preco: item.preco,
-              custo: item.custo > 0 ? item.custo : equivalente.custo,
-              observacoes: obsString,
-              ativo: true,
-            })
+            .update(updatePayload)
             .eq('id', equivalente.id);
 
-          if (updateErr) console.error('Erro ao atualizar aparelho:', updateErr);
-          else atualizados++;
+          if (updateErr) {
+            delete updatePayload.saudeBateria;
+            delete updatePayload.saude_bateria;
+            await supabase.from('aparelhos').update(updatePayload).eq('id', equivalente.id);
+          }
+          atualizados++;
         } else {
-          const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-          const { error: insertErr } = await supabase
-            .from('aparelhos')
-            .insert({
-              id: uniqueId,
-              loja_id: currentLojaId,
-              marca: item.marca,
-              modelo: item.modelo,
-              imei: item.sufixoSerial || idEtiquetaFinal,
-              numeroSerie: idEtiquetaFinal,
-              cor: item.cor,
-              capacidade: item.capacidade,
-              condicao: item.condicao,
-              preco: item.preco,
-              custo: item.custo,
-              descricao: item.raw,
-              cliente: '',
-              clienteId: null,
-              acessorios: '',
-              observacoes: obsString,
-              ativo: true,
-            });
-
-          if (insertErr) console.error('Erro ao cadastrar novo aparelho:', insertErr);
-          else novosInseridos++;
+          await criarAparelho({
+            marca: item.marca,
+            modelo: item.modelo,
+            imei: item.sufixoSerial || idEtiquetaFinal,
+            numeroSerie: idEtiquetaFinal,
+            codigo: idEtiquetaFinal,
+            cor: item.cor,
+            capacidade: item.capacidade,
+            condicao: item.condicao,
+            saudeBateria: item.bateria || '',
+            preco: String(item.preco),
+            custo: String(item.custo),
+            descricao: item.raw,
+            cliente: '',
+            clienteId: null,
+            acessorios: '',
+            observacoes: obsString,
+            ativo: true,
+          } as any);
+          novosInseridos++;
         }
       }
 
-      // 2. Dar baixa nos aparelhos ativos que sobram e NÃO vieram na nova lista
       const aparelhosParaDarBaixa = ativosAtuais.filter(a => !ativosMantidosIds.has(a.id));
       let baixados = 0;
 
@@ -633,14 +620,12 @@ export function AparelhosTab() {
           })
           .in('id', idsBaixa);
 
-        if (baixaErr) {
-          console.error('Erro ao dar baixa nos sobravam:', baixaErr);
-        } else {
+        if (!baixaErr) {
           baixados = idsBaixa.length;
         }
       }
 
-      toast.success(`⚡ Estoque Remontado! ${novosInseridos} novos cadastrados, ${atualizados} atualizados e ${baixados} marcados como vendidos.`, { id: toastId });
+      toast.success(`⚡ Estoque Remontado com Sucesso! ${novosInseridos} novos cadastrados, ${atualizados} atualizados e ${baixados} marcados como vendidos.`, { id: toastId });
       await fetchAparelhos();
       setShowMercadoPhoneModal(false);
       setMercadoPhoneText("");
