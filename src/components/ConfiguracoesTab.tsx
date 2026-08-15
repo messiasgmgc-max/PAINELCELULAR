@@ -759,32 +759,6 @@ export function ConfiguracoesTab() {
                   </div>
                 </div>
               </GlassCard>
-
-              {/* Script SQL para Supabase */}
-              <GlassCard className="border-2 border-emerald-500/20 bg-emerald-950/10 rounded-3xl mt-4">
-                <div className="pb-4 border-b border-white/10 mb-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-emerald-400 flex items-center gap-2">
-                      <Database className="w-5 h-5" /> Script SQL do Banco de Dados (Supabase)
-                    </h3>
-                    <p className="text-xs sm:text-sm text-slate-400">
-                      Execute os comandos SQL abaixo no SQL Editor do seu projeto Supabase para habilitar a coluna de garantia em dias e os novos campos de cliente.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-950/80 p-4 rounded-xl font-mono text-xs text-emerald-300 border border-emerald-500/20 overflow-x-auto select-all">
-                  <p className="text-slate-500 mb-2">-- 1. Adicionar colunas de garantia em dias na tabela 'lojas'</p>
-                  <p>ALTER TABLE lojas ADD COLUMN IF NOT EXISTS garantia_dias INTEGER DEFAULT 90;</p>
-                  <p>ALTER TABLE lojas ADD COLUMN IF NOT EXISTS dias_garantia INTEGER DEFAULT 90;</p>
-                  
-                  <p className="text-slate-500 my-2">-- 2. Adicionar coluna de data de nascimento na tabela 'clientes'</p>
-                  <p>ALTER TABLE clientes ADD COLUMN IF NOT EXISTS data_nascimento TEXT;</p>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-2 italic">
-                  💡 Dica: Basta copiar todo o código em verde acima e colar no menu <strong>SQL Editor</strong> dentro do seu painel do Supabase.
-                </p>
-              </GlassCard>
             </div>
           </TabsContent>
 
