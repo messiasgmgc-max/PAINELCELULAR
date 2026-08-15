@@ -192,12 +192,88 @@ export function AparelhosTab() {
     setShowForm(true);
   };
 
-  // Extrai o modelo e a cor exata do iPhone sem separar Pro ou Pro Max
-  const extractIphoneModelAndColor = (str: string): { modelo: string; cor: string } => {
-    const cleanStr = str.replace(/[\s\u00A0\u200B\u200E]+/g, ' ').trim();
+  // Extrator universal de marcas, modelos e cores (iPhones, MacBooks, PS5, Xbox, iPads, Android, etc.)
+  const extractAparelhoBrandModelAndColor = (str: string) => {
+    let cleanStr = str.replace(/[\s\u00A0\u200B\u200E]+/g, ' ').trim();
 
-    const modelPatterns = [
-      // Geração 17
+    // 1. MACBOOKS & NOTEBOOKS (Apple)
+    if (/\bmacbook\b/i.test(cleanStr) || /\bmac\s*book\b/i.test(cleanStr)) {
+      const matchMac = cleanStr.match(/\b(macbook\s*(?:pro|air)?(?:\s*(?:m1|m2|m3|m4)(?:\s*(?:pro|max))?|\s*\d{2,2}")?)\b/i);
+      const modelo = matchMac ? matchMac[0].replace(/\bmacbook\b/i, 'MacBook').trim() : 'MacBook';
+      const cor = cleanStr.replace(matchMac ? matchMac[0] : /macbook/gi, '').replace(/\bapple\b/gi, '').trim() || 'Padrão';
+      return { marca: 'Apple', modelo, cor };
+    }
+
+    // 2. IPADS / TABLETS (Apple / Samsung)
+    if (/\bipad\b/i.test(cleanStr)) {
+      const matchIpad = cleanStr.match(/\b(ipad\s*(?:pro|air|mini)?(?:\s*\d{1,2})?(?:\s*geração|\s*gen)?)\b/i);
+      const modelo = matchIpad ? matchIpad[0].replace(/\bipad\b/i, 'iPad').trim() : 'iPad';
+      const cor = cleanStr.replace(matchIpad ? matchIpad[0] : /ipad/gi, '').replace(/\bapple\b/gi, '').trim() || 'Padrão';
+      return { marca: 'Apple', modelo, cor };
+    }
+
+    // 3. APPLE WATCH (Apple)
+    if (/\bwatch\b/i.test(cleanStr) || /\bapple\s*watch\b/i.test(cleanStr)) {
+      const matchWatch = cleanStr.match(/\b(apple\s*watch\s*(?:ultra\s*2|ultra|series\s*\d|se)?)\b/i) || cleanStr.match(/\b(watch\s*(?:ultra\s*2|ultra|series\s*\d|se)?)\b/i);
+      const modelo = matchWatch ? matchWatch[0].replace(/\bwatch\b/i, 'Watch').trim() : 'Apple Watch';
+      const cor = cleanStr.replace(matchWatch ? matchWatch[0] : /watch/gi, '').replace(/\bapple\b/gi, '').trim() || 'Padrão';
+      return { marca: 'Apple', modelo: modelo.startsWith('Apple') ? modelo : `Apple ${modelo}`, cor };
+    }
+
+    // 4. AIRPODS & FONES (Apple)
+    if (/\bairpods\b/i.test(cleanStr) || /\bairpod\b/i.test(cleanStr)) {
+      const matchPods = cleanStr.match(/\b(airpods\s*(?:pro\s*2|pro|max|\d)?)\b/i);
+      const modelo = matchPods ? matchPods[0] : 'AirPods';
+      const cor = cleanStr.replace(matchPods ? matchPods[0] : /airpods/gi, '').replace(/\bapple\b/gi, '').trim() || 'Branco';
+      return { marca: 'Apple', modelo: `Apple ${modelo}`, cor };
+    }
+
+    // 5. CONSOLES DE VIDEO GAME (Sony PS5/PS4, Microsoft Xbox, Nintendo Switch)
+    if (/\b(ps5|ps4|playstation)\b/i.test(cleanStr)) {
+      const matchPs = cleanStr.match(/\b(playstation\s*5\s*(?:slim|pro|digital)?|ps5\s*(?:slim|pro|digital)?|playstation\s*4\s*(?:slim|pro)?|ps4\s*(?:slim|pro)?)\b/i);
+      const modelo = matchPs ? matchPs[0].toUpperCase().replace('PLAYSTATION', 'PlayStation') : 'PlayStation 5';
+      const cor = cleanStr.replace(matchPs ? matchPs[0] : /ps5|ps4|playstation/gi, '').replace(/\bsony\b/gi, '').trim() || 'Branco';
+      return { marca: 'Sony', modelo, cor };
+    }
+
+    if (/\bxbox\b/i.test(cleanStr)) {
+      const matchXbox = cleanStr.match(/\b(xbox\s*(?:series\s*x|series\s*s|one\s*s|one\s*x|one)?)\b/i);
+      const modelo = matchXbox ? matchXbox[0].replace(/xbox/i, 'Xbox') : 'Xbox';
+      const cor = cleanStr.replace(matchXbox ? matchXbox[0] : /xbox/gi, '').replace(/\bmicrosoft\b/gi, '').trim() || 'Padrão';
+      return { marca: 'Microsoft', modelo, cor };
+    }
+
+    if (/\b(nintendo|switch)\b/i.test(cleanStr)) {
+      const matchSwitch = cleanStr.match(/\b(nintendo\s*switch\s*(?:oled|lite)?|switch\s*(?:oled|lite)?)\b/i);
+      const modelo = matchSwitch ? matchSwitch[0].replace(/nintendo/i, 'Nintendo').replace(/switch/i, 'Switch') : 'Nintendo Switch';
+      const cor = cleanStr.replace(matchSwitch ? matchSwitch[0] : /nintendo|switch/gi, '').trim() || 'Padrão';
+      return { marca: 'Nintendo', modelo, cor };
+    }
+
+    // 6. ANDROID (Samsung, Xiaomi/Redmi/Poco, Motorola)
+    if (/\b(samsung|galaxy)\b/i.test(cleanStr)) {
+      const matchSam = cleanStr.match(/\b(galaxy\s*[a-z0-9\s+]+)\b/i);
+      const modelo = matchSam ? matchSam[0] : 'Galaxy';
+      const cor = cleanStr.replace(matchSam ? matchSam[0] : /samsung|galaxy/gi, '').trim() || 'Padrão';
+      return { marca: 'Samsung', modelo: modelo.startsWith('Galaxy') ? modelo : `Galaxy ${modelo}`, cor };
+    }
+
+    if (/\b(xiaomi|redmi|poco)\b/i.test(cleanStr)) {
+      const matchXio = cleanStr.match(/\b((?:redmi\s*note|redmi|poco|xiaomi)\s*[a-z0-9\s+]+)\b/i);
+      const modelo = matchXio ? matchXio[0] : 'Xiaomi';
+      const cor = cleanStr.replace(matchXio ? matchXio[0] : /xiaomi|redmi|poco/gi, '').trim() || 'Padrão';
+      return { marca: 'Xiaomi', modelo, cor };
+    }
+
+    if (/\b(motorola|moto)\b/i.test(cleanStr)) {
+      const matchMoto = cleanStr.match(/\b((?:moto|edge)\s*[a-z0-9\s+]+)\b/i);
+      const modelo = matchMoto ? matchMoto[0] : 'Motorola';
+      const cor = cleanStr.replace(matchMoto ? matchMoto[0] : /motorola|moto/gi, '').trim() || 'Padrão';
+      return { marca: 'Motorola', modelo, cor };
+    }
+
+    // 7. IPHONES (Gerações 7 a 17)
+    const iphonePatterns = [
       { regex: /\b17\s*pro\s*max\b/i, name: 'iPhone 17 Pro Max' },
       { regex: /\b17\s*pro\b/i, name: 'iPhone 17 Pro' },
       { regex: /\b17\s*plus\b/i, name: 'iPhone 17 Plus' },
@@ -205,7 +281,6 @@ export function AparelhosTab() {
       { regex: /\b17e\b/i, name: 'iPhone 17e' },
       { regex: /\b17\b/i, name: 'iPhone 17' },
 
-      // Geração 16
       { regex: /\b16\s*pro\s*max\b/i, name: 'iPhone 16 Pro Max' },
       { regex: /\b16\s*pro\b/i, name: 'iPhone 16 Pro' },
       { regex: /\b16\s*plus\b/i, name: 'iPhone 16 Plus' },
@@ -213,7 +288,6 @@ export function AparelhosTab() {
       { regex: /\b16e\b/i, name: 'iPhone 16e' },
       { regex: /\b16\b/i, name: 'iPhone 16' },
 
-      // Geração 15
       { regex: /\b15\s*pro\s*max\b/i, name: 'iPhone 15 Pro Max' },
       { regex: /\b15\s*pro\b/i, name: 'iPhone 15 Pro' },
       { regex: /\b15\s*plus\b/i, name: 'iPhone 15 Plus' },
@@ -221,30 +295,25 @@ export function AparelhosTab() {
       { regex: /\b15e\b/i, name: 'iPhone 15e' },
       { regex: /\b15\b/i, name: 'iPhone 15' },
 
-      // Geração 14
       { regex: /\b14\s*pro\s*max\b/i, name: 'iPhone 14 Pro Max' },
       { regex: /\b14\s*pro\b/i, name: 'iPhone 14 Pro' },
       { regex: /\b14\s*plus\b/i, name: 'iPhone 14 Plus' },
       { regex: /\b14\b/i, name: 'iPhone 14' },
 
-      // Geração 13
       { regex: /\b13\s*pro\s*max\b/i, name: 'iPhone 13 Pro Max' },
       { regex: /\b13\s*pro\b/i, name: 'iPhone 13 Pro' },
       { regex: /\b13\s*mini\b/i, name: 'iPhone 13 Mini' },
       { regex: /\b13\b/i, name: 'iPhone 13' },
 
-      // Geração 12
       { regex: /\b12\s*pro\s*max\b/i, name: 'iPhone 12 Pro Max' },
       { regex: /\b12\s*pro\b/i, name: 'iPhone 12 Pro' },
       { regex: /\b12\s*mini\b/i, name: 'iPhone 12 Mini' },
       { regex: /\b12\b/i, name: 'iPhone 12' },
 
-      // Geração 11
       { regex: /\b11\s*pro\s*max\b/i, name: 'iPhone 11 Pro Max' },
       { regex: /\b11\s*pro\b/i, name: 'iPhone 11 Pro' },
       { regex: /\b11\b/i, name: 'iPhone 11' },
 
-      // Outros modelos Apple
       { regex: /\bse\s*3\b/i, name: 'iPhone SE 3' },
       { regex: /\bse\s*2\b/i, name: 'iPhone SE 2' },
       { regex: /\bse\b/i, name: 'iPhone SE' },
@@ -258,19 +327,24 @@ export function AparelhosTab() {
       { regex: /\b7\b/i, name: 'iPhone 7' },
     ];
 
-    for (const p of modelPatterns) {
+    for (const p of iphonePatterns) {
       if (p.regex.test(cleanStr)) {
         const rest = cleanStr.replace(p.regex, '').replace(/iphone/gi, '').trim();
         return {
+          marca: 'Apple',
           modelo: p.name,
           cor: rest || 'Padrão'
         };
       }
     }
 
+    const parts = cleanStr.split(' ');
+    const modelo = parts.slice(0, 2).join(' ') || 'Eletrônico';
+    const cor = parts.slice(2).join(' ') || 'Padrão';
     return {
-      modelo: `iPhone ${cleanStr.split(' ')[0] || 'Genérico'}`,
-      cor: cleanStr.split(' ').slice(1).join(' ') || 'Padrão'
+      marca: 'Outros',
+      modelo,
+      cor
     };
   };
 
@@ -280,26 +354,21 @@ export function AparelhosTab() {
     const aparelhosFormatados: any[] = [];
 
     for (let rawLine of lines) {
-      // Normalização inicial de espaços em branco não-quebráveis (como vindos do WhatsApp/MercadoPhone)
       let line = rawLine.replace(/[\s\u00A0\u200B\u200E]+/g, ' ').trim();
       if (!line) continue;
 
-      // 1. Extrair ID existente (ex: | ID: 9410244)
       let idEtiqueta: string | null = null;
       const matchId = line.match(/\|\s*ID:\s*(\d+)/i) || line.match(/ID:\s*(\d+)/i);
       if (matchId) {
         idEtiqueta = matchId[1];
         line = line.replace(matchId[0], '').trim();
       } else {
-        // Gera um ID numérico de 7 dígitos caso não exista na etiqueta
-        idEtiqueta = String(Math.floor(1000000 + Math.random() * 9000000));
+        idEtiqueta = String(Math.floor(10000000 + Math.random() * 90000000));
       }
 
-      // Remover Emojis e símbolos iniciais (NÃO remover dígitos do modelo como 11, 12, 16, 17!)
       line = line.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s=+\-*•∙]+/gu, '').trim();
       if (!line) continue;
 
-      // 2. Extração de Sufixo / Código / Serial após o hífen (-)
       let mainPart = line;
       let sufixoSerial = '';
       if (line.includes('-')) {
@@ -308,7 +377,6 @@ export function AparelhosTab() {
         sufixoSerial = parts.slice(1).join('-').trim();
       }
 
-      // 3. Extrair Saúde de Bateria (%) ou indicação de Lacrado
       let bateria = '';
       let condicao: "novo" | "seminovo" = "seminovo";
       if (mainPart.toLowerCase().includes('lacrado') || sufixoSerial.toLowerCase().includes('lacrado') || rawLine.toLowerCase().includes('lacrado')) {
@@ -323,15 +391,13 @@ export function AparelhosTab() {
         }
       }
 
-      // 4. Extrair Capacidade (ex: 256gb, 128GB, 512gb, 1TB)
-      let capacidade = '128GB';
+      let capacidade = '';
       const matchRom = mainPart.match(/\b(\d+gb|\d+tb)\b/i);
       if (matchRom) {
         capacidade = matchRom[1].toUpperCase();
         mainPart = mainPart.replace(matchRom[0], '').trim();
       }
 
-      // 5. Extrair Valor de Custo (se houver indicação explícita de valor R$)
       let custoNumerico = 0;
       const matchCustoExplicit = mainPart.match(/R\$\s*([\d\.,]+)/i);
       if (matchCustoExplicit) {
@@ -339,13 +405,10 @@ export function AparelhosTab() {
         mainPart = mainPart.replace(matchCustoExplicit[0], '').trim();
       }
 
-      // 6. Identificar Modelo e Cor usando o extrator dedicado imune a espaços especiais
-      const { modelo, cor: corExtraida } = extractIphoneModelAndColor(mainPart);
+      const { marca: marcaExtraida, modelo, cor: corExtraida } = extractAparelhoBrandModelAndColor(mainPart);
 
-      // 7. Extrair Observações (ex: "msg bateria", "msgdegradada", "TRASEIRA DIEGO", "detalhe", "tela trocada", etc.)
       let observacoesPartes: string[] = [];
 
-      // A) Se no sufixoSerial houver texto além dos 4 dígitos do IMEI (ex: "5039 TRASEIRA DIEGO" ou "5877 msg bateria")
       if (sufixoSerial) {
         const matchSerialWithObs = sufixoSerial.match(/^([A-Za-z0-9]{3,6})\s+(.+)$/);
         if (matchSerialWithObs) {
@@ -355,7 +418,6 @@ export function AparelhosTab() {
         }
       }
 
-      // B) Identificar palavras-chave de observações no modelo/cor/linha
       const regexObsKeywords = /\b(msg\s*degradada|msgdegradada|msg\s*bateria|msgbateria|msg\s*bat|msg\s*tela|msg\s*camera|msg\s*peça|msg\s*peca|traseira\s*[\w\s]*|tampa\s*[\w\s]*|tela\s*trocada|trincad[oa]|detalhe|face\s*id\s*off)\b/gi;
 
       const matchesObsCor = corExtraida.match(regexObsKeywords);
@@ -376,7 +438,6 @@ export function AparelhosTab() {
         });
       }
 
-      // Limpar a COR removendo as observações identificadas
       let corFinal = corExtraida;
       observacoesPartes.forEach(obs => {
         corFinal = corFinal.replace(new RegExp(obs, 'gi'), '');
@@ -389,9 +450,9 @@ export function AparelhosTab() {
       aparelhosFormatados.push({
         raw: rawLine,
         idEtiqueta,
-        marca: 'Apple',
+        marca: marcaExtraida || 'Apple',
         modelo,
-        capacidade,
+        capacidade: capacidade || (marcaExtraida === 'Apple' && modelo.includes('iPhone') ? '128GB' : ''),
         cor,
         condicao,
         bateria,
