@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
 import { useAparelhos } from '@/hooks/useAparelhos';
-import { supabase } from '@/lib/supabaseClient';
+import { getAparelhoCodigo } from '@/lib/utils';
 import { CheckSquare, Pencil, Printer, Plus, Search, Square, Tag, X } from 'lucide-react';
 
 type CampoEtiqueta = 'marcaModelo' | 'codigo' | 'capacidade' | 'condicao' | 'imei' | 'cor' | 'saudeBateria' | 'preco';
@@ -125,12 +125,6 @@ export function EtiquetasTab() {
 
     const encontrado = candidatos.find((valor) => typeof valor === 'string' && valor.trim().length > 0);
     return String(encontrado || '').trim();
-  };
-
-  const getAparelhoCodigo = (aparelho: typeof aparelhosAtivos[number]) => {
-    const identificador = getAparelhoIdentificador(aparelho).replace(/\D/g, '');
-    if (identificador.length >= 4) return identificador.slice(-4);
-    return String(aparelho.id || '').replace(/-/g, '').slice(-6).toUpperCase();
   };
 
   const getAparelhoSaudeBateria = (aparelho: typeof aparelhosAtivos[number]) => {

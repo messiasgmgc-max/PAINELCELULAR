@@ -70,8 +70,10 @@ export function useAparelhos(): UseAparelhosReturn {
       setError(null);
       try {
         const uniqueId = (dados as any)?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+        const codigo8Digitos = String(Math.floor(10000000 + Math.random() * 90000000));
         const rawPayload: Record<string, any> = {
           id: uniqueId,
+          codigo: (dados as any).codigo || codigo8Digitos,
           ...dados,
           loja_id: usuario.lojaId,
           ativo: (dados as any).ativo !== undefined ? (dados as any).ativo : true,
