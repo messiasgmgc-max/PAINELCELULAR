@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw } from "lucide-react";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
+import { useAuth } from "@/hooks/useAuth";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
 import { getAparelhoCodigo } from "@/lib/utils";
@@ -479,10 +480,12 @@ export function AparelhosTab() {
     const toastId = toast.loading(`Processando ${itens.length} aparelhos...`);
 
     try {
-      const { data: aparelhosExistentes, error: searchError } = await supabase
-        .from('aparelhos')
-        .select('*')
-        .eq('loja_id', currentLojaId || usuario?.lojaId);
+      const targetLojaId = usuario?.lojaId;
+      let query = supabase.from('aparelhos').select('*');
+      if (targetLojaId) {
+        query = query.eq('loja_id', targetLojaId);
+      }
+      const { data: aparelhosExistentes, error: searchError } = await query;
 
       if (searchError) console.warn('Erro ao buscar existentes:', searchError);
 
@@ -585,10 +588,12 @@ export function AparelhosTab() {
     const toastId = toast.loading(`Remontando estoque (${itensImportados.length} aparelhos)...`);
 
     try {
-      const { data: aparelhosDoBanco, error: fetchErr } = await supabase
-        .from('aparelhos')
-        .select('*')
-        .eq('loja_id', currentLojaId || usuario?.lojaId);
+      const targetLojaId = usuario?.lojaId;
+      let queryBanco = supabase.from('aparelhos').select('*');
+      if (targetLojaId) {
+        queryBanco = queryBanco.eq('loja_id', targetLojaId);
+      }
+      const { data: aparelhosDoBanco, error: fetchErr } = await queryBanco;
 
       if (fetchErr) console.warn('Aviso ao buscar banco:', fetchErr);
 
