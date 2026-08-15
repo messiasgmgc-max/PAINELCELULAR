@@ -12,6 +12,7 @@ export interface StoreConfig {
   cnpjLoja: string;
   telefoneLoja: string;
   emailLoja: string;
+  garantiaDias: number;
 }
 
 const DEFAULT_CONFIG: StoreConfig = {
@@ -23,6 +24,7 @@ const DEFAULT_CONFIG: StoreConfig = {
   cnpjLoja: 'Não informado',
   telefoneLoja: 'Não informado',
   emailLoja: 'contato@loja.com',
+  garantiaDias: 90,
 };
 
 export function useStoreConfig(providedLojaId?: string | null) {
@@ -93,6 +95,7 @@ export function useStoreConfig(providedLojaId?: string | null) {
             cnpjLoja: lojaDb.cnpj || DEFAULT_CONFIG.cnpjLoja,
             telefoneLoja: lojaDb.telefone || DEFAULT_CONFIG.telefoneLoja,
             emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
+            garantiaDias: Number(lojaDb.garantia_dias || lojaDb.dias_garantia || DEFAULT_CONFIG.garantiaDias),
           };
           setConfig(configDb);
           return;
@@ -147,6 +150,10 @@ export function useStoreConfig(providedLojaId?: string | null) {
         if (novaConfig.cnpjLoja !== undefined) updatePayload.cnpj = novaConfig.cnpjLoja;
         if (novaConfig.telefoneLoja !== undefined) updatePayload.telefone = novaConfig.telefoneLoja;
         if (novaConfig.emailLoja !== undefined) updatePayload.email = novaConfig.emailLoja;
+        if (novaConfig.garantiaDias !== undefined) {
+          updatePayload.garantia_dias = novaConfig.garantiaDias;
+          updatePayload.dias_garantia = novaConfig.garantiaDias;
+        }
 
         const { error } = await supabase
           .from('lojas')

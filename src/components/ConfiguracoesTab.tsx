@@ -32,6 +32,7 @@ export function ConfiguracoesTab() {
   const [enderecoEmpresa, setEnderecoEmpresa] = useState('');
   const [emailEmpresa, setEmailEmpresa] = useState('');
   const [cnpj, setCnpj] = useState('');
+  const [garantiaDias, setGarantiaDias] = useState(90);
 
   const { tecnicos, fetchTecnicos /*, criarTecnico, deletarTecnico (se tiver no seu hook) */ } = useTecnicos();
   const [novoTecnico, setNovoTecnico] = useState('');
@@ -72,6 +73,7 @@ export function ConfiguracoesTab() {
       setCnpj(config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '');
       setTelefoneEmpresa(config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '');
       setEmailEmpresa(config.emailLoja !== 'contato@loja.com' ? config.emailLoja : '');
+      setGarantiaDias(config.garantiaDias || 90);
     }
   }, [config]);
 
@@ -132,6 +134,8 @@ export function ConfiguracoesTab() {
           endereco: enderecoEmpresa,
           email: emailEmpresa,
           cnpj,
+          garantia_dias: Number(garantiaDias),
+          dias_garantia: Number(garantiaDias),
         }).eq('id', usuario.lojaId);
 
         if (error) {
@@ -152,6 +156,7 @@ export function ConfiguracoesTab() {
       enderecoLoja: enderecoEmpresa,
       emailLoja: emailEmpresa,
       cnpjLoja: cnpj,
+      garantiaDias: Number(garantiaDias),
     });
 
     alert('Configurações da empresa salvas com sucesso!');
@@ -724,14 +729,61 @@ export function ConfiguracoesTab() {
                       />
                     </div>
 
+                    <div>
+                      <label className="text-sm font-medium flex items-center justify-between">
+                        <span>Tempo de Garantia Padrão (em Dias)</span>
+                        <Badge variant="outline" className="text-xs font-mono text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+                          {garantiaDias} dias
+                        </Badge>
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="3650"
+                        value={garantiaDias}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setGarantiaDias(Number(e.target.value))}
+                        placeholder="Ex: 90"
+                        className="input-glass mt-2 font-bold text-emerald-400"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Defina o tempo padrão de garantia (em dias) que será aplicado nas novas vendas e recibos. Ex: 90 (para 90 dias), 180 (para 180 dias).
+                      </p>
+                    </div>
+
                     <Button 
                       onClick={handleSalvarConfiguracoes}
-                      className="w-full h-10 sm:h-auto"
+                      className="w-full h-10 sm:h-auto font-bold bg-blue-600 hover:bg-blue-700"
                     >
-                      Salvar Configurações
+                      Salvar Configurações da Empresa
                     </Button>
                   </div>
                 </div>
+              </GlassCard>
+
+              {/* Script SQL para Supabase */}
+              <GlassCard className="border-2 border-emerald-500/20 bg-emerald-950/10 rounded-3xl mt-4">
+                <div className="pb-4 border-b border-white/10 mb-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-emerald-400 flex items-center gap-2">
+                      <Database className="w-5 h-5" /> Script SQL do Banco de Dados (Supabase)
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-400">
+                      Execute os comandos SQL abaixo no SQL Editor do seu projeto Supabase para habilitar a coluna de garantia em dias e os novos campos de cliente.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 p-4 rounded-xl font-mono text-xs text-emerald-300 border border-emerald-500/20 overflow-x-auto select-all">
+                  <p className="text-slate-500 mb-2">-- 1. Adicionar colunas de garantia em dias na tabela 'lojas'</p>
+                  <p>ALTER TABLE lojas ADD COLUMN IF NOT EXISTS garantia_dias INTEGER DEFAULT 90;</p>
+                  <p>ALTER TABLE lojas ADD COLUMN IF NOT EXISTS dias_garantia INTEGER DEFAULT 90;</p>
+                  
+                  <p className="text-slate-500 my-2">-- 2. Adicionar coluna de data de nascimento na tabela 'clientes'</p>
+                  <p>ALTER TABLE clientes ADD COLUMN IF NOT EXISTS data_nascimento TEXT;</p>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2 italic">
+                  💡 Dica: Basta copiar todo o código em verde acima e colar no menu <strong>SQL Editor</strong> dentro do seu painel do Supabase.
+                </p>
               </GlassCard>
             </div>
           </TabsContent>

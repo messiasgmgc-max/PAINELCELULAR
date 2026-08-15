@@ -27,6 +27,7 @@ Estrutura JSON obrigatória:
   "cliente": {
     "nome": string ou null (ex: Nome completo do cliente),
     "cpf": string ou null (ex: 01358726698),
+    "dataNascimento": string ou null (ex: 04/04/1982),
     "telefone": string ou null (ex: 31994848695),
     "email": string ou null (ex: thiagoamorimc10@yahoo.com.br - PROCURE POR E-mail OU email NO TEXTO!)
   },
@@ -49,7 +50,7 @@ Estrutura JSON obrigatória:
 }
 
 Regras para os camposFaltantes:
-- Um celular exige obrigatoriamente: "modelo", "capacidade", "valorTotal", "formaPagamento" e "dataVenda" (O IMEI É OPCIONAL, NÃO coloque imei em camposFaltantes).
+- Um celular exige obrigatoriamente: "modelo", "capacidade", "valorTotal", "formaPagamento" e "dataVenda" (O IMEI, CPF e Data de Nascimento são OPCIONAIS, NÃO coloque imei, cpf ou dataNascimento em camposFaltantes).
 - Se algum desses 5 campos cruciais não puder ser identificado com clareza no texto, adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["dataVenda"].
 - Se todos estiverem preenchidos no texto, "camposFaltantes" deve ser um array vazio [].
 - Retorne APENAS o JSON puro.`;
@@ -129,7 +130,15 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 4. Telefone Fallback
+    // 4. Data de Nascimento Fallback
+    if (!parsedJson.cliente.dataNascimento && !parsedJson.cliente.data_nascimento) {
+      const nascMatch = texto.match(/(?:Data de nascimento|Nascimento|Dt Nasc):\s*([0-9/.-]+)/i);
+      if (nascMatch) {
+        parsedJson.cliente.dataNascimento = nascMatch[1].trim();
+      }
+    }
+
+    // 5. Telefone Fallback
     if (!parsedJson.cliente.telefone) {
       const telMatch = texto.match(/(?:Telefone|WhatsApp|Tel|Celular):\s*([0-9\s()-]+)/i);
       if (telMatch) {
@@ -137,7 +146,7 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 5. Forma de Pagamento Fallback
+    // 6. Forma de Pagamento Fallback
     if (!parsedJson.formaPagamento) {
       if (/\(X\s*\)\s*Pix/i.test(texto)) parsedJson.formaPagamento = 'pix';
       else if (/\(X\s*\)\s*Cartão de crédito/i.test(texto) || /\(X\s*\)\s*Cartao de credito/i.test(texto)) parsedJson.formaPagamento = 'cartao_credito';
@@ -145,7 +154,7 @@ Regras para os camposFaltantes:
       else if (/\(X\s*\)\s*Dinheiro/i.test(texto)) parsedJson.formaPagamento = 'dinheiro';
     }
 
-    // 6. Valor Total Fallback
+    // 7. Valor Total Fallback
     if (!parsedJson.valorTotal || parsedJson.valorTotal <= 0) {
       const valorMatch = texto.match(/(?:Valor total|Total|Valor):\s*R\$\s*([0-9.,]+)/i);
       if (valorMatch) {
@@ -157,7 +166,7 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 7. Condição Fallback (novo vs seminovo)
+    // 8. Condição Fallback (novo vs seminovo)
     if (!parsedJson.aparelho.condicao) {
       if (/lacrado|novo|caixa fechada/i.test(texto)) {
         parsedJson.aparelho.condicao = 'novo';
@@ -166,11 +175,11 @@ Regras para os camposFaltantes:
       }
     }
 
-    // Pós-processamento e sanitização dos camposFaltantes (IMEI É OPCIONAL)
+    // Pós-processamento e sanitização dos camposFaltantes (IMEI, CPF e DataNascimento são OPCIONAIS)
     const camposFaltantes: string[] = (Array.isArray(parsedJson.camposFaltantes) ? parsedJson.camposFaltantes : [])
-      .filter((c: string) => c !== 'imei'); // Remover IMEI de campos faltantes
+      .filter((c: string) => c !== 'imei' && c !== 'cpf' && c !== 'dataNascimento' && c !== 'data_nascimento');
     
-    // Verificação de segurança para campos cruciais (sem IMEI)
+    // Verificação de segurança para campos cruciais
     if (!parsedJson.aparelho?.modelo && !camposFaltantes.includes('modelo')) {
       camposFaltantes.push('modelo');
     }

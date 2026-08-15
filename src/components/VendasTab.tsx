@@ -697,11 +697,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     try {
       toast.info('⚡ Finalizando venda e registrando e-mail...');
 
-      // 1. Garantir e atualizar Cliente com E-mail
+      // 1. Garantir e atualizar Cliente com E-mail, CPF e Data de Nascimento
       let clienteIdFinal = '';
       let clienteNomeFinal = parsedData.cliente?.nome || 'Cliente Consumidor';
       let clienteObj: Cliente | null = null;
       const emailFinal = parsedData.cliente?.email && parsedData.cliente.email !== '' ? parsedData.cliente.email : 'sem@email.com';
+      const cpfFinal = parsedData.cliente?.cpf || '';
+      const nascFinal = parsedData.cliente?.dataNascimento || parsedData.cliente?.data_nascimento || '';
       
       if (parsedData.cliente?.nome || parsedData.cliente?.email) {
         const clienteExistente = clientes.find(c => 
@@ -715,12 +717,20 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           clienteNomeFinal = clienteExistente.nome;
           clienteObj = clienteExistente;
 
+          const clientUpdates: Record<string, any> = {};
           if (emailFinal !== 'sem@email.com' && (!clienteExistente.email || clienteExistente.email === 'sem@email.com')) {
-            await supabase
-              .from('clientes')
-              .update({ email: emailFinal })
-              .eq('id', clienteExistente.id);
-            clienteObj = { ...clienteExistente, email: emailFinal };
+            clientUpdates.email = emailFinal;
+          }
+          if (cpfFinal && (!clienteExistente.cpf || clienteExistente.cpf === '')) {
+            clientUpdates.cpf = cpfFinal;
+          }
+          if (nascFinal && (!(clienteExistente as any).data_nascimento || (clienteExistente as any).data_nascimento === '')) {
+            clientUpdates.data_nascimento = nascFinal;
+          }
+
+          if (Object.keys(clientUpdates).length > 0) {
+            await supabase.from('clientes').update(clientUpdates).eq('id', clienteExistente.id);
+            clienteObj = { ...clienteExistente, ...clientUpdates };
             await fetchClientes();
           }
         } else {
@@ -730,7 +740,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               nome: parsedData.cliente?.nome || 'Cliente Consumidor',
               telefone: parsedData.cliente?.telefone || '00000000000',
               email: emailFinal,
-              cpf: parsedData.cliente?.cpf || '',
+              cpf: cpfFinal,
+              data_nascimento: nascFinal,
               loja_id: usuario?.lojaId || null
             }])
             .select()
@@ -829,7 +840,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         status: 'pago',
         metodo: metodoPgto,
         descricao: `Venda Gerada por IA - ${cartItem.descricao}`,
-        garantia: '90 dias',
+        garantia: `${config?.garantiaDias || 90} dias`,
         descontoTotal: 0,
         pagamentos: [{ id: Date.now().toString(), metodo: metodoPgto, valor: valorVenda, parcelas: 1 }],
         loja_id: usuario?.lojaId || null
