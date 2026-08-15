@@ -19,16 +19,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const systemPrompt = `Você é um assistente especialista em extrair dados de vendas de celulares e eletrônicos para um sistema ERP de gestão de lojas de celulares.
-Sua missão é analisar o texto digitado em português pelo usuário e retornar ESTRITAMENTE um objeto JSON válido (sem qualquer markdown, sem texto extra, sem \`\`\`json).
+    const systemPrompt = `Você é um assistente especialista em extrair dados de formulários e vendas de celulares/eletrônicos para um sistema ERP.
+Sua missão é analisar o texto digitado pelo usuário e retornar ESTRITAMENTE um objeto JSON válido (sem qualquer markdown, sem texto extra, sem \`\`\`json).
 
 Estrutura JSON obrigatória:
 {
   "cliente": {
-    "nome": string ou null,
-    "cpf": string ou null,
-    "telefone": string ou null,
-    "email": string ou null
+    "nome": string ou null (ex: Nome completo do cliente),
+    "cpf": string ou null (ex: 01358726698),
+    "telefone": string ou null (ex: 31994848695),
+    "email": string ou null (ex: thiagoamorimc10@yahoo.com.br - PROCURE POR E-mail OU email NO TEXTO!)
   },
   "aparelho": {
     "marca": string ou null (ex: Apple, Samsung, Xiaomi, Motorola),
@@ -98,6 +98,62 @@ Regras para os camposFaltantes:
         { error: 'Erro no formato retornado pela IA.' },
         { status: 500 }
       );
+    }
+
+    if (!parsedJson.cliente) parsedJson.cliente = {};
+    if (!parsedJson.aparelho) parsedJson.aparelho = {};
+
+    // --- FALLBACKS ROBUSTOS DE REGEX ---
+    // 1. E-mail Regex Fallback
+    if (!parsedJson.cliente.email || parsedJson.cliente.email === 'sem@email.com') {
+      const emailMatch = texto.match(/[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}/i);
+      if (emailMatch) {
+        parsedJson.cliente.email = emailMatch[0].trim();
+      }
+    }
+
+    // 2. Nome Cliente Fallback
+    if (!parsedJson.cliente.nome) {
+      const nameMatch = texto.match(/(?:Nome|Nome completo|Cliente):\s*([^\n\r•]+)/i);
+      if (nameMatch) {
+        parsedJson.cliente.nome = nameMatch[1].trim();
+      }
+    }
+
+    // 3. CPF Fallback
+    if (!parsedJson.cliente.cpf) {
+      const cpfMatch = texto.match(/(?:CPF):\s*([0-9.-]+)/i);
+      if (cpfMatch) {
+        parsedJson.cliente.cpf = cpfMatch[1].trim();
+      }
+    }
+
+    // 4. Telefone Fallback
+    if (!parsedJson.cliente.telefone) {
+      const telMatch = texto.match(/(?:Telefone|WhatsApp|Tel|Celular):\s*([0-9\s()-]+)/i);
+      if (telMatch) {
+        parsedJson.cliente.telefone = telMatch[1].trim();
+      }
+    }
+
+    // 5. Forma de Pagamento Fallback
+    if (!parsedJson.formaPagamento) {
+      if (/\(X\s*\)\s*Pix/i.test(texto)) parsedJson.formaPagamento = 'pix';
+      else if (/\(X\s*\)\s*Cartão de crédito/i.test(texto) || /\(X\s*\)\s*Cartao de credito/i.test(texto)) parsedJson.formaPagamento = 'cartao_credito';
+      else if (/\(X\s*\)\s*Cartão de débito/i.test(texto) || /\(X\s*\)\s*Cartao de debito/i.test(texto)) parsedJson.formaPagamento = 'cartao_debito';
+      else if (/\(X\s*\)\s*Dinheiro/i.test(texto)) parsedJson.formaPagamento = 'dinheiro';
+    }
+
+    // 6. Valor Total Fallback
+    if (!parsedJson.valorTotal || parsedJson.valorTotal <= 0) {
+      const valorMatch = texto.match(/(?:Valor total|Total|Valor):\s*R\$\s*([0-9.,]+)/i);
+      if (valorMatch) {
+        const clean = valorMatch[1].replace(/\./g, '').replace(',', '.');
+        const val = parseFloat(clean);
+        if (!isNaN(val) && val > 0) {
+          parsedJson.valorTotal = val;
+        }
+      }
     }
 
     // Pós-processamento e sanitização dos camposFaltantes

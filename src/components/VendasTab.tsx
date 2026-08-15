@@ -903,6 +903,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         setDadosFaltantesForm({
           clienteNome: parsed.cliente?.nome || '',
           clienteTelefone: parsed.cliente?.telefone || '',
+          clienteEmail: parsed.cliente?.email || '',
           marca: parsed.aparelho?.marca || 'Apple',
           modelo: parsed.aparelho?.modelo || '',
           capacidade: parsed.aparelho?.capacidade || '128GB',
