@@ -92,12 +92,13 @@ function escapeHtml(value: string) {
 }
 
 export function EtiquetasTab() {
-  const { aparelhos, loading } = useAparelhos();
+  const { aparelhos, loading, fetchAparelhos } = useAparelhos();
   const [modelosEtiqueta, setModelosEtiqueta] = useState<ModeloEtiquetaGlobal[]>(DEFAULT_MODELOS);
   const [modeloEtiquetaId, setModeloEtiquetaId] = useState<string>(DEFAULT_MODELOS[0].id);
   const [quantidadePorItem, setQuantidadePorItem] = useState(1);
   const [aparelhosSelecionadosIds, setAparelhosSelecionadosIds] = useState<string[]>([]);
   const [buscaAparelho, setBuscaAparelho] = useState('');
+  const [filtroApenasSemEtiqueta, setFiltroApenasSemEtiqueta] = useState(false);
   const [camposEtiqueta, setCamposEtiqueta] = useState<CampoEtiqueta[]>(['marcaModelo', 'codigo', 'imei', 'capacidade', 'saudeBateria']);
   const [loadingModelosEtiqueta, setLoadingModelosEtiqueta] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
@@ -154,16 +155,25 @@ export function EtiquetasTab() {
   };
 
   const aparelhosVisiveis = useMemo(() => {
-    const termo = buscaAparelho.trim().toLowerCase();
-    if (!termo) return aparelhosAtivos;
+    let lista = aparelhosAtivos;
 
-    return aparelhosAtivos.filter((aparelho) => {
+    if (filtroApenasSemEtiqueta) {
+      lista = lista.filter((aparelho) => {
+        const count = Number((aparelho as any).etiquetas_impressas || (aparelho as any).etiquetasImpressas || 0);
+        return count === 0;
+      });
+    }
+
+    const termo = buscaAparelho.trim().toLowerCase();
+    if (!termo) return lista;
+
+    return lista.filter((aparelho) => {
       const marcador = `${aparelho.marca} ${aparelho.modelo}`.toLowerCase();
       const imei = getAparelhoIdentificador(aparelho).toLowerCase();
       const codigo = getAparelhoCodigo(aparelho).toLowerCase();
       return marcador.includes(termo) || imei.includes(termo) || codigo.includes(termo);
     });
-  }, [aparelhosAtivos, buscaAparelho]);
+  }, [aparelhosAtivos, buscaAparelho, filtroApenasSemEtiqueta]);
 
   const aparelhosSelecionados = useMemo(
     () => aparelhosAtivos.filter((aparelho) => aparelhosSelecionadosIds.includes(aparelho.id)),
@@ -475,9 +485,25 @@ export function EtiquetasTab() {
     `;
   };
 
-  const imprimirEtiquetas = () => {
+  const imprimirEtiquetas = async () => {
     const html = gerarHtmlEtiquetas();
     if (!html) return;
+
+    // Atualizar contagem de etiquetas impressas no Supabase para todos os aparelhos selecionados
+    try {
+      for (const aparelho of aparelhosSelecionados) {
+        const atual = Number((aparelho as any).etiquetas_impressas || (aparelho as any).etiquetasImpressas || 0);
+        const novoValor = atual + Math.max(1, quantidadePorItem);
+        await supabase
+          .from('aparelhos')
+          .update({ etiquetas_impressas: novoValor })
+          .eq('id', aparelho.id);
+      }
+      await fetchAparelhos();
+    } catch (err) {
+      console.error('Erro ao atualizar contagem de etiquetas no Supabase:', err);
+    }
+
     const win = window.open('', '_blank');
     if (!win) {
       alert('Permita pop-up para imprimir as etiquetas.');
@@ -555,14 +581,27 @@ export function EtiquetasTab() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4 mt-1 md:mt-2">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <p className="text-xs font-bold uppercase text-muted-foreground">Aparelhos no estoque da loja atual</p>
-            <button
-              type="button"
-              onClick={toggleSelecionarTodos}
-              className="text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1"
-            >
-              {todosAparelhosSelecionados ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-              {todosAparelhosSelecionados ? 'Desmarcar todos' : 'Marcar todos'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setFiltroApenasSemEtiqueta(!filtroApenasSemEtiqueta)}
+                className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+                  filtroApenasSemEtiqueta
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md'
+                    : 'bg-white/5 text-muted-foreground border-white/10 hover:bg-white/10'
+                }`}
+              >
+                {filtroApenasSemEtiqueta ? '⚡ Ver todos os modelos' : '⚠️ Apenas sem etiqueta'}
+              </button>
+              <button
+                type="button"
+                onClick={toggleSelecionarTodos}
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1"
+              >
+                {todosAparelhosSelecionados ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                {todosAparelhosSelecionados ? 'Desmarcar todos' : 'Marcar todos'}
+              </button>
+            </div>
           </div>
 
           <div className="relative">
@@ -629,6 +668,8 @@ export function EtiquetasTab() {
               const imeiLimpo = imeiTexto.replace(/\D/g, '');
               const imeiFinal = imeiLimpo ? imeiLimpo.slice(-4) : '-';
               const codigo = getAparelhoCodigo(aparelho);
+              const countEtiqueta = Number((aparelho as any).etiquetas_impressas || (aparelho as any).etiquetasImpressas || 0);
+
               return (
                 <label key={aparelho.id} className={`rounded-2xl border p-3 cursor-pointer transition-all ${checked ? 'border-blue-500 bg-blue-500/10 shadow-lg' : 'border-white/10 bg-white/10 hover:bg-white/15'}`}>
                   <div className="flex items-start gap-3">
@@ -647,13 +688,27 @@ export function EtiquetasTab() {
                       <div className="text-xs text-muted-foreground">Cap.: {aparelho.capacidade || '-'}</div>
                       <div className="text-xs text-muted-foreground">IMEI final: {imeiFinal}</div>
                       <div className="text-xs text-muted-foreground">IMEI: {imeiTexto || 'Não informado'}</div>
+
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/10">
+                        {countEtiqueta === 0 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                            ⚠️ Sem etiqueta (0)
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                            🏷️ Emitida {countEtiqueta}x
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </label>
               );
             })}
             {!loading && aparelhosVisiveis.length === 0 && (
-              <div className="text-sm text-muted-foreground">Nenhum modelo ativo no estoque.</div>
+              <div className="text-sm text-muted-foreground">
+                {filtroApenasSemEtiqueta ? 'Nenhum aparelho sem etiqueta pendente.' : 'Nenhum modelo ativo no estoque.'}
+              </div>
             )}
           </div>
         </div>
