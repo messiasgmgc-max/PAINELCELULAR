@@ -73,12 +73,15 @@ export function useAparelhos(): UseAparelhosReturn {
         const codigo8Digitos = String(Math.floor(10000000 + Math.random() * 90000000));
         const rawPayload: Record<string, any> = {
           id: uniqueId,
-          codigo: (dados as any).codigo || codigo8Digitos,
           ...dados,
           loja_id: usuario.lojaId,
           ativo: (dados as any).ativo !== undefined ? (dados as any).ativo : true,
           condicao: dados.condicao || 'seminovo',
         };
+
+        // Remove campos que não são colunas padrão do Supabase para evitar PGRST204
+        delete rawPayload.codigo;
+        delete rawPayload.saudeBateria;
 
         // Evita enviar string vazia para colunas opcionais.
         Object.keys(rawPayload).forEach((key) => {
