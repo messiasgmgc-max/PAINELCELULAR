@@ -250,6 +250,8 @@ function ProdutoCombobox({
   );
 }
 
+const ComboboxAparelhos = ProdutoCombobox;
+
 export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: VendasTabProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
