@@ -33,6 +33,7 @@ import {
   Send,
   Upload,
   FileText,
+  Loader2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -86,6 +87,49 @@ export default function SuperAdminTab() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"dashboard" | "lojas" | "usuarios" | "planos" | "logs" | "aprovacoes">("dashboard");
   
+  // Chave PIX Global de Cobrança
+  const [chavePixGlobal, setChavePixGlobal] = useState("financeiro@phonecenter.com.br");
+  const [salvandoChavePixGlobal, setSalvandoChavePixGlobal] = useState(false);
+
+  useEffect(() => {
+    if (lojas.length > 0) {
+      const lojaComPix = lojas.find(l => l.chave_pix_cobranca && l.chave_pix_cobranca.trim() !== "");
+      if (lojaComPix?.chave_pix_cobranca) {
+        setChavePixGlobal(lojaComPix.chave_pix_cobranca);
+      }
+    }
+  }, [lojas]);
+
+  const handleAplicarChavePixParaTodasLojas = async () => {
+    const chaveLimpa = chavePixGlobal.trim();
+    if (!chaveLimpa) {
+      toast.error("Informe a nova Chave PIX de cobrança.");
+      return;
+    }
+
+    if (!confirm(`Tem certeza que deseja atualizar a Chave PIX de cobrança de TODAS as ${lojas.length} lojas para "${chaveLimpa}"?`)) {
+      return;
+    }
+
+    setSalvandoChavePixGlobal(true);
+    try {
+      const { error } = await supabase
+        .from("lojas")
+        .update({ chave_pix_cobranca: chaveLimpa })
+        .not("id", "is", null);
+
+      if (error) throw error;
+
+      toast.success(`🚀 Chave PIX atualizada com sucesso para todas as ${lojas.length} lojas!`);
+      await fetchDadosGlobais();
+    } catch (err: any) {
+      console.error("Erro ao atualizar Chave PIX global:", err);
+      toast.error(`Erro ao atualizar Chave PIX: ${err?.message || "Falha no servidor"}`);
+    } finally {
+      setSalvandoChavePixGlobal(false);
+    }
+  };
+
   // Modais de Plano
   const [editingPlanoLoja, setEditingPlanoLoja] = useState<Loja | null>(null);
   const [verComprovanteModal, setVerComprovanteModal] = useState<{ lojaNome: string; url: string; observacao?: string } | null>(null);
@@ -1019,6 +1063,43 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
               <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-xs px-3 py-1.5">
                 Receita Estimada: R$ {lojas.reduce((acc, l) => acc + (l.valor_mensalidade || 99.90), 0).toFixed(2).replace('.', ',')} / mês
               </Badge>
+            </div>
+          </div>
+
+          {/* Painel da Chave PIX Global de Cobrança */}
+          <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Key className="w-5 h-5 text-emerald-400" />
+                <h4 className="text-sm font-bold text-white">Chave PIX Global de Cobrança dos Planos</h4>
+              </div>
+              <p className="text-xs text-slate-300">
+                Altere a Chave PIX padrão do sistema e aplique a mudança para <b>TODAS AS LOJAS</b> de uma só vez com um clique.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <input
+                type="text"
+                placeholder="ex: financeiro@sualoja.com ou CPF/CNPJ"
+                value={chavePixGlobal}
+                onChange={(e) => setChavePixGlobal(e.target.value)}
+                className="input-glass font-mono text-emerald-400 text-xs px-3 py-2 flex-1 md:w-72"
+              />
+              <Button
+                onClick={handleAplicarChavePixParaTodasLojas}
+                disabled={salvandoChavePixGlobal}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-1.5 shrink-0"
+              >
+                {salvandoChavePixGlobal ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Atualizando...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5" /> Aplicar para TODAS as Lojas
+                  </>
+                )}
+              </Button>
             </div>
           </div>
 
