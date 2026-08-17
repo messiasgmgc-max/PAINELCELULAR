@@ -55,15 +55,20 @@ Regras para os camposFaltantes:
 - Retorne APENAS o JSON puro.`;
 
       const candidateModels = [
+        'openai/gpt-oss-120b',
+        'openai/gpt-oss-20b',
+        'groq/compound',
+        'groq/compound-mini',
         'llama-3.3-70b-versatile',
         'llama-3.1-8b-instant',
         'llama3-70b-8192',
+        'llama3-8b-8192',
         'mixtral-8x7b-32768'
       ];
 
       for (const model of candidateModels) {
         try {
-          const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          let groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${apiKey}`,
@@ -80,11 +85,32 @@ Regras para os camposFaltantes:
             }),
           });
 
+          // Se o modelo retornar 400 (ex: json_object não suportado), tenta sem o parâmetro response_format
+          if (!groqResponse.ok && groqResponse.status === 400) {
+            groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: trimmedText }
+                ],
+                temperature: 0.1
+              }),
+            });
+          }
+
           if (groqResponse.ok) {
             const groqData = await groqResponse.json();
             const content = groqData.choices?.[0]?.message?.content;
             if (content) {
-              parsedJson = JSON.parse(content);
+              const cleaned = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+              parsedJson = JSON.parse(cleaned);
+              console.log(`✅ Sucesso no modelo Groq: ${model}`);
               break;
             }
           } else {
