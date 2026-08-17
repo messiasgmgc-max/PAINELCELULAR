@@ -1,11 +1,16 @@
 export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForEmail: boolean = false) {
-  const dataAtual = venda.dataPagamento
-    ? new Date(venda.dataPagamento).toLocaleDateString('pt-BR')
-    : new Date().toLocaleDateString('pt-BR');
+  const safeDataPagamento = (() => {
+    if (!venda?.dataPagamento) return new Date();
+    try {
+      const d = new Date(venda.dataPagamento);
+      return isNaN(d.getTime()) ? new Date() : d;
+    } catch {
+      return new Date();
+    }
+  })();
 
-  const horaAtual = venda.dataPagamento
-    ? new Date(venda.dataPagamento).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dataAtual = safeDataPagamento.toLocaleDateString('pt-BR');
+  const horaAtual = safeDataPagamento.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
   const assinaturaEmpresaUrl = loja?.assinatura_url || loja?.assinaturaLoja;
   const logoUrl = loja?.logo_url || loja?.logoLoja;
