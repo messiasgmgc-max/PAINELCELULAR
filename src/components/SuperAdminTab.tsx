@@ -219,34 +219,44 @@ export default function SuperAdminTab() {
       setPerfis(perfisLista);
 
       // 3. Buscar Métricas e Estatísticas por Loja
-      const { data: vendasData } = await supabase.from("vendas").select("loja_id, valorTotal");
-      const { data: aparelhosData } = await supabase.from("aparelhos").select("loja_id").eq("ativo", true);
+      const { data: vendasData } = await supabase.from("vendas").select("id, loja_id, valor, valorTotal");
+      const { data: aparelhosData } = await supabase.from("aparelhos").select("id, loja_id, ativo, condicao, status");
 
       const stats: Record<string, LojaStats> = {};
+      const primaryLojaId = lojasLista[0]?.id ? String(lojasLista[0].id) : null;
 
-      lojasLista.forEach((loja) => {
+      lojasLista.forEach((loja, index) => {
         stats[loja.id] = {
           lojaId: loja.id,
           totalVendas: 0,
           faturamentoTotal: 0,
           totalAparelhos: 0,
-          totalUsuarios: perfisLista.filter((p) => p.loja_id === loja.id).length,
+          totalUsuarios: perfisLista.filter(
+            (p) => String(p.loja_id || "") === String(loja.id) || (!p.loja_id && index === 0)
+          ).length,
         };
       });
 
       if (vendasData) {
         vendasData.forEach((v: any) => {
-          if (v.loja_id && stats[v.loja_id]) {
-            stats[v.loja_id].totalVendas += 1;
-            stats[v.loja_id].faturamentoTotal += Number(v.valorTotal) || 0;
+          const val = Number(v.valor !== undefined && v.valor !== null ? v.valor : v.valorTotal) || 0;
+          const targetId = v.loja_id ? String(v.loja_id) : primaryLojaId;
+          if (targetId && stats[targetId]) {
+            stats[targetId].totalVendas += 1;
+            stats[targetId].faturamentoTotal += val;
           }
         });
       }
 
       if (aparelhosData) {
         aparelhosData.forEach((a: any) => {
-          if (a.loja_id && stats[a.loja_id]) {
-            stats[a.loja_id].totalAparelhos += 1;
+          const isVendido = a.condicao === 'vendido' || (a as any).status === 'vendido';
+          const isAtivo = a.ativo !== false && !isVendido;
+          if (isAtivo) {
+            const targetId = a.loja_id ? String(a.loja_id) : primaryLojaId;
+            if (targetId && stats[targetId]) {
+              stats[targetId].totalAparelhos += 1;
+            }
           }
         });
       }
