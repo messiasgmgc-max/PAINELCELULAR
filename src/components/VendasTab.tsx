@@ -827,9 +827,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         observacao: parsedData.observacoes || (parsedData.aparelho?.imei ? `IMEI: ${parsedData.aparelho.imei}` : '')
       };
 
-      const dataPagamentoIso = parsedData.dataVenda
-        ? (parsedData.dataVenda.includes('T') ? new Date(parsedData.dataVenda).toISOString() : new Date(`${parsedData.dataVenda}T12:00:00`).toISOString())
-        : new Date().toISOString();
+      const dataPagamentoIso = (() => {
+        if (!parsedData.dataVenda) return new Date().toISOString();
+        try {
+          const str = String(parsedData.dataVenda);
+          const d = new Date(str.includes('T') ? str : `${str}T12:00:00`);
+          return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+        } catch (e) {
+          return new Date().toISOString();
+        }
+      })();
 
       const lucroVenda = valorVenda - custoVenda;
       const percentualLucro = valorVenda > 0 ? (lucroVenda / valorVenda) * 100 : 0;
@@ -891,12 +898,14 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       // 6. Gerar Notinha / Recibo A4 automaticamente
       handleGerarReciboA4(vendaCriada);
     } catch (err: any) {
-      console.error('Erro ao aplicar e finalizar venda AI:', err);
-      toast.error(`Erro ao finalizar venda: ${err?.message || 'Falha no processamento'}`);
+      console.error('Erro ao aplicar venda por IA:', err);
+      toast.error(err.message || 'Erro ao finalizar venda por IA');
+    } finally {
+      setProcessingAiText(false);
     }
   };
 
-  const handleProcessarPedido = async () => {
+  const handleProcessarTextoVenda = async () => {
     if (!textoPedido.trim()) {
       toast.error('Cole o texto da venda na área indicada.');
       return;
@@ -954,7 +963,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           custo: apPreSel ? String((apPreSel as any).custo || 0) : parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
           formaPagamento: parsed.formaPagamento || 'pix',
-          dataVenda: parsed.dataVenda ? parsed.dataVenda.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          dataVenda: parsed.dataVenda ? String(parsed.dataVenda).slice(0, 10) : new Date().toISOString().slice(0, 10),
           observacoes: parsed.observacoes || '',
         });
         setSelectedStockAparelhoId(matchedStockId);
@@ -1000,8 +1009,19 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const metodoPrincipal = posPagamento.pagamentos[0]?.metodo || posPagamento.metodo;
       const statusFinal = pagamentosTotal >= valorFinal ? posPagamento.status : 'pendente';
 
+      const dataPagamentoFinalIso = (() => {
+        if (!posDados.dataVenda) return new Date().toISOString();
+        try {
+          const str = String(posDados.dataVenda);
+          const d = new Date(str.includes('T') ? str : `${str}T12:00:00`);
+          return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+        } catch (e) {
+          return new Date().toISOString();
+        }
+      })();
+
       const vendaDados = {
-        clienteId: posDados.clienteId || null, // <--- O SEGREDO PRA SALVAR E EDITAR É ESSE NULL AQUI
+        clienteId: posDados.clienteId || null,
         clienteNome: posDados.clienteNome,
         vendedor: posDados.vendedor,
         tipoEntrega: posDados.tipoEntrega,
@@ -1010,7 +1030,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         custo: custoTotal,
         lucro,
         percentualLucro,
-        dataPagamento: posDados.dataVenda ? new Date(posDados.dataVenda).toISOString() : new Date().toISOString(),
+        dataPagamento: dataPagamentoFinalIso,
         status: statusFinal,
         metodo: metodoPrincipal,
         descricao: `Venda PDV - ${carrinho.length} itens`,
@@ -1022,17 +1042,17 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           valor: Number(pagamento.valor) || 0,
           parcelas: Number(pagamento.parcelas) || 1,
         })),
-        loja_id: usuario?.lojaId || null // <--- SEGURANÇA AQUI TAMBÉM
+        loja_id: usuario?.lojaId || null
       };
 
-      let vendaSalva = null; // DECLARA ESSA CARALHA AQUI
+      let vendaSalva = null;
 
       if (editingId) {
         const { data, error } = await supabase
           .from('vendas')
           .update(vendaDados)
           .eq('id', editingId)
-          .select() // Pede pro Supabase devolver o dado atualizado
+          .select()
           .single();
         if (error) throw error;
         vendaSalva = data;
@@ -1040,7 +1060,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         const { data, error } = await supabase
           .from('vendas')
           .insert([vendaDados])
-          .select() // Pede pro Supabase devolver o dado criado
+          .select()
           .single();
         if (error) throw error;
         vendaSalva = data;
@@ -1088,7 +1108,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               
               <!-- Cabeçalho da Loja -->
               <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 15px; margin-bottom: 20px;">
-                <h1 style="margin: 0; font-size: 22px; text-transform: uppercase;">${config.nomeLoja || 'PHONE CENTER'}</h1>
+                <h1 style="margin: 0; font-size: 22px; text-transform: uppercase;">${config?.nomeLoja || 'PHONE CENTER'}</h1>
                 <p style="margin: 5px 0 0 0; font-size: 12px; color: #555;">Assistência Técnica e Vendas</p>
                 <p style="margin: 2px 0 0 0; font-size: 12px; font-weight: bold;">RECIBO DE VENDA N° ${vendaSalva?.id ? vendaSalva.id.slice(-6).toUpperCase() : '000000'}</p>
               </div>
