@@ -55,7 +55,7 @@ export function useStoreConfig(providedLojaId?: string | null) {
 
       let currentLojaId: string | null = providedLojaId || activeLojaId;
 
-      // Se não foi passado via parâmetro, busca da sessão + tabela 'perfis'
+      // Se não foi passado via parâmetro, busca da sessão + tabela 'perfis' ou pega a primeira loja cadastrada no banco
       if (!currentLojaId) {
         const { data: { session } } = await supabase.auth.getSession();
         const userEmail = session?.user?.email;
@@ -73,33 +73,55 @@ export function useStoreConfig(providedLojaId?: string | null) {
         }
       }
 
+      if (!currentLojaId) {
+        const { data: primeiraLoja } = await supabase
+          .from('lojas')
+          .select('id')
+          .limit(1)
+          .maybeSingle();
+
+        if (primeiraLoja?.id) {
+          currentLojaId = String(primeiraLoja.id);
+        }
+      }
+
+      let lojaDb: any = null;
       if (currentLojaId) {
         setActiveLojaId(currentLojaId);
-        const { data: lojaDb, error } = await supabase
+        const { data: foundLoja } = await supabase
           .from('lojas')
           .select('*')
           .eq('id', currentLojaId)
           .maybeSingle();
+        lojaDb = foundLoja;
+      }
 
-        if (error) {
-          console.error('Erro ao buscar dados da loja no Supabase:', error);
+      if (!lojaDb) {
+        const { data: fallbackLoja } = await supabase
+          .from('lojas')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+        if (fallbackLoja) {
+          lojaDb = fallbackLoja;
+          setActiveLojaId(String(fallbackLoja.id));
         }
+      }
 
-        if (lojaDb) {
-          const configDb: StoreConfig = {
-            nomeLoja: lojaDb.nome || DEFAULT_CONFIG.nomeLoja,
-            subtituloLoja: lojaDb.subtitulo || DEFAULT_CONFIG.subtituloLoja,
-            logoLoja: lojaDb.logo_url || null,
-            assinaturaLoja: lojaDb.assinatura_url || null,
-            enderecoLoja: lojaDb.endereco || DEFAULT_CONFIG.enderecoLoja,
-            cnpjLoja: lojaDb.cnpj || DEFAULT_CONFIG.cnpjLoja,
-            telefoneLoja: lojaDb.telefone || DEFAULT_CONFIG.telefoneLoja,
-            emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
-            garantiaDias: Number(lojaDb.garantia_dias || lojaDb.dias_garantia || DEFAULT_CONFIG.garantiaDias),
-          };
-          setConfig(configDb);
-          return;
-        }
+      if (lojaDb) {
+        const configDb: StoreConfig = {
+          nomeLoja: lojaDb.nome || DEFAULT_CONFIG.nomeLoja,
+          subtituloLoja: lojaDb.subtitulo || DEFAULT_CONFIG.subtituloLoja,
+          logoLoja: lojaDb.logo_url || null,
+          assinaturaLoja: lojaDb.assinatura_url || null,
+          enderecoLoja: lojaDb.endereco || DEFAULT_CONFIG.enderecoLoja,
+          cnpjLoja: lojaDb.cnpj || DEFAULT_CONFIG.cnpjLoja,
+          telefoneLoja: lojaDb.telefone || DEFAULT_CONFIG.telefoneLoja,
+          emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
+          garantiaDias: Number(lojaDb.garantia_dias || lojaDb.dias_garantia || DEFAULT_CONFIG.garantiaDias),
+        };
+        setConfig(configDb);
+        return;
       }
     } catch (error) {
       console.error('Erro ao carregar dados oficiais da loja:', error);
@@ -140,21 +162,30 @@ export function useStoreConfig(providedLojaId?: string | null) {
         }
       }
 
-      if (targetId) {
-        const updatePayload: Record<string, any> = {};
-        if (novaConfig.nomeLoja !== undefined) updatePayload.nome = novaConfig.nomeLoja;
-        if (novaConfig.subtituloLoja !== undefined) updatePayload.subtitulo = novaConfig.subtituloLoja;
-        if (novaConfig.logoLoja !== undefined) updatePayload.logo_url = novaConfig.logoLoja;
-        if (novaConfig.assinaturaLoja !== undefined) updatePayload.assinatura_url = novaConfig.assinaturaLoja;
-        if (novaConfig.enderecoLoja !== undefined) updatePayload.endereco = novaConfig.enderecoLoja;
-        if (novaConfig.cnpjLoja !== undefined) updatePayload.cnpj = novaConfig.cnpjLoja;
-        if (novaConfig.telefoneLoja !== undefined) updatePayload.telefone = novaConfig.telefoneLoja;
-        if (novaConfig.emailLoja !== undefined) updatePayload.email = novaConfig.emailLoja;
-        if (novaConfig.garantiaDias !== undefined) {
-          updatePayload.garantia_dias = novaConfig.garantiaDias;
-          updatePayload.dias_garantia = novaConfig.garantiaDias;
-        }
+      if (!targetId) {
+        const { data: primeiraLoja } = await supabase
+          .from('lojas')
+          .select('id')
+          .limit(1)
+          .maybeSingle();
+        if (primeiraLoja?.id) targetId = String(primeiraLoja.id);
+      }
 
+      const updatePayload: Record<string, any> = {};
+      if (novaConfig.nomeLoja !== undefined) updatePayload.nome = novaConfig.nomeLoja;
+      if (novaConfig.subtituloLoja !== undefined) updatePayload.subtitulo = novaConfig.subtituloLoja;
+      if (novaConfig.logoLoja !== undefined) updatePayload.logo_url = novaConfig.logoLoja;
+      if (novaConfig.assinaturaLoja !== undefined) updatePayload.assinatura_url = novaConfig.assinaturaLoja;
+      if (novaConfig.enderecoLoja !== undefined) updatePayload.endereco = novaConfig.enderecoLoja;
+      if (novaConfig.cnpjLoja !== undefined) updatePayload.cnpj = novaConfig.cnpjLoja;
+      if (novaConfig.telefoneLoja !== undefined) updatePayload.telefone = novaConfig.telefoneLoja;
+      if (novaConfig.emailLoja !== undefined) updatePayload.email = novaConfig.emailLoja;
+      if (novaConfig.garantiaDias !== undefined) {
+        updatePayload.garantia_dias = novaConfig.garantiaDias;
+        updatePayload.dias_garantia = novaConfig.garantiaDias;
+      }
+
+      if (targetId) {
         const { error } = await supabase
           .from('lojas')
           .update(updatePayload)
@@ -164,10 +195,29 @@ export function useStoreConfig(providedLojaId?: string | null) {
           console.error('Erro ao atualizar dados da loja no Supabase:', error);
           throw error;
         }
+      } else {
+        const { data: novaLoja } = await supabase
+          .from('lojas')
+          .insert([{
+            nome: novaConfig.nomeLoja || 'Minha Loja',
+            subtitulo: novaConfig.subtituloLoja || 'Sistema de Gestão',
+            endereco: novaConfig.enderecoLoja || '',
+            cnpj: novaConfig.cnpjLoja || '',
+            telefone: novaConfig.telefoneLoja || '',
+            email: novaConfig.emailLoja || '',
+            logo_url: novaConfig.logoLoja || null,
+            assinatura_url: novaConfig.assinaturaLoja || null,
+          }])
+          .select()
+          .maybeSingle();
 
-        // Recarrega as configurações para garantir consistência total
-        await fetchStoreConfig();
+        if (novaLoja?.id) {
+          targetId = String(novaLoja.id);
+          setActiveLojaId(targetId);
+        }
       }
+
+      await fetchStoreConfig();
     } catch (error) {
       console.error('Erro ao salvar configuração no banco:', error);
       throw error;

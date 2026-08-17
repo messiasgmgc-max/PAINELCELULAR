@@ -1965,24 +1965,34 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       };
 
       const targetLojaId = (venda as any).loja_id || (venda as any).lojaId || usuario?.lojaId;
+      let dbLoja: any = null;
       if (targetLojaId) {
-        const { data: dbLoja } = await supabase
+        const { data: found } = await supabase
           .from('lojas')
           .select('*')
           .eq('id', targetLojaId)
           .maybeSingle();
+        dbLoja = found;
+      }
+      if (!dbLoja) {
+        const { data: fallbackLoja } = await supabase
+          .from('lojas')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+        dbLoja = fallbackLoja;
+      }
 
-        if (dbLoja) {
-          storeData = {
-            nomeLoja: dbLoja.nome || storeData.nomeLoja,
-            enderecoLoja: dbLoja.endereco || storeData.enderecoLoja,
-            cnpjLoja: dbLoja.cnpj || storeData.cnpjLoja,
-            telefoneLoja: dbLoja.telefone || storeData.telefoneLoja,
-            emailLoja: dbLoja.email || storeData.emailLoja,
-            logoLoja: dbLoja.logo_url || storeData.logoLoja,
-            assinaturaLoja: dbLoja.assinatura_url || storeData.assinaturaLoja,
-          };
-        }
+      if (dbLoja) {
+        storeData = {
+          nomeLoja: dbLoja.nome || storeData.nomeLoja,
+          enderecoLoja: dbLoja.endereco || storeData.enderecoLoja,
+          cnpjLoja: dbLoja.cnpj || storeData.cnpjLoja,
+          telefoneLoja: dbLoja.telefone || storeData.telefoneLoja,
+          emailLoja: dbLoja.email || storeData.emailLoja,
+          logoLoja: dbLoja.logo_url || storeData.logoLoja,
+          assinaturaLoja: dbLoja.assinatura_url || storeData.assinaturaLoja,
+        };
       }
 
       const logoHtml = storeData.logoLoja ? `<img src="${storeData.logoLoja}" style="max-height: 54px; max-width: 130px; margin: 0 auto 8px auto; display: block;" />` : '';
@@ -2118,24 +2128,34 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       };
 
       const targetLojaId = (venda as any).loja_id || (venda as any).lojaId || usuario?.lojaId;
+      let dbLoja: any = null;
       if (targetLojaId) {
-        const { data: dbLoja } = await supabase
+        const { data: found } = await supabase
           .from('lojas')
           .select('*')
           .eq('id', targetLojaId)
           .maybeSingle();
+        dbLoja = found;
+      }
+      if (!dbLoja) {
+        const { data: fallbackLoja } = await supabase
+          .from('lojas')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+        dbLoja = fallbackLoja;
+      }
 
-        if (dbLoja) {
-          storeData = {
-            nomeLoja: dbLoja.nome || storeData.nomeLoja,
-            enderecoLoja: dbLoja.endereco || storeData.enderecoLoja,
-            cnpjLoja: dbLoja.cnpj || storeData.cnpjLoja,
-            telefoneLoja: dbLoja.telefone || storeData.telefoneLoja,
-            emailLoja: dbLoja.email || storeData.emailLoja,
-            logoLoja: dbLoja.logo_url || storeData.logoLoja,
-            assinaturaLoja: dbLoja.assinatura_url || storeData.assinaturaLoja,
-          };
-        }
+      if (dbLoja) {
+        storeData = {
+          nomeLoja: dbLoja.nome || storeData.nomeLoja,
+          enderecoLoja: dbLoja.endereco || storeData.enderecoLoja,
+          cnpjLoja: dbLoja.cnpj || storeData.cnpjLoja,
+          telefoneLoja: dbLoja.telefone || storeData.telefoneLoja,
+          emailLoja: dbLoja.email || storeData.emailLoja,
+          logoLoja: dbLoja.logo_url || storeData.logoLoja,
+          assinaturaLoja: dbLoja.assinatura_url || storeData.assinaturaLoja,
+        };
       }
 
       const conteudoHtml = getReciboA4Html(venda, clienteVenda, false, storeData);

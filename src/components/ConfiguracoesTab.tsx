@@ -163,16 +163,13 @@ export function ConfiguracoesTab() {
   };
 
   const handleSalvarNomeLoja = async () => {
-    if (!usuario?.lojaId || !nomeLoja) return;
+    if (!nomeLoja) {
+      alert('Digite o nome da loja.');
+      return;
+    }
     try {
-      const { error } = await supabase
-        .from('lojas')
-        .update({ nome: nomeLoja })
-        .eq('id', usuario.lojaId);
-      if (error) throw error;
-      atualizarNomeLoja(nomeLoja);
+      await atualizarNomeLoja(nomeLoja);
       alert('Nome da loja atualizado com sucesso!');
-      window.location.reload();
     } catch (error: any) {
       console.error('Erro ao salvar nome:', error);
       alert(`Erro ao salvar nome: ${error.message}`);
@@ -180,13 +177,8 @@ export function ConfiguracoesTab() {
   };
 
   const handleSalvarSubtituloLoja = async () => {
-    if (!usuario?.lojaId) return;
     try {
-      const { error } = await supabase
-        .from('lojas')
-        .update({ subtitulo: subtituloLoja })
-        .eq('id', usuario.lojaId);
-      if (error) throw error;
+      await atualizarDadosEmpresa({ subtituloLoja });
       alert('Subtítulo atualizado com sucesso!');
     } catch (error: any) {
       console.error('Erro ao salvar subtítulo:', error);
@@ -195,23 +187,13 @@ export function ConfiguracoesTab() {
   };
 
   const handleSalvarLogoLoja = async () => {
-    if (!usuario?.lojaId || !logoLoja) {
+    if (!logoLoja) {
       alert('Selecione uma logo primeiro');
       return;
     }
     try {
-      // Nota: Idealmente você usaria Supabase Storage. 
-      // Aqui estamos salvando a string base64 no campo logo_url
-      const { error } = await supabase
-        .from('lojas')
-        .update({ logo_url: logoLoja })
-        .eq('id', usuario.lojaId);
-
-      if (error) throw error;
-
-      atualizarLogoLoja(logoLoja);
+      await atualizarLogoLoja(logoLoja);
       alert('Logo atualizada com sucesso!');
-      window.location.reload();
     } catch (error: any) {
       console.error('Erro ao salvar logo:', error);
       alert(`Erro ao salvar logo: ${error.message}`);
@@ -219,17 +201,8 @@ export function ConfiguracoesTab() {
   };
 
   const handleSalvarAssinaturaLoja = async () => {
-    if (!usuario?.lojaId) return;
-
     try {
-      const { error } = await supabase
-        .from('lojas')
-        .update({ assinatura_url: assinaturaLoja })
-        .eq('id', usuario.lojaId);
-
-      if (error) throw error;
-
-      atualizarAssinaturaLoja(assinaturaLoja);
+      await atualizarAssinaturaLoja(assinaturaLoja);
       alert('Assinatura atualizada com sucesso!');
     } catch (error: any) {
       console.error('Erro ao salvar assinatura:', error);
