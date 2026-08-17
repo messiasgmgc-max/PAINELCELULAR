@@ -1303,13 +1303,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   // Função auxiliar para gerar o HTML do recibo A4
   const getReciboA4Html = (venda: Venda, clienteVenda?: Cliente, isForEmail: boolean = false, overrideStoreData?: any) => {
     const storeObj = overrideStoreData || {
-      nome: config.nomeLoja,
-      endereco: config.enderecoLoja,
-      cnpj: config.cnpjLoja,
-      telefone: config.telefoneLoja,
-      email: config.emailLoja,
-      logo_url: config.logoLoja,
-      assinatura_url: config.assinaturaLoja,
+      nome: config?.nomeLoja || 'Phone Center',
+      endereco: config?.enderecoLoja || '',
+      cnpj: config?.cnpjLoja || '',
+      telefone: config?.telefoneLoja || '',
+      email: config?.emailLoja || '',
+      logo_url: config?.logoLoja || null,
+      assinatura_url: config?.assinaturaLoja || null,
     };
     return generateReciboA4Html(venda, storeObj, clienteVenda, isForEmail);
   };
@@ -1317,8 +1317,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const dispararEmailReciboComPdf = async (venda: Venda, clienteVenda: Cliente) => {
     try {
       const publicLink = `${window.location.origin}/recibo/${venda.id}`;
-      const nomeLoja = config.nomeLoja || 'Phone Center';
-      const logoHtml = config.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; margin-bottom: 12px; display: block; margin-left: auto; margin-right: auto;" />` : '';
+      const nomeLoja = config?.nomeLoja || 'Phone Center';
+      const logoHtml = config?.logoLoja ? `<img src="${config.logoLoja}" style="max-height: 60px; margin-bottom: 12px; display: block; margin-left: auto; margin-right: auto;" />` : '';
 
       const emailCorpoHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
@@ -1920,13 +1920,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     try {
       // Busca dados completos da loja no banco ou do config
       let storeData = {
-        nomeLoja: config.nomeLoja || 'Phone Center',
-        enderecoLoja: config.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '',
-        cnpjLoja: config.cnpjLoja && config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '',
-        telefoneLoja: config.telefoneLoja && config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '',
-        emailLoja: config.emailLoja || '',
-        logoLoja: config.logoLoja || null,
-        assinaturaLoja: config.assinaturaLoja || null,
+        nomeLoja: config?.nomeLoja || 'Phone Center',
+        enderecoLoja: config?.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '',
+        cnpjLoja: config?.cnpjLoja && config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '',
+        telefoneLoja: config?.telefoneLoja && config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '',
+        emailLoja: config?.emailLoja || '',
+        logoLoja: config?.logoLoja || null,
+        assinaturaLoja: config?.assinaturaLoja || null,
       };
 
       const targetLojaId = (venda as any).loja_id || (venda as any).lojaId || usuario?.lojaId;
@@ -2073,13 +2073,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const clienteVenda = clientes.find(c => c.id === venda.clienteId);
       
       let storeData = {
-        nomeLoja: config.nomeLoja || 'Phone Center',
-        enderecoLoja: config.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '',
-        cnpjLoja: config.cnpjLoja && config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '',
-        telefoneLoja: config.telefoneLoja && config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '',
-        emailLoja: config.emailLoja || '',
-        logoLoja: config.logoLoja || null,
-        assinaturaLoja: config.assinaturaLoja || null,
+        nomeLoja: config?.nomeLoja || 'Phone Center',
+        enderecoLoja: config?.enderecoLoja && config.enderecoLoja !== 'Endereço não configurado' ? config.enderecoLoja : '',
+        cnpjLoja: config?.cnpjLoja && config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '',
+        telefoneLoja: config?.telefoneLoja && config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '',
+        emailLoja: config?.emailLoja || '',
+        logoLoja: config?.logoLoja || null,
+        assinaturaLoja: config?.assinaturaLoja || null,
       };
 
       const targetLojaId = (venda as any).loja_id || (venda as any).lojaId || usuario?.lojaId;
