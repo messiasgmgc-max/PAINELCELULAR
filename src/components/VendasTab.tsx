@@ -743,20 +743,39 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             await fetchClientes();
           }
         } else {
-          const { data: novoCli } = await supabase
+          const clientPayload: Record<string, any> = {
+            nome: parsedData.cliente?.nome || 'Cliente Consumidor',
+            telefone: parsedData.cliente?.telefone || '00000000000',
+            email: emailFinal,
+            cpf: cpfFinal,
+            data_nascimento: nascFinal,
+            loja_id: usuario?.lojaId || null
+          };
+          Object.keys(clientPayload).forEach(k => {
+            if (clientPayload[k] === '' || clientPayload[k] === null) delete clientPayload[k];
+          });
+
+          const { data: novoCli, error: errCli } = await supabase
             .from('clientes')
-            .insert([{
-              nome: parsedData.cliente?.nome || 'Cliente Consumidor',
-              telefone: parsedData.cliente?.telefone || '00000000000',
-              email: emailFinal,
-              cpf: cpfFinal,
-              data_nascimento: nascFinal,
-              loja_id: usuario?.lojaId || null
-            }])
+            .insert([clientPayload])
             .select()
-            .single();
-          
-          if (novoCli) {
+            .maybeSingle();
+
+          if (errCli) {
+            delete clientPayload.cpf;
+            delete clientPayload.data_nascimento;
+            const { data: retryCli } = await supabase
+              .from('clientes')
+              .insert([clientPayload])
+              .select()
+              .maybeSingle();
+            if (retryCli) {
+              clienteIdFinal = retryCli.id;
+              clienteNomeFinal = retryCli.nome;
+              clienteObj = retryCli as Cliente;
+              await fetchClientes();
+            }
+          } else if (novoCli) {
             clienteIdFinal = novoCli.id;
             clienteNomeFinal = novoCli.nome;
             clienteObj = novoCli as Cliente;
@@ -782,25 +801,39 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
         const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-        const { data: novoAp } = await supabase
-          .from('aparelhos')
-          .insert([{
-            id: uniqueId,
-            marca: parsedData.aparelho.marca || 'Apple',
-            modelo: parsedData.aparelho.modelo,
-            capacidade: parsedData.aparelho.capacidade || '128GB',
-            cor: parsedData.aparelho.cor || '',
-            imei: parsedData.aparelho.imei || '',
-            preco: Number(parsedData.aparelho.preco || parsedData.valorTotal || 0),
-            custo: Number(parsedData.aparelho.custo || 0),
-            condicao: parsedData.aparelho.condicao || 'seminovo',
-            ativo: true,
-            loja_id: usuario?.lojaId || null
-          }])
-          .select()
-          .single();
+        const apPayload: Record<string, any> = {
+          id: uniqueId,
+          marca: parsedData.aparelho.marca || 'Apple',
+          modelo: parsedData.aparelho.modelo,
+          capacidade: parsedData.aparelho.capacidade || '128GB',
+          cor: parsedData.aparelho.cor || '',
+          imei: parsedData.aparelho.imei || '',
+          preco: Number(parsedData.aparelho.preco || parsedData.valorTotal || 0),
+          custo: Number(parsedData.aparelho.custo || 0),
+          condicao: parsedData.aparelho.condicao || 'seminovo',
+          ativo: true,
+          loja_id: usuario?.lojaId || null
+        };
 
-        if (novoAp) {
+        const { data: novoAp, error: errAp } = await supabase
+          .from('aparelhos')
+          .insert([apPayload])
+          .select()
+          .maybeSingle();
+
+        if (errAp) {
+          delete apPayload.saude_bateria;
+          delete apPayload.codigo;
+          const { data: retryAp } = await supabase
+            .from('aparelhos')
+            .insert([apPayload])
+            .select()
+            .maybeSingle();
+          if (retryAp) {
+            aparelhoFinal = retryAp as Aparelho;
+            await fetchAparelhos();
+          }
+        } else if (novoAp) {
           aparelhoFinal = novoAp as Aparelho;
           await fetchAparelhos();
         }

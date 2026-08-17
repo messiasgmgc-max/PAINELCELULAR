@@ -226,25 +226,23 @@ Regras para os camposFaltantes:
       }
     }
 
-    // Pós-processamento e sanitização dos camposFaltantes (IMEI, CPF e DataNascimento são OPCIONAIS)
+    // Pós-processamento e sanitização dos camposFaltantes (IMEI, CPF, DataNascimento e DataVenda padrão são OPCIONAIS)
+    if (!parsedJson.dataVenda) {
+      parsedJson.dataVenda = new Date().toISOString().split('T')[0];
+    }
+    if (!parsedJson.formaPagamento) {
+      parsedJson.formaPagamento = 'pix';
+    }
+
     const camposFaltantes: string[] = (Array.isArray(parsedJson.camposFaltantes) ? parsedJson.camposFaltantes : [])
-      .filter((c: string) => c !== 'imei' && c !== 'cpf' && c !== 'dataNascimento' && c !== 'data_nascimento');
+      .filter((c: string) => c !== 'imei' && c !== 'cpf' && c !== 'dataNascimento' && c !== 'data_nascimento' && c !== 'dataVenda');
     
     // Verificação de segurança para campos cruciais
     if (!parsedJson.aparelho?.modelo && !camposFaltantes.includes('modelo')) {
       camposFaltantes.push('modelo');
     }
-    if (!parsedJson.aparelho?.capacidade && !camposFaltantes.includes('capacidade')) {
-      camposFaltantes.push('capacidade');
-    }
     if ((parsedJson.valorTotal === null || parsedJson.valorTotal === undefined || parsedJson.valorTotal <= 0) && !camposFaltantes.includes('valorTotal')) {
       camposFaltantes.push('valorTotal');
-    }
-    if (!parsedJson.formaPagamento && !camposFaltantes.includes('formaPagamento')) {
-      camposFaltantes.push('formaPagamento');
-    }
-    if (!parsedJson.dataVenda && !camposFaltantes.includes('dataVenda')) {
-      camposFaltantes.push('dataVenda');
     }
 
     parsedJson.camposFaltantes = Array.from(new Set(camposFaltantes));
