@@ -85,7 +85,6 @@ Regras para os camposFaltantes:
             }),
           });
 
-          // Se o modelo retornar 400 (ex: json_object não suportado), tenta sem o parâmetro response_format
           if (!groqResponse.ok && groqResponse.status === 400) {
             groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
@@ -110,7 +109,6 @@ Regras para os camposFaltantes:
             if (content) {
               const cleaned = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
               parsedJson = JSON.parse(cleaned);
-              console.log(`✅ Sucesso no modelo Groq: ${model}`);
               break;
             }
           } else {
@@ -252,23 +250,25 @@ Regras para os camposFaltantes:
       }
     }
 
-    // Pós-processamento e sanitização dos camposFaltantes (IMEI, CPF, DataNascimento e DataVenda padrão são OPCIONAIS)
-    if (!parsedJson.dataVenda) {
-      parsedJson.dataVenda = new Date().toISOString().split('T')[0];
-    }
-    if (!parsedJson.formaPagamento) {
-      parsedJson.formaPagamento = 'pix';
-    }
-
+    // Pós-processamento e sanitização dos camposFaltantes (IMEI, CPF e DataNascimento são OPCIONAIS)
     const camposFaltantes: string[] = (Array.isArray(parsedJson.camposFaltantes) ? parsedJson.camposFaltantes : [])
-      .filter((c: string) => c !== 'imei' && c !== 'cpf' && c !== 'dataNascimento' && c !== 'data_nascimento' && c !== 'dataVenda');
+      .filter((c: string) => c !== 'imei' && c !== 'cpf' && c !== 'dataNascimento' && c !== 'data_nascimento');
     
     // Verificação de segurança para campos cruciais
     if (!parsedJson.aparelho?.modelo && !camposFaltantes.includes('modelo')) {
       camposFaltantes.push('modelo');
     }
+    if (!parsedJson.aparelho?.capacidade && !camposFaltantes.includes('capacidade')) {
+      camposFaltantes.push('capacidade');
+    }
     if ((parsedJson.valorTotal === null || parsedJson.valorTotal === undefined || parsedJson.valorTotal <= 0) && !camposFaltantes.includes('valorTotal')) {
       camposFaltantes.push('valorTotal');
+    }
+    if (!parsedJson.formaPagamento && !camposFaltantes.includes('formaPagamento')) {
+      camposFaltantes.push('formaPagamento');
+    }
+    if (!parsedJson.dataVenda && !camposFaltantes.includes('dataVenda')) {
+      camposFaltantes.push('dataVenda');
     }
 
     parsedJson.camposFaltantes = Array.from(new Set(camposFaltantes));

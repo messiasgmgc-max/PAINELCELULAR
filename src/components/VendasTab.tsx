@@ -794,7 +794,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
         const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
         aparelhoFinal = disponiveis.find(a => 
-          (parsedData.aparelho.imei && a.imei && a.imei.toLowerCase() === parsedData.aparelho.imei.toLowerCase()) ||
+          (parsedData.aparelho?.imei && a.imei && a.imei.toLowerCase() === parsedData.aparelho.imei.toLowerCase()) ||
           (`${a.marca} ${a.modelo}`.toLowerCase().includes(parsedData.aparelho.modelo.toLowerCase()))
         ) || null;
       }
