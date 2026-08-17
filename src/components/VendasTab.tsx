@@ -3215,7 +3215,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               </Button>
             </div>
             <div className="modal-body-scroll">
-              <form onSubmit={(e) => { e.preventDefault(); handleProcessarPedido(); }} className="space-y-4">
+              <form onSubmit={(e) => { e.preventDefault(); handleProcessarTextoVenda(); }} className="space-y-4">
                 <textarea
                   className="input-glass min-h-[220px] font-sans text-sm p-3 border-blue-500/20 focus:border-blue-500"
                   placeholder="Ex: Vendi um iPhone 13 Pro 128GB Grafite IMEI 358921098492041 para o cliente Carlos Silva por R$ 3.500 no Pix pelo vendedor Lucas..."
