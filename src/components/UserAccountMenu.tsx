@@ -11,7 +11,8 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  XCircle
+  XCircle,
+  Smartphone
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStorePlan } from '@/hooks/useStorePlan';
@@ -108,6 +109,21 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
             <span>Painel Super Admin</span>
           </DropdownMenuItem>
         )}
+
+        {/* Instalar App Web */}
+        <DropdownMenuItem 
+          onClick={() => {
+            const btn = document.querySelector('button[title="Instalar App"]') as HTMLButtonElement;
+            if (btn) btn.click();
+            else {
+              alert('Para instalar o app: no Safari toque em Compartilhar -> Adicionar à Tela de Início. No Chrome/Edge, clique no ícone de instalar na barra de navegação!');
+            }
+          }}
+          className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-indigo-300"
+        >
+          <Smartphone className="w-4 h-4 text-indigo-400" />
+          <span>Instalar App Web</span>
+        </DropdownMenuItem>
 
         <DropdownMenuSeparator className="bg-slate-800 my-1" />
 

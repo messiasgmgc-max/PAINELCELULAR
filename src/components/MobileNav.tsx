@@ -221,7 +221,20 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
               ))}
             </div>
             
-            <div className="p-4 border-t border-white/10">
+            <div className="p-4 border-t border-white/10 space-y-2">
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  const btn = document.querySelector('button[title="Instalar App"]') as HTMLButtonElement;
+                  if (btn) btn.click();
+                  else {
+                    alert('Para instalar o app no celular: no Safari toque em Compartilhar -> "Adicionar à Tela de Início". No Chrome, toque no menu (...) -> "Instalar Aplicativo"!');
+                  }
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 dark:text-indigo-300 font-bold text-xs rounded-xl border border-indigo-500/30 transition-colors"
+              >
+                <Smartphone className="w-4 h-4" /> Instalar App Web no Celular
+              </button>
               <p className="text-xs text-center text-gray-400">
                 Phone Center &copy; {new Date().getFullYear()}
               </p>

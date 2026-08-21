@@ -1252,3 +1252,32 @@ html {
     opacity: 0; 
   }
 }
+
+/* Otimizações de Animações Mobile & Gestos */
+@media (max-width: 768px) {
+  button, a, input, select {
+    touch-action: manipulation;
+  }
+
+  button:active, .interactive-tap:active {
+    transform: scale(0.96);
+    transition: transform 0.1s ease;
+  }
+}
+
+/* Transições suaves de visualização de abas */
+.tab-view-container {
+  will-change: transform, opacity;
+  animation: tabFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes tabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

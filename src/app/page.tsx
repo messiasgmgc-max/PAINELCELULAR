@@ -26,6 +26,7 @@ import { LogsTab } from '@/components/LogsTab';
 import { UserAccountMenu } from '@/components/UserAccountMenu';
 import { MeuPlanoModal } from '@/components/MeuPlanoModal';
 import { PlanPaywallModal } from '@/components/PlanPaywallModal';
+import { PwaInstallPrompt } from '@/components/PwaInstallPrompt';
 import { 
   Smartphone, 
   LogOut,
@@ -80,11 +81,20 @@ export default function Home() {
   };
 
   const handleTabChange = (tabId: string) => {
+    setCurrentTab(tabId);
     const nextPath = tabToPath(tabId);
-    if (nextPath !== pathname) {
-      router.push(nextPath);
+    if (typeof window !== 'undefined' && nextPath !== window.location.pathname) {
+      window.history.pushState(null, '', nextPath);
     }
   };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentTab(normalizeTabFromPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     setCurrentTab(normalizeTabFromPath(pathname));
@@ -245,9 +255,10 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Modais Globais de Plano e Paywall */}
+      {/* Modais Globais de Plano, PWA e Paywall */}
       <MeuPlanoModal isOpen={showMeuPlanoModal} onClose={() => setShowMeuPlanoModal(false)} />
       <PlanPaywallModal />
+      <PwaInstallPrompt />
     </div>
   );
 }
