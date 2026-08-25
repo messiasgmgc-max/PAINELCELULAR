@@ -105,8 +105,14 @@ export function AparelhosTab() {
     setSaidas(historicoSaidas);
   }, [aparelhos]);
 
-  // Filtrar aparelhos por busca
-  const aparelhosAtivos = aparelhos.filter((aparelho: any) => aparelho.ativo !== false);
+  // Filtrar aparelhos ativos em estoque (excluindo vendidos e baixados)
+  const aparelhosAtivos = useMemo(() => {
+    return aparelhos.filter((aparelho: any) => {
+      if (aparelho.ativo === false) return false;
+      if (aparelho.condicao === 'vendido' || (aparelho as any).status === 'vendido') return false;
+      return true;
+    });
+  }, [aparelhos]);
   const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) => {
     const cod = getAparelhoCodigo(aparelho).toLowerCase();
     const term = searchTerm.toLowerCase();

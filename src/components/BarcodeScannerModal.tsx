@@ -175,8 +175,8 @@ export function BarcodeScannerModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-white relative">
+    <div className="fixed inset-0 z-[1000] flex items-start sm:items-center justify-center p-2 sm:p-4 pt-3 sm:pt-6 bg-black/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3.5 text-white relative my-0 sm:my-auto">
         
         {/* Cabeçalho */}
         <div className="flex items-start justify-between">

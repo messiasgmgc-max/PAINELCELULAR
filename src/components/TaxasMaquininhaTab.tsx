@@ -21,7 +21,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 
 interface LinhaTaxa {
-  parcelas: number; // 0 = Débito, 1..12 = Crédito 1x..12x
+  parcelas: number; // 0 = Débito, 1..24 = Crédito 1x..24x
   label: string;
   taxaBaseMaster: string;
   taxaBaseElo: string;
@@ -29,9 +29,9 @@ interface LinhaTaxa {
   taxaClienteElo: string;
 }
 
-const criarLinhasPadrao = (): LinhaTaxa[] => [
+const criarLinhasPadrao = (maxParcelas: number = 24): LinhaTaxa[] => [
   { parcelas: 0, label: 'Débito', taxaBaseMaster: '', taxaBaseElo: '', taxaClienteMaster: '', taxaClienteElo: '' },
-  ...Array.from({ length: 12 }, (_, index) => ({
+  ...Array.from({ length: Math.max(12, maxParcelas) }, (_, index) => ({
     parcelas: index + 1,
     label: `${index + 1}x`,
     taxaBaseMaster: '',
@@ -51,7 +51,7 @@ export function TaxasMaquininhaTab() {
   
   const [usarTaxasAumentadas, setUsarTaxasAumentadas] = useState(false);
 
-  const [linhas, setLinhas] = useState<LinhaTaxa[]>(criarLinhasPadrao());
+  const [linhas, setLinhas] = useState<LinhaTaxa[]>(criarLinhasPadrao(24));
 
   // Estados da Calculadora
   const [calcPerfil, setCalcPerfil] = useState('');
@@ -61,7 +61,7 @@ export function TaxasMaquininhaTab() {
   // Modos de cálculo: 'parcelas' (fixo) ou 'alvo' (busca inteligente)
   const [tipoBusca, setTipoBusca] = useState<'parcelas' | 'alvo'>('parcelas');
   
-  const [calcParcelaSelecionada, setCalcParcelaSelecionada] = useState('Debito'); // Ex: 'Debito', '1', '2'
+  const [calcParcelaSelecionada, setCalcParcelaSelecionada] = useState('Debito'); // Ex: 'Debito', '1', '2', ..., '24'
   const [calcValorAlvo, setCalcValorAlvo] = useState('');
   const [calcModoAlvo, setCalcModoAlvo] = useState<'parcela' | 'total'>('parcela');
   
@@ -135,7 +135,7 @@ export function TaxasMaquininhaTab() {
     setPerfilNome('');
     setEditingGrupoNome(null);
     setUsarTaxasAumentadas(false);
-    setLinhas(criarLinhasPadrao());
+    setLinhas(criarLinhasPadrao(24));
     setMostrarFormulario(false);
   };
 
@@ -146,7 +146,17 @@ export function TaxasMaquininhaTab() {
     setEditingGrupoNome(grupoNome);
     setPerfilNome(grupoNome);
 
-    const novasLinhas = criarLinhasPadrao().map((linhaPadrao) => {
+    // Descobre qual a maior parcela salva neste perfil (ex: 21, 24)
+    let maiorParcela = 24;
+    grupo.itens.forEach((item: any) => {
+      const parte = (item.nome?.split(' | ')[1] || '').toLowerCase();
+      if (!parte.includes('débito') && !parte.includes('debito')) {
+        const num = parseInt(parte.replace('x', '') || '0');
+        if (num > maiorParcela) maiorParcela = num;
+      }
+    });
+
+    const novasLinhas = criarLinhasPadrao(maiorParcela).map((linhaPadrao) => {
       const itemEncontrado = grupo.itens.find((item: any) => {
         const parte = (item.nome?.split(' | ')[1] || '').toLowerCase();
         if (linhaPadrao.parcelas === 0) {
@@ -337,7 +347,7 @@ export function TaxasMaquininhaTab() {
       
       <div className="flex flex-col gap-1.5">
         <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Taxas de Maquininha</h1>
-        <p className="text-sm md:text-base font-medium text-slate-600 dark:text-slate-400">Calcule as parcelas no Débito ou Crédito pro cliente e veja seu lucro real.</p>
+        <p className="text-sm md:text-base font-medium text-slate-600 dark:text-slate-400">Calcule as parcelas no Débito ou Crédito (até 24x) pro cliente e veja seu lucro real.</p>
       </div>
 
       {/* BLOCO DA CALCULADORA */}
@@ -546,7 +556,7 @@ export function TaxasMaquininhaTab() {
             {editingGrupoNome ? (
               <span className="text-cyan-300">Editando Perfil: {editingGrupoNome}</span>
             ) : (
-              <span>Cadastrar Novo Perfil de Taxas</span>
+              <span>Cadastrar Novo Perfil de Taxas (Até 24x)</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -597,7 +607,7 @@ export function TaxasMaquininhaTab() {
               </div>
             </div>
 
-            <div className="grid gap-3 xl:max-h-96 overflow-y-auto pr-1">
+            <div className="grid gap-3 xl:max-h-[480px] overflow-y-auto pr-1">
               {linhas.map((linha, index) => {
                 const isDebito = linha.parcelas === 0;
                 return (
@@ -687,7 +697,7 @@ export function TaxasMaquininhaTab() {
 
             <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-white/10">
               <Button type="button" onClick={adicionarLinha} variant="secondary" className="gap-2 bg-white/10 font-semibold text-white hover:bg-white/20 w-full sm:w-auto h-[42px] rounded-xl">
-                <Plus className="w-4 h-4" /> Adicionar Parcela Extra
+                <Plus className="w-4 h-4" /> Adicionar Parcela Extra (+1x)
               </Button>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 {editingGrupoNome && (
@@ -755,7 +765,7 @@ export function TaxasMaquininhaTab() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5">
                   {grupo.itens.map((perfil) => {
                     const parte = perfil.nome?.split(' | ')[1] || '1x';
                     const isDebito = parte.toLowerCase().includes('débito') || parte.toLowerCase().includes('debito') || parte === '0x';
