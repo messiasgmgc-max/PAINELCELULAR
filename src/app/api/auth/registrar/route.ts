@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { criarUsuario } from '@/lib/db/usuarios';
 
+export const dynamic = 'force-dynamic';
+
 const COOKIE_NAME = 'sessao_usuario';
 const COOKIE_EXPIRES = 7 * 24 * 60 * 60;
 
