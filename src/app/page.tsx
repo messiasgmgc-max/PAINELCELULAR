@@ -27,12 +27,14 @@ import { UserAccountMenu } from '@/components/UserAccountMenu';
 import { MeuPlanoModal } from '@/components/MeuPlanoModal';
 import { PlanPaywallModal } from '@/components/PlanPaywallModal';
 import { PwaInstallPrompt } from '@/components/PwaInstallPrompt';
+import { CommandPaletteModal } from '@/components/CommandPaletteModal';
 import { 
   Smartphone, 
   LogOut,
   User,
   Shield,
-  CreditCard
+  CreditCard,
+  Search
 } from 'lucide-react';
 
 export default function Home() {
@@ -43,6 +45,7 @@ export default function Home() {
   
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const headerNomeLoja = config.nomeLoja || 'Phone Center';
   const subtitulo = config.subtituloLoja || 'Sistema de Gestão';
   const headerLogoLoja = config.logoLoja;
@@ -101,11 +104,39 @@ export default function Home() {
   }, [pathname]);
 
   useEffect(() => {
-    if (!authReady || loading) return;
-    if (currentTab === 'superadmin' && !checkIsSuperAdmin(usuario)) {
-      router.replace('/');
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleSelectTabFromPalette = (tabId: string) => {
+    const tabMap: Record<string, string> = {
+      'vendas': 'vendas',
+      'aparelhos': 'aparelhos',
+      'ordens': 'orders',
+      'taxas_maquininha': 'taxas-maquininha',
+      'tecnicos': 'tecnicos',
+      'pecas': 'pecas',
+      'clientes': 'clientes',
+      'agendamentos': 'agendamentos',
+      'garantias': 'garantias',
+      'etiquetas': 'etiquetas',
+      'configuracoes': 'configuracoes',
+      'superadmin': 'superadmin',
+      'logs': 'logs',
+      'whatsapp': 'whatsapp',
+    };
+
+    const targetTab = tabMap[tabId] || tabId;
+    if (targetTab) {
+      handleTabChange(targetTab);
     }
-  }, [currentTab, usuario, authReady, loading, router]);
+  };
 
 
 
@@ -198,8 +229,21 @@ export default function Home() {
               </div>
             </div>
 
-            {/* User Info, Meu Plano e Dropdown */}
+            {/* User Info, Busca Railway, Meu Plano e Dropdown */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* Barra de Pesquisa Estilo Railway / Cmd+K */}
+              <button
+                onClick={() => setShowCommandPalette(true)}
+                className="flex items-center gap-2 bg-slate-900/80 hover:bg-slate-950 text-slate-300 hover:text-white px-2.5 sm:px-3.5 py-1.5 rounded-xl border border-white/15 text-xs font-semibold transition-all shadow-inner group shrink-0 cursor-pointer"
+                title="Pesquisar todas as funções (Ctrl+K)"
+              >
+                <Search className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                <span className="hidden md:inline text-slate-300">Todas as Funções...</span>
+                <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-mono font-bold bg-slate-800 text-cyan-300 rounded border border-slate-700 ml-0.5">
+                  Ctrl K
+                </kbd>
+              </button>
+
               {/* Botão Meu Plano */}
               <Button
                 variant="outline"
@@ -255,10 +299,15 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Modais Globais de Plano, PWA e Paywall */}
+      {/* Modais Globais de Plano, PWA, Paywall e Palette Estilo Railway */}
       <MeuPlanoModal isOpen={showMeuPlanoModal} onClose={() => setShowMeuPlanoModal(false)} />
       <PlanPaywallModal />
       <PwaInstallPrompt />
+      <CommandPaletteModal
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onSelectTab={handleSelectTabFromPalette}
+      />
     </div>
   );
 }

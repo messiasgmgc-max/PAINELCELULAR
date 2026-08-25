@@ -114,15 +114,21 @@ export function AparelhosTab() {
     });
   }, [aparelhos]);
   const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) => {
-    const cod = getAparelhoCodigo(aparelho).toLowerCase();
-    const term = searchTerm.toLowerCase();
+    const cod = (getAparelhoCodigo(aparelho) || '').toLowerCase();
+    const term = (searchTerm || '').toLowerCase();
+    const modeloStr = String(aparelho?.modelo || '').toLowerCase();
+    const marcaStr = String(aparelho?.marca || '').toLowerCase();
+    const imeiStr = String(aparelho?.imei || '');
+    const numSerieStr = String(aparelho?.numeroSerie || '');
+    const clienteStr = String(aparelho?.cliente || '').toLowerCase();
+
     return (
-      aparelho.modelo.toLowerCase().includes(term) ||
-      aparelho.marca.toLowerCase().includes(term) ||
+      modeloStr.includes(term) ||
+      marcaStr.includes(term) ||
       cod.includes(term) ||
-      aparelho.imei?.includes(searchTerm) ||
-      aparelho.numeroSerie?.includes(searchTerm) ||
-      aparelho.cliente?.toLowerCase().includes(term)
+      imeiStr.includes(searchTerm) ||
+      numSerieStr.includes(searchTerm) ||
+      clienteStr.includes(term)
     );
   });
 
