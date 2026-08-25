@@ -31,7 +31,8 @@ import {
   Shield,
   SmartphoneNfc,
   Layers,
-  Key
+  Key,
+  Calculator
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from 'next-themes';
