@@ -296,6 +296,42 @@ export function TaxasMaquininhaTab() {
     }
   };
 
+  const tabelaTodasParcelas = useMemo(() => {
+    const grupo = perfisAgrupados.find((g) => g.nome === calcPerfil);
+    if (!grupo || !calcValorBase || isNaN(parseFloat(calcValorBase))) return [];
+
+    const base = parseFloat(calcValorBase);
+
+    return grupo.itens.map((perfil: any) => {
+      const parte = (perfil.nome?.split(' | ')[1] || '1x').toLowerCase();
+      const isDebito = parte.includes('débito') || parte.includes('debito') || parte === '0x';
+      const numParcelas = isDebito ? 1 : parseInt(parte.replace('x', '')) || 1;
+      const labelExibicao = isDebito ? 'Débito (À Vista)' : `${numParcelas}x`;
+
+      const taxaBase = calcBandeira === 'master' ? Number(perfil.taxa_base_master) : Number(perfil.taxa_base_elo);
+      const taxaCliente = calcBandeira === 'master' ? Number(perfil.taxa_cliente_master) : Number(perfil.taxa_cliente_elo);
+
+      const valorTotalCobrado = base / (1 - taxaCliente / 100);
+      const valorDaParcela = valorTotalCobrado / numParcelas;
+      const custoMaquininha = valorTotalCobrado * (taxaBase / 100);
+      const valorLiquidoRecebido = valorTotalCobrado - custoMaquininha;
+      const lucroTaxa = valorLiquidoRecebido - base;
+
+      return {
+        id: perfil.id,
+        numParcelas,
+        labelExibicao,
+        isDebito,
+        taxaCliente,
+        taxaBase,
+        valorTotalCobrado,
+        valorDaParcela,
+        lucroTaxa,
+        valorLiquidoRecebido,
+      };
+    });
+  }, [perfisAgrupados, calcPerfil, calcValorBase, calcBandeira]);
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 px-2 pb-16 font-sans">
       
@@ -413,6 +449,89 @@ export function TaxasMaquininhaTab() {
                 <p className="text-[12px] font-medium text-slate-400 mt-2 bg-black/20 inline-block px-2.5 py-1 rounded-md">
                   Taxa Cliente: <span className="text-white">{calcResultado.taxaCliente}%</span> • Custo Máq: <span className="text-white">{calcResultado.taxaBase}%</span>
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* TABELA COMPARATIVA DE TODAS AS PARCELAS */}
+          {tabelaTodasParcelas.length > 0 && (
+            <div className="mt-6 rounded-2xl border border-white/10 bg-slate-900/90 p-4 md:p-5 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-white/10 gap-2">
+                <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-widest flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-cyan-400" /> Tabela Completa de Parcelamento ({calcPerfil} - {calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper'})
+                </h3>
+                <span className="text-xs font-semibold text-slate-400">
+                  Valor Produto: <strong className="text-white">R$ {parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',')}</strong>
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-medium border-collapse min-w-[620px]">
+                  <thead>
+                    <tr className="border-b border-white/10 text-slate-400 uppercase text-[10px] tracking-wider">
+                      <th className="py-2.5 px-3">Modalidade</th>
+                      <th className="py-2.5 px-3">Taxa Cliente</th>
+                      <th className="py-2.5 px-3">Valor da Parcela</th>
+                      <th className="py-2.5 px-3">Total na Maquininha</th>
+                      <th className="py-2.5 px-3">Custo Máquina</th>
+                      <th className="py-2.5 px-3 text-right">Lucro na Taxa</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {tabelaTodasParcelas.map((row) => {
+                      const isSelected = calcResultado && (
+                        (row.isDebito && calcResultado.isDebito) ||
+                        (!row.isDebito && !calcResultado.isDebito && row.numParcelas === calcResultado.numParcelas)
+                      );
+
+                      return (
+                        <tr 
+                          key={row.id}
+                          className={`transition-colors ${
+                            isSelected 
+                              ? 'bg-cyan-500/25 font-bold border-l-4 border-cyan-400' 
+                              : row.isDebito 
+                                ? 'bg-purple-950/20 hover:bg-purple-950/40' 
+                                : 'hover:bg-white/5'
+                          }`}
+                        >
+                          <td className="py-2.5 px-3">
+                            {row.isDebito ? (
+                              <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                                💵 DÉBITO
+                              </span>
+                            ) : (
+                              <span className="text-white font-extrabold text-xs">{row.labelExibicao}</span>
+                            )}
+                          </td>
+
+                          <td className="py-2.5 px-3 text-cyan-300 font-semibold">
+                            {row.taxaCliente.toFixed(2)}%
+                          </td>
+
+                          <td className="py-2.5 px-3 text-white font-black text-xs sm:text-sm">
+                            R$ {row.valorDaParcela.toFixed(2).replace('.', ',')}
+                            {!row.isDebito && <span className="text-[10px] text-slate-400 font-normal"> /mês</span>}
+                          </td>
+
+                          <td className="py-2.5 px-3 text-slate-200">
+                            R$ {row.valorTotalCobrado.toFixed(2).replace('.', ',')}
+                          </td>
+
+                          <td className="py-2.5 px-3 text-slate-400">
+                            {row.taxaBase.toFixed(2)}%
+                          </td>
+
+                          <td className="py-2.5 px-3 text-right font-bold">
+                            <span className={row.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-400'}>
+                              {row.lucroTaxa > 0 ? `+ R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}` : `R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}`}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
