@@ -13,7 +13,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera } from 'lucide-react';
+import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -278,9 +279,35 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showPOS, setShowPOS] = useState(false);
   const [closingPOS, setClosingPOS] = useState(false);
   const [savingVenda, setSavingVenda] = useState(false);
-  const [showSaleCelebration, setShowSaleCelebration] = useState(false);
   const [showNovoCliente, setShowNovoCliente] = useState(false);
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+
+  const selecionarAparelhoPorCodigo = (codeScanned: string) => {
+    const codeClean = codeScanned.trim().toLowerCase();
+    const aparelhoEncontrado = aparelhos.find(a => {
+      const c1 = (a.codigo || '').trim().toLowerCase();
+      const c2 = (a.imei || '').trim().toLowerCase();
+      const c3 = (a.numeroSerie || '').trim().toLowerCase();
+      const c4 = (a.id || '').trim().toLowerCase();
+      const c5 = (getAparelhoCodigo(a) || '').trim().toLowerCase();
+      return c1 === codeClean || c2 === codeClean || c3 === codeClean || c4 === codeClean || c5 === codeClean;
+    });
+
+    if (aparelhoEncontrado) {
+      const custo = resolveAparelhoCusto(aparelhoEncontrado);
+      setPosItem(prev => ({
+        ...prev,
+        aparelhoId: aparelhoEncontrado.id,
+        descricao: `${aparelhoEncontrado.marca} ${aparelhoEncontrado.modelo}`,
+        valorExibir: aparelhoEncontrado.preco || 0,
+        valorInterno: custo
+      }));
+      toast.success(`📱 ${aparelhoEncontrado.modelo} selecionado para a venda!`);
+    } else {
+      toast.error(`Código de barras "${codeScanned}" não encontrado no estoque.`);
+    }
+  };
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [showImportarPedidoModal, setShowImportarPedidoModal] = useState(false);
   const [isClient, setIsClient] = useState(false);
@@ -2430,7 +2457,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                             });
                           }}
                         />
-                        <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+                        <Button type="button" size="icon" variant="outline" onClick={() => setShowBarcodeScanner(true)} title="Escanear Código de Barras / Câmera" className="h-11 w-11 shrink-0 bg-cyan-500/20 text-cyan-400 border-cyan-500/40 hover:bg-cyan-500/30 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+                          <Camera className="h-5 w-5" />
+                        </Button>
+                        <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} title="Novo Aparelho Avulso" className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
                           <Plus className="h-4 w-4" />
                         </Button>
                       </div>
@@ -3635,6 +3665,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         </div>,
         document.body
       )}
+
+      {/* Barcode Scanner Modal for POS Vendas */}
+      <BarcodeScannerModal
+        isOpen={showBarcodeScanner}
+        onClose={() => setShowBarcodeScanner(false)}
+        onScan={(barcode) => selecionarAparelhoPorCodigo(barcode)}
+        title="Scanner de Código de Barras PDV"
+        subtitle="Aponte a câmera ou bipe o código do aparelho com o leitor USB"
+      />
     </div>
   );
 }

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck } from "lucide-react";
+import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
@@ -36,6 +37,7 @@ export function AparelhosTab() {
   const { clientes, fetchClientes, criarCliente } = useClientes();
 
   const [showForm, setShowForm] = useState(false);
+  const [showConferenciaModal, setShowConferenciaModal] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
@@ -1396,6 +1398,13 @@ export function AparelhosTab() {
                 <Plus className="h-4 w-4" />
                 Novo Aparelho
               </Button>
+              <Button 
+                onClick={() => setShowConferenciaModal(true)} 
+                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold shrink-0 whitespace-nowrap flex items-center gap-1.5 h-9 px-4 text-sm shadow-md shadow-cyan-900/20 rounded-xl"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Conferir Estoque
+              </Button>
               <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap h-9">
                 <History className="h-4 w-4" /> Saídas
               </Button>
@@ -2119,6 +2128,15 @@ export function AparelhosTab() {
           </div>
         </ModalPortal>
       )}
+
+      {/* MODAL DE CONFERÊNCIA DE ESTOQUE */}
+      <ConferenciaEstoqueModal
+        isOpen={showConferenciaModal}
+        onClose={() => setShowConferenciaModal(false)}
+        aparelhosEstoque={aparelhosAtivos as any}
+        lojaId={usuario?.lojaId || usuario?.loja_id || null}
+        onEstoqueAtualizado={fetchAparelhos}
+      />
     </div>
   );
 }

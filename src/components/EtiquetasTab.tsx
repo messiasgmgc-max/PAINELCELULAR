@@ -5,10 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
 import { useAparelhos } from '@/hooks/useAparelhos';
-import { getAparelhoCodigo } from '@/lib/utils';
-import { CheckSquare, Pencil, Printer, Plus, Search, Square, Tag, X } from 'lucide-react';
+import { generateCode128SvgString } from '@/lib/barcodeGenerator';
 
-type CampoEtiqueta = 'marcaModelo' | 'codigo' | 'capacidade' | 'condicao' | 'imei' | 'cor' | 'saudeBateria' | 'preco';
+type CampoEtiqueta = 'marcaModelo' | 'codigo' | 'codigoBarras' | 'capacidade' | 'condicao' | 'imei' | 'cor' | 'saudeBateria' | 'preco';
 
 interface ModeloEtiquetaGlobal {
   id: string;
@@ -367,9 +366,15 @@ export function EtiquetasTab() {
           camposEtiqueta.includes('cor') ? `Cor: ${aparelho.cor || '-'}` : '',
           camposEtiqueta.includes('preco') ? `Preço: R$ ${Number(aparelho.preco || 0).toFixed(2).replace('.', ',')}` : '',
         ].filter(Boolean);
+        const barcodeVal = codigo || imeiTexto || aparelho.id;
+        const barcodeHtml = (camposEtiqueta.includes('codigoBarras') && barcodeVal)
+          ? `<div style="margin-top:0.5mm; text-align:center; overflow:hidden;">${generateCode128SvgString(barcodeVal, { height: 18, showText: false })}</div>`
+          : '';
+
         etiquetas.push(`
           <div class="etiqueta">
             ${linhasEtiqueta.map((linha, index) => `<div class="${index === 0 ? 'etiqueta-titulo' : 'etiqueta-linha'}">${escapeHtml(linha)}</div>`).join('')}
+            ${barcodeHtml}
           </div>
         `);
       }
