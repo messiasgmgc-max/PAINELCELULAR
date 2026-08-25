@@ -1,18 +1,45 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Save, Percent, Calculator, Search, TrendingUp, CreditCard, ArrowRightLeft } from 'lucide-react';
+import { 
+  Plus, 
+  Trash2, 
+  Save, 
+  Percent, 
+  Calculator, 
+  Search, 
+  TrendingUp, 
+  CreditCard, 
+  ArrowRightLeft, 
+  Edit, 
+  X,
+  BadgeCheck,
+  RotateCcw
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 
 interface LinhaTaxa {
-  parcelas: number;
+  parcelas: number; // 0 = Débito, 1..12 = Crédito 1x..12x
+  label: string;
   taxaBaseMaster: string;
   taxaBaseElo: string;
   taxaClienteMaster: string;
   taxaClienteElo: string;
 }
+
+const criarLinhasPadrao = (): LinhaTaxa[] => [
+  { parcelas: 0, label: 'Débito', taxaBaseMaster: '', taxaBaseElo: '', taxaClienteMaster: '', taxaClienteElo: '' },
+  ...Array.from({ length: 12 }, (_, index) => ({
+    parcelas: index + 1,
+    label: `${index + 1}x`,
+    taxaBaseMaster: '',
+    taxaBaseElo: '',
+    taxaClienteMaster: '',
+    taxaClienteElo: '',
+  })),
+];
 
 export function TaxasMaquininhaTab() {
   const { usuario } = useAuth();
@@ -20,16 +47,11 @@ export function TaxasMaquininhaTab() {
   const [loading, setLoading] = useState(true);
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [perfilNome, setPerfilNome] = useState('');
+  const [editingGrupoNome, setEditingGrupoNome] = useState<string | null>(null);
   
   const [usarTaxasAumentadas, setUsarTaxasAumentadas] = useState(false);
 
-  const [linhas, setLinhas] = useState<LinhaTaxa[]>(
-    Array.from({ length: 12 }, (_, index) => ({ 
-      parcelas: index + 1, 
-      taxaBaseMaster: '', taxaBaseElo: '', 
-      taxaClienteMaster: '', taxaClienteElo: '' 
-    }))
-  );
+  const [linhas, setLinhas] = useState<LinhaTaxa[]>(criarLinhasPadrao());
 
   // Estados da Calculadora
   const [calcPerfil, setCalcPerfil] = useState('');
@@ -39,7 +61,7 @@ export function TaxasMaquininhaTab() {
   // Modos de cálculo: 'parcelas' (fixo) ou 'alvo' (busca inteligente)
   const [tipoBusca, setTipoBusca] = useState<'parcelas' | 'alvo'>('parcelas');
   
-  const [calcParcelaSelecionada, setCalcParcelaSelecionada] = useState('1'); // Ex: '1', '2'
+  const [calcParcelaSelecionada, setCalcParcelaSelecionada] = useState('Debito'); // Ex: 'Debito', '1', '2'
   const [calcValorAlvo, setCalcValorAlvo] = useState('');
   const [calcModoAlvo, setCalcModoAlvo] = useState<'parcela' | 'total'>('parcela');
   
@@ -75,8 +97,12 @@ export function TaxasMaquininhaTab() {
     const resultado = Array.from(agrupados.entries()).map(([nome, itens]) => ({
       nome,
       itens: itens.sort((a, b) => {
-        const numA = parseInt(a.nome?.split(' | ')[1] || '0');
-        const numB = parseInt(b.nome?.split(' | ')[1] || '0');
+        const strA = (a.nome?.split(' | ')[1] || '').toLowerCase();
+        const strB = (b.nome?.split(' | ')[1] || '').toLowerCase();
+        if (strA.includes('débito') || strA.includes('debito')) return -1;
+        if (strB.includes('débito') || strB.includes('debito')) return 1;
+        const numA = parseInt(strA.replace('x', '') || '0');
+        const numB = parseInt(strB.replace('x', '') || '0');
         return numA - numB;
       }),
     }));
@@ -92,16 +118,79 @@ export function TaxasMaquininhaTab() {
   };
 
   const adicionarLinha = () => {
-    setLinhas((prev) => [...prev, { parcelas: prev.length + 1, taxaBaseMaster: '', taxaBaseElo: '', taxaClienteMaster: '', taxaClienteElo: '' }]);
+    setLinhas((prev) => [
+      ...prev, 
+      { 
+        parcelas: prev.length, 
+        label: `${prev.length}x`, 
+        taxaBaseMaster: '', 
+        taxaBaseElo: '', 
+        taxaClienteMaster: '', 
+        taxaClienteElo: '' 
+      }
+    ]);
+  };
+
+  const resetarFormulario = () => {
+    setPerfilNome('');
+    setEditingGrupoNome(null);
+    setUsarTaxasAumentadas(false);
+    setLinhas(criarLinhasPadrao());
+    setMostrarFormulario(false);
+  };
+
+  const editarPerfil = (grupoNome: string) => {
+    const grupo = perfisAgrupados.find(g => g.nome === grupoNome);
+    if (!grupo) return;
+
+    setEditingGrupoNome(grupoNome);
+    setPerfilNome(grupoNome);
+
+    const novasLinhas = criarLinhasPadrao().map((linhaPadrao) => {
+      const itemEncontrado = grupo.itens.find((item: any) => {
+        const parte = (item.nome?.split(' | ')[1] || '').toLowerCase();
+        if (linhaPadrao.parcelas === 0) {
+          return parte.includes('débito') || parte.includes('debito') || parte === '0x';
+        }
+        return parte === `${linhaPadrao.parcelas}x` || parte === `${linhaPadrao.parcelas}`;
+      });
+
+      if (itemEncontrado) {
+        return {
+          ...linhaPadrao,
+          taxaBaseMaster: itemEncontrado.taxa_base_master !== null && itemEncontrado.taxa_base_master !== undefined ? String(itemEncontrado.taxa_base_master) : '',
+          taxaBaseElo: itemEncontrado.taxa_base_elo !== null && itemEncontrado.taxa_base_elo !== undefined ? String(itemEncontrado.taxa_base_elo) : '',
+          taxaClienteMaster: itemEncontrado.taxa_cliente_master !== null && itemEncontrado.taxa_cliente_master !== undefined ? String(itemEncontrado.taxa_cliente_master) : '',
+          taxaClienteElo: itemEncontrado.taxa_cliente_elo !== null && itemEncontrado.taxa_cliente_elo !== undefined ? String(itemEncontrado.taxa_cliente_elo) : '',
+        };
+      }
+      return linhaPadrao;
+    });
+
+    setLinhas(novasLinhas);
+
+    const temAumentada = grupo.itens.some(
+      (i: any) => Number(i.taxa_cliente_master) !== Number(i.taxa_base_master) || Number(i.taxa_cliente_elo) !== Number(i.taxa_base_elo)
+    );
+    setUsarTaxasAumentadas(temAumentada);
+    setMostrarFormulario(true);
   };
 
   const salvarPerfil = async () => {
     if (!lojaIdAtual) return alert('Erro: Loja não identificada.');
     if (!perfilNome.trim()) return alert('Dê um nome para o perfil.');
-    if (!podeAdicionar) return alert('Máximo de 3 perfis por loja.');
+    if (!editingGrupoNome && !podeAdicionar) return alert('Máximo de 3 perfis por loja.');
 
     const preenchidas = linhas.filter((linha) => linha.taxaBaseMaster.trim() !== '');
-    if (preenchidas.length === 0) return alert('Preencha pelo menos a taxa Base Master em alguma parcela.');
+    if (preenchidas.length === 0) return alert('Preencha pelo menos a taxa Base Master (Débito ou parcelas).');
+
+    // Se estiver editando, desativa o grupo antigo primeiro
+    if (editingGrupoNome) {
+      const idsAntigos = perfisAgrupados.find(g => g.nome === editingGrupoNome)?.itens.map((i: any) => i.id);
+      if (idsAntigos && idsAntigos.length > 0) {
+        await supabase.from('taxas_maquininha').update({ ativo: false }).in('id', idsAntigos);
+      }
+    }
 
     const inserts = preenchidas.map((linha) => {
       const tBaseMaster = Number(linha.taxaBaseMaster || 0);
@@ -109,9 +198,11 @@ export function TaxasMaquininhaTab() {
       const tCliMaster = usarTaxasAumentadas && linha.taxaClienteMaster ? Number(linha.taxaClienteMaster) : tBaseMaster;
       const tCliElo = usarTaxasAumentadas && linha.taxaClienteElo ? Number(linha.taxaClienteElo) : tBaseElo;
 
+      const rotulo = linha.parcelas === 0 ? 'Débito' : `${linha.parcelas}x`;
+
       return {
         loja_id: lojaIdAtual,
-        nome: `${perfilNome.trim()} | ${linha.parcelas}x`,
+        nome: `${perfilNome.trim()} | ${rotulo}`,
         taxa_base_master: tBaseMaster,
         taxa_base_elo: tBaseElo,
         taxa_cliente_master: tCliMaster,
@@ -123,22 +214,22 @@ export function TaxasMaquininhaTab() {
     const { error } = await supabase.from('taxas_maquininha').insert(inserts);
 
     if (!error) {
-      setPerfilNome('');
-      setUsarTaxasAumentadas(false);
-      setLinhas(Array.from({ length: 12 }, (_, index) => ({ parcelas: index + 1, taxaBaseMaster: '', taxaBaseElo: '', taxaClienteMaster: '', taxaClienteElo: '' })));
-      setMostrarFormulario(false);
+      resetarFormulario();
       await carregarPerfis();
+      alert(editingGrupoNome ? 'Perfil de taxas atualizado com sucesso!' : 'Perfil de taxas salvo com sucesso!');
     } else {
-      alert(`Deu bosta ao salvar: ${error.message}`);
+      alert(`Erro ao salvar perfil: ${error.message}`);
     }
   };
 
   const removerPerfil = async (grupoNome: string) => {
+    if (!confirm(`Tem certeza que deseja excluir o perfil "${grupoNome}"?`)) return;
     const idsParaRemover = perfisAgrupados.find(g => g.nome === grupoNome)?.itens.map(i => i.id);
     if (!idsParaRemover || idsParaRemover.length === 0) return;
     await supabase.from('taxas_maquininha').update({ ativo: false }).in('id', idsParaRemover);
     await carregarPerfis();
     if (calcPerfil === grupoNome) setCalcPerfil(''); 
+    if (editingGrupoNome === grupoNome) resetarFormulario();
   };
 
   const calcularMelhorOpcao = () => {
@@ -149,7 +240,11 @@ export function TaxasMaquininhaTab() {
 
     // FUNÇÃO AUXILIAR PARA FAZER A MATEMÁTICA
     const processarItem = (perfil: any) => {
-      const numParcelas = parseInt(perfil.nome?.split(' | ')[1] || '1');
+      const parte = (perfil.nome?.split(' | ')[1] || '1x').toLowerCase();
+      const isDebito = parte.includes('débito') || parte.includes('debito') || parte === '0x';
+      const numParcelas = isDebito ? 1 : (parseInt(parte.replace('x', '')) || 1);
+      const labelExibicao = isDebito ? 'Débito À Vista' : `${numParcelas}x`;
+
       const taxaBase = calcBandeira === 'master' ? Number(perfil.taxa_base_master) : Number(perfil.taxa_base_elo);
       const taxaCliente = calcBandeira === 'master' ? Number(perfil.taxa_cliente_master) : Number(perfil.taxa_cliente_elo);
 
@@ -159,14 +254,23 @@ export function TaxasMaquininhaTab() {
       const valorLiquidoRecebido = valorTotalCobrado - custoMaquininha;
       const lucroTaxa = valorLiquidoRecebido - base;
 
-      return { numParcelas, taxaCliente, taxaBase, valorTotalCobrado, valorDaParcela, lucroTaxa };
+      return { numParcelas, labelExibicao, isDebito, taxaCliente, taxaBase, valorTotalCobrado, valorDaParcela, lucroTaxa };
     };
 
     if (tipoBusca === 'parcelas') {
-      // MODO: BUSCAR PARCELA ESPECÍFICA
-      const perfilExato = grupo.itens.find(p => p.nome?.endsWith(` | ${calcParcelaSelecionada}x`));
+      // MODO: BUSCAR PARCELA/MODALIDADE ESPECÍFICA
+      const isBuscandoDebito = calcParcelaSelecionada.toLowerCase().includes('debito') || calcParcelaSelecionada === '0';
+      
+      const perfilExato = grupo.itens.find(p => {
+        const parte = (p.nome?.split(' | ')[1] || '').toLowerCase();
+        if (isBuscandoDebito) {
+          return parte.includes('débito') || parte.includes('debito') || parte === '0x';
+        }
+        return parte === `${calcParcelaSelecionada}x` || parte === calcParcelaSelecionada;
+      });
+
       if (!perfilExato) {
-        alert('Esta quantidade de parcelas não está cadastrada neste perfil de taxa.');
+        alert(isBuscandoDebito ? 'A modalidade Débito não está cadastrada neste perfil de taxa.' : 'Esta quantidade de parcelas não está cadastrada neste perfil de taxa.');
         return;
       }
       setCalcResultado(processarItem(perfilExato));
@@ -197,7 +301,7 @@ export function TaxasMaquininhaTab() {
       
       <div className="flex flex-col gap-1.5">
         <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Taxas de Maquininha</h1>
-        <p className="text-sm md:text-base font-medium text-slate-600 dark:text-slate-400">Calcule as parcelas pro cliente e veja seu lucro com taxas ajustadas.</p>
+        <p className="text-sm md:text-base font-medium text-slate-600 dark:text-slate-400">Calcule as parcelas no Débito ou Crédito pro cliente e veja seu lucro real.</p>
       </div>
 
       {/* BLOCO DA CALCULADORA */}
@@ -205,25 +309,29 @@ export function TaxasMaquininhaTab() {
         <div className="rounded-[2rem] border border-cyan-500/30 bg-slate-950 p-5 md:p-6 text-white shadow-xl shadow-cyan-900/20">
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-cyan-400">
-              <Calculator className="w-4 h-4" /> Simulador
+              <Calculator className="w-4 h-4" /> Simulador de Taxas
             </div>
             {/* BOTÃO PARA ALTERNAR O MODO DE BUSCA */}
             <button 
               onClick={() => {
                 setTipoBusca(prev => prev === 'parcelas' ? 'alvo' : 'parcelas');
-                setCalcResultado(null); // Limpa o resultado ao trocar de modo
+                setCalcResultado(null);
               }}
               className="flex items-center gap-2 text-[11px] font-bold bg-cyan-950/40 text-cyan-300 px-3 py-1.5 rounded-full border border-cyan-500/20 hover:bg-cyan-900/40 transition-colors uppercase tracking-wider"
             >
               <ArrowRightLeft className="w-3 h-3" />
-              {tipoBusca === 'parcelas' ? 'Mudar para Alvo' : 'Mudar para Parcelas'}
+              {tipoBusca === 'parcelas' ? 'Mudar para Busca por Alvo' : 'Mudar para Seleção Direta'}
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-5 items-end">
             <div className="w-full">
               <label className="mb-2 block text-[13px] font-semibold text-slate-300">Maquininha</label>
-              <select className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2.5 text-sm font-medium text-white outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all cursor-pointer" value={calcPerfil} onChange={(e) => { setCalcPerfil(e.target.value); setCalcResultado(null); }}>
+              <select 
+                className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2.5 text-sm font-medium text-white outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all cursor-pointer" 
+                value={calcPerfil} 
+                onChange={(e) => { setCalcPerfil(e.target.value); setCalcResultado(null); }}
+              >
                 {perfisAgrupados.map(g => <option key={g.nome} value={g.nome}>{g.nome}</option>)}
               </select>
             </div>
@@ -231,8 +339,8 @@ export function TaxasMaquininhaTab() {
             <div className="w-full">
               <label className="mb-2 block text-[13px] font-semibold text-slate-300">Bandeira</label>
               <select className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2.5 text-sm font-medium text-white outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all cursor-pointer" value={calcBandeira} onChange={(e) => setCalcBandeira(e.target.value as 'master'|'elo')}>
-                <option value="master">Master/Visa</option>
-                <option value="elo">Elo/Outras</option>
+                <option value="master">Master / Visa</option>
+                <option value="elo">Elo / Hiper / Outras</option>
               </select>
             </div>
             
@@ -243,7 +351,7 @@ export function TaxasMaquininhaTab() {
             
             <div className="w-full">
               <label className="mb-2 block text-[13px] font-semibold text-cyan-300">
-                {tipoBusca === 'parcelas' ? 'Qtd. de Parcelas' : 'Alvo do Cliente'}
+                {tipoBusca === 'parcelas' ? 'Modalidade / Parcelas' : 'Alvo do Cliente'}
               </label>
               
               {tipoBusca === 'parcelas' ? (
@@ -253,8 +361,11 @@ export function TaxasMaquininhaTab() {
                   onChange={(e) => setCalcParcelaSelecionada(e.target.value)}
                 >
                   {perfisAgrupados.find(g => g.nome === calcPerfil)?.itens.map(p => {
-                    const num = p.nome?.split(' | ')[1]?.replace('x', '') || '1';
-                    return <option key={p.id} value={num}>{num}x</option>
+                    const parte = p.nome?.split(' | ')[1] || '1x';
+                    const isDebito = parte.toLowerCase().includes('débito') || parte.toLowerCase().includes('debito') || parte === '0x';
+                    const val = isDebito ? 'Debito' : parte.replace('x', '');
+                    const labelStr = isDebito ? '💵 DÉBITO (À Vista)' : `💳 ${parte}`;
+                    return <option key={p.id} value={val}>{labelStr}</option>;
                   })}
                 </select>
               ) : (
@@ -279,10 +390,14 @@ export function TaxasMaquininhaTab() {
             <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-5 flex flex-col md:flex-row md:items-center justify-between gap-5 animate-in fade-in slide-in-from-top-2">
               <div className="flex-1">
                 <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest mb-1">
-                  {tipoBusca === 'parcelas' ? 'Resultado do Cálculo' : 'A melhor parcela pro cliente é'}
+                  {tipoBusca === 'parcelas' ? 'Resultado do Cálculo' : 'A melhor opção pro cliente é'}
                 </p>
                 <p className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-                  {calcResultado.numParcelas}x de <span className="text-emerald-400">R$ {calcResultado.valorDaParcela.toFixed(2)}</span>
+                  {calcResultado.isDebito ? (
+                    <>💳 <span className="text-purple-300">DÉBITO</span>: <span className="text-emerald-400">R$ {calcResultado.valorTotalCobrado.toFixed(2)}</span></>
+                  ) : (
+                    <>{calcResultado.numParcelas}x de <span className="text-emerald-400">R$ {calcResultado.valorDaParcela.toFixed(2)}</span></>
+                  )}
                 </p>
                 <p className="text-[13px] font-medium text-slate-300 mt-2">
                   Total passado na máquina: <strong className="text-white">R$ {calcResultado.valorTotalCobrado.toFixed(2)}</strong>
@@ -290,7 +405,7 @@ export function TaxasMaquininhaTab() {
               </div>
               <div className="flex-1 text-left md:text-right border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6">
                 <p className="text-[11px] font-bold text-slate-400 flex items-center md:justify-end gap-1.5 uppercase tracking-widest">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400"/> Lucro limpo na taxa
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400"/> Lucro líquido na taxa
                 </p>
                 <p className={`text-xl md:text-2xl font-extrabold tracking-tight mt-1 ${calcResultado.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
                   + R$ {calcResultado.lucroTaxa.toFixed(2)}
@@ -304,15 +419,41 @@ export function TaxasMaquininhaTab() {
         </div>
       )}
 
-      {/* BLOCO DE CADASTRO */}
+      {/* BLOCO DE CADASTRO E EDIÇÃO DE PERFIL */}
       <div className="rounded-[2rem] border border-white/10 bg-slate-950 p-5 md:p-6 text-white shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-slate-300">
-            <CreditCard className="w-4 h-4" /> Cadastrar Taxas
+            <CreditCard className="w-4 h-4 text-cyan-400" /> 
+            {editingGrupoNome ? (
+              <span className="text-cyan-300">Editando Perfil: {editingGrupoNome}</span>
+            ) : (
+              <span>Cadastrar Novo Perfil de Taxas</span>
+            )}
           </div>
-          <Button variant="outline" onClick={() => setMostrarFormulario((v) => !v)} className="gap-2 border-white/15 bg-white/10 text-sm font-semibold text-white hover:bg-white/20 h-[42px] rounded-xl w-full sm:w-auto">
-            <Plus className="w-4 h-4" /> Adicionar Perfil
-          </Button>
+          <div className="flex items-center gap-2">
+            {editingGrupoNome && (
+              <Button 
+                variant="outline" 
+                onClick={resetarFormulario} 
+                className="gap-1.5 border-white/15 bg-white/10 text-xs font-semibold text-slate-300 hover:bg-white/20 h-[42px] rounded-xl"
+              >
+                <X className="w-4 h-4" /> Cancelar Edição
+              </Button>
+            )}
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                if (mostrarFormulario && editingGrupoNome) {
+                  resetarFormulario();
+                } else {
+                  setMostrarFormulario((v) => !v);
+                }
+              }} 
+              className="gap-2 border-white/15 bg-white/10 text-sm font-semibold text-white hover:bg-white/20 h-[42px] rounded-xl w-full sm:w-auto"
+            >
+              <Plus className="w-4 h-4" /> {mostrarFormulario ? 'Fechar Formulário' : 'Adicionar Perfil'}
+            </Button>
+          </div>
         </div>
 
         {mostrarFormulario && (
@@ -320,8 +461,13 @@ export function TaxasMaquininhaTab() {
             
             <div className="flex flex-col lg:flex-row lg:items-end gap-5 mb-6 pb-6 border-b border-white/10">
               <div className="flex-1">
-                <label className="mb-2 block text-[13px] font-semibold text-slate-200">Nome da Maquininha</label>
-                <input className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-2.5 text-sm font-medium text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all" placeholder="Ex: InfinitePay, Stone..." value={perfilNome} onChange={(e) => setPerfilNome(e.target.value)} />
+                <label className="mb-2 block text-[13px] font-semibold text-slate-200">Nome da Maquininha / Perfil</label>
+                <input 
+                  className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 py-2.5 text-sm font-medium text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all" 
+                  placeholder="Ex: InfinitePay, Ton, Stone, Mercado Pago..." 
+                  value={perfilNome} 
+                  onChange={(e) => setPerfilNome(e.target.value)} 
+                />
               </div>
               
               <div className="flex items-center gap-3 bg-cyan-950/30 p-3 rounded-xl border border-cyan-500/30 w-full lg:w-auto">
@@ -333,51 +479,116 @@ export function TaxasMaquininhaTab() {
             </div>
 
             <div className="grid gap-3 xl:max-h-96 overflow-y-auto pr-1">
-              {linhas.map((linha, index) => (
-                <div key={index} className="rounded-xl border border-white/5 bg-slate-900/60 p-3.5 flex flex-col md:flex-row md:items-center gap-4 hover:border-white/10 transition-colors">
-                  <span className="text-base font-extrabold text-white w-10 shrink-0">{linha.parcelas}x</span>
-                  
-                  {/* TAXAS BASE */}
-                  <div className="flex-1 grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5 block">Master/Visa (Base)</label>
-                      <input className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-medium text-white outline-none focus:border-cyan-500 transition-colors" type="number" step="0.01" placeholder="Ex: 3.5" value={linha.taxaBaseMaster} onChange={(e) => atualizarLinha(index, 'taxaBaseMaster', e.target.value)} />
+              {linhas.map((linha, index) => {
+                const isDebito = linha.parcelas === 0;
+                return (
+                  <div 
+                    key={index} 
+                    className={`rounded-xl border p-3.5 flex flex-col md:flex-row md:items-center gap-4 transition-colors ${
+                      isDebito 
+                        ? 'border-purple-500/30 bg-purple-950/20 hover:border-purple-500/50' 
+                        : 'border-white/5 bg-slate-900/60 hover:border-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 shrink-0 min-w-[90px]">
+                      {isDebito ? (
+                        <span className="text-xs font-black bg-purple-600 text-white px-2.5 py-1 rounded-lg uppercase tracking-wider">
+                          DÉBITO
+                        </span>
+                      ) : (
+                        <span className="text-base font-extrabold text-white">{linha.label}</span>
+                      )}
                     </div>
-                    <div>
-                      <label className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5 block">Elo (Base)</label>
-                      <input className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-medium text-white outline-none focus:border-cyan-500 transition-colors" type="number" step="0.01" placeholder="Ex: 4.2" value={linha.taxaBaseElo} onChange={(e) => atualizarLinha(index, 'taxaBaseElo', e.target.value)} />
+                    
+                    {/* TAXAS BASE */}
+                    <div className="flex-1 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5 block">
+                          Master/Visa ({isDebito ? 'Débito' : 'Base'})
+                        </label>
+                        <input 
+                          className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-medium text-white outline-none focus:border-cyan-500 transition-colors" 
+                          type="number" 
+                          step="0.01" 
+                          placeholder={isDebito ? "Ex: 1.2" : "Ex: 3.5"} 
+                          value={linha.taxaBaseMaster} 
+                          onChange={(e) => atualizarLinha(index, 'taxaBaseMaster', e.target.value)} 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1.5 block">
+                          Elo ({isDebito ? 'Débito' : 'Base'})
+                        </label>
+                        <input 
+                          className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-medium text-white outline-none focus:border-cyan-500 transition-colors" 
+                          type="number" 
+                          step="0.01" 
+                          placeholder={isDebito ? "Ex: 1.99" : "Ex: 4.2"} 
+                          value={linha.taxaBaseElo} 
+                          onChange={(e) => atualizarLinha(index, 'taxaBaseElo', e.target.value)} 
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  {/* TAXAS CLIENTE */}
-                  {usarTaxasAumentadas && (
-                    <div className="flex-1 grid grid-cols-2 gap-3 border-t md:border-t-0 md:border-l border-white/10 pt-3 md:pt-0 md:pl-5">
-                      <div>
-                        <label className="text-[10px] text-cyan-400 uppercase font-bold tracking-wider mb-1.5 block">Master/Visa (Cliente)</label>
-                        <input className="w-full rounded-lg border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 text-sm font-medium text-cyan-100 outline-none focus:border-cyan-400 transition-colors placeholder:text-cyan-800" type="number" step="0.01" placeholder="Ex: 5.0" value={linha.taxaClienteMaster} onChange={(e) => atualizarLinha(index, 'taxaClienteMaster', e.target.value)} />
+                    {/* TAXAS CLIENTE */}
+                    {usarTaxasAumentadas && (
+                      <div className="flex-1 grid grid-cols-2 gap-3 border-t md:border-t-0 md:border-l border-white/10 pt-3 md:pt-0 md:pl-5">
+                        <div>
+                          <label className="text-[10px] text-cyan-400 uppercase font-bold tracking-wider mb-1.5 block">
+                            Master/Visa (Cliente)
+                          </label>
+                          <input 
+                            className="w-full rounded-lg border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 text-sm font-medium text-cyan-100 outline-none focus:border-cyan-400 transition-colors placeholder:text-cyan-800" 
+                            type="number" 
+                            step="0.01" 
+                            placeholder="Ex: 5.0" 
+                            value={linha.taxaClienteMaster} 
+                            onChange={(e) => atualizarLinha(index, 'taxaClienteMaster', e.target.value)} 
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-cyan-400 uppercase font-bold tracking-wider mb-1.5 block">
+                            Elo (Cliente)
+                          </label>
+                          <input 
+                            className="w-full rounded-lg border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 text-sm font-medium text-cyan-100 outline-none focus:border-cyan-400 transition-colors placeholder:text-cyan-800" 
+                            type="number" 
+                            step="0.01" 
+                            placeholder="Ex: 6.0" 
+                            value={linha.taxaClienteElo} 
+                            onChange={(e) => atualizarLinha(index, 'taxaClienteElo', e.target.value)} 
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="text-[10px] text-cyan-400 uppercase font-bold tracking-wider mb-1.5 block">Elo (Cliente)</label>
-                        <input className="w-full rounded-lg border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 text-sm font-medium text-cyan-100 outline-none focus:border-cyan-400 transition-colors placeholder:text-cyan-800" type="number" step="0.01" placeholder="Ex: 6.0" value={linha.taxaClienteElo} onChange={(e) => atualizarLinha(index, 'taxaClienteElo', e.target.value)} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="mt-6 flex flex-col sm:flex-row items-center gap-3 pt-4 border-t border-white/10">
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-white/10">
               <Button type="button" onClick={adicionarLinha} variant="secondary" className="gap-2 bg-white/10 font-semibold text-white hover:bg-white/20 w-full sm:w-auto h-[42px] rounded-xl">
-                <Plus className="w-4 h-4" /> Adicionar Mês
+                <Plus className="w-4 h-4" /> Adicionar Parcela Extra
               </Button>
-              <Button type="button" onClick={salvarPerfil} className="gap-2 bg-cyan-600 font-semibold text-white hover:bg-cyan-500 w-full sm:w-auto h-[42px] rounded-xl shadow-lg shadow-cyan-900/20">
-                <Save className="w-4 h-4" /> Salvar Perfil
-              </Button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                {editingGrupoNome && (
+                  <Button type="button" onClick={resetarFormulario} variant="ghost" className="text-slate-400 hover:text-white w-full sm:w-auto">
+                    Cancelar
+                  </Button>
+                )}
+                <Button type="button" onClick={salvarPerfil} className="gap-2 bg-cyan-600 font-semibold text-white hover:bg-cyan-500 w-full sm:w-auto h-[42px] rounded-xl shadow-lg shadow-cyan-900/20">
+                  <Save className="w-4 h-4" /> {editingGrupoNome ? 'Salvar Alterações' : 'Salvar Perfil'}
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
-        {!podeAdicionar && <p className="mt-5 text-[13px] font-medium text-amber-400 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20">Você já atingiu o limite de 3 perfis para esta loja.</p>}
+        {!editingGrupoNome && !podeAdicionar && (
+          <p className="mt-5 text-[13px] font-medium text-amber-400 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20">
+            Você já atingiu o limite de 3 perfis de taxas para esta loja. Use o botão <b>Editar</b> para alterar um perfil existente.
+          </p>
+        )}
       </div>
 
       {/* BLOCO DA LISTA DE CADASTRADOS */}
@@ -388,27 +599,59 @@ export function TaxasMaquininhaTab() {
         </div>
 
         {loading ? (
-          <p className="pt-6 text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Carregando as taxas, guenta aí...</p>
+          <p className="pt-6 text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Carregando as taxas...</p>
         ) : perfisAgrupados.length === 0 ? (
-          <p className="pt-6 text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Nenhum perfil cadastrado. A maquininha vai chorar de fome.</p>
+          <p className="pt-6 text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Nenhum perfil cadastrado. Adicione um perfil acima para simular vendas.</p>
         ) : (
           <div className="space-y-4 pt-5">
             {perfisAgrupados.map((grupo) => (
               <div key={grupo.nome} className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/50 hover:border-cyan-500/30 transition-colors">
                 
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
-                  <p className="text-lg font-bold text-slate-900 dark:text-white">{grupo.nome}</p>
-                  <Button variant="destructive" size="sm" onClick={() => removerPerfil(grupo.nome)} className="shrink-0 bg-red-500/15 text-red-600 hover:bg-red-500/30 hover:text-red-500 dark:text-red-400 rounded-lg font-semibold w-full md:w-auto">
-                    <Trash2 className="w-4 h-4 mr-2" /> Excluir Perfil
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <p className="text-lg font-bold text-slate-900 dark:text-white">{grupo.nome}</p>
+                    {editingGrupoNome === grupo.nome && (
+                      <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded-full">
+                        Em edição
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 w-full md:w-auto">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => editarPerfil(grupo.nome)} 
+                      className="shrink-0 border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 hover:bg-cyan-500/20 rounded-lg font-semibold flex-1 md:flex-none"
+                    >
+                      <Edit className="w-3.5 h-3.5 mr-1.5" /> Editar Perfil
+                    </Button>
+                    <Button 
+                      variant="destructive" 
+                      size="sm" 
+                      onClick={() => removerPerfil(grupo.nome)} 
+                      className="shrink-0 bg-red-500/15 text-red-600 hover:bg-red-500/30 hover:text-red-500 dark:text-red-400 rounded-lg font-semibold flex-1 md:flex-none"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Excluir
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
                   {grupo.itens.map((perfil) => {
                     const parte = perfil.nome?.split(' | ')[1] || '1x';
+                    const isDebito = parte.toLowerCase().includes('débito') || parte.toLowerCase().includes('debito') || parte === '0x';
                     return (
-                      <div key={perfil.id} className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 dark:bg-cyan-950/20 p-2.5 flex flex-col gap-1.5">
-                        <strong className="text-[13px] font-extrabold text-cyan-700 dark:text-cyan-400 border-b border-cyan-500/10 pb-1">{parte}</strong>
+                      <div 
+                        key={perfil.id} 
+                        className={`rounded-xl p-2.5 flex flex-col gap-1.5 ${
+                          isDebito 
+                            ? 'border border-purple-500/40 bg-purple-500/10 dark:bg-purple-950/30' 
+                            : 'border border-cyan-500/20 bg-cyan-500/5 dark:bg-cyan-950/20'
+                        }`}
+                      >
+                        <strong className={`text-[12px] font-extrabold pb-1 border-b ${isDebito ? 'text-purple-400 border-purple-500/20' : 'text-cyan-700 dark:text-cyan-400 border-cyan-500/10'}`}>
+                          {isDebito ? '💵 DÉBITO' : parte}
+                        </strong>
                         
                         <div className="flex justify-between items-center text-[11px] font-medium text-slate-600 dark:text-slate-300">
                           <span>M/V:</span>
