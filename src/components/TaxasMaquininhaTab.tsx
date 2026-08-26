@@ -14,7 +14,9 @@ import {
   Edit, 
   X,
   BadgeCheck,
-  RotateCcw
+  RotateCcw,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabaseClient';
@@ -60,6 +62,8 @@ export function TaxasMaquininhaTab() {
   
   // Modos de cálculo: 'parcelas' (fixo) ou 'alvo' (busca inteligente)
   const [tipoBusca, setTipoBusca] = useState<'parcelas' | 'alvo'>('parcelas');
+  // Visualização avançada (Lojista com Lucro/Custo) vs Modo Cliente (Oculta Margens)
+  const [modoAvancado, setModoAvancado] = useState(false);
   
   const [calcParcelaSelecionada, setCalcParcelaSelecionada] = useState('Debito'); // Ex: 'Debito', '1', '2', ..., '24'
   const [calcValorAlvo, setCalcValorAlvo] = useState('');
@@ -353,21 +357,47 @@ export function TaxasMaquininhaTab() {
       {/* BLOCO DA CALCULADORA */}
       {perfisAgrupados.length > 0 && (
         <div className="rounded-[2rem] border border-cyan-500/30 bg-slate-950 p-5 md:p-6 text-white shadow-xl shadow-cyan-900/20">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
             <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-cyan-400">
               <Calculator className="w-4 h-4" /> Simulador de Taxas
             </div>
-            {/* BOTÃO PARA ALTERNAR O MODO DE BUSCA */}
-            <button 
-              onClick={() => {
-                setTipoBusca(prev => prev === 'parcelas' ? 'alvo' : 'parcelas');
-                setCalcResultado(null);
-              }}
-              className="flex items-center gap-2 text-[11px] font-bold bg-cyan-950/40 text-cyan-300 px-3 py-1.5 rounded-full border border-cyan-500/20 hover:bg-cyan-900/40 transition-colors uppercase tracking-wider"
-            >
-              <ArrowRightLeft className="w-3 h-3" />
-              {tipoBusca === 'parcelas' ? 'Mudar para Busca por Alvo' : 'Mudar para Seleção Direta'}
-            </button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* TOGGLE MODO CLIENTE vs MODO LOJISTA */}
+              <button 
+                type="button"
+                onClick={() => setModoAvancado(!modoAvancado)}
+                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                  modoAvancado 
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 shadow-md shadow-amber-950/20' 
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30 shadow-md shadow-emerald-950/20'
+                }`}
+              >
+                {modoAvancado ? (
+                  <>
+                    <Eye className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Modo Lojista (Ver Lucro/Custo)</span>
+                  </>
+                ) : (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Modo Cliente (Ocultar Lucro)</span>
+                  </>
+                )}
+              </button>
+
+              {/* BOTÃO PARA ALTERNAR O MODO DE BUSCA */}
+              <button 
+                onClick={() => {
+                  setTipoBusca(prev => prev === 'parcelas' ? 'alvo' : 'parcelas');
+                  setCalcResultado(null);
+                }}
+                className="flex items-center gap-2 text-[11px] font-bold bg-cyan-950/40 text-cyan-300 px-3 py-1.5 rounded-full border border-cyan-500/20 hover:bg-cyan-900/40 transition-colors uppercase tracking-wider"
+              >
+                <ArrowRightLeft className="w-3 h-3" />
+                {tipoBusca === 'parcelas' ? 'Busca por Alvo' : 'Seleção Direta'}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-5 items-end">
@@ -449,17 +479,19 @@ export function TaxasMaquininhaTab() {
                   Total passado na máquina: <strong className="text-white">R$ {calcResultado.valorTotalCobrado.toFixed(2)}</strong>
                 </p>
               </div>
-              <div className="flex-1 text-left md:text-right border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6">
-                <p className="text-[11px] font-bold text-slate-400 flex items-center md:justify-end gap-1.5 uppercase tracking-widest">
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-400"/> Lucro líquido na taxa
-                </p>
-                <p className={`text-xl md:text-2xl font-extrabold tracking-tight mt-1 ${calcResultado.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                  + R$ {calcResultado.lucroTaxa.toFixed(2)}
-                </p>
-                <p className="text-[12px] font-medium text-slate-400 mt-2 bg-black/20 inline-block px-2.5 py-1 rounded-md">
-                  Taxa Cliente: <span className="text-white">{calcResultado.taxaCliente}%</span> • Custo Máq: <span className="text-white">{calcResultado.taxaBase}%</span>
-                </p>
-              </div>
+              {modoAvancado && (
+                <div className="flex-1 text-left md:text-right border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6">
+                  <p className="text-[11px] font-bold text-slate-400 flex items-center md:justify-end gap-1.5 uppercase tracking-widest">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400"/> Lucro líquido na taxa
+                  </p>
+                  <p className={`text-xl md:text-2xl font-extrabold tracking-tight mt-1 ${calcResultado.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                    + R$ {calcResultado.lucroTaxa.toFixed(2)}
+                  </p>
+                  <p className="text-[12px] font-medium text-slate-400 mt-2 bg-black/20 inline-block px-2.5 py-1 rounded-md">
+                    Taxa Cliente: <span className="text-white">{calcResultado.taxaCliente}%</span> • Custo Máq: <span className="text-white">{calcResultado.taxaBase}%</span>
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -470,21 +502,24 @@ export function TaxasMaquininhaTab() {
                 <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-widest flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-cyan-400" /> Tabela Completa de Parcelamento ({calcPerfil} - {calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper'})
                 </h3>
-                <span className="text-xs font-semibold text-slate-400">
-                  Valor Produto: <strong className="text-white">R$ {parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',')}</strong>
-                </span>
+                
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-slate-400">
+                    Valor Produto: <strong className="text-white">R$ {parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',')}</strong>
+                  </span>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-medium border-collapse min-w-[620px]">
+                <table className="w-full text-left text-xs font-medium border-collapse min-w-[500px]">
                   <thead>
                     <tr className="border-b border-white/10 text-slate-400 uppercase text-[10px] tracking-wider">
                       <th className="py-2.5 px-3">Modalidade</th>
                       <th className="py-2.5 px-3">Taxa Cliente</th>
                       <th className="py-2.5 px-3">Valor da Parcela</th>
                       <th className="py-2.5 px-3">Total na Maquininha</th>
-                      <th className="py-2.5 px-3">Custo Máquina</th>
-                      <th className="py-2.5 px-3 text-right">Lucro na Taxa</th>
+                      {modoAvancado && <th className="py-2.5 px-3">Custo Máquina</th>}
+                      {modoAvancado && <th className="py-2.5 px-3 text-right">Lucro na Taxa</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
@@ -528,15 +563,19 @@ export function TaxasMaquininhaTab() {
                             R$ {row.valorTotalCobrado.toFixed(2).replace('.', ',')}
                           </td>
 
-                          <td className="py-2.5 px-3 text-slate-400">
-                            {row.taxaBase.toFixed(2)}%
-                          </td>
+                          {modoAvancado && (
+                            <td className="py-2.5 px-3 text-slate-400">
+                              {row.taxaBase.toFixed(2)}%
+                            </td>
+                          )}
 
-                          <td className="py-2.5 px-3 text-right font-bold">
-                            <span className={row.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-400'}>
-                              {row.lucroTaxa > 0 ? `+ R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}` : `R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}`}
-                            </span>
-                          </td>
+                          {modoAvancado && (
+                            <td className="py-2.5 px-3 text-right font-bold">
+                              <span className={row.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-400'}>
+                                {row.lucroTaxa > 0 ? `+ R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}` : `R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}`}
+                              </span>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}

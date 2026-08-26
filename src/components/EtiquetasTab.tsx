@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
-import { Plus, Pencil, Square, Tag, Printer, Settings, Check, RefreshCw, Search, Smartphone, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Square, CheckSquare, Tag, Printer, Settings, Check, RefreshCw, Search, Smartphone, Trash2, X } from 'lucide-react';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { generateCode128SvgString } from '@/lib/barcodeGenerator';
+import { supabase } from '@/lib/supabaseClient';
 
 type CampoEtiqueta = 'marcaModelo' | 'codigo' | 'codigoBarras' | 'capacidade' | 'condicao' | 'imei' | 'cor' | 'saudeBateria' | 'preco';
 
