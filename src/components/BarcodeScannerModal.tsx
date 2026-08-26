@@ -28,7 +28,7 @@ const createSafeScanner = (elementId: string) => {
         return await originalStop();
       }
     } catch (e) {
-      // Engole o erro "Cannot transition to a new state"
+      // Engole erro de transição "Cannot transition to a new state"
     }
   };
 
@@ -309,13 +309,16 @@ export function BarcodeScannerModal({
           </div>
         </div>
 
-        {/* Câmera Viewfinder */}
-        <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 min-h-[240px] flex items-center justify-center">
-          <div id="qr-reader-container" className="w-full h-full" />
+        {/* Câmera Viewfinder (Limitada com CSS estrito para não engolir o layout) */}
+        <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 h-[220px] sm:h-[240px] w-full flex items-center justify-center shrink-0">
+          <div 
+            id="qr-reader-container" 
+            className="w-full h-full [&>video]:w-full [&>video]:h-full [&>video]:object-cover [&>video]:max-h-[240px] [&>video]:rounded-2xl" 
+          />
 
           {/* Mira de Escaneamento */}
           {cameraActive && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
               <div className="w-64 h-44 border-2 border-cyan-400/80 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] relative overflow-hidden">
                 <div className="absolute inset-x-0 h-0.5 bg-cyan-400 animate-pulse top-1/2 -translate-y-1/2 shadow-[0_0_10px_#22d3ee]" />
               </div>
@@ -324,7 +327,7 @@ export function BarcodeScannerModal({
 
           {/* Mensagem de Erro na Câmera */}
           {cameraError && (
-            <div className="p-4 text-center space-y-2">
+            <div className="p-4 text-center space-y-2 z-10">
               <Keyboard className="w-8 h-8 text-amber-400 mx-auto opacity-80" />
               <p className="text-xs text-amber-300 font-medium">{cameraError}</p>
               <p className="text-[11px] text-slate-400">Você ainda pode usar um <b>Leitor de Código de Barras USB</b> ou digitar manualmente abaixo.</p>

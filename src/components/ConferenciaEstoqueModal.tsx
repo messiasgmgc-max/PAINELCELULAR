@@ -474,30 +474,31 @@ export function ConferenciaEstoqueModal({
           </div>
         </div>
 
-        {/* CONTAINER DO SCANNER (Mantido continuamente montado no DOM) */}
-        <div className={cn(etapa !== 'escaneamento' && 'hidden')}>
-          <div id="conf-qr-container" className="w-full h-full" />
-        </div>
-
         {/* ETAPA 1: ESCANEAMENTO CONTÍNUO */}
         {etapa === 'escaneamento' && (
           <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
             
             {/* COLUNA ESQUERDA: CÂMERA E ENTRADA */}
             <div className="lg:col-span-5 flex flex-col gap-3 min-h-0">
-              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex-1 min-h-[220px] flex items-center justify-center">
+              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 h-[220px] sm:h-[260px] w-full flex items-center justify-center shrink-0">
                 
+                {/* O container id="conf-qr-container" fica AQUI DENTRO da moldura da esquerda */}
+                <div 
+                  id="conf-qr-container" 
+                  className="w-full h-full [&>video]:w-full [&>video]:h-full [&>video]:object-cover [&>video]:max-h-[260px] [&>video]:rounded-2xl" 
+                />
+
                 {/* Elemento visual ou mira da câmera */}
                 {cameraActive && (
                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
-                    <div className="w-56 h-40 border-2 border-cyan-400/80 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] relative overflow-hidden">
+                    <div className="w-52 h-36 border-2 border-cyan-400/80 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] relative overflow-hidden">
                       <div className="absolute inset-x-0 h-0.5 bg-cyan-400 animate-pulse top-1/2 -translate-y-1/2 shadow-[0_0_10px_#22d3ee]" />
                     </div>
                   </div>
                 )}
 
                 {cameraError && (
-                  <div className="p-4 text-center space-y-2">
+                  <div className="p-4 text-center space-y-2 z-10">
                     <Keyboard className="w-7 h-7 text-amber-400 mx-auto opacity-80" />
                     <p className="text-xs text-amber-300 font-medium">{cameraError}</p>
                     <p className="text-[11px] text-slate-400">Utilize o Leitor USB ou digite abaixo.</p>
@@ -559,10 +560,10 @@ export function ConferenciaEstoqueModal({
               </div>
 
               {/* Lista dos Itens Escaneados */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 max-h-[320px]">
                 {escaneados.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
-                    <Camera className="w-8 h-8 opacity-40 animate-pulse" />
+                    <Camera className="w-8 h-8 opacity-40 animate-pulse mx-auto" />
                     <p className="text-xs font-medium">Nenhum aparelho bipado nesta sessão.</p>
                     <p className="text-[11px] text-slate-600">Aponte a câmera para o código da etiqueta ou conecte o leitor USB.</p>
                   </div>
