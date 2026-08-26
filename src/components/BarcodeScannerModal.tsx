@@ -14,18 +14,44 @@ interface BarcodeScannerModalProps {
   keepOpenOnScan?: boolean;
 }
 
-const stopScannerInstance = async (scannerInstance: Html5Qrcode | null) => {
+const createSafeScanner = (elementId: string) => {
+  const instance = new Html5Qrcode(elementId);
+  const originalStop = instance.stop.bind(instance);
+  const originalClear = instance.clear.bind(instance);
+
+  instance.stop = async () => {
+    try {
+      const state = (instance as any).getState?.();
+      // 2 = SCANNING, 3 = PAUSED. Se for 1 (TRANSITIONING) ou 0 (NOT_STARTED), ignora originalStop
+      if (state === 2 || state === 3) {
+        return await originalStop();
+      }
+    } catch (e) {
+      // Engole o erro "Cannot transition to a new state"
+    }
+  };
+
+  instance.clear = () => {
+    try {
+      return originalClear();
+    } catch (e) {}
+  };
+
+  return instance;
+};
+
+const stopScannerInstance = async (
+  scannerInstance: Html5Qrcode | null,
+  startPromise?: Promise<void> | null
+) => {
   if (!scannerInstance) return;
   try {
-    const state = (scannerInstance as any).getState?.();
-    // 2 = SCANNING, 3 = PAUSED
-    if (state === 2 || state === 3 || typeof state !== 'number') {
-      await scannerInstance.stop().catch(() => {});
+    if (startPromise) {
+      await startPromise.catch(() => {});
     }
-    await scannerInstance.clear().catch(() => {});
-  } catch (e) {
-    // Engole transições do Html5Qrcode
-  }
+    await scannerInstance.stop();
+    scannerInstance.clear();
+  } catch (e) {}
 };
 
 export function BarcodeScannerModal({
@@ -43,6 +69,7 @@ export function BarcodeScannerModal({
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const startPromiseRef = useRef<Promise<void> | null>(null);
   const keyBufferRef = useRef<string>('');
   const keyTimeoutRef = useRef<any>(null);
   const modalContainerRef = useRef<HTMLDivElement>(null);
@@ -157,9 +184,11 @@ export function BarcodeScannerModal({
     if (!isOpen) {
       if (scannerRef.current) {
         const instance = scannerRef.current;
+        const p = startPromiseRef.current;
         scannerRef.current = null;
+        startPromiseRef.current = null;
         setCameraActive(false);
-        stopScannerInstance(instance);
+        stopScannerInstance(instance, p);
       }
       return;
     }
@@ -170,7 +199,7 @@ export function BarcodeScannerModal({
         const container = document.getElementById('qr-reader-container');
         if (!container) return;
 
-        const html5QrCode = new Html5Qrcode('qr-reader-container');
+        const html5QrCode = createSafeScanner('qr-reader-container');
         scannerRef.current = html5QrCode;
 
         const config = {
@@ -179,7 +208,7 @@ export function BarcodeScannerModal({
           aspectRatio: 1.0,
         };
 
-        await html5QrCode.start(
+        const promise = html5QrCode.start(
           { facingMode: 'environment' },
           config,
           (decodedText) => {
@@ -189,6 +218,9 @@ export function BarcodeScannerModal({
           },
           () => {}
         );
+
+        startPromiseRef.current = promise;
+        await promise;
 
         if (isMounted) {
           setCameraActive(true);
@@ -211,8 +243,10 @@ export function BarcodeScannerModal({
       clearTimeout(timer);
       if (scannerRef.current) {
         const instance = scannerRef.current;
+        const p = startPromiseRef.current;
         scannerRef.current = null;
-        stopScannerInstance(instance);
+        startPromiseRef.current = null;
+        stopScannerInstance(instance, p);
       }
     };
   }, [isOpen]);
