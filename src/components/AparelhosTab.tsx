@@ -2142,13 +2142,15 @@ export function AparelhosTab() {
       )}
 
       {/* MODAL DE CONFERÊNCIA DE ESTOQUE */}
-      <ConferenciaEstoqueModal
-        isOpen={showConferenciaModal}
-        onClose={() => setShowConferenciaModal(false)}
-        aparelhosEstoque={aparelhosAtivos as any}
-        lojaId={usuario?.lojaId || usuario?.loja_id || null}
-        onEstoqueAtualizado={fetchAparelhos}
-      />
+      <ModalPortal>
+        <ConferenciaEstoqueModal
+          isOpen={showConferenciaModal}
+          onClose={() => setShowConferenciaModal(false)}
+          aparelhosEstoque={aparelhosAtivos as any}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onEstoqueAtualizado={fetchAparelhos}
+        />
+      </ModalPortal>
     </div>
   );
 }

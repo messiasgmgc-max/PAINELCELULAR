@@ -15,6 +15,7 @@ import {
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
+import { ModalPortal } from '@/components/ModalPortal';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -3667,13 +3668,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       )}
 
       {/* Barcode Scanner Modal for POS Vendas */}
-      <BarcodeScannerModal
-        isOpen={showBarcodeScanner}
-        onClose={() => setShowBarcodeScanner(false)}
-        onScan={(barcode) => selecionarAparelhoPorCodigo(barcode)}
-        title="Scanner de Código de Barras PDV"
-        subtitle="Aponte a câmera ou bipe o código do aparelho com o leitor USB"
-      />
+      <ModalPortal>
+        <BarcodeScannerModal
+          isOpen={showBarcodeScanner}
+          onClose={() => setShowBarcodeScanner(false)}
+          onScan={(barcode) => selecionarAparelhoPorCodigo(barcode)}
+          title="Scanner de Código de Barras PDV"
+          subtitle="Aponte a câmera ou bipe o código do aparelho com o leitor USB"
+        />
+      </ModalPortal>
     </div>
   );
 }

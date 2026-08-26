@@ -22,8 +22,9 @@ const createSafeScanner = (elementId: string) => {
   instance.stop = async () => {
     try {
       const state = (instance as any).getState?.();
-      // 2 = SCANNING, 3 = PAUSED. Se for 1 (TRANSITIONING) ou 0 (NOT_STARTED), ignora originalStop
-      if (state === 2 || state === 3) {
+      const isScanning = (instance as any).isScanning;
+      // 2 = SCANNING, 3 = PAUSED
+      if (isScanning && (state === 2 || state === 3)) {
         return await originalStop();
       }
     } catch (e) {
@@ -74,10 +75,21 @@ export function BarcodeScannerModal({
   const keyTimeoutRef = useRef<any>(null);
   const modalContainerRef = useRef<HTMLDivElement>(null);
 
+  // Fechar de forma limpa desligando a câmera antes de solicitar ao pai
+  const handleClose = async () => {
+    if (scannerRef.current) {
+      const instance = scannerRef.current;
+      const p = startPromiseRef.current;
+      scannerRef.current = null;
+      startPromiseRef.current = null;
+      setCameraActive(false);
+      await stopScannerInstance(instance, p);
+    }
+    onClose();
+  };
+
   // Previnir crash de tela do Next.js se o Html5Qrcode lançar erro de transição não capturado
   useEffect(() => {
-    if (!isOpen) return;
-
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reasonStr = String(event.reason?.message || event.reason || '');
       if (
@@ -94,7 +106,7 @@ export function BarcodeScannerModal({
     return () => {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
-  }, [isOpen]);
+  }, []);
 
   // Garantir que a modal abra no topo absoluto da tela no mobile
   useEffect(() => {
@@ -133,7 +145,7 @@ export function BarcodeScannerModal({
     onScan(clean);
 
     if (!keepOpenOnScan) {
-      onClose();
+      handleClose();
     }
   };
 
@@ -251,7 +263,14 @@ export function BarcodeScannerModal({
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  // Manter o container do leitor no DOM para evitar que a remoção do DOM cause erro no Html5Qrcode
+  if (!isOpen) {
+    return (
+      <div style={{ display: 'none' }}>
+        <div id="qr-reader-container" />
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -282,7 +301,7 @@ export function BarcodeScannerModal({
             </button>
 
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
             >
               <X className="w-5 h-5" />
@@ -352,7 +371,7 @@ export function BarcodeScannerModal({
         {/* Footer */}
         <div className="flex items-center justify-between pt-1">
           <span className="text-[10px] text-slate-400">⚡ Compatível com leitor USB e câmera Android/iOS</span>
-          <Button variant="ghost" size="sm" onClick={onClose} className="text-xs text-slate-400 hover:text-white">
+          <Button variant="ghost" size="sm" onClick={handleClose} className="text-xs text-slate-400 hover:text-white">
             Fechar
           </Button>
         </div>

@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface AparelhoAuditoria {
   id: string;
@@ -63,8 +64,9 @@ const createSafeScanner = (elementId: string) => {
   instance.stop = async () => {
     try {
       const state = (instance as any).getState?.();
+      const isScanning = (instance as any).isScanning;
       // 2 = SCANNING, 3 = PAUSED
-      if (state === 2 || state === 3) {
+      if (isScanning && (state === 2 || state === 3)) {
         return await originalStop();
       }
     } catch (e) {
@@ -119,10 +121,21 @@ export function ConferenciaEstoqueModal({
   const keyTimeoutRef = useRef<any>(null);
   const modalContainerRef = useRef<HTMLDivElement>(null);
 
+  // Desligar câmera de forma limpa antes de fechar o modal
+  const handleClose = async () => {
+    if (scannerRef.current) {
+      const instance = scannerRef.current;
+      const p = startPromiseRef.current;
+      scannerRef.current = null;
+      startPromiseRef.current = null;
+      setCameraActive(false);
+      await stopScannerInstance(instance, p);
+    }
+    onClose();
+  };
+
   // Previnir crash de tela do Next.js se o Html5Qrcode lançar erro de transição não capturado
   useEffect(() => {
-    if (!isOpen) return;
-
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reasonStr = String(event.reason?.message || event.reason || '');
       if (
@@ -139,7 +152,7 @@ export function ConferenciaEstoqueModal({
     return () => {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
-  }, [isOpen]);
+  }, []);
 
   // Garantir que a modal abra no topo absoluto da tela no mobile
   useEffect(() => {
@@ -352,11 +365,19 @@ export function ConferenciaEstoqueModal({
     setAcoesFaltantes(novao);
   };
 
-  const handleFinalizarEConferir = () => {
+  const handleFinalizarEConferir = async () => {
     if (escaneados.length === 0) {
       if (!confirm('Nenhum aparelho foi escaneado ainda. Deseja avançar para o relatório de qualquer forma?')) {
         return;
       }
+    }
+    if (scannerRef.current) {
+      const instance = scannerRef.current;
+      const p = startPromiseRef.current;
+      scannerRef.current = null;
+      startPromiseRef.current = null;
+      setCameraActive(false);
+      await stopScannerInstance(instance, p);
     }
     setEtapa('relatorio');
   };
@@ -396,7 +417,7 @@ export function ConferenciaEstoqueModal({
 
       toast.success(`🚀 Auditoria concluída! ${alterados} aparelhos tiveram baixa/ajuste no estoque.`);
       onEstoqueAtualizado();
-      onClose();
+      handleClose();
     } catch (err: any) {
       console.error('Erro ao aplicar ajustes na conferência:', err);
       toast.error(`Erro ao aplicar ajustes: ${err?.message || 'Falha no servidor'}`);
@@ -405,7 +426,14 @@ export function ConferenciaEstoqueModal({
     }
   };
 
-  if (!isOpen) return null;
+  // Manter o container do leitor no DOM para evitar que a remoção do DOM cause erro no Html5Qrcode
+  if (!isOpen) {
+    return (
+      <div style={{ display: 'none' }}>
+        <div id="conf-qr-container" />
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -440,10 +468,15 @@ export function ConferenciaEstoqueModal({
                 {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4" />}
               </button>
             )}
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800">
+            <button onClick={handleClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800">
               <X className="w-5 h-5" />
             </button>
           </div>
+        </div>
+
+        {/* CONTAINER DO SCANNER (Mantido continuamente montado no DOM) */}
+        <div className={cn(etapa !== 'escaneamento' && 'hidden')}>
+          <div id="conf-qr-container" className="w-full h-full" />
         </div>
 
         {/* ETAPA 1: ESCANEAMENTO CONTÍNUO */}
@@ -453,10 +486,10 @@ export function ConferenciaEstoqueModal({
             {/* COLUNA ESQUERDA: CÂMERA E ENTRADA */}
             <div className="lg:col-span-5 flex flex-col gap-3 min-h-0">
               <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex-1 min-h-[220px] flex items-center justify-center">
-                <div id="conf-qr-container" className="w-full h-full" />
-
+                
+                {/* Elemento visual ou mira da câmera */}
                 {cameraActive && (
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
                     <div className="w-56 h-40 border-2 border-cyan-400/80 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] relative overflow-hidden">
                       <div className="absolute inset-x-0 h-0.5 bg-cyan-400 animate-pulse top-1/2 -translate-y-1/2 shadow-[0_0_10px_#22d3ee]" />
                     </div>
