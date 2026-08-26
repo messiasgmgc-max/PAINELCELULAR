@@ -1405,38 +1405,43 @@ export function AparelhosTab() {
                 </p>
               </div>
             </div>
-            <div className="scroll-row w-full pb-1">
-              <Button onClick={() => setShowForm(!showForm)} className="btn-ios shrink-0 whitespace-nowrap flex items-center gap-1.5 h-9 px-4 text-sm">
+            <div className="scroll-row w-full pb-1 flex items-center gap-2">
+              <Button 
+                onClick={() => setShowForm(!showForm)} 
+                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+              >
                 <Plus className="h-4 w-4" />
                 Novo Aparelho
               </Button>
               <Button 
                 onClick={() => setShowConferenciaModal(true)} 
-                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold shrink-0 whitespace-nowrap flex items-center gap-1.5 h-9 px-4 text-sm shadow-md shadow-cyan-900/20 rounded-xl"
+                className="bg-slate-800/90 hover:bg-slate-700/90 text-cyan-400 hover:text-cyan-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
               >
-                <ShieldCheck className="h-4 w-4" />
+                <ShieldCheck className="h-4 w-4 text-cyan-400" />
                 Conferir Estoque
               </Button>
-              <Button variant="destructive" onClick={() => setShowSaidas(true)} className="gap-2 shrink-0 whitespace-nowrap h-9">
+              <Button 
+                onClick={() => setShowSaidas(true)} 
+                className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-amber-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+              >
                 <History className="h-4 w-4" /> Saídas
               </Button>
               {/* Dropdown Exportar */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant="outline"
                     disabled={aparelhosAtivos.length === 0}
-                    className="whitespace-nowrap h-9 gap-1.5 shrink-0 border-white/20 hover:bg-white/10"
+                    className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
                   >
                     <Download className="h-4 w-4 text-blue-400" />
                     Exportar
                     <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56 bg-slate-900 border border-white/20 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
+                <DropdownMenuContent align="start" className="w-56 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
                   <DropdownMenuItem
                     onClick={handleExportCSV}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-white/10 focus:bg-white/10 cursor-pointer text-slate-200"
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
                     <FileSpreadsheet className="h-4 w-4 text-emerald-400 shrink-0" />
                     <div>
@@ -1444,10 +1449,10 @@ export function AparelhosTab() {
                       <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
                     </div>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-white/10 my-1" />
+                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
                   <DropdownMenuItem
                     onClick={handleExportWhatsApp}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-white/10 focus:bg-white/10 cursor-pointer text-slate-200"
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
                     <MessageCircle className="h-4 w-4 text-green-400 shrink-0" />
                     <div>
@@ -1457,13 +1462,22 @@ export function AparelhosTab() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant="outline" onClick={() => setShowSupplierModal(true)} className="gap-2 border-blue-500 text-blue-600 hover:bg-blue-50 shrink-0 whitespace-nowrap h-9">
-                <List className="h-4 w-4" /> Lista Fornecedor
+              <Button 
+                onClick={() => setShowSupplierModal(true)} 
+                className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
+              >
+                <List className="h-4 w-4 text-blue-400" /> Lista Fornecedor
               </Button>
-              <Button variant="outline" onClick={() => setShowMercadoPhoneModal(true)} className="gap-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-500/50 dark:text-emerald-400 shrink-0 whitespace-nowrap h-9">
-                <Download className="h-4 w-4" /> Lista MP
+              <Button 
+                onClick={() => setShowMercadoPhoneModal(true)} 
+                className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
+              >
+                <Download className="h-4 w-4 text-emerald-400" /> Lista MP
               </Button>
-              <Button variant="outline" onClick={handleDeleteEstoque} className="gap-2 border-red-500 text-red-600 hover:bg-red-50 shrink-0 whitespace-nowrap h-9">
+              <Button 
+                onClick={handleDeleteEstoque} 
+                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-rose-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+              >
                 <Trash2 className="h-4 w-4" /> Deletar Estoque
               </Button>
             </div>

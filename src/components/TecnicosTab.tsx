@@ -192,13 +192,19 @@ export function TecnicosTab() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <div className="scroll-row w-full pb-1">
-          <Button onClick={handleExportCSV} variant="outline" className="shrink-0 whitespace-nowrap">
-            <Download className="w-4 h-4 mr-2" />
+        <div className="scroll-row w-full pb-1 flex items-center gap-2">
+          <Button 
+            onClick={handleExportCSV} 
+            className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
+          >
+            <Download className="w-4 h-4 text-blue-400" />
             CSV
           </Button>
-          <Button onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '', tipo: filtroTipo === 'vendedor' ? 'vendedor' : 'tecnico' }); }} className="shrink-0 whitespace-nowrap bg-blue-600 hover:bg-blue-700">
-            <Plus className="w-4 h-4 mr-2" />
+          <Button 
+            onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData({ nome: '', email: '', telefone: '', cpf: '', especialidade: '', tipo: filtroTipo === 'vendedor' ? 'vendedor' : 'tecnico' }); }} 
+            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+          >
+            <Plus className="w-4 h-4" />
             Novo Membro
           </Button>
         </div>

@@ -299,25 +299,26 @@ export function ClientesTab() {
               className="hidden"
             />
             <Button
-              variant="outline"
               onClick={handleExport}
               disabled={clientes.length === 0}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+              className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
             >
-              <Download className="mr-2 h-4 w-4" />
+              <Download className="mr-1.5 h-4 w-4 text-blue-400" />
               Exportar
             </Button>
             <Button
-              variant="outline"
               onClick={handleOpenImport}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+              className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
             >
-              <Upload className="mr-2 h-4 w-4" />
+              <Upload className="mr-1.5 h-4 w-4 text-cyan-400" />
               Importar
             </Button>
-            <Button onClick={() => setShowForm(!showForm)} className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap">
-              <Plus className="mr-2 h-4 w-4" />
-              Novo
+            <Button 
+              onClick={() => setShowForm(!showForm)} 
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Novo Cliente
             </Button>
           </div>
         </div>

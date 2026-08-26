@@ -329,19 +329,22 @@ export function GarantiasTab() {
           />
         </div>
         
-        <div className="scroll-row w-full pb-1">
+        <div className="scroll-row w-full pb-1 flex items-center gap-2">
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as any)}
-            className="input-glass w-auto shrink-0"
+            className="bg-slate-800/90 text-slate-200 border border-slate-700/80 rounded-xl px-3 py-2 text-xs sm:text-sm outline-none focus:border-cyan-500 cursor-pointer h-10"
           >
-            <option value="todas">Todas</option>
+            <option value="todas">Todas as Garantias</option>
             <option value="vigentes">Vigentes</option>
             <option value="expiradas">Expiradas</option>
           </select>
 
-          <Button onClick={openNewForm} className="shrink-0 whitespace-nowrap">
-            <Plus className="w-4 h-4 mr-2" />
+          <Button 
+            onClick={openNewForm} 
+            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+          >
+            <Plus className="w-4 h-4" />
             Nova Garantia
           </Button>
         </div>
