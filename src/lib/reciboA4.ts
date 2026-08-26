@@ -37,28 +37,69 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
       }).join(' | ')
     : formatarMetodoLabel(venda.metodo || venda.formaPagamento || 'PIX');
 
+  const extrairImei = (obj: any) => {
+    if (!obj) return '';
+    const candidatos = [
+      obj.imei,
+      obj.imei1,
+      obj.imei2,
+      obj.numeroSerie,
+      obj.numero_serie,
+      obj.serialNumber,
+      obj.serial_number,
+      obj.codigo,
+      obj.codigoUnico,
+      obj.aparelhoImei,
+      obj.aparelho_imei
+    ];
+    const achado = candidatos.find((c) => typeof c === 'string' && c.trim().length > 0);
+    if (achado) return achado.trim();
+
+    if (obj.observacao && typeof obj.observacao === 'string') {
+      const match = obj.observacao.match(/IMEI:?\s*([A-Z0-9]+)/i);
+      if (match && match[1]) return match[1];
+    }
+    return '';
+  };
+
   const itensHtmlA4 = venda.itens && venda.itens.length > 0
-    ? venda.itens.map((item: any, index: number) => `
+    ? venda.itens.map((item: any, index: number) => {
+        const imeiValor = extrairImei(item) || extrairImei(venda);
+        const imeiHtml = imeiValor ? `<br><span style="color: #0f172a; font-weight: bold; font-size: 11px;">📱 IMEI / Serial: ${imeiValor}</span>` : '';
+        const obsHtml = item.observacao && !String(item.observacao).toUpperCase().includes('IMEI:') 
+          ? `<br><span style="color: #475569; font-weight: 500; font-size: 10px;">${item.observacao}</span>` 
+          : '';
+
+        return `
         <tr>
           <td style="text-align: center; border: 1px solid #000; padding: 6px;">${item.codigo || index + 1}</td>
           <td style="border: 1px solid #000; padding: 6px;">
             <b style="font-size: 12px; color: #000;">${item.descricao}</b>
-            ${item.observacao ? `<br><span style="color: #333; font-[500]; font-size: 10px;">${item.observacao}</span>` : ''}
+            ${imeiHtml}
+            ${obsHtml}
           </td>
           <td style="text-align: center; border: 1px solid #000; padding: 6px;">${item.quantidade || 1}</td>
           <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ ${(item.valorExibir || item.valor || 0).toFixed(2).replace('.', ',')}</td>
           <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ ${(item.desconto || 0).toFixed(2).replace('.', ',')}</td>
           <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 6px;">R$ ${(item.total || item.valor || 0).toFixed(2).replace('.', ',')}</td>
         </tr>
-      `).join('')
-    : `<tr>
+      `;
+      }).join('')
+    : (() => {
+        const imeiValor = extrairImei(venda);
+        const imeiHtml = imeiValor ? `<br><span style="color: #0f172a; font-weight: bold; font-size: 11px;">📱 IMEI / Serial: ${imeiValor}</span>` : '';
+        return `<tr>
          <td style="text-align: center; border: 1px solid #000; padding: 6px;">1</td>
-         <td style="border: 1px solid #000; padding: 6px;"><b style="font-size: 12px;">${venda.descricao || 'Produto Celular / Eletrônico'}</b></td>
+         <td style="border: 1px solid #000; padding: 6px;">
+           <b style="font-size: 12px;">${venda.descricao || 'Produto Celular / Eletrônico'}</b>
+           ${imeiHtml}
+         </td>
          <td style="text-align: center; border: 1px solid #000; padding: 6px;">1</td>
          <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</td>
          <td style="text-align: right; border: 1px solid #000; padding: 6px;">R$ 0,00</td>
          <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 6px;">R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</td>
        </tr>`;
+      })();
 
   const valorTotalVenda = (venda.valorTotal || venda.valor || 0);
   const nomeClienteFinal = cliente?.nome || venda.clienteNome || 'Não informado';

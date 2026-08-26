@@ -279,6 +279,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
   const [closingPOS, setClosingPOS] = useState(false);
+  const [showSaleCelebration, setShowSaleCelebration] = useState(false);
   const [savingVenda, setSavingVenda] = useState(false);
   const [showNovoCliente, setShowNovoCliente] = useState(false);
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
@@ -1728,6 +1729,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
     const total = (valor - desconto) * qtd;
 
+    const apEncontrado = posItem.aparelhoId ? aparelhos.find((a) => a.id === posItem.aparelhoId) : null;
+    const imeiEncontrado = apEncontrado ? (apEncontrado.imei || apEncontrado.numeroSerie || (apEncontrado as any).codigo) : '';
+
     const newItem: VendaItem = {
       id: Date.now().toString(),
       aparelhoId: posItem.aparelhoId || '',
@@ -1738,7 +1742,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       desconto: posItem.desconto || 0,
       tipoDesconto: posItem.tipoDesconto as 'R$' | '%',
       total: total,
-      observacao: posItem.observacao || ''
+      observacao: posItem.observacao || '',
+      imei: imeiEncontrado || (posItem as any).imei || ''
     };
 
     setCart([...carrinho, newItem]);
