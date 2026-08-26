@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, X, Check, Volume2, VolumeX, Keyboard, RefreshCw, Zap } from 'lucide-react';
+import { Camera, X, Volume2, VolumeX, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Html5Qrcode } from 'html5-qrcode';
 
@@ -13,6 +13,20 @@ interface BarcodeScannerModalProps {
   subtitle?: string;
   keepOpenOnScan?: boolean;
 }
+
+const stopScannerInstance = async (scannerInstance: Html5Qrcode | null) => {
+  if (!scannerInstance) return;
+  try {
+    const state = (scannerInstance as any).getState?.();
+    // 2 = SCANNING, 3 = PAUSED em Html5QrcodeScannerState
+    if (state === 2 || state === 3 || typeof state !== 'number') {
+      await scannerInstance.stop().catch(() => {});
+    }
+    await scannerInstance.clear().catch(() => {});
+  } catch (e) {
+    // Ignora transições simultâneas do Html5Qrcode
+  }
+};
 
 export function BarcodeScannerModal({
   isOpen,
@@ -40,16 +54,14 @@ export function BarcodeScannerModal({
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz (nota Lá)
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
       gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.start();
       osc.stop(audioCtx.currentTime + 0.15);
-    } catch (e) {
-      // Ignora erros de áudio se navegadores bloquearem autostart
-    }
+    } catch (e) {}
   };
 
   const handleBarcodeFound = (barcode: string) => {
@@ -65,12 +77,11 @@ export function BarcodeScannerModal({
     }
   };
 
-  // Listener global para Leitor de Código de Barras USB (Keyboard Wedge)
+  // Listener global para Leitor de Código de Barras USB
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignora se o foco estiver num input de texto ativo
       const activeEl = document.activeElement;
       if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
         if ((activeEl as HTMLElement).id === 'manual-barcode-input') {
@@ -95,7 +106,7 @@ export function BarcodeScannerModal({
         if (keyTimeoutRef.current) clearTimeout(keyTimeoutRef.current);
         keyTimeoutRef.current = setTimeout(() => {
           keyBufferRef.current = '';
-        }, 200); // 200ms de tolerância entre caracteres digitados pelo leitor USB
+        }, 200);
       }
     };
 
@@ -106,23 +117,26 @@ export function BarcodeScannerModal({
     };
   }, [isOpen, manualCode]);
 
-  // Inicializar câmera com Html5Qrcode
+  // Inicializar câmera com Html5Qrcode de forma segura
   useEffect(() => {
+    let isMounted = true;
+
     if (!isOpen) {
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current = null;
-          setCameraActive(false);
-        });
+        const instance = scannerRef.current;
+        scannerRef.current = null;
+        setCameraActive(false);
+        stopScannerInstance(instance);
       }
       return;
     }
 
-    let isMounted = true;
-
     const startCamera = async () => {
       try {
         setCameraError(null);
+        const container = document.getElementById('qr-reader-container');
+        if (!container) return;
+
         const html5QrCode = new Html5Qrcode('qr-reader-container');
         scannerRef.current = html5QrCode;
 
@@ -140,9 +154,7 @@ export function BarcodeScannerModal({
               handleBarcodeFound(decodedText);
             }
           },
-          () => {
-            // Callback silencioso para frames sem código
-          }
+          () => {}
         );
 
         if (isMounted) {
@@ -165,9 +177,9 @@ export function BarcodeScannerModal({
       isMounted = false;
       clearTimeout(timer);
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current = null;
-        });
+        const instance = scannerRef.current;
+        scannerRef.current = null;
+        stopScannerInstance(instance);
       }
     };
   }, [isOpen]);

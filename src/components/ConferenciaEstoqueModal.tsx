@@ -55,6 +55,20 @@ interface ConferenciaEstoqueModalProps {
 
 type AcaoFaltante = 'manter' | 'vendido' | 'manutencao' | 'atacado' | 'remover';
 
+const stopScannerInstance = async (scannerInstance: Html5Qrcode | null) => {
+  if (!scannerInstance) return;
+  try {
+    const state = (scannerInstance as any).getState?.();
+    // 2 = SCANNING, 3 = PAUSED
+    if (state === 2 || state === 3 || typeof state !== 'number') {
+      await scannerInstance.stop().catch(() => {});
+    }
+    await scannerInstance.clear().catch(() => {});
+  } catch (e) {
+    // Engole transições simultâneas com segurança
+  }
+};
+
 export function ConferenciaEstoqueModal({
   isOpen,
   onClose,
@@ -100,7 +114,6 @@ export function ConferenciaEstoqueModal({
     const clean = rawCode.trim();
     if (!clean) return;
 
-    // Evita duplicatas consecutivas imediatas
     setEscaneados((prev) => {
       if (prev.some((item) => item.codigoLido.toLowerCase() === clean.toLowerCase())) {
         toast.info(`O código "${clean}" já foi bipado anteriormente nesta conferência.`);
@@ -109,7 +122,6 @@ export function ConferenciaEstoqueModal({
 
       playBeep();
 
-      // Procura o aparelho no estoque ativo
       const encontrado = aparelhosEstoque.find((a) => {
         const c1 = (a.codigo || '').trim().toLowerCase();
         const c2 = (a.imei || '').trim().toLowerCase();
@@ -175,23 +187,26 @@ export function ConferenciaEstoqueModal({
     };
   }, [isOpen, etapa, manualCode, aparelhosEstoque]);
 
-  // Inicializar câmera
+  // Inicializar câmera com cancelamento seguro
   useEffect(() => {
+    let isMounted = true;
+
     if (!isOpen || etapa !== 'escaneamento') {
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current = null;
-          setCameraActive(false);
-        });
+        const instance = scannerRef.current;
+        scannerRef.current = null;
+        setCameraActive(false);
+        stopScannerInstance(instance);
       }
       return;
     }
 
-    let isMounted = true;
-
     const startCamera = async () => {
       try {
         setCameraError(null);
+        const container = document.getElementById('conf-qr-container');
+        if (!container) return;
+
         const html5QrCode = new Html5Qrcode('conf-qr-container');
         scannerRef.current = html5QrCode;
 
@@ -221,9 +236,9 @@ export function ConferenciaEstoqueModal({
       isMounted = false;
       clearTimeout(timer);
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current = null;
-        });
+        const instance = scannerRef.current;
+        scannerRef.current = null;
+        stopScannerInstance(instance);
       }
     };
   }, [isOpen, etapa]);
@@ -253,7 +268,7 @@ export function ConferenciaEstoqueModal({
     return escaneados.filter((e) => !e.aparelhoEncontrado);
   }, [escaneados]);
 
-  // Inicializa o mapa de ações padrão para os faltantes como 'manter'
+  // Inicializa o mapa de ações padrão para os faltantes como 'remover'
   useEffect(() => {
     const acoes: Record<string, AcaoFaltante> = {};
     aparelhosFaltantes.forEach((aparelho) => {
@@ -289,20 +304,15 @@ export function ConferenciaEstoqueModal({
         if (!acao || acao === 'manter') continue;
 
         let payload: any = {};
-        let obsLog = '';
 
         if (acao === 'vendido') {
           payload = { ativo: false, condicao: 'vendido', status: 'vendido', observacoes: `Baixa automática na conferência de estoque: Marcado como Vendido em ${new Date().toLocaleDateString('pt-BR')}` };
-          obsLog = `Dar saída - Vendido na conferência`;
         } else if (acao === 'manutencao') {
           payload = { status: 'manutencao', observacoes: `Encaminhado para manutenção na conferência de estoque em ${new Date().toLocaleDateString('pt-BR')}` };
-          obsLog = `Encaminhado para manutenção na conferência`;
         } else if (acao === 'atacado') {
           payload = { ativo: false, condicao: 'vendido', status: 'vendido', observacoes: `Vendido no atacado (Baixa na conferência de estoque em ${new Date().toLocaleDateString('pt-BR')})` };
-          obsLog = `Dar saída - Venda Atacado na conferência`;
         } else if (acao === 'remover') {
           payload = { ativo: false, observacoes: `Removido do estoque por extravio/perda na conferência em ${new Date().toLocaleDateString('pt-BR')}` };
-          obsLog = `Baixa por remoção/perda na conferência`;
         }
 
         if (Object.keys(payload).length > 0) {
