@@ -18,13 +18,13 @@ const stopScannerInstance = async (scannerInstance: Html5Qrcode | null) => {
   if (!scannerInstance) return;
   try {
     const state = (scannerInstance as any).getState?.();
-    // 2 = SCANNING, 3 = PAUSED em Html5QrcodeScannerState
+    // 2 = SCANNING, 3 = PAUSED
     if (state === 2 || state === 3 || typeof state !== 'number') {
       await scannerInstance.stop().catch(() => {});
     }
     await scannerInstance.clear().catch(() => {});
   } catch (e) {
-    // Ignora transições simultâneas do Html5Qrcode
+    // Engole transições do Html5Qrcode
   }
 };
 
@@ -45,6 +45,39 @@ export function BarcodeScannerModal({
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const keyBufferRef = useRef<string>('');
   const keyTimeoutRef = useRef<any>(null);
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+
+  // Previnir crash de tela do Next.js se o Html5Qrcode lançar erro de transição não capturado
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reasonStr = String(event.reason?.message || event.reason || '');
+      if (
+        reasonStr.includes('Cannot transition to a new state') ||
+        reasonStr.includes('already under transition') ||
+        reasonStr.includes('Html5Qrcode')
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, [isOpen]);
+
+  // Garantir que a modal abra no topo absoluto da tela no mobile
+  useEffect(() => {
+    if (isOpen) {
+      if (modalContainerRef.current) {
+        modalContainerRef.current.scrollTop = 0;
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  }, [isOpen]);
 
   // Tocar aviso sonoro de beep
   const playBeep = () => {
@@ -187,8 +220,11 @@ export function BarcodeScannerModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-start sm:items-center justify-center p-2 sm:p-4 pt-3 sm:pt-6 bg-black/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3.5 text-white relative my-0 sm:my-auto">
+    <div 
+      ref={modalContainerRef}
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-start p-2 sm:p-4 pt-2 sm:pt-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200"
+    >
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3.5 text-white relative my-0 shrink-0">
         
         {/* Cabeçalho */}
         <div className="flex items-start justify-between">
