@@ -207,103 +207,123 @@ export function TecnicosTab() {
       {/* Formulário Modal */}
       {showForm && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full my-4">
-              <div className="modal-header">
-                <h3 className="modal-title">
-                  {editingId ? 'Editar Membro da Equipe' : 'Novo Membro da Equipe'}
-                </h3>
-                <Button variant="ghost" size="icon" onClick={() => { setShowForm(false); setEditingId(null); }}>
-                  <X className="h-5 w-5" />
-                </Button>
+          <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start p-2 sm:p-4 pt-3 sm:pt-6 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-white relative my-0 shrink-0">
+              {/* Cabeçalho */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold border border-cyan-500/30">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base sm:text-lg text-white">
+                      {editingId ? 'Editar Membro da Equipe' : 'Cadastrar Membro da Equipe'}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Cadastre técnicos e vendedores para vincular às Ordens de Serviço e Vendas
+                    </p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => { setShowForm(false); setEditingId(null); }} 
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <div className="modal-body-scroll">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Função / Cargo *</label>
-                      <select
-                        name="tipo"
-                        value={formData.tipo}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                        required
-                      >
-                        <option value="tecnico">Técnico</option>
-                        <option value="vendedor">Vendedor</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Nome *</label>
-                      <input
-                        type="text"
-                        name="nome"
-                        placeholder="Nome completo"
-                        value={formData.nome}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Telefone *</label>
-                      <input
-                        type="tel"
-                        name="telefone"
-                        placeholder="(11) 98765-4321"
-                        value={formData.telefone}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Email</label>
-                      <input
-                        type="email"
-                        name="email"
-                        placeholder="email@example.com"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">CPF</label>
-                      <input
-                        type="text"
-                        name="cpf"
-                        placeholder="123.456.789-00"
-                        value={formData.cpf}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium mb-2">Especialidade (opcional)</label>
-                      <input
-                        type="text"
-                        name="especialidade"
-                        placeholder="Ex: Tela, Bateria, Placa, Vendas Balcão"
-                        value={formData.especialidade}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                      />
-                    </div>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Função / Cargo *</label>
+                    <select
+                      name="tipo"
+                      value={formData.tipo}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all cursor-pointer"
+                      required
+                    >
+                      <option value="tecnico">🔧 Técnico de Manutenção</option>
+                      <option value="vendedor">🛒 Vendedor de Balcão</option>
+                    </select>
                   </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Nome completo *</label>
+                    <input
+                      type="text"
+                      name="nome"
+                      placeholder="Nome completo do colaborador"
+                      value={formData.nome}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Telefone / WhatsApp *</label>
+                    <input
+                      type="tel"
+                      name="telefone"
+                      placeholder="(11) 98765-4321 *"
+                      value={formData.telefone}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Email (opcional)</label>
+                    <input
+                      type="email"
+                      name="email"
+                      placeholder="colaborador@loja.com"
+                      value={formData.email}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">CPF (opcional)</label>
+                    <input
+                      type="text"
+                      name="cpf"
+                      placeholder="000.000.000-00"
+                      value={formData.cpf}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Especialidade (opcional)</label>
+                    <input
+                      type="text"
+                      name="especialidade"
+                      placeholder="Ex: Troca de Tela, Placa, Balcão"
+                      value={formData.especialidade}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
+                    />
+                  </div>
+                </div>
 
-                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
-                    <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); }}>
-                      Cancelar
-                    </Button>
-                    <Button type="submit" className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
-                      {editingId ? 'Atualizar Membro' : 'Salvar Membro'}
-                    </Button>
-                  </div>
-                </form>
-              </div>
-            </GlassCard>
+                <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => { setShowForm(false); setEditingId(null); }}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs sm:text-sm transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl text-xs sm:text-sm px-6 py-2.5 shadow-lg shadow-cyan-950/40 flex items-center gap-2 transition-all"
+                  >
+                    {editingId ? 'Atualizar Membro' : 'Salvar Membro'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </ModalPortal>
       )}

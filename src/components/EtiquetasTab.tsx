@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
+import { Tag, Printer, Settings, Check, RefreshCw, Search, Smartphone, Trash2 } from 'lucide-react';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { generateCode128SvgString } from '@/lib/barcodeGenerator';
 

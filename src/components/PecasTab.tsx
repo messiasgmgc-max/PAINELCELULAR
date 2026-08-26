@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { X, Plus, Download, Edit2, Search, Package, AlertCircle, Upload } from "lucide-react";
+import { X, Plus, Download, Edit2, Search, Package, AlertCircle, Upload, Wrench } from "lucide-react";
 import { usePecas } from "@/hooks/usePecas";
 import { useAuth } from "@/hooks/useAuth";
 import { Peca } from "@/lib/db/types";
@@ -392,178 +392,222 @@ export function PecasTab() {
             />
           </div>
 
-          {/* Formulário */}
+          {/* Formulário de Nova/Editar Peça */}
           {showForm && (
             <ModalPortal>
-              <div className="modal-overlay modal-overlay-fit">
-                <GlassCard className="modal-panel modal-panel-fit modal-panel-xl w-full my-4">
-                  <div className="modal-header">
-                    <h3 className="modal-title">
-                      {editingId ? "Editar Peça" : "Nova Peça"}
-                    </h3>
-                    <Button variant="ghost" size="icon" onClick={handleCancel}>
-                      <X className="h-5 w-5" />
-                    </Button>
+              <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start p-2 sm:p-4 pt-3 sm:pt-6 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
+                <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-white relative my-0 shrink-0">
+                  {/* Cabeçalho */}
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold border border-cyan-500/30">
+                        <Wrench className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-base sm:text-lg text-white">
+                          {editingId ? "Editar Peça" : "Cadastrar Nova Peça"}
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          Informe código, preços de custo/venda e níveis de estoque da peça
+                        </p>
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={handleCancel} 
+                      className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
 
-                  <div className="modal-body-scroll">
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                      {/* Linha 1: Código e Nome */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Linha 1: Código e Nome */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Código Único / SKU *</label>
                         <input
                           type="text"
                           name="codigoUnico"
-                          placeholder="Código Único *"
+                          placeholder="Ex: TELA-IP13-BLK *"
                           value={formData.codigoUnico}
                           onChange={handleInputChange}
                           required
-                          className="input-glass"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all font-mono"
                         />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Nome da Peça *</label>
                         <input
                           type="text"
                           name="nome"
-                          placeholder="Nome *"
+                          placeholder="Ex: Tela Display OLED iPhone 13 *"
                           value={formData.nome}
                           onChange={handleInputChange}
                           required
-                          className="input-glass"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
                         />
                       </div>
+                    </div>
 
-                      {/* Linha 2: Custo e Venda */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-xs text-muted-foreground">Custo *</label>
-                          <input
-                            type="text"
-                            name="custoPeca"
-                            placeholder="R$ 0,00"
-                            value={formatarPreco(formData.custoPeca)}
-                            onChange={handlePrecoChange}
-                            className="input-glass"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Venda *</label>
-                          <input
-                            type="text"
-                            name="vendaPeca"
-                            placeholder="R$ 0,00"
-                            value={formatarPreco(formData.vendaPeca)}
-                            onChange={handlePrecoChange}
-                            className="input-glass"
-                          />
-                        </div>
+                    {/* Linha 2: Custo e Venda */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Preço de Custo *</label>
+                        <input
+                          type="text"
+                          name="custoPeca"
+                          placeholder="R$ 0,00"
+                          value={formatarPreco(formData.custoPeca)}
+                          onChange={handlePrecoChange}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all font-mono"
+                        />
                       </div>
-
-                      {/* Linha 3: Estoque */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                          <label className="text-xs text-muted-foreground">Estoque Atual</label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            name="estoque"
-                            value={formData.estoque}
-                            onChange={handleInputChange}
-                            min="0"
-                            className="input-glass"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Estoque Mín</label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            name="estoqueMinimo"
-                            value={formData.estoqueMinimo}
-                            onChange={handleInputChange}
-                            min="0"
-                            className="input-glass"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground">Estoque Máx</label>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            name="estoqueMaximo"
-                            value={formData.estoqueMaximo}
-                            onChange={handleInputChange}
-                            min="0"
-                            className="input-glass"
-                          />
-                        </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Preço de Venda *</label>
+                        <input
+                          type="text"
+                          name="vendaPeca"
+                          placeholder="R$ 0,00"
+                          value={formatarPreco(formData.vendaPeca)}
+                          onChange={handlePrecoChange}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all font-mono"
+                        />
                       </div>
+                    </div>
 
-                      {/* Descrição */}
+                    {/* Linha 3: Estoque */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Estoque Atual</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          name="estoque"
+                          value={formData.estoque}
+                          onChange={handleInputChange}
+                          min="0"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Estoque Mínimo</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          name="estoqueMinimo"
+                          value={formData.estoqueMinimo}
+                          onChange={handleInputChange}
+                          min="0"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Estoque Máximo</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          name="estoqueMaximo"
+                          value={formData.estoqueMaximo}
+                          onChange={handleInputChange}
+                          min="0"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Descrição */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 block mb-1">Descrição (opcional)</label>
                       <textarea
                         name="descricao"
-                        placeholder="Descrição (opcional)"
+                        placeholder="Detalhes técnicos da peça, lote, etc."
                         value={formData.descricao}
                         onChange={handleInputChange}
                         rows={2}
-                        className="input-glass"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
                       />
+                    </div>
 
-                      {/* Fornecedor e Localização */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Fornecedor e Localização */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Fornecedor (opcional)</label>
                         <input
                           type="text"
                           name="fornecedor"
-                          placeholder="Fornecedor (opcional)"
+                          placeholder="Nome do fornecedor"
                           value={formData.fornecedor}
                           onChange={handleInputChange}
-                          className="input-glass"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
                         />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Localização Física (opcional)</label>
                         <input
                           type="text"
                           name="localizacao"
-                          placeholder="Localização Física (opcional)"
+                          placeholder="Gaveta A1, Prateleira 2"
                           value={formData.localizacao}
                           onChange={handleInputChange}
-                          className="input-glass"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
                         />
                       </div>
+                    </div>
 
-                      {/* Código de Barras e Compatibilidade */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Código de Barras e Compatibilidade */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Código de Barras (opcional)</label>
                         <input
                           type="text"
                           name="codigoBarras"
-                          placeholder="Código de Barras (opcional)"
+                          placeholder="EAN / Efeito de leitura USB"
                           value={formData.codigoBarras}
                           onChange={handleInputChange}
-                          className="input-glass"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all font-mono"
                         />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Compatibilidade (opcional)</label>
                         <input
                           type="text"
                           name="compatibilidade"
-                          placeholder="Compatibilidade (ex: iPhone 13) (opcional)"
+                          placeholder="iPhone 13, 13 Pro..."
                           value={formData.compatibilidade}
                           onChange={handleInputChange}
-                          className="input-glass"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
                         />
                       </div>
+                    </div>
 
-                      {error && (
-                        <p className="text-sm text-red-500 font-semibold">Erro: {error}</p>
-                      )}
+                    {error && (
+                      <p className="text-xs text-red-400 font-semibold p-2.5 bg-red-950/40 border border-red-800/50 rounded-xl">
+                        Erro: {error}
+                      </p>
+                    )}
 
-                      <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
-                        <Button type="button" variant="outline" onClick={handleCancel}>
-                          Cancelar
-                        </Button>
-                        <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
-                          {loading ? "Processando..." : editingId ? "Atualizar Peça" : "Salvar Peça"}
-                        </Button>
-                      </div>
-                    </form>
-                  </div>
-                </GlassCard>
+                    <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={handleCancel}
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs sm:text-sm transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl text-xs sm:text-sm px-6 py-2.5 shadow-lg shadow-cyan-950/40 flex items-center gap-2 transition-all"
+                      >
+                        {loading ? "Salvando..." : editingId ? "Atualizar Peça" : "Salvar Peça"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
             </ModalPortal>
           )}

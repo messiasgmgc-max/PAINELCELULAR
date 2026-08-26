@@ -350,169 +350,190 @@ export function GarantiasTab() {
       {/* Formulário */}
       {showForm && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg modal-panel-tall w-full my-4">
-              <div className="modal-header">
-                <h3 className="modal-title">
-                  {editingId ? 'Editar Garantia' : 'Nova Garantia'}
-                </h3>
-                <Button variant="ghost" size="icon" onClick={resetForm}>
-                  <X className="h-5 w-5" />
-                </Button>
+          <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start p-2 sm:p-4 pt-3 sm:pt-6 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
+            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-white relative my-0 shrink-0">
+              {/* Cabeçalho */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold border border-cyan-500/30">
+                    <Shield className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base sm:text-lg text-white">
+                      {editingId ? 'Editar Termo de Garantia' : 'Emissão de Nova Garantia'}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Vincule a uma venda realizada e registre a cobertura de garantia do cliente
+                    </p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={resetForm} 
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <div className="modal-body-scroll">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Venda Processada *</label>
-                      <select
-                        name="osId"
-                        value={formData.osId}
-                        onChange={(e) => handleVendaChange(e.target.value)}
-                        className="input-glass"
-                        required
-                      >
-                        <option value="">
-                          {loadingVendas ? 'Carregando vendas...' : 'Selecionar venda paga dentro do prazo'}
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Venda Elegível *</label>
+                    <select
+                      name="osId"
+                      value={formData.osId}
+                      onChange={(e) => handleVendaChange(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all cursor-pointer"
+                      required
+                    >
+                      <option value="">
+                        {loadingVendas ? 'Carregando vendas...' : 'Selecionar venda paga dentro do prazo'}
+                      </option>
+                      {vendasElegiveis.map(venda => (
+                        <option key={venda.id} value={venda.id}>
+                          {venda.clienteNome} - {new Date(venda.dataPagamento).toLocaleDateString('pt-BR')} ({parseDiasGarantia(venda.garantia)} dias)
                         </option>
-                        {vendasElegiveis.map(venda => (
-                          <option key={venda.id} value={venda.id}>
-                            {venda.clienteNome} - {new Date(venda.dataPagamento).toLocaleDateString('pt-BR')} ({parseDiasGarantia(venda.garantia)} dias)
-                          </option>
-                        ))}
-                      </select>
-                      {!loadingVendas && vendasElegiveis.length === 0 && (
-                        <p className="text-xs text-amber-500 mt-1">
-                          Não há vendas pagas dentro do prazo de garantia disponíveis.
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Data de Início *</label>
-                      <input
-                        type="date"
-                        name="dataInicio"
-                        value={formData.dataInicio}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Dias de Garantia *</label>
-                      <input
-                        type="number"
-                        name="diasGarantia"
-                        value={formData.diasGarantia}
-                        onChange={handleInputChange}
-                        className="input-glass"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Cliente</label>
-                      <input
-                        type="text"
-                        value={formData.clienteNome}
-                        readOnly
-                        className="input-glass bg-white/10"
-                      />
-                    </div>
+                      ))}
+                    </select>
+                    {!loadingVendas && vendasElegiveis.length === 0 && (
+                      <p className="text-[11px] text-amber-400 mt-1">
+                        ⚠️ Nenhuma venda disponível sem garantia ativa.
+                      </p>
+                    )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium mb-2">Aparelho</label>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Data de Início da Cobertura *</label>
+                    <input
+                      type="date"
+                      name="dataInicio"
+                      value={formData.dataInicio}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Prazo de Cobertura (Dias) *</label>
+                    <input
+                      type="number"
+                      name="diasGarantia"
+                      value={formData.diasGarantia}
+                      onChange={handleInputChange}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all font-mono"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Cliente Vinculado</label>
                     <input
                       type="text"
-                      value={formData.aparelhoDescricao}
+                      value={formData.clienteNome || 'Selecione uma venda'}
                       readOnly
-                      className="input-glass bg-white/10"
+                      className="w-full bg-slate-950/60 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-400 outline-none"
                     />
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Descrição</label>
-                    <textarea
-                      name="descricao"
-                      placeholder="Descrição da garantia..."
-                      value={formData.descricao}
-                      onChange={handleInputChange}
-                      rows={2}
-                      className="input-glass"
-                    />
-                  </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Aparelho Vinculado</label>
+                  <input
+                    type="text"
+                    value={formData.aparelhoDescricao || 'Selecione uma venda'}
+                    readOnly
+                    className="w-full bg-slate-950/60 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-400 outline-none"
+                  />
+                </div>
 
-                  {/* Histórico */}
-                  <div className="space-y-2 border-t border-white/10 pt-4">
-                    <h4 className="font-medium text-sm text-blue-400">Histórico de Atendimentos</h4>
-                    
-                    <div className="space-y-2">
-                      {formData.historico.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-2.5 bg-white/5 rounded-xl border border-white/10">
-                          <div className="text-sm">
-                            <p className="font-medium text-white">{item.acao}</p>
-                            <p className="text-xs text-muted-foreground">{new Date(item.data).toLocaleDateString('pt-BR')} {item.descricao && `- ${item.descricao}`}</p>
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Termos / Cobertura da Garantia</label>
+                  <textarea
+                    name="descricao"
+                    placeholder="Especifique o que está coberto pela garantia da loja..."
+                    value={formData.descricao}
+                    onChange={handleInputChange}
+                    rows={2}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
+                  />
+                </div>
+
+                {/* Histórico */}
+                <div className="space-y-2 border-t border-slate-800 pt-3">
+                  <h4 className="font-bold text-xs text-cyan-400 uppercase tracking-wider">Histórico de Chamados de Garantia</h4>
+                  
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {formData.historico.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">Nenhum evento gravado no histórico.</p>
+                    ) : (
+                      formData.historico.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+                          <div className="text-xs">
+                            <p className="font-bold text-white">{item.acao}</p>
+                            <p className="text-[11px] text-slate-400">{new Date(item.data).toLocaleDateString('pt-BR')} {item.descricao && `- ${item.descricao}`}</p>
                           </div>
-                          <Button
+                          <button
                             type="button"
-                            size="sm"
-                            variant="ghost"
                             onClick={() => handleRemoveHistorico(idx)}
-                            className="text-red-400 hover:text-red-300"
+                            className="p-1 text-slate-500 hover:text-red-400 rounded transition-colors"
                           >
-                            <X className="w-4 h-4" />
-                          </Button>
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-
-                    <div className="flex gap-2">
-                      <select
-                        value={novoHistorico.acao}
-                        onChange={(e) => setNovoHistorico(prev => ({ ...prev, acao: e.target.value }))}
-                        className="input-glass flex-1 text-sm"
-                      >
-                        <option value="">Selecionar ação</option>
-                        <option value="Troca">Troca</option>
-                        <option value="Reparo">Reparo</option>
-                        <option value="Verificação">Verificação</option>
-                        <option value="Substituição">Substituição</option>
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="Descrição (opcional)"
-                        value={novoHistorico.descricao}
-                        onChange={(e) => setNovoHistorico(prev => ({ ...prev, descricao: e.target.value }))}
-                        className="input-glass flex-1 text-sm"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={handleAddHistorico}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                      >
-                        Adicionar
-                      </Button>
-                    </div>
+                      ))
+                    )}
                   </div>
 
-                  <div className="flex gap-2 justify-end pt-4 border-t border-white/10">
-                    <Button type="button" variant="outline" onClick={resetForm}>
-                      Cancelar
-                    </Button>
-                    <Button type="submit" className="bg-blue-600 hover:bg-blue-700 font-bold px-6">
-                      {editingId ? 'Atualizar Garantia' : 'Criar Garantia'}
-                    </Button>
+                  <div className="flex gap-2">
+                    <select
+                      value={novoHistorico.acao}
+                      onChange={(e) => setNovoHistorico(prev => ({ ...prev, acao: e.target.value }))}
+                      className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-cyan-500 cursor-pointer"
+                    >
+                      <option value="">Ação do Chamado</option>
+                      <option value="Troca">Troca de Aparelho/Peça</option>
+                      <option value="Reparo">Reparo em Assistência</option>
+                      <option value="Verificação">Verificação / Análise</option>
+                      <option value="Substituição">Substituição Definitiva</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Descrição do atendimento"
+                      value={novoHistorico.descricao}
+                      onChange={(e) => setNovoHistorico(prev => ({ ...prev, descricao: e.target.value }))}
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddHistorico}
+                      className="bg-slate-800 hover:bg-slate-700 text-cyan-400 font-bold px-3 py-2 rounded-xl text-xs shrink-0"
+                    >
+                      Adicionar
+                    </button>
                   </div>
-                </form>
-              </div>
-            </GlassCard>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs sm:text-sm transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl text-xs sm:text-sm px-6 py-2.5 shadow-lg shadow-cyan-950/40 flex items-center gap-2 transition-all"
+                  >
+                    {editingId ? 'Atualizar Garantia' : 'Emitir Garantia'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </ModalPortal>
       )}
