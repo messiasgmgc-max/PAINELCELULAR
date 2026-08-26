@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
-import { Tag, Printer, Settings, Check, RefreshCw, Search, Smartphone, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Square, Tag, Printer, Settings, Check, RefreshCw, Search, Smartphone, Trash2 } from 'lucide-react';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { generateCode128SvgString } from '@/lib/barcodeGenerator';
 
@@ -125,6 +125,20 @@ export function EtiquetasTab() {
 
     const encontrado = candidatos.find((valor) => typeof valor === 'string' && valor.trim().length > 0);
     return String(encontrado || '').trim();
+  };
+
+  const getAparelhoCodigo = (aparelho: typeof aparelhosAtivos[number]) => {
+    const candidatos = [
+      (aparelho as any).codigo,
+      (aparelho as any).codigoUnico,
+      (aparelho as any).codigo_unico,
+      aparelho.imei,
+      aparelho.numeroSerie,
+      aparelho.id,
+    ];
+
+    const encontrado = candidatos.find((valor) => typeof valor === 'string' && valor.trim().length > 0);
+    return String(encontrado || aparelho.id || '').trim();
   };
 
   const getAparelhoSaudeBateria = (aparelho: typeof aparelhosAtivos[number]) => {
@@ -585,11 +599,10 @@ export function EtiquetasTab() {
               <button
                 type="button"
                 onClick={() => setFiltroApenasSemEtiqueta(!filtroApenasSemEtiqueta)}
-                className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
-                  filtroApenasSemEtiqueta
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md'
-                    : 'bg-white/5 text-muted-foreground border-white/10 hover:bg-white/10'
-                }`}
+                className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${filtroApenasSemEtiqueta
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md'
+                  : 'bg-white/5 text-muted-foreground border-white/10 hover:bg-white/10'
+                  }`}
               >
                 {filtroApenasSemEtiqueta ? '⚡ Ver todos os modelos' : '⚠️ Apenas sem etiqueta'}
               </button>
