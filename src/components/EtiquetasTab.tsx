@@ -428,7 +428,7 @@ export function EtiquetasTab() {
         const barcodeVal = codigo || imeiTexto || aparelho.id;
         const deveMostrarBarcode = template.mostrarCodigoBarras !== false && camposEtiqueta.includes('codigoBarras') && barcodeVal;
         const barcodeHtml = deveMostrarBarcode
-          ? `<div class="etiqueta-barcode">${generateCode128SvgString(barcodeVal, { height: 16, width: 1.1, showText: false })}</div>`
+          ? `<div class="etiqueta-barcode">${generateCode128SvgString(barcodeVal, { height: 18, width: 1.1, showText: false })}</div>`
           : '';
 
         etiquetas.push(`
@@ -440,8 +440,10 @@ export function EtiquetasTab() {
       }
     }
 
+    const is3ColRolo = template.colunas === 3;
+    const etiquetasPorPagina = is3ColRolo ? 3 : template.colunas;
+
     const paginasHtml: string[] = [];
-    const etiquetasPorPagina = template.colunas === 3 ? 3 : 1;
     for (let index = 0; index < etiquetas.length; index += etiquetasPorPagina) {
       const grupo = etiquetas.slice(index, index + etiquetasPorPagina);
       while (grupo.length < etiquetasPorPagina) {
@@ -450,56 +452,88 @@ export function EtiquetasTab() {
       paginasHtml.push(`<section class="pagina-etiquetas">${grupo.join('')}</section>`);
     }
 
-    const pageWidth = template.larguraPaginaMm;
-    const pageHeight = template.alturaPaginaMm;
-    const labelWidth = Math.max(20, (template.larguraPaginaMm - (template.espacamentoMm * (template.colunas - 1))) / template.colunas);
-    const labelHeight = template.alturaMinimaEtiquetaMm;
-    const gapMm = template.espacamentoMm;
+    const pageWidth = is3ColRolo ? 104 : template.larguraPaginaMm;
+    const pageHeight = is3ColRolo ? 22 : template.alturaPaginaMm;
+    const labelWidth = is3ColRolo
+      ? 33
+      : Math.max(20, (template.larguraPaginaMm - (template.margemMm * 2) - (template.espacamentoMm * (template.colunas - 1))) / template.colunas);
+    const labelHeight = is3ColRolo ? 20 : template.alturaMinimaEtiquetaMm;
+    const gapMm = is3ColRolo ? 2 : template.espacamentoMm;
+    const marginMm = is3ColRolo ? 0 : template.margemMm;
 
     return `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>Etiquetas</title>
+        <title>Etiquetas de Estoque</title>
         <style>
-          @page { size: ${pageWidth}mm ${pageHeight}mm; margin: ${template.margemMm}mm; }
+          @page { size: ${pageWidth}mm ${pageHeight}mm; margin: ${marginMm}mm; }
           * { box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; color: #000; margin: 0; }
+          html, body {
+            width: ${pageWidth}mm;
+            margin: 0;
+            padding: 0;
+            background: #fff !important;
+            color-scheme: light;
+          }
+          body {
+            font-family: Arial, sans-serif;
+            color: #000;
+            background: #fff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            color-adjust: exact;
+          }
           .pagina-etiquetas {
             width: ${pageWidth}mm;
             height: ${pageHeight}mm;
             display: grid;
             grid-template-columns: repeat(${template.colunas}, 1fr);
             gap: ${gapMm}mm;
+            box-sizing: border-box;
+            padding: 0;
+            overflow: hidden;
+            align-items: stretch;
+          }
+          .pagina-etiquetas:not(:first-child) {
+            break-before: page;
+            page-break-before: always;
           }
           .etiqueta {
-            border: 1px solid #000;
-            padding: 1mm;
+            border: 1.5px solid #111;
+            border-radius: 2.5mm;
+            padding: 1.2mm 1.5mm;
             width: ${labelWidth}mm;
             height: ${labelHeight}mm;
+            min-height: ${labelHeight}mm;
+            break-inside: avoid;
             overflow: hidden;
+            text-align: left;
+            line-height: 1.05;
             display: flex;
             flex-direction: column;
+            justify-content: flex-start;
           }
+          .etiqueta-vazia { border: none; }
           .etiqueta-titulo {
             font-size: ${template.fonteTituloPx}px;
             font-weight: 700;
             text-transform: uppercase;
             line-height: 1;
-            margin-bottom: 0.4mm;
+            margin-bottom: 0.6mm;
           }
           .etiqueta-linha {
             font-size: ${Math.max(7, template.fonteTextoPx - 1)}px;
-            line-height: 1;
-            margin-top: 0.35mm;
+            line-height: 1.1;
+            margin-top: 0.45mm;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
           .etiqueta-barcode {
             margin-top: auto;
-            padding-top: 0.3mm;
+            padding-top: 0.5mm;
             text-align: center;
             overflow: hidden;
             width: 100%;
@@ -509,7 +543,7 @@ export function EtiquetasTab() {
           }
           .etiqueta-barcode svg {
             max-width: 98%;
-            max-height: 6.5mm;
+            max-height: 7.5mm;
             width: auto;
             height: auto;
             display: block;
@@ -521,7 +555,9 @@ export function EtiquetasTab() {
         ${paginasHtml.join('')}
         <script>
           window.onload = function() {
-            window.print();
+            setTimeout(function() {
+              window.print();
+            }, 120);
           };
         </script>
       </body>
