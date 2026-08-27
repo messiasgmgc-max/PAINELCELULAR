@@ -525,22 +525,22 @@ export function EtiquetasTab() {
             text-overflow: ellipsis;
           }
           .etiqueta-barcode {
-            margin-top: auto;
-            padding-top: 0.5mm;
-            text-align: center;
+            margin-top: 0.8mm;
+            padding-top: 0.2mm;
+            text-align: left;
             overflow: hidden;
             width: 100%;
             display: flex;
-            justify-content: center;
+            justify-content: flex-start;
             align-items: center;
           }
           .etiqueta-barcode svg {
-            max-width: 98%;
-            max-height: 7.5mm;
+            max-width: 95%;
+            max-height: 8mm;
             width: auto;
             height: auto;
             display: block;
-            margin: 0 auto;
+            margin: 0;
           }
         </style>
       </head>
