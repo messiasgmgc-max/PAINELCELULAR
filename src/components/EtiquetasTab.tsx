@@ -26,6 +26,7 @@ interface ModeloEtiquetaGlobal {
   mostrarCapacidade: boolean;
   mostrarCondicao: boolean;
   mostrarImei: boolean;
+  mostrarCodigoBarras?: boolean;
   ativo: boolean;
 }
 
@@ -45,6 +46,7 @@ const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
     mostrarCapacidade: true,
     mostrarCondicao: true,
     mostrarImei: true,
+    mostrarCodigoBarras: true,
     ativo: true,
   },
   {
@@ -62,6 +64,7 @@ const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
     mostrarCapacidade: true,
     mostrarCondicao: true,
     mostrarImei: true,
+    mostrarCodigoBarras: true,
     ativo: true,
   },
   {
@@ -79,6 +82,7 @@ const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
     mostrarCapacidade: true,
     mostrarCondicao: true,
     mostrarImei: true,
+    mostrarCodigoBarras: true,
     ativo: true,
   },
 ];
@@ -281,62 +285,102 @@ export function EtiquetasTab() {
 
   const abrirNovoModelo = () => {
     setModeloEmEdicao({
-      ...modeloEtiquetaAtivo,
       id: 'novo',
-      nome: `Novo modelo ${modelosEtiqueta.length + 1}`,
+      nome: 'Novo Modelo',
+      colunas: 3,
+      larguraPaginaMm: 104,
+      alturaPaginaMm: 22,
+      margemMm: 0,
+      espacamentoMm: 2,
+      alturaMinimaEtiquetaMm: 20,
+      fonteTituloPx: 9,
+      fonteTextoPx: 10,
+      fontePrecoPx: 10,
+      mostrarCapacidade: true,
+      mostrarCondicao: true,
+      mostrarImei: true,
+      mostrarCodigoBarras: true,
+      ativo: true,
     });
     setShowEditor(true);
   };
 
-  const abrirEditarModelo = () => {
-    setModeloEmEdicao(modeloEtiquetaAtivo);
+  const abrirEdicaoModelo = (modelo: ModeloEtiquetaGlobal) => {
+    setModeloEmEdicao({ ...modelo });
     setShowEditor(true);
   };
 
   const salvarModelo = async () => {
-    const payload = {
-      nome: modeloEmEdicao.nome.trim(),
-      colunas: modeloEmEdicao.colunas,
-      largura_pagina_mm: modeloEmEdicao.larguraPaginaMm,
-      altura_pagina_mm: modeloEmEdicao.alturaPaginaMm,
-      margem_mm: modeloEmEdicao.margemMm,
-      espacamento_mm: modeloEmEdicao.espacamentoMm,
-      altura_minima_etiqueta_mm: modeloEmEdicao.alturaMinimaEtiquetaMm,
-      fonte_titulo_px: modeloEmEdicao.fonteTituloPx,
-      fonte_texto_px: modeloEmEdicao.fonteTextoPx,
-      fonte_preco_px: modeloEmEdicao.fontePrecoPx,
-      mostrar_capacidade: modeloEmEdicao.mostrarCapacidade,
-      mostrar_condicao: modeloEmEdicao.mostrarCondicao,
-      mostrar_imei: modeloEmEdicao.mostrarImei,
-      ativo: true,
-    };
-
-    if (!payload.nome) {
-      alert('Informe um nome para o modelo de etiqueta.');
-      return;
-    }
-
-    if (!modelosGlobaisDisponiveis) {
-      alert('Modelos globais ainda não estão habilitados no banco. Aplique a migration de modelos globais e tente novamente.');
-      return;
-    }
-
     try {
-      if (modeloEmEdicao.id === 'novo' || modeloEmEdicao.id.startsWith('default-')) {
+      if (!modeloEmEdicao.nome.trim()) {
+        alert('Informe o nome do modelo.');
+        return;
+      }
+
+      const payload = {
+        nome: modeloEmEdicao.nome.trim(),
+        colunas: modeloEmEdicao.colunas,
+        largura_pagina_mm: modeloEmEdicao.larguraPaginaMm,
+        altura_pagina_mm: modeloEmEdicao.alturaPaginaMm,
+        margem_mm: modeloEmEdicao.margemMm,
+        espacamento_mm: modeloEmEdicao.espacamentoMm,
+        altura_minima_etiqueta_mm: modeloEmEdicao.alturaMinimaEtiquetaMm,
+        fonte_titulo_px: modeloEmEdicao.fonteTituloPx,
+        fonte_texto_px: modeloEmEdicao.fonteTextoPx,
+        fonte_preco_px: modeloEmEdicao.fontePrecoPx,
+        mostrar_capacidade: modeloEmEdicao.mostrarCapacidade,
+        mostrar_condicao: modeloEmEdicao.mostrarCondicao,
+        mostrar_imei: modeloEmEdicao.mostrarImei,
+        mostrar_codigo_barras: modeloEmEdicao.mostrarCodigoBarras ?? true,
+        ativo: true,
+      };
+
+      if (!modelosGlobaisDisponiveis) {
+        const idFinal = modeloEmEdicao.id === 'novo' ? `local-${Date.now()}` : modeloEmEdicao.id;
+        const modeloAtualizado = { ...modeloEmEdicao, id: idFinal };
+        setModelosEtiqueta((prev) => {
+          const index = prev.findIndex((m) => m.id === idFinal);
+          if (index >= 0) {
+            const temp = [...prev];
+            temp[index] = modeloAtualizado;
+            return temp;
+          }
+          return [...prev, modeloAtualizado];
+        });
+        setModeloEtiquetaId(idFinal);
+        setShowEditor(false);
+        return;
+      }
+
+      if (modeloEmEdicao.id === 'novo') {
         const { data, error } = await supabase
           .from('etiqueta_modelos_globais')
-          .upsert([payload], { onConflict: 'nome' })
+          .insert([payload])
           .select('*')
           .single();
 
         if (error) throw error;
 
         const novoModelo: ModeloEtiquetaGlobal = {
-          ...modeloEmEdicao,
           id: String(data.id),
           nome: String(data.nome),
+          colunas: Number(data.colunas) as 1 | 2 | 3,
+          larguraPaginaMm: Number(data.largura_pagina_mm),
+          alturaPaginaMm: Number(data.altura_pagina_mm),
+          margemMm: Number(data.margem_mm),
+          espacamentoMm: Number(data.espacamento_mm),
+          alturaMinimaEtiquetaMm: Number(data.altura_minima_etiqueta_mm),
+          fonteTituloPx: Number(data.fonte_titulo_px),
+          fonteTextoPx: Number(data.fonte_texto_px),
+          fontePrecoPx: Number(data.fonte_preco_px),
+          mostrarCapacidade: Boolean(data.mostrar_capacidade),
+          mostrarCondicao: Boolean(data.mostrar_condicao),
+          mostrarImei: Boolean(data.mostrar_imei),
+          mostrarCodigoBarras: Boolean(data.mostrar_codigo_barras ?? true),
+          ativo: Boolean(data.ativo),
         };
-        const atualizados = [...modelosEtiqueta.filter((item) => !item.id.startsWith('default-')), novoModelo].sort((a, b) => a.nome.localeCompare(b.nome));
+
+        const atualizados = [...modelosEtiqueta, novoModelo];
         setModelosEtiqueta(atualizados);
         setModeloEtiquetaId(novoModelo.id);
       } else {
@@ -369,8 +413,6 @@ export function EtiquetasTab() {
     for (const aparelho of selecionados) {
       for (let i = 0; i < Math.max(1, quantidadePorItem); i += 1) {
         const imeiTexto = getAparelhoIdentificador(aparelho);
-        const imeiLimpo = imeiTexto.replace(/\D/g, '');
-        const imeiFinal = imeiLimpo ? imeiLimpo.slice(-4) : '-';
         const codigo = getAparelhoCodigo(aparelho);
         const linhasEtiqueta = [
           camposEtiqueta.includes('marcaModelo') ? String(aparelho.modelo || `${aparelho.marca} ${aparelho.modelo}`.trim()).toUpperCase() : '',
@@ -382,9 +424,11 @@ export function EtiquetasTab() {
           camposEtiqueta.includes('cor') ? `Cor: ${aparelho.cor || '-'}` : '',
           camposEtiqueta.includes('preco') ? `Preço: R$ ${Number(aparelho.preco || 0).toFixed(2).replace('.', ',')}` : '',
         ].filter(Boolean);
+
         const barcodeVal = codigo || imeiTexto || aparelho.id;
-        const barcodeHtml = (camposEtiqueta.includes('codigoBarras') && barcodeVal)
-          ? `<div style="margin-top:0.5mm; text-align:center; overflow:hidden;">${generateCode128SvgString(barcodeVal, { height: 18, showText: false })}</div>`
+        const deveMostrarBarcode = template.mostrarCodigoBarras !== false && camposEtiqueta.includes('codigoBarras') && barcodeVal;
+        const barcodeHtml = deveMostrarBarcode
+          ? `<div class="etiqueta-barcode">${generateCode128SvgString(barcodeVal, { height: 16, width: 1.1, showText: false })}</div>`
           : '';
 
         etiquetas.push(`
@@ -397,7 +441,7 @@ export function EtiquetasTab() {
     }
 
     const paginasHtml: string[] = [];
-    const etiquetasPorPagina = 3;
+    const etiquetasPorPagina = template.colunas === 3 ? 3 : 1;
     for (let index = 0; index < etiquetas.length; index += etiquetasPorPagina) {
       const grupo = etiquetas.slice(index, index + etiquetasPorPagina);
       while (grupo.length < etiquetasPorPagina) {
@@ -406,82 +450,70 @@ export function EtiquetasTab() {
       paginasHtml.push(`<section class="pagina-etiquetas">${grupo.join('')}</section>`);
     }
 
-    const pageWidth = template.colunas === 3 ? 104 : template.larguraPaginaMm;
-    const pageHeight = template.colunas === 3 ? 22 : template.alturaPaginaMm;
-    const labelWidth = template.colunas === 3 ? 33 : Math.max(20, (template.larguraPaginaMm - (template.espacamentoMm * (template.colunas - 1))) / template.colunas);
-    const labelHeight = template.colunas === 3 ? 20 : template.alturaMinimaEtiquetaMm;
-    const gapMm = template.colunas === 3 ? 2 : template.espacamentoMm;
-    const pageBreakCss = template.colunas === 3
-      ? '.pagina-etiquetas:not(:first-child) { break-before: page; page-break-before: always; }'
-      : '.pagina-etiquetas:not(:first-child) { break-before: page; page-break-before: always; }';
+    const pageWidth = template.larguraPaginaMm;
+    const pageHeight = template.alturaPaginaMm;
+    const labelWidth = Math.max(20, (template.larguraPaginaMm - (template.espacamentoMm * (template.colunas - 1))) / template.colunas);
+    const labelHeight = template.alturaMinimaEtiquetaMm;
+    const gapMm = template.espacamentoMm;
 
     return `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>Etiquetas de Estoque</title>
+        <title>Etiquetas</title>
         <style>
-          @page { size: ${pageWidth}mm ${pageHeight}mm; margin: ${template.colunas === 3 ? 0 : template.margemMm}mm; }
+          @page { size: ${pageWidth}mm ${pageHeight}mm; margin: ${template.margemMm}mm; }
           * { box-sizing: border-box; }
-          html, body {
-            width: ${pageWidth}mm;
-            margin: 0;
-            padding: 0;
-            background: #fff !important;
-            color-scheme: light;
-          }
-          body {
-            font-family: Arial, sans-serif;
-            color: #000;
-            background: #fff !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            color-adjust: exact;
-          }
+          body { font-family: Arial, sans-serif; color: #000; margin: 0; }
           .pagina-etiquetas {
             width: ${pageWidth}mm;
             height: ${pageHeight}mm;
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(${template.colunas}, 1fr);
             gap: ${gapMm}mm;
-            box-sizing: border-box;
-            padding: 0;
-            overflow: hidden;
-            align-items: stretch;
           }
-          ${pageBreakCss}
           .etiqueta {
-            border: 1px solid #111;
-            border-radius: 2.5mm;
-            padding: 1mm 1.2mm;
+            border: 1px solid #000;
+            padding: 1mm;
             width: ${labelWidth}mm;
             height: ${labelHeight}mm;
-            min-height: ${labelHeight}mm;
-            break-inside: avoid;
             overflow: hidden;
-            text-align: left;
-            line-height: 1.05;
             display: flex;
             flex-direction: column;
-            justify-content: flex-start;
           }
-          .etiqueta:last-child { margin-right: 0; }
-          .etiqueta-vazia { border: none; }
           .etiqueta-titulo {
             font-size: ${template.fonteTituloPx}px;
             font-weight: 700;
             text-transform: uppercase;
             line-height: 1;
-            margin-bottom: 0.6mm;
+            margin-bottom: 0.4mm;
           }
           .etiqueta-linha {
             font-size: ${Math.max(7, template.fonteTextoPx - 1)}px;
             line-height: 1;
-            margin-top: 0.45mm;
+            margin-top: 0.35mm;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+          }
+          .etiqueta-barcode {
+            margin-top: auto;
+            padding-top: 0.3mm;
+            text-align: center;
+            overflow: hidden;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+          }
+          .etiqueta-barcode svg {
+            max-width: 98%;
+            max-height: 6.5mm;
+            width: auto;
+            height: auto;
+            display: block;
+            margin: 0 auto;
           }
         </style>
       </head>
@@ -489,10 +521,7 @@ export function EtiquetasTab() {
         ${paginasHtml.join('')}
         <script>
           window.onload = function() {
-            setTimeout(function() {
-              window.print();
-              window.onafterprint = function() { window.close(); };
-            }, 120);
+            window.print();
           };
         </script>
       </body>
@@ -639,7 +668,7 @@ export function EtiquetasTab() {
                 Marcar tudo
               </button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-2 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2 text-sm">
               <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 cursor-pointer">
                 <input type="checkbox" checked={camposEtiqueta.includes('marcaModelo')} onChange={() => toggleCampoEtiqueta('marcaModelo')} />
                 Modelo
@@ -647,6 +676,10 @@ export function EtiquetasTab() {
               <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 cursor-pointer">
                 <input type="checkbox" checked={camposEtiqueta.includes('codigo')} onChange={() => toggleCampoEtiqueta('codigo')} />
                 Código
+              </label>
+              <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 cursor-pointer">
+                <input type="checkbox" checked={camposEtiqueta.includes('codigoBarras')} onChange={() => toggleCampoEtiqueta('codigoBarras')} />
+                Código de barras
               </label>
               <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 cursor-pointer">
                 <input type="checkbox" checked={camposEtiqueta.includes('capacidade')} onChange={() => toggleCampoEtiqueta('capacidade')} />
@@ -812,10 +845,11 @@ export function EtiquetasTab() {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm font-medium">
+            <div className="pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm font-medium">
               <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCapacidade} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCapacidade: event.target.checked }))} /> Mostrar capacidade</label>
               <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCondicao} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCondicao: event.target.checked }))} /> Mostrar condição</label>
               <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarImei} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarImei: event.target.checked }))} /> Mostrar IMEI</label>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCodigoBarras !== false} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCodigoBarras: event.target.checked }))} /> Mostrar cód. barras</label>
             </div>
 
             <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
