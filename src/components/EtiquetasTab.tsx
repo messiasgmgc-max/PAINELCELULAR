@@ -26,7 +26,6 @@ interface ModeloEtiquetaGlobal {
   mostrarCapacidade: boolean;
   mostrarCondicao: boolean;
   mostrarImei: boolean;
-  mostrarCodigoBarras?: boolean;
   ativo: boolean;
 }
 
@@ -46,7 +45,6 @@ const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
     mostrarCapacidade: true,
     mostrarCondicao: true,
     mostrarImei: true,
-    mostrarCodigoBarras: true,
     ativo: true,
   },
   {
@@ -64,7 +62,6 @@ const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
     mostrarCapacidade: true,
     mostrarCondicao: true,
     mostrarImei: true,
-    mostrarCodigoBarras: true,
     ativo: true,
   },
   {
@@ -82,7 +79,6 @@ const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
     mostrarCapacidade: true,
     mostrarCondicao: true,
     mostrarImei: true,
-    mostrarCodigoBarras: true,
     ativo: true,
   },
 ];
@@ -299,7 +295,6 @@ export function EtiquetasTab() {
       mostrarCapacidade: true,
       mostrarCondicao: true,
       mostrarImei: true,
-      mostrarCodigoBarras: true,
       ativo: true,
     });
     setShowEditor(true);
@@ -331,7 +326,6 @@ export function EtiquetasTab() {
         mostrar_capacidade: modeloEmEdicao.mostrarCapacidade,
         mostrar_condicao: modeloEmEdicao.mostrarCondicao,
         mostrar_imei: modeloEmEdicao.mostrarImei,
-        mostrar_codigo_barras: modeloEmEdicao.mostrarCodigoBarras ?? true,
         ativo: true,
       };
 
@@ -376,7 +370,6 @@ export function EtiquetasTab() {
           mostrarCapacidade: Boolean(data.mostrar_capacidade),
           mostrarCondicao: Boolean(data.mostrar_condicao),
           mostrarImei: Boolean(data.mostrar_imei),
-          mostrarCodigoBarras: Boolean(data.mostrar_codigo_barras ?? true),
           ativo: Boolean(data.ativo),
         };
 
@@ -426,7 +419,7 @@ export function EtiquetasTab() {
         ].filter(Boolean);
 
         const barcodeVal = codigo || imeiTexto || aparelho.id;
-        const deveMostrarBarcode = template.mostrarCodigoBarras !== false && camposEtiqueta.includes('codigoBarras') && barcodeVal;
+        const deveMostrarBarcode = camposEtiqueta.includes('codigoBarras') && Boolean(barcodeVal);
         const barcodeHtml = deveMostrarBarcode
           ? `<div class="etiqueta-barcode">${generateCode128SvgString(barcodeVal, { height: 18, width: 1.1, showText: false })}</div>`
           : '';
@@ -881,11 +874,10 @@ export function EtiquetasTab() {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm font-medium">
+            <div className="pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm font-medium">
               <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCapacidade} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCapacidade: event.target.checked }))} /> Mostrar capacidade</label>
               <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCondicao} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCondicao: event.target.checked }))} /> Mostrar condição</label>
               <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarImei} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarImei: event.target.checked }))} /> Mostrar IMEI</label>
-              <label className="flex items-center gap-2 cursor-pointer text-slate-300"><input type="checkbox" className="rounded bg-slate-800 border-white/20" checked={modeloEmEdicao.mostrarCodigoBarras !== false} onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, mostrarCodigoBarras: event.target.checked }))} /> Mostrar cód. barras</label>
             </div>
 
             <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
