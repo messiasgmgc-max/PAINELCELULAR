@@ -597,7 +597,7 @@ export function EtiquetasTab() {
           </div>
 
           <div className="flex items-end">
-            <Button type="button" variant="outline" className="w-full h-11 rounded-2xl gap-2 bg-white/10 border-white/15 text-foreground hover:bg-white/20 dark:bg-white/5 dark:border-white/10 dark:hover:bg-white/10 shadow-md" onClick={abrirEditarModelo} disabled={!modelosGlobaisDisponiveis}>
+            <Button type="button" variant="outline" className="w-full h-11 rounded-2xl gap-2 bg-white/10 border-white/15 text-foreground hover:bg-white/20 dark:bg-white/5 dark:border-white/10 dark:hover:bg-white/10 shadow-md" onClick={() => abrirEdicaoModelo(modeloEtiquetaAtivo)} disabled={!modelosGlobaisDisponiveis}>
               <Pencil className="w-4 h-4" />
               Editar Modelo
             </Button>
