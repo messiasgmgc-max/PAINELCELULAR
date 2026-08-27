@@ -421,7 +421,7 @@ export function EtiquetasTab() {
         const barcodeVal = codigo || imeiTexto || aparelho.id;
         const deveMostrarBarcode = camposEtiqueta.includes('codigoBarras') && Boolean(barcodeVal);
         const barcodeHtml = deveMostrarBarcode
-          ? `<div class="etiqueta-barcode">${generateCode128SvgString(barcodeVal, { height: 18, width: 1.1, showText: false })}</div>`
+          ? `<div class="etiqueta-barcode">${generateCode128SvgString(barcodeVal, { height: 14, width: 1.0, showText: false })}</div>`
           : '';
 
         etiquetas.push(`
@@ -525,22 +525,22 @@ export function EtiquetasTab() {
             text-overflow: ellipsis;
           }
           .etiqueta-barcode {
-            margin-top: 0.8mm;
-            padding-top: 0.2mm;
-            text-align: left;
+            margin-top: 0.4mm;
+            padding-top: 0.1mm;
+            text-align: center;
             overflow: hidden;
             width: 100%;
             display: flex;
-            justify-content: flex-start;
+            justify-content: center;
             align-items: center;
           }
           .etiqueta-barcode svg {
-            max-width: 95%;
-            max-height: 8mm;
+            max-width: 90%;
+            max-height: 5mm;
             width: auto;
             height: auto;
             display: block;
-            margin: 0;
+            margin: 0 auto;
           }
         </style>
       </head>
