@@ -944,6 +944,7 @@ export function AparelhosTab() {
           if (bateriaMatch) obs.push(`🔋 ${bateriaMatch[1]}%`);
           const outrasObs = a.observacoes
             .replace(/BAIXA_ESTOQUE:[^|]+/g, "")
+            .replace(/ID:\s*[A-Za-z0-9]+/gi, "")
             .replace(/\d+%\s*bat[a-z]*/gi, "")
             .split("|")
             .map((o) => o.trim())
