@@ -864,10 +864,21 @@ export function AparelhosTab() {
       }
     };
 
-    const formatPreco = (v: number) =>
-      v > 0
-        ? v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
-        : "";
+    const getEmojiCor = (cor?: string) => {
+      if (!cor || cor.toLowerCase() === 'padrão' || cor.toLowerCase() === 'padrao') return '';
+      const c = cor.toLowerCase();
+      if (c.includes('preto') || c.includes('black') || c.includes('grafite') || c.includes('midnight') || c.includes('meia-noite') || c.includes('escuro')) return '🖤';
+      if (c.includes('branco') || c.includes('white') || c.includes('prata') || c.includes('silver') || c.includes('starlight') || c.includes('estelar')) return '🤍';
+      if (c.includes('azul') || c.includes('blue') || c.includes('sierra')) return '💙';
+      if (c.includes('vermelho') || c.includes('red')) return '❤️';
+      if (c.includes('verde') || c.includes('green') || c.includes('alpino')) return '💚';
+      if (c.includes('amarelo') || c.includes('yellow') || c.includes('dourado') || c.includes('gold')) return '💛';
+      if (c.includes('roxo') || c.includes('purple')) return '💜';
+      if (c.includes('rosa') || c.includes('pink') || c.includes('rose')) return '🌸';
+      if (c.includes('cinza') || c.includes('gray') || c.includes('grey') || c.includes('titânio') || c.includes('titanium')) return '🩶';
+      if (c.includes('laranja') || c.includes('orange')) return '🧡';
+      return '🎨';
+    };
 
     // Agrupa por modelo
     const grupos: Record<string, typeof aparelhosAtivos> = {};
@@ -888,33 +899,35 @@ export function AparelhosTab() {
     Object.entries(grupos).forEach(([modelo, itens]) => {
       texto += `*${modelo}* (${itens.length})\n`;
       itens.forEach((a) => {
-        // ID / etiqueta: usa numeroSerie ou IMEI (últimos 4) ou id curto
-        const etiqueta = a.numeroSerie
-          ? a.numeroSerie.slice(-6).toUpperCase()
-          : a.imei
-          ? a.imei.slice(-4)
-          : a.id.slice(0, 6).toUpperCase();
+        const codigoTag = getAparelhoCodigo(a) || a.id.slice(0, 6).toUpperCase();
+        const emojiCor = getEmojiCor(a.cor);
 
         const partes: string[] = [];
-        partes.push(`🔖 *${etiqueta}*`);
+        partes.push(`🔖 ${codigoTag}`);
         if (a.capacidade) partes.push(a.capacidade);
-        if (a.cor && a.cor.toLowerCase() !== "padrão") partes.push(a.cor);
-        partes.push(`[${condicaoLabel(a.condicao)}]`);
-        if (a.preco > 0) partes.push(formatPreco(a.preco));
+        
+        // Evita duplicar a marca se já estiver no modelo
+        const modeloClean = `${a.marca !== modelo.split(' ')[0] ? a.marca + ' ' : ''}${a.modelo}`.trim();
+        partes.push(modeloClean);
 
-        // Observações relevantes (bateria, acessórios etc.)
+        if (a.cor && a.cor.toLowerCase() !== "padrão") {
+          partes.push(`${emojiCor} ${a.cor}`.trim());
+        }
+
+        partes.push(`[${condicaoLabel(a.condicao)}]`);
+
+        // Observações relevantes (bateria etc.)
         const obs: string[] = [];
         if (a.observacoes) {
           const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i);
           if (bateriaMatch) obs.push(`🔋 ${bateriaMatch[1]}%`);
-          // outras obs curtas
           const outrasObs = a.observacoes
             .replace(/BAIXA_ESTOQUE:[^|]+/g, "")
             .replace(/\d+%\s*bat[a-z]*/gi, "")
             .split("|")
             .map((o) => o.trim())
-            .filter((o) => o.length > 0 && o.length < 40);
-          obs.push(...outrasObs.slice(0, 2));
+            .filter((o) => o.length > 0 && o.length < 30);
+          obs.push(...outrasObs.slice(0, 1));
         }
 
         texto += `  ${partes.join(" · ")}${obs.length ? " — " + obs.join(" | ") : ""}\n`;
@@ -929,7 +942,6 @@ export function AparelhosTab() {
     navigator.clipboard.writeText(texto)
       .then(() => toast.success("Lista copiada! Cole no WhatsApp 📋", { duration: 4000 }))
       .catch(() => {
-        // Fallback: abre em nova aba como texto
         const blob = new Blob([texto], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
