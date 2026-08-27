@@ -16,11 +16,17 @@ import {
   BadgeCheck,
   RotateCcw,
   Eye,
-  EyeOff
+  EyeOff,
+  Download,
+  MessageCircle,
+  Copy,
+  Check
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
+import toast from 'react-hot-toast';
 
 interface LinhaTaxa {
   parcelas: number; // 0 = Débito, 1..24 = Crédito 1x..24x
@@ -71,7 +77,181 @@ export function TaxasMaquininhaTab() {
   
   const [calcResultado, setCalcResultado] = useState<any>(null);
 
+  const { config } = useStoreConfig();
   const lojaIdAtual = usuario?.lojaId || usuario?.loja_id || usuario?.id;
+  const [copiedWhatsApp, setCopiedWhatsApp] = useState(false);
+
+  const handleCopyWhatsApp = () => {
+    if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) return;
+
+    const nomeLoja = config?.nomeLoja || config?.nome || 'Phone Center';
+    const valorProdStr = parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',');
+    const bandeiraStr = calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper / Outras';
+
+    let txt = `*${nomeLoja.toUpperCase()} - TABELA DE PARCELAMENTO*\n`;
+    txt += `📱 *Maquininha:* ${calcPerfil} (${bandeiraStr})\n`;
+    txt += `💵 *Valor à Vista/Produto:* R$ ${valorProdStr}\n\n`;
+    txt += `*OPÇÕES DE PARCELAMENTO:*\n`;
+
+    tabelaTodasParcelas.forEach((row) => {
+      const valorTotalStr = row.valorTotalCobrado.toFixed(2).replace('.', ',');
+      const valorParcStr = row.valorDaParcela.toFixed(2).replace('.', ',');
+      if (row.isDebito) {
+        txt += `💵 *Débito:* R$ ${valorTotalStr} (Taxa: ${row.taxaCliente.toFixed(2)}%)\n`;
+      } else {
+        txt += `💳 *${row.labelExibicao}:* R$ ${valorParcStr}/mês (Total: R$ ${valorTotalStr})\n`;
+      }
+    });
+
+    txt += `\n_Simulação gerada por ${nomeLoja}_`;
+
+    navigator.clipboard.writeText(txt);
+    setCopiedWhatsApp(true);
+    setTimeout(() => setCopiedWhatsApp(false), 2500);
+    toast.success('📲 Tabela copiada! Cole no WhatsApp do cliente.');
+  };
+
+  const handleExportPNG = () => {
+    if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) return;
+
+    const canvas = document.createElement('canvas');
+    const width = 840;
+    const headerHeight = 140;
+    const rowHeight = 42;
+    const tableHeaderHeight = 45;
+    const padding = 32;
+    const showAdvancedCols = modoAvancado;
+
+    const totalRows = tabelaTodasParcelas.length;
+    const totalHeight = headerHeight + tableHeaderHeight + (totalRows * rowHeight) + (padding * 2) + 50;
+
+    canvas.width = width * 2;
+    canvas.height = totalHeight * 2;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.scale(2, 2);
+
+    // Background Gradient (Sleek Dark Theme)
+    const bgGradient = ctx.createLinearGradient(0, 0, 0, totalHeight);
+    bgGradient.addColorStop(0, '#0f172a');
+    bgGradient.addColorStop(1, '#020617');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, totalHeight);
+
+    // Store Header Info
+    const nomeLoja = (config?.nomeLoja || config?.nome || 'PHONE CENTER').toUpperCase();
+    const valorProdStr = parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',');
+    const bandeiraStr = calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper';
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText(nomeLoja, padding, padding + 24);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`TABELA COMPLETA DE PARCELAMENTO`, padding, padding + 48);
+
+    // Sub-banner info box
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(padding, padding + 62, width - (padding * 2), 44, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(`Maquininha: ${calcPerfil} (${bandeiraStr})   |   Valor do Produto: R$ ${valorProdStr}`, padding + 16, padding + 89);
+
+    // Table Header Bar
+    const tableTop = padding + 122;
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.roundRect(padding, tableTop, width - (padding * 2), tableHeaderHeight, 10);
+    ctx.fill();
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 11px sans-serif';
+
+    const colX = showAdvancedCols 
+      ? [padding + 16, padding + 150, padding + 270, padding + 430, padding + 560, width - padding - 16]
+      : [padding + 20, padding + 220, padding + 400, width - padding - 20];
+
+    const colTitles = showAdvancedCols
+      ? ['MODALIDADE', 'TAXA CLIENTE', 'VALOR PARCELA', 'TOTAL MÁQUINA', 'CUSTO MÁQ.', 'LUCRO TAXA']
+      : ['MODALIDADE', 'TAXA CLIENTE', 'VALOR DA PARCELA', 'TOTAL NA MAQUININHA'];
+
+    colTitles.forEach((title, idx) => {
+      ctx.textAlign = (idx === colTitles.length - 1 && showAdvancedCols) ? 'right' : 'left';
+      ctx.fillText(title, colX[idx], tableTop + 27);
+    });
+
+    // Table Rows
+    let currentY = tableTop + tableHeaderHeight;
+
+    tabelaTodasParcelas.forEach((row, i) => {
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+        ctx.fillRect(padding, currentY, width - (padding * 2), rowHeight);
+      }
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+
+      // Modalidade
+      const modLabel = row.isDebito ? '💵 DÉBITO' : row.labelExibicao;
+      ctx.fillText(modLabel, colX[0], currentY + 26);
+
+      // Taxa Cliente
+      ctx.fillStyle = '#7dd3fc';
+      ctx.fillText(`${row.taxaCliente.toFixed(2)}%`, colX[1], currentY + 26);
+
+      // Valor Parcela
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px sans-serif';
+      const parcStr = `R$ ${row.valorDaParcela.toFixed(2).replace('.', ',')}${!row.isDebito ? ' /mês' : ''}`;
+      ctx.fillText(parcStr, colX[2], currentY + 26);
+
+      // Total na Maquininha
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#cbd5e1';
+      const totalStr = `R$ ${row.valorTotalCobrado.toFixed(2).replace('.', ',')}`;
+      if (showAdvancedCols) {
+        ctx.fillText(totalStr, colX[3], currentY + 26);
+
+        // Custo Maquina
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(`${row.taxaBase.toFixed(2)}%`, colX[4], currentY + 26);
+
+        // Lucro
+        ctx.textAlign = 'right';
+        ctx.fillStyle = row.lucroTaxa > 0 ? '#4ade80' : '#94a3b8';
+        ctx.fillText(`${row.lucroTaxa > 0 ? '+ ' : ''}R$ ${row.lucroTaxa.toFixed(2).replace('.', ',')}`, colX[5], currentY + 26);
+      } else {
+        ctx.textAlign = 'right';
+        ctx.fillText(totalStr, colX[3], currentY + 26);
+      }
+
+      currentY += rowHeight;
+    });
+
+    // Footer Branding
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(`Simulação gerada por ${nomeLoja} • ${new Date().toLocaleDateString('pt-BR')}`, width / 2, currentY + 30);
+
+    // Download PNG
+    const link = document.createElement('a');
+    link.download = `Tabela-Parcelamento-${nomeLoja.replace(/\s+/g, '-')}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+
+    toast.success('📷 Imagem PNG gerada e baixada com sucesso!');
+  };
 
   const carregarPerfis = async () => {
     if (!lojaIdAtual) return;
@@ -498,15 +678,47 @@ export function TaxasMaquininhaTab() {
           {/* TABELA COMPARATIVA DE TODAS AS PARCELAS */}
           {tabelaTodasParcelas.length > 0 && (
             <div className="mt-6 rounded-2xl border border-white/10 bg-slate-900/90 p-4 md:p-5 animate-in fade-in slide-in-from-bottom-2">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-white/10 gap-2">
-                <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-widest flex items-center gap-2">
-                  <CreditCard className="w-4 h-4 text-cyan-400" /> Tabela Completa de Parcelamento ({calcPerfil} - {calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper'})
-                </h3>
-                
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-semibold text-slate-400">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-3 mb-3 border-b border-white/10 gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-widest flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-cyan-400" /> Tabela Completa de Parcelamento ({calcPerfil} - {calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper'})
+                  </h3>
+                  <span className="text-xs font-semibold text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-lg border border-slate-700/60">
                     Valor Produto: <strong className="text-white">R$ {parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',')}</strong>
                   </span>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* CAIXINHA PARA ACTIVAR/DESATIVAR VISUALIZAÇÃO DE LUCROS */}
+                  <label className="flex items-center gap-2 cursor-pointer bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 select-none transition-all font-semibold shadow-sm">
+                    <input 
+                      type="checkbox" 
+                      checked={modoAvancado} 
+                      onChange={(e) => setModoAvancado(e.target.checked)} 
+                      className="rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500 w-4 h-4 cursor-pointer accent-cyan-500" 
+                    />
+                    <span className="flex items-center gap-1.5">
+                      {modoAvancado ? <Eye className="w-3.5 h-3.5 text-amber-400" /> : <EyeOff className="w-3.5 h-3.5 text-emerald-400" />}
+                      {modoAvancado ? 'Exibir Custo/Lucro (Modo Lojista)' : 'Modo Cliente (Lucros Ocultos)'}
+                    </span>
+                  </label>
+
+                  {/* BOTÃO BAIXAR IMAGEM PNG */}
+                  <Button
+                    onClick={handleExportPNG}
+                    className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs h-8 px-3 rounded-xl gap-1.5 shadow-md shadow-cyan-950/30 shrink-0 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Baixar PNG
+                  </Button>
+
+                  {/* BOTÃO COPIAR TABELA WHATSAPP */}
+                  <Button
+                    onClick={handleCopyWhatsApp}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-3 rounded-xl gap-1.5 shadow-md shadow-emerald-950/30 shrink-0 border border-emerald-400/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    {copiedWhatsApp ? <Check className="w-3.5 h-3.5 text-white" /> : <MessageCircle className="w-3.5 h-3.5" />}
+                    {copiedWhatsApp ? 'Copiado!' : 'Copiar WhatsApp'}
+                  </Button>
                 </div>
               </div>
 
