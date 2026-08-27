@@ -365,25 +365,23 @@ export function AparelhosTab() {
   };
 
   // Utilitário para interpretar lista exportada do MercadoPhone
-  const parseMercadoPhoneList = (rawText: string, margemAdicional: number) => {
+  const parseMercadoPhoneList = (rawText: string, margemAdicional: number = 0) => {
     const lines = rawText.split('\n');
     const aparelhosFormatados: any[] = [];
+    const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     for (let rawLine of lines) {
-      let line = rawLine.replace(/[\s\u00A0\u200B\u200E]+/g, ' ').trim();
+      let line = rawLine.trim();
       if (!line) continue;
 
-      let idEtiqueta: string | null = null;
-      const matchId = line.match(/\|\s*ID:\s*(\d+)/i) || line.match(/ID:\s*(\d+)/i);
+      let idEtiqueta = '';
+      const matchId = line.match(/^(\d{6,8})\s*[-•·:]?\s*/);
       if (matchId) {
         idEtiqueta = matchId[1];
         line = line.replace(matchId[0], '').trim();
       } else {
         idEtiqueta = String(Math.floor(10000000 + Math.random() * 90000000));
       }
-
-      line = line.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s=+\-*•∙]+/gu, '').trim();
-      if (!line) continue;
 
       let mainPart = line;
       let sufixoSerial = '';
@@ -392,6 +390,8 @@ export function AparelhosTab() {
         mainPart = parts[0].trim();
         sufixoSerial = parts.slice(1).join('-').trim();
       }
+
+      let observacoesPartes: string[] = [];
 
       // Detecção de quantidade (ex: 2 unidades, 3 un, 2x)
       let quantidade = 1;
@@ -402,6 +402,20 @@ export function AparelhosTab() {
       if (matchQtd) {
         quantidade = parseInt(matchQtd[1], 10) || 1;
         mainPart = mainPart.replace(matchQtd[0], '').trim();
+      }
+
+      // Extrai qualquer observação entre parênteses (ex: (PIXEL NA TELA), (COM CAIXA))
+      const matchParenteses = mainPart.match(/\(([^)]+)\)/g);
+      if (matchParenteses) {
+        matchParenteses.forEach((p) => {
+          if (!/\b(\d+)\s*(?:unidades|unidade|unid|un|peças|pecas|x)\b/i.test(p)) {
+            const obsInterna = p.replace(/[()]/g, '').trim();
+            if (obsInterna && !observacoesPartes.includes(obsInterna)) {
+              observacoesPartes.push(obsInterna);
+            }
+            mainPart = mainPart.replace(p, '').trim();
+          }
+        });
       }
 
       let bateria = '';
@@ -439,23 +453,28 @@ export function AparelhosTab() {
                             /\b(macbook|mac\s*book|ps5|ps4|playstation|xbox|nintendo|switch|pencil|airpods|airpod|ipad|tablet)\b/i.test(modelo) ||
                             ['Sony', 'Microsoft', 'Nintendo'].includes(marcaExtraida);
 
-      const finalImei = isNonCellular ? '' : (sufixoSerial || '');
-
-      let observacoesPartes: string[] = [];
-
+      let imeiLimpo = '';
       if (sufixoSerial && !isNonCellular) {
-        const matchSerialWithObs = sufixoSerial.match(/^([A-Za-z0-9]{3,6})\s+(.+)$/);
+        const matchSerialWithObs = sufixoSerial.match(/^([A-Za-z0-9]{3,15})\s+(.+)$/);
         if (matchSerialWithObs) {
-          sufixoSerial = matchSerialWithObs[1];
+          imeiLimpo = matchSerialWithObs[1].trim();
           const obsTxt = matchSerialWithObs[2].trim();
-          if (obsTxt) observacoesPartes.push(obsTxt);
+          if (obsTxt && !observacoesPartes.includes(obsTxt)) {
+            observacoesPartes.push(obsTxt);
+          }
+        } else {
+          imeiLimpo = sufixoSerial.trim();
         }
       } else if (sufixoSerial && isNonCellular) {
         const cleanObs = sufixoSerial.replace(/lacrado/gi, '').trim();
-        if (cleanObs) observacoesPartes.push(cleanObs);
+        if (cleanObs && !observacoesPartes.includes(cleanObs)) {
+          observacoesPartes.push(cleanObs);
+        }
       }
 
-      const regexObsKeywords = /\b(msg\s*degradada|msgdegradada|msg\s*bateria|msgbateria|msg\s*bat|msg\s*tela|msg\s*camera|msg\s*peça|msg\s*peca|traseira\s*[\w\s]*|tampa\s*[\w\s]*|tela\s*trocada|trincad[oa]|detalhe|face\s*id\s*off)\b/gi;
+      const finalImei = isNonCellular ? '' : imeiLimpo;
+
+      const regexObsKeywords = /\b(msg\s*degradada|msgdegradada|msg\s*bateria|msgbateria|msg\s*bat|msg\s*tela|msg\s*camera|msg\s*peça|msg\s*peca|traseira\s*[\w\s]*|tampa\s*[\w\s]*|tela\s*trocada|trincad[oa]|detalhe|face\s*id\s*off|pixel\s*na\s*tela|risco\s*na\s*tela|mancha\s*na\s*tela)\b/gi;
 
       const matchesObsCor = corExtraida.match(regexObsKeywords);
       if (matchesObsCor) {
@@ -477,9 +496,11 @@ export function AparelhosTab() {
 
       let corFinal = corExtraida;
       observacoesPartes.forEach(obs => {
-        corFinal = corFinal.replace(new RegExp(obs, 'gi'), '');
+        if (obs) {
+          corFinal = corFinal.replace(new RegExp(escapeRegExp(obs), 'gi'), '');
+        }
       });
-      const cor = corFinal.replace(/lacrado/gi, '').replace(/\b\d+%\b/g, '').trim() || 'Padrão';
+      const cor = corFinal.replace(/lacrado/gi, '').replace(/\b\d+%\b/g, '').replace(/[()]/g, '').trim() || 'Padrão';
       const observacoes = observacoesPartes.join(' | ');
 
       const precoVenda = custoNumerico > 0 ? custoNumerico + margemAdicional : margemAdicional;
