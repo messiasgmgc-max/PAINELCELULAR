@@ -914,11 +914,10 @@ export function AparelhosTab() {
     });
 
     let texto = `📱 *ESTOQUE — ${hoje}*\n`;
-    texto += `_${aparelhosAtivos.length} aparelho(s) disponível(is)_\n`;
-    texto += `${"-".repeat(30)}\n\n`;
+    texto += `_${aparelhosAtivos.length} aparelho(s) disponível(is)_\n\n`;
 
-    Object.entries(grupos).forEach(([modelo, itens]) => {
-      texto += `*${modelo}* (${itens.length})\n`;
+    Object.entries(grupos).forEach(([modeloHeader, itens]) => {
+      texto += `*${modeloHeader}*\n`;
       itens.forEach((a) => {
         const codigoTag = getAparelhoCodigo(a) || a.id.slice(0, 6).toUpperCase();
         const emojiCor = getEmojiCor(a.cor);
@@ -926,12 +925,8 @@ export function AparelhosTab() {
         const partes: string[] = [];
         partes.push(`🔖 ${codigoTag}`);
         if (a.capacidade) partes.push(a.capacidade);
-        
-        // Evita duplicar a marca se já estiver no modelo
-        const modeloClean = `${a.marca !== modelo.split(' ')[0] ? a.marca + ' ' : ''}${a.modelo}`.trim();
-        partes.push(modeloClean);
 
-        if (a.cor && a.cor.toLowerCase() !== "padrão") {
+        if (a.cor && a.cor.toLowerCase() !== "padrão" && a.cor.toLowerCase() !== "padrao") {
           partes.push(`${emojiCor} ${a.cor}`.trim());
         }
 
@@ -941,23 +936,26 @@ export function AparelhosTab() {
         const obs: string[] = [];
         if (a.observacoes) {
           const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i);
-          if (bateriaMatch) obs.push(`🔋 ${bateriaMatch[1]}%`);
+          if (bateriaMatch) {
+            obs.push(`🔋 ${bateriaMatch[1]}%`);
+          }
           const outrasObs = a.observacoes
             .replace(/BAIXA_ESTOQUE:[^|]+/g, "")
             .replace(/ID:\s*[A-Za-z0-9]+/gi, "")
             .replace(/\d+%\s*bat[a-z]*/gi, "")
             .split("|")
             .map((o) => o.trim())
-            .filter((o) => o.length > 0 && o.length < 30);
-          obs.push(...outrasObs.slice(0, 1));
+            .filter((o) => o.length > 0 && o.length < 25);
+          if (outrasObs.length > 0) {
+            obs.push(outrasObs[0]);
+          }
         }
 
-        texto += `  ${partes.join(" · ")}${obs.length ? " — " + obs.join(" | ") : ""}\n`;
+        texto += `  ${partes.join(" · ")}${obs.length ? " · " + obs.join(" ") : ""}\n`;
       });
       texto += "\n";
     });
 
-    texto += `${"-".repeat(30)}\n`;
     texto += `✅ *Consulte disponibilidade antes de confirmar*`;
 
     // Copia para clipboard
