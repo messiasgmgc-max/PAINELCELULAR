@@ -904,50 +904,62 @@ export function AparelhosTab() {
       day: "2-digit", month: "2-digit",
     });
 
+    // Agrupa aparelhos por modelo
+    const grupos: Record<string, typeof aparelhosAtivos> = {};
+    aparelhosAtivos.forEach((a) => {
+      const modeloClean = a.modelo ? a.modelo.replace(/^Apple\s+/i, '').trim() : 'Outros';
+      if (!grupos[modeloClean]) grupos[modeloClean] = [];
+      grupos[modeloClean].push(a);
+    });
+
     let texto = `🔄 *ESTOQUE DISPONÍVEL (${dataCurta})*\n\n`;
 
-    aparelhosAtivos.forEach((a) => {
-      const emoji = getEmojiItem(a);
-      const codigoRaw = getAparelhoCodigo(a) || a.id;
-      const codigoFinal = codigoRaw.slice(-4);
+    Object.entries(grupos).forEach(([modeloHeader, itens]) => {
+      texto += `*${modeloHeader}*\n`;
+      itens.forEach((a) => {
+        const emoji = getEmojiItem(a);
+        const codigoRaw = getAparelhoCodigo(a) || a.id;
+        const codigoFinal = codigoRaw.slice(-4);
 
-      const modeloClean = a.modelo ? a.modelo.replace(/^Apple\s+/i, '') : 'Aparelho';
-      const capacidadeStr = a.capacidade ? `${a.capacidade}` : '';
-      const corStr = (a.cor && a.cor.toLowerCase() !== 'padrão' && a.cor.toLowerCase() !== 'padrao') ? a.cor : '';
+        const capacidadeStr = a.capacidade ? `${a.capacidade}` : '';
+        const corStr = (a.cor && a.cor.toLowerCase() !== 'padrão' && a.cor.toLowerCase() !== 'padrao') ? a.cor : '';
 
-      // Extrai % de bateria de observações ou campo de saúde
-      let bateriaStr = '';
-      if (a.observacoes) {
-        const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
-        if (bateriaMatch) bateriaStr = `${bateriaMatch[1]}%`;
-      }
-      if (!bateriaStr && (a as any).saudeBateria) {
-        bateriaStr = `${String((a as any).saudeBateria).replace('%', '')}%`;
-      }
-
-      // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
-      let obsExtra = '';
-      if (a.observacoes) {
-        const obsLimpas = a.observacoes
-          .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
-          .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
-          .replace(/\d+%\s*bat[a-z]*/gi, '')
-          .replace(/\b\d{2,3}%\b/g, '')
-          .split('|')
-          .map((o) => o.trim())
-          .filter((o) => o.length > 0 && o.length < 35);
-        if (obsLimpas.length > 0) {
-          obsExtra = ` (${obsLimpas[0]})`;
+        // Extrai % de bateria de observações ou campo de saúde
+        let bateriaStr = '';
+        if (a.observacoes) {
+          const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
+          if (bateriaMatch) bateriaStr = `${bateriaMatch[1]}%`;
         }
-      }
+        if (!bateriaStr && (a as any).saudeBateria) {
+          bateriaStr = `${String((a as any).saudeBateria).replace('%', '')}%`;
+        }
 
-      const partes = [modeloClean];
-      if (capacidadeStr) partes.push(capacidadeStr);
-      if (corStr) partes.push(corStr);
-      if (bateriaStr) partes.push(bateriaStr);
+        // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
+        let obsExtra = '';
+        if (a.observacoes) {
+          const obsLimpas = a.observacoes
+            .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
+            .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
+            .replace(/\d+%\s*bat[a-z]*/gi, '')
+            .replace(/\b\d{2,3}%\b/g, '')
+            .split('|')
+            .map((o) => o.trim())
+            .filter((o) => o.length > 0 && o.length < 35);
+          if (obsLimpas.length > 0) {
+            obsExtra = ` (${obsLimpas[0]})`;
+          }
+        }
 
-      const linhaItem = `${emoji} ${partes.join(' ')} - ${codigoFinal}${obsExtra}`;
-      texto += `${linhaItem}\n`;
+        const partes = [];
+        if (capacidadeStr) partes.push(capacidadeStr);
+        if (corStr) partes.push(corStr);
+        if (bateriaStr) partes.push(bateriaStr);
+
+        const detalheItem = partes.length > 0 ? ` ${partes.join(' ')}` : '';
+        const linhaItem = `${emoji}${detalheItem} - ${codigoFinal}${obsExtra}`;
+        texto += `${linhaItem}\n`;
+      });
+      texto += '\n';
     });
 
     // Copia para clipboard
