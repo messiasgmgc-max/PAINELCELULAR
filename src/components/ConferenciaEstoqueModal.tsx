@@ -18,7 +18,9 @@ import {
   ArrowRight,
   ShieldCheck,
   Search,
-  Plus
+  Plus,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +38,8 @@ interface AparelhoAuditoria {
   codigo?: string;
   status?: string;
   condicao?: string;
+  cor?: string;
+  capacidade?: string;
   ativo?: boolean;
   preco?: number;
 }
@@ -105,6 +109,8 @@ export function ConferenciaEstoqueModal({
   onEstoqueAtualizado,
 }: ConferenciaEstoqueModalProps) {
   const [etapa, setEtapa] = useState<'escaneamento' | 'relatorio'>('escaneamento');
+  const [modoConferencia, setModoConferencia] = useState<'scanner' | 'manual'>('scanner');
+  const [buscaManual, setBuscaManual] = useState('');
   const [escaneados, setEscaneados] = useState<ItemEscaneado[]>([]);
   const [manualCode, setManualCode] = useState('');
   const [cameraActive, setCameraActive] = useState(false);
@@ -348,14 +354,75 @@ export function ConferenciaEstoqueModal({
     return escaneados.filter((e) => !e.aparelhoEncontrado);
   }, [escaneados]);
 
-  // Inicializa o mapa de ações padrão para os faltantes como 'remover'
-  useEffect(() => {
-    const acoes: Record<string, AcaoFaltante> = {};
-    aparelhosFaltantes.forEach((aparelho) => {
-      acoes[aparelho.id] = acoesFaltantes[aparelho.id] || 'remover';
+  // ── Lógica para Seleção Manual por Lista ──
+  const idsConfirmadosSet = useMemo(() => {
+    return new Set(aparelhosConfirmados.map((a) => a.id));
+  }, [aparelhosConfirmados]);
+
+  const aparelhosFiltradosManual = useMemo(() => {
+    if (!buscaManual.trim()) return aparelhosEstoque;
+    const termo = buscaManual.toLowerCase().trim();
+    return aparelhosEstoque.filter((a) => {
+      const mod = (a.modelo || '').toLowerCase();
+      const mar = (a.marca || '').toLowerCase();
+      const ime = (a.imei || '').toLowerCase();
+      const cod = (a.codigo || '').toLowerCase();
+      const num = (a.numeroSerie || '').toLowerCase();
+      return mod.includes(termo) || mar.includes(termo) || ime.includes(termo) || cod.includes(termo) || num.includes(termo);
     });
-    setAcoesFaltantes(acoes);
-  }, [aparelhosFaltantes]);
+  }, [aparelhosEstoque, buscaManual]);
+
+  const gruposModelosManual = useMemo(() => {
+    const map: Record<string, AparelhoAuditoria[]> = {};
+    aparelhosFiltradosManual.forEach((a) => {
+      const modeloKey = a.modelo ? a.modelo.replace(/^Apple\s+/i, '').trim() : 'Outros';
+      if (!map[modeloKey]) map[modeloKey] = [];
+      map[modeloKey].push(a);
+    });
+    return map;
+  }, [aparelhosFiltradosManual]);
+
+  const toggleItemManual = (aparelho: AparelhoAuditoria) => {
+    const jaConfirmado = idsConfirmadosSet.has(aparelho.id);
+    if (jaConfirmado) {
+      setEscaneados((prev) => prev.filter((e) => e.aparelhoEncontrado?.id !== aparelho.id));
+    } else {
+      const codigo = aparelho.codigo || aparelho.imei || aparelho.numeroSerie || aparelho.id;
+      setEscaneados((prev) => [
+        {
+          codigoLido: codigo,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          aparelhoEncontrado: aparelho,
+        },
+        ...prev,
+      ]);
+      playBeep();
+    }
+  };
+
+  const marcarListaManual = (itens: AparelhoAuditoria[]) => {
+    const novos: ItemEscaneado[] = [];
+    itens.forEach((aparelho) => {
+      if (!idsConfirmadosSet.has(aparelho.id)) {
+        const codigo = aparelho.codigo || aparelho.imei || aparelho.numeroSerie || aparelho.id;
+        novos.push({
+          codigoLido: codigo,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          aparelhoEncontrado: aparelho,
+        });
+      }
+    });
+    if (novos.length > 0) {
+      setEscaneados((prev) => [...novos, ...prev]);
+      toast.success(`${novos.length} aparelho(s) marcado(s) como localizado(s)!`);
+    }
+  };
+
+  const desmarcarListaManual = (itens: AparelhoAuditoria[]) => {
+    const idsRemover = new Set(itens.map((a) => a.id));
+    setEscaneados((prev) => prev.filter((e) => !e.aparelhoEncontrado || !idsRemover.has(e.aparelhoEncontrado.id)));
+    toast.info(`${itens.length} aparelho(s) desmarcado(s).`);
+  };
 
   const aplicarLoteAcoes = (acao: AcaoFaltante) => {
     const novao: Record<string, AcaoFaltante> = {};
@@ -474,8 +541,36 @@ export function ConferenciaEstoqueModal({
           </div>
         </div>
 
-        {/* ETAPA 1: ESCANEAMENTO CONTÍNUO */}
+        {/* SELETOR DE MODO DE CONFERÊNCIA (Etapa 1) */}
         {etapa === 'escaneamento' && (
+          <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800 shrink-0">
+            <button
+              onClick={() => setModoConferencia('scanner')}
+              className={cn(
+                "flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer",
+                modoConferencia === 'scanner'
+                  ? "bg-cyan-500 text-white shadow-md shadow-cyan-950/40"
+                  : "text-slate-400 hover:text-white hover:bg-slate-900"
+              )}
+            >
+              <Camera className="w-4 h-4" /> Bipar Código de Barras / Câmera
+            </button>
+            <button
+              onClick={() => setModoConferencia('manual')}
+              className={cn(
+                "flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer",
+                modoConferencia === 'manual'
+                  ? "bg-cyan-500 text-white shadow-md shadow-cyan-950/40"
+                  : "text-slate-400 hover:text-white hover:bg-slate-900"
+              )}
+            >
+              <CheckSquare className="w-4 h-4" /> Seleção Manual por Lista ({aparelhosConfirmados.length}/{aparelhosEstoque.length})
+            </button>
+          </div>
+        )}
+
+        {/* ETAPA 1 - MODO A: SCANNER CONTÍNUO */}
+        {etapa === 'escaneamento' && modoConferencia === 'scanner' && (
           <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
             
             {/* COLUNA ESQUERDA: CÂMERA E ENTRADA */}
@@ -630,10 +725,140 @@ export function ConferenciaEstoqueModal({
                   onClick={handleFinalizarEConferir} 
                   className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-2 px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-900/20"
                 >
-                  <CheckCircle2 className="w-4 h-4" /> Finalizar Conferência ({escaneados.length})
+                  <CheckCircle2 className="w-4 h-4" /> Finalizar Conferência ({aparelhosConfirmados.length})
                 </Button>
               </div>
 
+            </div>
+
+          </div>
+        )}
+
+        {/* ETAPA 1 - MODO B: SELEÇÃO MANUAL POR LISTA */}
+        {etapa === 'escaneamento' && modoConferencia === 'manual' && (
+          <div className="flex-1 overflow-hidden flex flex-col gap-3 min-h-0 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
+            
+            {/* Barra de Busca e Ações Rápidas */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0 pb-3 border-b border-slate-800">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar modelo, cor, IMEI ou código..."
+                  value={buscaManual}
+                  onChange={(e) => setBuscaManual(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => marcarListaManual(aparelhosFiltradosManual)}
+                  className="text-xs bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 font-bold rounded-xl gap-1.5 cursor-pointer"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" /> Marcar Filtrados ({aparelhosFiltradosManual.length})
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => desmarcarListaManual(aparelhosFiltradosManual)}
+                  className="text-xs bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 font-bold rounded-xl gap-1.5 cursor-pointer"
+                >
+                  <Square className="w-3.5 h-3.5 text-slate-400" /> Desmarcar
+                </Button>
+              </div>
+            </div>
+
+            {/* Lista Agrupada por Modelo */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0 max-h-[380px]">
+              {Object.keys(gruposModelosManual).length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500 space-y-2">
+                  <Package className="w-8 h-8 opacity-40 mx-auto" />
+                  <p className="text-xs font-medium">Nenhum aparelho localizado com o termo pesquisado.</p>
+                </div>
+              ) : (
+                Object.entries(gruposModelosManual).map(([modelo, itens]) => {
+                  const todosGrupoConfirmados = itens.every((item) => idsConfirmadosSet.has(item.id));
+                  const confirmadosNoGrupo = itens.filter((item) => idsConfirmadosSet.has(item.id)).length;
+
+                  return (
+                    <div key={modelo} className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-white">{modelo}</span>
+                          <Badge variant="outline" className="bg-slate-800 text-slate-300 text-[10px] border-slate-700">
+                            {confirmadosNoGrupo} / {itens.length} encontrados
+                          </Badge>
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (todosGrupoConfirmados) {
+                              desmarcarListaManual(itens);
+                            } else {
+                              marcarListaManual(itens);
+                            }
+                          }}
+                          className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 bg-slate-800/60 hover:bg-slate-800 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                        >
+                          {todosGrupoConfirmados ? 'Desmarcar Grupo' : 'Marcar Grupo'}
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        {itens.map((item) => {
+                          const isChecked = idsConfirmadosSet.has(item.id);
+                          return (
+                            <label
+                              key={item.id}
+                              onClick={() => toggleItemManual(item)}
+                              className={cn(
+                                "p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all select-none",
+                                isChecked
+                                  ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-100"
+                                  : "bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {}}
+                                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 cursor-pointer"
+                              />
+                              <div className="min-w-0 flex-1 text-xs">
+                                <div className="font-bold text-white flex items-center gap-2">
+                                  <span>{item.modelo}</span>
+                                  {item.capacidade && <span className="text-[10px] text-slate-400">{item.capacidade}</span>}
+                                  {item.cor && <span className="text-[10px] text-slate-400">· {item.cor}</span>}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
+                                  IMEI/Cod: {item.codigo || item.imei || item.numeroSerie || item.id}
+                                </div>
+                              </div>
+                              <Badge className={cn("text-[9px] shrink-0", isChecked ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700")}>
+                                {isChecked ? '✓ Encontrado' : 'Faltante'}
+                              </Badge>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Rodapé do Modo Manual */}
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between shrink-0">
+              <span className="text-xs text-slate-400">
+                Total Localizado: <strong className="text-emerald-400">{aparelhosConfirmados.length}</strong> de <strong className="text-white">{aparelhosEstoque.length}</strong>
+              </span>
+              <Button 
+                onClick={handleFinalizarEConferir} 
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-2 px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-900/20 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" /> Finalizar Conferência ({aparelhosConfirmados.length})
+              </Button>
             </div>
 
           </div>
