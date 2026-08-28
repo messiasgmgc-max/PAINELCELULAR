@@ -875,92 +875,84 @@ export function AparelhosTab() {
       return;
     }
 
-    const condicaoLabel = (c: string) => {
-      switch (c) {
-        case "novo": return "NOVO";
-        case "seminovo": return "SEMI";
-        case "usado": return "USADO";
-        case "danificado": return "AVARIA";
-        default: return c.toUpperCase();
-      }
+    const getEmojiItem = (a: typeof aparelhosAtivos[number]) => {
+      const mod = String(a.modelo || '').toLowerCase();
+      const cor = String(a.cor || '').toLowerCase();
+
+      if (mod.includes('macbook') || mod.includes('mac book')) return '💻';
+      if (mod.includes('watch')) return '⌚️';
+      if (mod.includes('pencil')) return '✏️';
+      if (mod.includes('ps5') || mod.includes('ps4') || mod.includes('xbox') || mod.includes('nintendo') || mod.includes('switch')) return '🎮';
+      if (mod.includes('airpods') || mod.includes('airpod')) return '🎧';
+
+      if (cor.includes('desert') || cor.includes('deserto')) return '🏜';
+      if (cor.includes('natural') || cor.includes('cinza') || cor.includes('gray') || cor.includes('grey')) return '🔘';
+      if (cor.includes('branco') || cor.includes('white') || cor.includes('silver') || cor.includes('prata') || cor.includes('starlight') || cor.includes('estelar')) return '⚪️';
+      if (cor.includes('preto') || cor.includes('black') || cor.includes('grafite') || cor.includes('dark') || cor.includes('midnight') || cor.includes('meia-noite') || cor.includes('space')) return '⚫️';
+      if (cor.includes('azul') || cor.includes('blue') || cor.includes('sierra') || cor.includes('pacifico')) return '🔵';
+      if (cor.includes('roxo') || cor.includes('purple') || cor.includes('lilás') || cor.includes('lilas') || cor.includes('violeta')) return '🟣';
+      if (cor.includes('rosa') || cor.includes('pink') || cor.includes('rose')) return '🌸';
+      if (cor.includes('dourado') || cor.includes('gold') || cor.includes('amarelo') || cor.includes('yellow')) return '🟡';
+      if (cor.includes('verde') || cor.includes('green') || cor.includes('alpino')) return '🟢';
+      if (cor.includes('vermelho') || cor.includes('red')) return '🔴';
+      if (cor.includes('laranja') || cor.includes('orange')) return '🟧';
+
+      return '📱';
     };
 
-    const getEmojiCor = (cor?: string) => {
-      if (!cor || cor.toLowerCase() === 'padrão' || cor.toLowerCase() === 'padrao') return '';
-      const c = cor.toLowerCase();
-      if (c.includes('preto') || c.includes('black') || c.includes('grafite') || c.includes('midnight') || c.includes('meia-noite') || c.includes('escuro')) return '🖤';
-      if (c.includes('branco') || c.includes('white') || c.includes('prata') || c.includes('silver') || c.includes('starlight') || c.includes('estelar')) return '🤍';
-      if (c.includes('azul') || c.includes('blue') || c.includes('sierra')) return '💙';
-      if (c.includes('vermelho') || c.includes('red')) return '❤️';
-      if (c.includes('verde') || c.includes('green') || c.includes('alpino')) return '💚';
-      if (c.includes('amarelo') || c.includes('yellow') || c.includes('dourado') || c.includes('gold')) return '💛';
-      if (c.includes('roxo') || c.includes('purple')) return '💜';
-      if (c.includes('rosa') || c.includes('pink') || c.includes('rose')) return '🌸';
-      if (c.includes('cinza') || c.includes('gray') || c.includes('grey') || c.includes('titânio') || c.includes('titanium')) return '🩶';
-      if (c.includes('laranja') || c.includes('orange')) return '🧡';
-      return '🎨';
-    };
+    const dataCurta = new Date().toLocaleDateString("pt-BR", {
+      day: "2-digit", month: "2-digit",
+    });
 
-    // Agrupa por modelo
-    const grupos: Record<string, typeof aparelhosAtivos> = {};
+    let texto = `🔄 *ESTOQUE DISPONÍVEL (${dataCurta})*\n\n`;
+
     aparelhosAtivos.forEach((a) => {
-      const chave = `${a.marca} ${a.modelo}`.trim();
-      if (!grupos[chave]) grupos[chave] = [];
-      grupos[chave].push(a);
-    });
+      const emoji = getEmojiItem(a);
+      const codigoRaw = getAparelhoCodigo(a) || a.id;
+      const codigoFinal = codigoRaw.slice(-4);
 
-    const hoje = new Date().toLocaleDateString("pt-BR", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-    });
+      const modeloClean = a.modelo ? a.modelo.replace(/^Apple\s+/i, '') : 'Aparelho';
+      const capacidadeStr = a.capacidade ? `${a.capacidade}` : '';
+      const corStr = (a.cor && a.cor.toLowerCase() !== 'padrão' && a.cor.toLowerCase() !== 'padrao') ? a.cor : '';
 
-    let texto = `📱 *ESTOQUE — ${hoje}*\n`;
-    texto += `_${aparelhosAtivos.length} aparelho(s) disponível(is)_\n\n`;
+      // Extrai % de bateria de observações ou campo de saúde
+      let bateriaStr = '';
+      if (a.observacoes) {
+        const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
+        if (bateriaMatch) bateriaStr = `${bateriaMatch[1]}%`;
+      }
+      if (!bateriaStr && (a as any).saudeBateria) {
+        bateriaStr = `${String((a as any).saudeBateria).replace('%', '')}%`;
+      }
 
-    Object.entries(grupos).forEach(([modeloHeader, itens]) => {
-      texto += `*${modeloHeader}*\n`;
-      itens.forEach((a) => {
-        const codigoTag = getAparelhoCodigo(a) || a.id.slice(0, 6).toUpperCase();
-        const emojiCor = getEmojiCor(a.cor);
-
-        const partes: string[] = [];
-        partes.push(`🔖 ${codigoTag}`);
-        if (a.capacidade) partes.push(a.capacidade);
-
-        if (a.cor && a.cor.toLowerCase() !== "padrão" && a.cor.toLowerCase() !== "padrao") {
-          partes.push(`${emojiCor} ${a.cor}`.trim());
+      // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
+      let obsExtra = '';
+      if (a.observacoes) {
+        const obsLimpas = a.observacoes
+          .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
+          .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
+          .replace(/\d+%\s*bat[a-z]*/gi, '')
+          .replace(/\b\d{2,3}%\b/g, '')
+          .split('|')
+          .map((o) => o.trim())
+          .filter((o) => o.length > 0 && o.length < 35);
+        if (obsLimpas.length > 0) {
+          obsExtra = ` (${obsLimpas[0]})`;
         }
+      }
 
-        partes.push(`[${condicaoLabel(a.condicao)}]`);
+      const partes = [modeloClean];
+      if (capacidadeStr) partes.push(capacidadeStr);
+      if (corStr) partes.push(corStr);
+      if (bateriaStr) partes.push(bateriaStr);
 
-        // Observações relevantes (bateria etc.)
-        const obs: string[] = [];
-        if (a.observacoes) {
-          const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i);
-          if (bateriaMatch) {
-            obs.push(`🔋 ${bateriaMatch[1]}%`);
-          }
-          const outrasObs = a.observacoes
-            .replace(/BAIXA_ESTOQUE:[^|]+/g, "")
-            .replace(/ID:\s*[A-Za-z0-9]+/gi, "")
-            .replace(/\d+%\s*bat[a-z]*/gi, "")
-            .split("|")
-            .map((o) => o.trim())
-            .filter((o) => o.length > 0 && o.length < 25);
-          if (outrasObs.length > 0) {
-            obs.push(outrasObs[0]);
-          }
-        }
-
-        texto += `  ${partes.join(" · ")}${obs.length ? " · " + obs.join(" ") : ""}\n`;
-      });
-      texto += "\n";
+      const linhaItem = `${emoji} ${partes.join(' ')} - ${codigoFinal}${obsExtra}`;
+      texto += `${linhaItem}\n`;
     });
-
-    texto += `✅ *Consulte disponibilidade antes de confirmar*`;
 
     // Copia para clipboard
     navigator.clipboard.writeText(texto)
-      .then(() => toast.success("Lista copiada! Cole no WhatsApp 📋", { duration: 4000 }))
+      .then(() => toast.success("Lista no padrão WhatsApp copiada! 📋", { duration: 4000 }))
       .catch(() => {
         const blob = new Blob([texto], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
