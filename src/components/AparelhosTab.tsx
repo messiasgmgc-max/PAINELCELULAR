@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
@@ -61,6 +61,7 @@ export function AparelhosTab() {
     condicao: "seminovo" as "novo" | "seminovo" | "usado" | "danificado",
     saudeBateria: "",
     preco: "",
+    precoAtacado: "",
     custo: "",
     descricao: "",
     cliente: "",
@@ -163,15 +164,25 @@ export function AparelhosTab() {
     }));
   };
 
+  const handlePrecoAtacadoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valor = e.target.value.replace(/\D/g, "");
+    setFormData((prev) => ({
+      ...prev,
+      precoAtacado: valor,
+    }));
+  };
+
   const handleCustoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const valor = e.target.value.replace(/\D/g, "");
     const custoNum = valor ? parseInt(valor) / 100 : 0;
     const vendaValor = valor ? String(Math.round((custoNum + 300) * 100)) : "";
+    const atacadoValor = valor ? String(Math.round((custoNum + 150) * 100)) : "";
 
     setFormData((prev) => ({
       ...prev,
       custo: valor,
       preco: valor ? vendaValor : prev.preco,
+      precoAtacado: valor ? atacadoValor : prev.precoAtacado,
     }));
   };
 
@@ -198,6 +209,7 @@ export function AparelhosTab() {
       condicao: aparelho.condicao,
       saudeBateria: (aparelho as any).saude_bateria || (aparelho as any).saudeBateria || "",
       preco: String(Math.round(aparelho.preco * 100)),
+      precoAtacado: (aparelho as any).precoAtacado ? String(Math.round(((aparelho as any).precoAtacado || 0) * 100)) : "",
       custo: String(Math.round(((aparelho as any).custo || 0) * 100)),
       descricao: aparelho.descricao || "",
       cliente: aparelho.cliente || "",
@@ -770,11 +782,13 @@ export function AparelhosTab() {
     }
 
     const precoNumerico = formData.preco ? parseInt(formData.preco) / 100 : 0;
+    const precoAtacadoNumerico = formData.precoAtacado ? parseInt(formData.precoAtacado) / 100 : undefined;
     const custoNumerico = formData.custo ? parseInt(formData.custo) / 100 : 0;
 
     const payload = {
       ...formData,
       preco: precoNumerico,
+      precoAtacado: precoAtacadoNumerico,
       custo: custoNumerico,
       saude_bateria: formData.saudeBateria,
       saudeBateria: formData.saudeBateria,
@@ -869,7 +883,7 @@ export function AparelhosTab() {
   };
 
   // ── Exportar Lista WhatsApp ──
-  const handleExportWhatsApp = () => {
+  const handleExportWhatsApp = (modoAtacado: boolean = false) => {
     if (aparelhosAtivos.length === 0) {
       toast.error("Nenhum aparelho em estoque para exportar!");
       return;
@@ -939,7 +953,9 @@ export function AparelhosTab() {
       grupos[modeloClean].push(a);
     });
 
-    let texto = `🔄 *ESTOQUE DISPONÍVEL (${dataCurta})*\n\n`;
+    let texto = modoAtacado
+      ? `📦 *ESTOQUE ATACADO (${dataCurta})*\n\n`
+      : `🔄 *ESTOQUE DISPONÍVEL (${dataCurta})*\n\n`;
 
     Object.entries(grupos)
       .sort(([a], [b]) => sortGrupos(a, b))
@@ -970,6 +986,15 @@ export function AparelhosTab() {
             if (saude && saude !== '-') bateriaStr = `${saude}%`;
           }
 
+          // Preço para Atacado
+          let precoAtacadoStr = '';
+          if (modoAtacado) {
+            const valAtacado = (a as any).precoAtacado || a.preco;
+            if (valAtacado > 0) {
+              precoAtacadoStr = `R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+            }
+          }
+
           // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
           let obsExtra = '';
           if (a.observacoes) {
@@ -990,6 +1015,7 @@ export function AparelhosTab() {
           if (capacidadeStr) partes.push(capacidadeStr);
           if (corLimpa) partes.push(corLimpa);
           if (bateriaStr) partes.push(bateriaStr);
+          if (precoAtacadoStr) partes.push(precoAtacadoStr);
 
           const detalheItem = partes.length > 0 ? ` ${partes.join(' ')}` : '';
           const linhaItem = `${emoji}${detalheItem} - ${codigoFinal}${obsExtra}`;
@@ -1000,13 +1026,13 @@ export function AparelhosTab() {
 
     // Copia para clipboard
     navigator.clipboard.writeText(texto)
-      .then(() => toast.success("Lista no padrão WhatsApp copiada! 📋", { duration: 4000 }))
+      .then(() => toast.success(modoAtacado ? "Lista de Atacado copiada! 📋" : "Lista de Varejo copiada! 📋", { duration: 4000 }))
       .catch(() => {
         const blob = new Blob([texto], { type: "text/plain;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `estoque_whatsapp_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.txt`;
+        a.download = `estoque_${modoAtacado ? 'atacado' : 'varejo'}_${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.txt`;
         a.click();
         URL.revokeObjectURL(url);
         toast.success("Lista baixada como arquivo .txt!");
@@ -1382,6 +1408,7 @@ export function AparelhosTab() {
       condicao: "seminovo",
       saudeBateria: "",
       preco: "",
+      precoAtacado: "",
       custo: "",
       descricao: "",
       cliente: "",
@@ -1523,13 +1550,24 @@ export function AparelhosTab() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-slate-800 my-1" />
                   <DropdownMenuItem
-                    onClick={handleExportWhatsApp}
+                    onClick={() => handleExportWhatsApp(false)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
                     <MessageCircle className="h-4 w-4 text-green-400 shrink-0" />
                     <div>
-                      <div className="font-bold text-xs text-white">Lista WhatsApp</div>
-                      <div className="text-[10px] text-slate-400">Copia formatada para enviar no grupo</div>
+                      <div className="font-bold text-xs text-white">Lista WhatsApp (Varejo)</div>
+                      <div className="text-[10px] text-slate-400">Lista sem preços / estoque geral</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => handleExportWhatsApp(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <Package className="h-4 w-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Lista WhatsApp (Atacado)</div>
+                      <div className="text-[10px] text-slate-400">Lista com valores de atacado para lojistas</div>
                     </div>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -1747,11 +1785,18 @@ export function AparelhosTab() {
                   </div>
 
                   <div className="flex flex-col items-end gap-2">
-                    <div className="text-right">
+                    <div className="text-right flex flex-col items-end gap-1">
                       <p className="text-[10px] text-muted-foreground">Custo: R$ {((aparelho as any).custo || 0).toFixed(2).replace(".", ",")}</p>
-                      <Badge variant="default">
-                        R$ {aparelho.preco.toFixed(2).replace(".", ",")}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        {(aparelho as any).precoAtacado ? (
+                          <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-xs">
+                            Atacado: R$ {Number((aparelho as any).precoAtacado).toFixed(2).replace(".", ",")}
+                          </Badge>
+                        ) : null}
+                        <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                          R$ {aparelho.preco.toFixed(2).replace(".", ",")}
+                        </Badge>
+                      </div>
                     </div>
                     <p className="text-xs text-muted-foreground whitespace-nowrap">
                       {new Date(aparelho.dataCadastro).toLocaleDateString(
@@ -1869,8 +1914,8 @@ export function AparelhosTab() {
                   </div>
                 </div>
 
-                {/* Linha 3: Condição, Saúde Bateria, Custo e Venda */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Linha 3: Condição, Saúde Bateria, Custo, Atacado e Venda Varejo */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
                   <div>
                     <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">Condição</label>
                     <select
@@ -1909,7 +1954,19 @@ export function AparelhosTab() {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-green-400 uppercase block mb-1">Venda</label>
+                    <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Atacado</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      name="precoAtacado"
+                      placeholder="R$ 0,00"
+                      value={formatarPreco(formData.precoAtacado)}
+                      onChange={handlePrecoAtacadoChange}
+                      className="input-glass w-full font-bold text-amber-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-green-400 uppercase block mb-1">Venda Varejo</label>
                     <input
                       type="text"
                       inputMode="decimal"

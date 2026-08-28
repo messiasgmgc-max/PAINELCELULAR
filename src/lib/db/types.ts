@@ -45,6 +45,7 @@ export interface Aparelho {
   capacidade?: string;
   condicao: "novo" | "seminovo" | "usado" | "danificado";
   preco: number;
+  precoAtacado?: number;
   custo?: number;
   saudeBateria?: string;
   saude_bateria?: string;
