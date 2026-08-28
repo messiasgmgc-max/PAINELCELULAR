@@ -900,6 +900,33 @@ export function AparelhosTab() {
       return '📱';
     };
 
+    const ordensPrincipais = [
+      'iphone 17 pro max', 'iphone 17 pro', 'iphone 17 plus', 'iphone 17',
+      'iphone 16 pro max', 'iphone 16 pro', 'iphone 16 plus', 'iphone 16',
+      'iphone 15 pro max', 'iphone 15 pro', 'iphone 15 plus', 'iphone 15',
+      'iphone 14 pro max', 'iphone 14 pro', 'iphone 14 plus', 'iphone 14',
+      'iphone 13 pro max', 'iphone 13 pro', 'iphone 13 mini', 'iphone 13',
+      'iphone 12 pro max', 'iphone 12 pro', 'iphone 12 mini', 'iphone 12',
+      'iphone 11 pro max', 'iphone 11 pro', 'iphone 11',
+      'iphone xs max', 'iphone xs', 'iphone xr', 'iphone x',
+      'iphone 8 plus', 'iphone 8', 'iphone 7 plus', 'iphone 7',
+      'iphone se 3', 'iphone se 2', 'iphone se',
+      'ipad', 'watch', 'macbook', 'pencil', 'airpods'
+    ];
+
+    const sortGrupos = (a: string, b: string) => {
+      const aLower = a.toLowerCase();
+      const bLower = b.toLowerCase();
+
+      const idxA = ordensPrincipais.findIndex((o) => aLower.includes(o));
+      const idxB = ordensPrincipais.findIndex((o) => bLower.includes(o));
+
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    };
+
     const dataCurta = new Date().toLocaleDateString("pt-BR", {
       day: "2-digit", month: "2-digit",
     });
@@ -914,53 +941,62 @@ export function AparelhosTab() {
 
     let texto = `🔄 *ESTOQUE DISPONÍVEL (${dataCurta})*\n\n`;
 
-    Object.entries(grupos).forEach(([modeloHeader, itens]) => {
-      texto += `*${modeloHeader}*\n`;
-      itens.forEach((a) => {
-        const emoji = getEmojiItem(a);
-        const codigoRaw = getAparelhoCodigo(a) || a.id;
-        const codigoFinal = codigoRaw.slice(-4);
+    Object.entries(grupos)
+      .sort(([a], [b]) => sortGrupos(a, b))
+      .forEach(([modeloHeader, itens]) => {
+        texto += `*${modeloHeader}*\n`;
+        itens.forEach((a) => {
+          const emoji = getEmojiItem(a);
+          const codigoRaw = getAparelhoCodigo(a) || a.id;
+          const codigoFinal = codigoRaw.slice(-4);
 
-        const capacidadeStr = a.capacidade ? `${a.capacidade}` : '';
-        const corStr = (a.cor && a.cor.toLowerCase() !== 'padrão' && a.cor.toLowerCase() !== 'padrao') ? a.cor : '';
-
-        // Extrai % de bateria de observações ou campo de saúde
-        let bateriaStr = '';
-        if (a.observacoes) {
-          const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
-          if (bateriaMatch) bateriaStr = `${bateriaMatch[1]}%`;
-        }
-        if (!bateriaStr && (a as any).saudeBateria) {
-          bateriaStr = `${String((a as any).saudeBateria).replace('%', '')}%`;
-        }
-
-        // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
-        let obsExtra = '';
-        if (a.observacoes) {
-          const obsLimpas = a.observacoes
-            .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
-            .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
-            .replace(/\d+%\s*bat[a-z]*/gi, '')
-            .replace(/\b\d{2,3}%\b/g, '')
-            .split('|')
-            .map((o) => o.trim())
-            .filter((o) => o.length > 0 && o.length < 35);
-          if (obsLimpas.length > 0) {
-            obsExtra = ` (${obsLimpas[0]})`;
+          const capacidadeStr = a.capacidade ? `${a.capacidade}` : '';
+          
+          let corLimpa = (a.cor || '')
+            .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '')
+            .trim();
+          if (corLimpa.toLowerCase() === 'padrão' || corLimpa.toLowerCase() === 'padrao') {
+            corLimpa = '';
           }
-        }
 
-        const partes = [];
-        if (capacidadeStr) partes.push(capacidadeStr);
-        if (corStr) partes.push(corStr);
-        if (bateriaStr) partes.push(bateriaStr);
+          // Extrai % de bateria de observações ou campo de saúde
+          let bateriaStr = '';
+          if (a.observacoes) {
+            const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
+            if (bateriaMatch) bateriaStr = `${bateriaMatch[1]}%`;
+          }
+          if (!bateriaStr && (a as any).saudeBateria) {
+            const saude = String((a as any).saudeBateria).replace('%', '').trim();
+            if (saude && saude !== '-') bateriaStr = `${saude}%`;
+          }
 
-        const detalheItem = partes.length > 0 ? ` ${partes.join(' ')}` : '';
-        const linhaItem = `${emoji}${detalheItem} - ${codigoFinal}${obsExtra}`;
-        texto += `${linhaItem}\n`;
+          // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
+          let obsExtra = '';
+          if (a.observacoes) {
+            const obsLimpas = a.observacoes
+              .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
+              .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
+              .replace(/\d+%\s*bat[a-z]*/gi, '')
+              .replace(/\b\d{2,3}%\b/g, '')
+              .split('|')
+              .map((o) => o.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').trim())
+              .filter((o) => o.length > 0 && o.length < 35);
+            if (obsLimpas.length > 0) {
+              obsExtra = ` (${obsLimpas[0]})`;
+            }
+          }
+
+          const partes = [];
+          if (capacidadeStr) partes.push(capacidadeStr);
+          if (corLimpa) partes.push(corLimpa);
+          if (bateriaStr) partes.push(bateriaStr);
+
+          const detalheItem = partes.length > 0 ? ` ${partes.join(' ')}` : '';
+          const linhaItem = `${emoji}${detalheItem} - ${codigoFinal}${obsExtra}`;
+          texto += `${linhaItem}\n`;
+        });
+        texto += '\n';
       });
-      texto += '\n';
-    });
 
     // Copia para clipboard
     navigator.clipboard.writeText(texto)
