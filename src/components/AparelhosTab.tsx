@@ -7,6 +7,8 @@ import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
 import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
+import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
+import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Settings } from "lucide-react";
 
 export function AparelhosTab() {
   const { usuario } = useAuth();
@@ -38,6 +41,8 @@ export function AparelhosTab() {
 
   const [showForm, setShowForm] = useState(false);
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
+  const [showAtacadoModal, setShowAtacadoModal] = useState(false);
+  const [showBackupModal, setShowBackupModal] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
@@ -684,6 +689,9 @@ export function AparelhosTab() {
       return;
     }
 
+    // Salva ponto de backup preventivo antes de remontar o estoque
+    salvarSnapshotBackup(aparelhos, usuario?.lojaId, 'Backup Automático Antes de Remontar Estoque');
+
     setImportingMercadoPhone(true);
     const toastId = toast.loading(`Remontando estoque (${itensImportados.length} aparelhos)...`);
 
@@ -1085,6 +1093,9 @@ export function AparelhosTab() {
 
     if (confirmacao) {
       try {
+        // Gera ponto de backup de segurança antes de limpar o estoque
+        salvarSnapshotBackup(aparelhos, currentLojaId, 'Backup Automático Antes de Deletar Estoque');
+
         const { error } = await supabase
           .from('aparelhos')
           .delete()
@@ -1539,42 +1550,61 @@ export function AparelhosTab() {
               </div>
             </div>
             <div className="scroll-row w-full pb-1 flex items-center gap-2">
+              {/* 1. Novo Aparelho */}
               <Button 
                 onClick={() => setShowForm(!showForm)} 
-                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
+                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
                 Novo Aparelho
               </Button>
-              <Button 
-                onClick={() => setShowConferenciaModal(true)} 
-                className="bg-slate-800/90 hover:bg-slate-700/90 text-cyan-400 hover:text-cyan-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
-              >
-                <ShieldCheck className="h-4 w-4 text-cyan-400" />
-                Conferir Estoque
-              </Button>
-              <Button 
-                onClick={() => setShowSaidas(true)} 
-                className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-amber-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
-              >
-                <History className="h-4 w-4" /> Saídas
-              </Button>
-              <Button 
-                onClick={handleRestaurarEstoqueDesativado} 
-                className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 hover:text-emerald-200 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-emerald-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
-                title="Reativa todos os aparelhos do estoque sem perder códigos de barras ou etiquetas impressas"
-              >
-                <RotateCcw className="h-4 w-4 text-emerald-400" />
-                Restaurar Estoque
-              </Button>
-              {/* Dropdown Exportar */}
+
+              {/* 2. Menu Importar */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                  >
+                    <Download className="h-4 w-4 text-emerald-400" />
+                    Importar
+                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
+                  <DropdownMenuItem
+                    onClick={() => setShowMercadoPhoneModal(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <RefreshCw className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Lista MercadoPhone (Remontar)</div>
+                      <div className="text-[10px] text-slate-400">Importar lista formatada e atualizar</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+                  <DropdownMenuItem
+                    onClick={() => setShowSupplierModal(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <List className="h-4 w-4 text-blue-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Lista Fornecedor</div>
+                      <div className="text-[10px] text-slate-400">Importar lote simples de fornecedor</div>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* 3. Menu Exportar */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     disabled={aparelhosAtivos.length === 0}
-                    className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
+                    className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
                   >
-                    <Download className="h-4 w-4 text-blue-400" />
+                    <ArrowUpRight className="h-4 w-4 text-blue-400" />
                     Exportar
                     <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                   </Button>
@@ -1590,7 +1620,9 @@ export function AparelhosTab() {
                       <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
                     </div>
                   </DropdownMenuItem>
+
                   <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
                   <DropdownMenuItem
                     onClick={() => handleExportWhatsApp(false)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
@@ -1614,24 +1646,79 @@ export function AparelhosTab() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button 
-                onClick={() => setShowSupplierModal(true)} 
-                className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
-              >
-                <List className="h-4 w-4 text-blue-400" /> Lista Fornecedor
-              </Button>
-              <Button 
-                onClick={() => setShowMercadoPhoneModal(true)} 
-                className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm"
-              >
-                <Download className="h-4 w-4 text-emerald-400" /> Lista MP
-              </Button>
-              <Button 
-                onClick={handleDeleteEstoque} 
-                className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-rose-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
-              >
-                <Trash2 className="h-4 w-4" /> Deletar Estoque
-              </Button>
+
+              {/* 4. Menu Gerenciar */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="bg-slate-800/90 hover:bg-slate-700/90 text-cyan-400 hover:text-cyan-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                  >
+                    <Settings className="h-4 w-4 text-cyan-400" />
+                    Gerenciar
+                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-64 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
+                  <DropdownMenuItem
+                    onClick={() => setShowConferenciaModal(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <ShieldCheck className="h-4 w-4 text-cyan-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Conferir Estoque</div>
+                      <div className="text-[10px] text-slate-400">Auditoria por câmera, leitor ou lista</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => setShowSaidas(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <History className="h-4 w-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Saídas / Histórico</div>
+                      <div className="text-[10px] text-slate-400">Aparelhos vendidos ou em manutenção</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+                  <DropdownMenuItem
+                    onClick={() => setShowAtacadoModal(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <Package className="h-4 w-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Editar Valores de Atacado</div>
+                      <div className="text-[10px] text-slate-400">Ajuste de preços de revenda em lote</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => setShowBackupModal(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <RotateCcw className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Restaurar Ponto de Backup</div>
+                      <div className="text-[10px] text-slate-400">Prévia e comparação de restauração</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+                  <DropdownMenuItem
+                    onClick={handleDeleteEstoque}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-rose-950/40 focus:bg-rose-950/40 cursor-pointer text-rose-300"
+                  >
+                    <Trash2 className="h-4 w-4 text-rose-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-rose-300">Deletar Todo Estoque</div>
+                      <div className="text-[10px] text-rose-400/80">Com criação automática de backup</div>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -2332,6 +2419,27 @@ export function AparelhosTab() {
           isOpen={showConferenciaModal}
           onClose={() => setShowConferenciaModal(false)}
           aparelhosEstoque={aparelhosAtivos as any}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onEstoqueAtualizado={fetchAparelhos}
+        />
+      </ModalPortal>
+
+      {/* MODAL DE EDIÇÃO DE ATACADO EM LOTE */}
+      <ModalPortal>
+        <EditarValoresAtacadoModal
+          isOpen={showAtacadoModal}
+          onClose={() => setShowAtacadoModal(false)}
+          aparelhos={aparelhos as any}
+          onEstoqueAtualizado={fetchAparelhos}
+        />
+      </ModalPortal>
+
+      {/* MODAL DE RESTAURAÇÃO DE PONTO DE BACKUP */}
+      <ModalPortal>
+        <BackupEstoqueModal
+          isOpen={showBackupModal}
+          onClose={() => setShowBackupModal(false)}
+          aparelhosAtuais={aparelhos as any}
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
           onEstoqueAtualizado={fetchAparelhos}
         />
