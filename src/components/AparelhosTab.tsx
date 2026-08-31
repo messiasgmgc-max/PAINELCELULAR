@@ -1026,14 +1026,11 @@ export function AparelhosTab() {
             if (saude && saude !== '-') bateriaStr = `${saude}%`;
           }
 
-          // Preço para Atacado
-          let precoAtacadoStr = '';
-          if (modoAtacado) {
-            const valAtacado = (a as any).precoAtacado || a.preco;
-            if (valAtacado > 0) {
-              precoAtacadoStr = `R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-            }
-          }
+          // Preço para Atacado formatado em destaque
+          const valAtacado = (a as any).precoAtacado || a.preco || 0;
+          const precoAtacadoStr = valAtacado > 0 
+            ? `*R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}*` 
+            : '';
 
           // Outras observações relevantes
           let obsExtra = '';
@@ -1056,11 +1053,19 @@ export function AparelhosTab() {
           if (capacidadeStr) partes.push(capacidadeStr);
           if (corLimpa) partes.push(corLimpa);
           if (bateriaStr) partes.push(bateriaStr);
-          if (precoAtacadoStr) partes.push(precoAtacadoStr);
 
           const detalheItem = partes.length > 0 ? ` ${partes.join(' ')}` : '';
-          const sufixoTag = codigoDisplay ? ` - ${codigoDisplay}` : '';
-          const linhaItem = `${emoji}${detalheItem}${sufixoTag}${obsExtra}`;
+          
+          let linhaItem = '';
+          if (modoAtacado) {
+            const tagCodigo = codigoDisplay ? ` (${codigoDisplay})` : '';
+            const precoTag = precoAtacadoStr ? ` ➔ ${precoAtacadoStr}` : '';
+            linhaItem = `${emoji}${detalheItem}${precoTag}${tagCodigo}${obsExtra}`;
+          } else {
+            const tagCodigo = codigoDisplay ? ` - ${codigoDisplay}` : '';
+            linhaItem = `${emoji}${detalheItem}${tagCodigo}${obsExtra}`;
+          }
+
           texto += `${linhaItem}\n`;
         });
         texto += '\n';

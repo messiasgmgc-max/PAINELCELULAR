@@ -70,7 +70,8 @@ export function EditarValoresAtacadoModal({
   if (!isOpen) return null;
 
   const handlePrecoAtacadoChange = (id: string, val: string) => {
-    const num = parseFloat(val.replace(/\D/g, '')) / 100 || 0;
+    const valLimpo = val.replace(/[^\d,.]/g, '').replace(',', '.');
+    const num = parseFloat(valLimpo) || 0;
     setValoresEditados((prev) => ({
       ...prev,
       [id]: num,
@@ -235,9 +236,10 @@ export function EditarValoresAtacadoModal({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => {
-                          const valPrompt = prompt(`Definir valor de atacado para TODOS os ${modelo}:`, String(primeiroValor || ''));
+                          const valPrompt = prompt(`Definir valor de atacado em R$ para TODOS os ${modelo}:`, String(primeiroValor || ''));
                           if (valPrompt !== null) {
-                            const valNum = parseFloat(valPrompt.replace(/\D/g, '')) || 0;
+                            const valLimpo = valPrompt.replace(/[^\d,.]/g, '').replace(',', '.');
+                            const valNum = parseFloat(valLimpo) || 0;
                             aplicarValorModelo(itens, valNum);
                           }
                         }}
@@ -276,10 +278,10 @@ export function EditarValoresAtacadoModal({
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span className="text-xs font-bold text-amber-400">Atacado R$</span>
                             <input
-                              type="text"
-                              value={valorAtual ? (valorAtual * 100).toLocaleString('pt-BR', { minimumFractionDigits: 0 }) : ''}
+                              type="number"
+                              value={valorAtual > 0 ? valorAtual : ''}
                               onChange={(e) => handlePrecoAtacadoChange(item.id, e.target.value)}
-                              placeholder="0,00"
+                              placeholder="1750"
                               className="w-24 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-white font-bold font-mono text-right outline-none focus:border-amber-500"
                             />
                           </div>
