@@ -647,6 +647,34 @@ export function AparelhosTab() {
     }
   };
 
+  // ── Restaurar Todo o Estoque Desativado / Inativo ──
+  const handleRestaurarEstoqueDesativado = async () => {
+    if (!confirm("Deseja reativar TODOS os aparelhos desativados do estoque? Isso fará com que todas as etiquetas e códigos de barras voltem a funcionar normalmente no sistema.")) {
+      return;
+    }
+
+    const toastId = toast.loading("Restaurando todos os aparelhos do estoque...");
+    try {
+      let query = supabase
+        .from('aparelhos')
+        .update({ ativo: true, condicao: 'seminovo' });
+
+      if (usuario?.lojaId) {
+        query = query.eq('loja_id', usuario.lojaId);
+      } else {
+        query = query.eq('ativo', false);
+      }
+
+      const { error } = await query;
+      if (error) throw error;
+
+      toast.success("⚡ Todo o estoque foi restaurado e reativado com sucesso! Os códigos de barra originais das etiquetas estão ativos novamente.", { id: toastId, duration: 6000 });
+      await fetchAparelhos();
+    } catch (err: any) {
+      toast.error(`Erro ao restaurar estoque: ${err?.message || 'Falha no banco'}`, { id: toastId });
+    }
+  };
+
   const handleRemontarEstoqueMercadoPhone = async () => {
     const margem = parseFloat(mercadoPhoneMargem) || 0;
     const itensImportados = parseMercadoPhoneList(mercadoPhoneText, margem);
@@ -669,14 +697,17 @@ export function AparelhosTab() {
 
       if (fetchErr) console.warn('Aviso ao buscar banco:', fetchErr);
 
-      const ativosAtuais = (aparelhosDoBanco || aparelhos || []).filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+      // Considera TODOS os aparelhos no banco (inclusive inativos) para reativar o ID da etiqueta original sem reescrever o código de barras
+      const todosAparelhosBanco = aparelhosDoBanco || aparelhos || [];
+      const ativosAtuais = todosAparelhosBanco.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
 
       const ativosMantidosIds = new Set<string>();
       let novosInseridos = 0;
       let atualizados = 0;
 
       for (const item of itensImportados) {
-        const equivalente = ativosAtuais.find(a => {
+        // Tenta encontrar equivalente no banco (busca em ativos e inativos para reativar etiqueta colada)
+        const equivalente = todosAparelhosBanco.find(a => {
           const cod = getAparelhoCodigo(a);
           if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
           if (item.isCellular && item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
@@ -699,7 +730,7 @@ export function AparelhosTab() {
             modelo: item.modelo,
             capacidade: item.capacidade,
             cor: item.cor,
-            condicao: item.condicao,
+            condicao: item.condicao || 'seminovo',
             preco: item.preco,
             custo: item.custo > 0 ? item.custo : equivalente.custo,
             observacoes: obsString,
@@ -761,7 +792,7 @@ export function AparelhosTab() {
         }
       }
 
-      toast.success(`⚡ Estoque Remontado com Sucesso! ${novosInseridos} novos cadastrados, ${atualizados} atualizados e ${baixados} marcados como vendidos.`, { id: toastId });
+      toast.success(`⚡ Estoque Remontado com Sucesso! ${novosInseridos} novos cadastrados, ${atualizados} reativados/atualizados e ${baixados} marcados como vendidos.`, { id: toastId, duration: 5000 });
       await fetchAparelhos();
       setShowMercadoPhoneModal(false);
       setMercadoPhoneText("");
@@ -865,18 +896,12 @@ export function AparelhosTab() {
         .join(",") + "\n";
     });
 
-    // Download
+    // Download do arquivo CSV
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-
+    const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute(
-      "download",
-      `aparelhos_${new Date().toLocaleDateString("pt-BR")}.csv`
-    );
-    link.style.visibility = "hidden";
-
+    link.setAttribute("download", `estoque_aparelhos_${new Date().toISOString().split("T")[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -963,8 +988,15 @@ export function AparelhosTab() {
         texto += `*${modeloHeader}*\n`;
         itens.forEach((a) => {
           const emoji = getEmojiItem(a);
-          const codigoRaw = getAparelhoCodigo(a) || a.id;
-          const codigoFinal = codigoRaw.slice(-4);
+
+          // Extrai o IMEI REAL do aparelho (ou sufixo de IMEI cadastrado)
+          let imeiReal = (a.imei || '').trim();
+          if (!imeiReal && a.observacoes) {
+            const matchImei = a.observacoes.match(/IMEI:\s*([A-Za-z0-9]+)/i);
+            if (matchImei) imeiReal = matchImei[1];
+          }
+
+          const codigoDisplay = imeiReal ? imeiReal : (getAparelhoCodigo(a) || '');
 
           const capacidadeStr = a.capacidade ? `${a.capacidade}` : '';
           
@@ -995,12 +1027,13 @@ export function AparelhosTab() {
             }
           }
 
-          // Outras observações relevantes (ex: FACEID OFF, PIXEL NA TELA)
+          // Outras observações relevantes
           let obsExtra = '';
           if (a.observacoes) {
             const obsLimpas = a.observacoes
               .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
               .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
+              .replace(/IMEI:\s*[A-Za-z0-9]+/gi, '')
               .replace(/\d+%\s*bat[a-z]*/gi, '')
               .replace(/\b\d{2,3}%\b/g, '')
               .split('|')
@@ -1018,7 +1051,8 @@ export function AparelhosTab() {
           if (precoAtacadoStr) partes.push(precoAtacadoStr);
 
           const detalheItem = partes.length > 0 ? ` ${partes.join(' ')}` : '';
-          const linhaItem = `${emoji}${detalheItem} - ${codigoFinal}${obsExtra}`;
+          const sufixoTag = codigoDisplay ? ` - ${codigoDisplay}` : '';
+          const linhaItem = `${emoji}${detalheItem}${sufixoTag}${obsExtra}`;
           texto += `${linhaItem}\n`;
         });
         texto += '\n';
@@ -1524,6 +1558,14 @@ export function AparelhosTab() {
                 className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-amber-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10"
               >
                 <History className="h-4 w-4" /> Saídas
+              </Button>
+              <Button 
+                onClick={handleRestaurarEstoqueDesativado} 
+                className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 hover:text-emerald-200 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-emerald-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                title="Reativa todos os aparelhos do estoque sem perder códigos de barras ou etiquetas impressas"
+              >
+                <RotateCcw className="h-4 w-4 text-emerald-400" />
+                Restaurar Estoque
               </Button>
               {/* Dropdown Exportar */}
               <DropdownMenu>
