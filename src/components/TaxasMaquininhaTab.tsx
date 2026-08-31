@@ -184,7 +184,7 @@ export function TaxasMaquininhaTab() {
       : ['MODALIDADE', 'TAXA CLIENTE', 'VALOR DA PARCELA', 'TOTAL NA MAQUININHA'];
 
     colTitles.forEach((title, idx) => {
-      ctx.textAlign = (idx === colTitles.length - 1 && showAdvancedCols) ? 'right' : 'left';
+      ctx.textAlign = (idx === colTitles.length - 1) ? 'right' : 'left';
       ctx.fillText(title, colX[idx], tableTop + 27);
     });
 
@@ -729,7 +729,7 @@ export function TaxasMaquininhaTab() {
                       <th className="py-2.5 px-3">Modalidade</th>
                       <th className="py-2.5 px-3">Taxa Cliente</th>
                       <th className="py-2.5 px-3">Valor da Parcela</th>
-                      <th className="py-2.5 px-3">Total na Maquininha</th>
+                      <th className="py-2.5 px-3 text-right">Total na Maquininha</th>
                       {modoAvancado && <th className="py-2.5 px-3">Custo Máquina</th>}
                       {modoAvancado && <th className="py-2.5 px-3 text-right">Lucro na Taxa</th>}
                     </tr>
