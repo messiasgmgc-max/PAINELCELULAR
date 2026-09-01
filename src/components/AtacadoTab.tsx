@@ -182,10 +182,10 @@ export function AtacadoTab() {
     aparelhos.forEach((a: any) => {
       const obs = String(a.observacoes || '');
       
-      // Regex robusto para pegar BAIXA_ESTOQUE com data ISO completa (com dois pontos)
-      const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*?)(?:\||$)/i)
-        || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):(.*)$/i)
-        || obs.match(/BAIXA_ESTOQUE:([^:]+):(.*)$/i);
+      // Regex robusto para pegar BAIXA_ESTOQUE com data ISO completa
+      const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
+        || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
+        || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
 
       if (matchBaixa) {
         let dataIso = matchBaixa[1] || a.dataCadastro || new Date().toISOString();
@@ -208,26 +208,35 @@ export function AtacadoTab() {
           const compradorNome = matchComprador ? matchComprador[1].trim() : (a.cliente || 'Lojista / Revenda');
 
           // Extrai valor da venda
-          const matchValor = textoDetalhe.match(/por\s+R\$\s*([\d.,]+)/i);
+          const matchValor = textoDetalhe.match(/por\s+R\$\s*([\d.,]+)/i) || obs.match(/por\s+R\$\s*([\d.,]+)/i);
           const valorVenda = matchValor 
             ? parseMonetaryValue(matchValor[1])
             : ((a as any).precoAtacado || (a as any).preco_atacado || a.preco || 0);
 
           // Extrai custo
-          const matchCusto = textoDetalhe.match(/Custo:\s*R\$\s*([\d.,]+)/i);
+          const matchCusto = textoDetalhe.match(/Custo:\s*R\$\s*([\d.,]+)/i) || obs.match(/Custo:\s*R\$\s*([\d.,]+)/i);
           const custo = matchCusto 
             ? parseMonetaryValue(matchCusto[1])
             : (a.custo || 0);
 
           // Extrai lucro
-          const matchLucro = textoDetalhe.match(/Lucro:\s*R\$\s*([\d.,]+)/i);
+          const matchLucro = textoDetalhe.match(/Lucro:\s*R\$\s*([\d.,]+)/i) || obs.match(/Lucro:\s*R\$\s*([\d.,]+)/i);
           const lucro = matchLucro 
             ? parseMonetaryValue(matchLucro[1])
             : (valorVenda - custo);
 
           // Extrai forma de pagamento
-          const matchPgto = textoDetalhe.match(/Pgto:\s*([A-Za-z0-9_]+)/i);
-          const metodoPgto = matchPgto ? matchPgto[1] : 'pix';
+          const matchPgto = textoDetalhe.match(/Pgto:\s*([A-Za-z0-9_]+)/i) || obs.match(/Pgto:\s*([A-Za-z0-9_]+)/i);
+          let metodoPgto = matchPgto ? matchPgto[1].toLowerCase() : 'pix';
+
+          // Cross-check com a tabela 'vendas' do Supabase
+          const vendaCorrespondente = vendasBanco.find(vb => 
+            (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === a.id)) ||
+            vb.aparelhoId === a.id
+          );
+          if (vendaCorrespondente && vendaCorrespondente.metodo) {
+            metodoPgto = vendaCorrespondente.metodo.toLowerCase();
+          }
 
           const margem = custo > 0 ? (lucro / custo) * 100 : 100;
 
@@ -255,7 +264,7 @@ export function AtacadoTab() {
     });
 
     return lista.sort((a, b) => parseTimestampSeguro(b.data) - parseTimestampSeguro(a.data));
-  }, [aparelhos]);
+  }, [aparelhos, vendasBanco]);
 
   // Filtro de Vendas por Período e Busca
   const vendasFiltradas = useMemo(() => {

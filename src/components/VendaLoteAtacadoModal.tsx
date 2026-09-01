@@ -551,15 +551,15 @@ export function VendaLoteAtacadoModal({
                             : "bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700"
                         )}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
                           <button
                             type="button"
-                            className={cn("w-4 h-4 rounded flex items-center justify-center transition-colors", isChecked ? "text-amber-400" : "text-slate-500")}
+                            className={cn("w-4 h-4 rounded flex items-center justify-center transition-colors shrink-0", isChecked ? "text-amber-400" : "text-slate-500")}
                           >
                             {isChecked ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                           </button>
 
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
                               <span>{isPerfume ? '🧴' : isAcessorio ? '🎧' : '📱'}</span>
                               <span className="truncate">{item.marca} {item.modelo}</span>
@@ -572,10 +572,28 @@ export function VendaLoteAtacadoModal({
                           </div>
                         </div>
 
-                        <div className="text-right shrink-0">
-                          <span className="font-bold font-mono text-xs text-amber-400">
-                            R$ {precoItem.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
-                          </span>
+                        {/* INPUT PARA EDITAR O VALOR DE VENDA DESTE ITEM */}
+                        <div 
+                          className="flex items-center gap-1.5 shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="text-[10px] font-bold text-amber-400">R$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={precosCustomizados[item.id] !== undefined ? precosCustomizados[item.id] : precoItem}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setPrecosCustomizados((prev) => ({ ...prev, [item.id]: val }));
+                              if (!selecionados.includes(item.id)) {
+                                setSelecionados((prev) => [...prev, item.id]);
+                              }
+                            }}
+                            placeholder="0"
+                            className="w-24 bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-lg px-2 py-1 text-xs font-bold font-mono text-amber-300 text-right outline-none ring-0 shadow-inner"
+                            title="Digite ou altere o valor deste item para a venda"
+                          />
                         </div>
                       </div>
                     );
@@ -623,6 +641,51 @@ export function VendaLoteAtacadoModal({
                   </div>
                 )}
               </div>
+
+              {/* LISTA DOS ITENS SELECIONADOS NO PEDIDO */}
+              {itensSelecionados.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                    <span>Itens no Pedido ({itensSelecionados.length})</span>
+                    <span className="text-[10px] text-amber-400 font-normal">Valores unitários editáveis</span>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto space-y-1 pr-1 border border-slate-800 rounded-xl p-1.5 bg-slate-900/50">
+                    {itensSelecionados.map((item) => {
+                      const preco = getPrecoItem(item);
+                      return (
+                        <div key={item.id} className="flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px]">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-white truncate">{item.marca} {item.modelo} {item.capacidade || ''}</p>
+                            <p className="text-[9px] text-slate-400 font-mono">ID: {getAparelhoCodigo(item)} · Custo: R$ {(item.custo || 0).toFixed(0)}</p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-[10px] font-bold text-amber-400">R$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={precosCustomizados[item.id] !== undefined ? precosCustomizados[item.id] : preco}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrecosCustomizados((prev) => ({ ...prev, [item.id]: val }));
+                              }}
+                              className="w-20 bg-slate-900 border border-amber-500/40 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-amber-300 text-right outline-none focus:border-amber-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => toggleSelecionado(item.id)}
+                              className="text-slate-500 hover:text-rose-400 p-0.5 rounded cursor-pointer"
+                              title="Remover do lote"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* FORMA DE PAGAMENTO E DATA */}
               <div className="grid grid-cols-2 gap-2">

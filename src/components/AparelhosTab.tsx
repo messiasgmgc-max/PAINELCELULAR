@@ -99,9 +99,9 @@ export function AparelhosTab() {
       .filter((aparelho: any) => aparelho.ativo === false)
       .map((aparelho: any) => {
         const obs = String(aparelho.observacoes || '');
-        const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*?)(?:\||$)/i)
-          || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):(.*)$/i)
-          || obs.match(/BAIXA_ESTOQUE:([^:]+):(.*)$/i);
+        const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
+          || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
+          || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
 
         let dataSaida = matchBaixa?.[1] || aparelho.dataCadastro || new Date().toISOString();
         if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataSaida)) {
