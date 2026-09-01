@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
-  ChevronLeft, LayoutGrid, Menu, Tag, FileText
+  ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -18,6 +18,7 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 className="w-5 h-5" /> },
   { id: 'vendas', label: 'Vendas', icon: <DollarSign className="w-5 h-5" /> },
+  { id: 'atacado', label: 'Atacado', icon: <Boxes className="w-5 h-5" /> },
   { id: 'taxas-maquininha', label: 'Calculadora de Taxa', icon: <Percent className="w-5 h-5" /> },
   { id: 'clientes', label: 'Clientes', icon: <Users className="w-5 h-5" /> },
   { id: 'aparelhos', label: 'Aparelhos', icon: <Smartphone className="w-5 h-5" /> },

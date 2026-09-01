@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
+import { MarcarVendidoModal } from "@/components/MarcarVendidoModal";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
@@ -43,6 +44,7 @@ export function AparelhosTab() {
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
+  const [aparelhoParaVenda, setAparelhoParaVenda] = useState<Aparelho | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
@@ -1937,24 +1939,32 @@ export function AparelhosTab() {
                         "pt-BR"
                       )}
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        onClick={() => setAparelhoParaVenda(aparelho)}
+                        className="text-xs text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-lg border border-amber-500/30 transition-all cursor-pointer shadow-sm"
+                        title="Marcar como vendido e registrar comprador (Atacado/Varejo)"
+                      >
+                        <ShoppingBag className="h-3 w-3" />
+                        Vender
+                      </button>
                       <button
                         onClick={() => handleGenerateCertificate(aparelho)}
-                        className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 font-medium flex items-center gap-1"
+                        className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 font-medium flex items-center gap-1 px-1.5 py-1"
                       >
                         <FileText className="h-3 w-3" />
                         PDF
                       </button>
                       <button
                         onClick={() => handleEdit(aparelho)}
-                        className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium flex items-center gap-1"
+                        className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium flex items-center gap-1 px-1.5 py-1"
                       >
                         <Edit2 className="h-3 w-3" />
                         Editar
                       </button>
                       <button
                         onClick={() => handleDelete(aparelho.id)}
-                        className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-medium"
+                        className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-medium px-1.5 py-1"
                       >
                         Deletar
                       </button>
@@ -2447,6 +2457,17 @@ export function AparelhosTab() {
           aparelhosAtuais={aparelhos as any}
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
           onEstoqueAtualizado={fetchAparelhos}
+        />
+      </ModalPortal>
+
+      {/* MODAL DE REGISTRAR VENDA / BAIXA COM COMPRADOR */}
+      <ModalPortal>
+        <MarcarVendidoModal
+          isOpen={!!aparelhoParaVenda}
+          onClose={() => setAparelhoParaVenda(null)}
+          aparelho={aparelhoParaVenda}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={fetchAparelhos}
         />
       </ModalPortal>
     </div>

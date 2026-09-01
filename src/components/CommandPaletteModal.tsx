@@ -32,7 +32,8 @@ import {
   SmartphoneNfc,
   Layers,
   Key,
-  Calculator
+  Calculator,
+  Boxes
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from 'next-themes';
@@ -40,28 +41,31 @@ import { useTheme } from 'next-themes';
 export interface CommandItem {
   id: string;
   label: string;
-  description?: string;
-  category: 'Navegação' | 'Aparelhos' | 'Vendas' | 'Ordens de Serviço' | 'Técnicos & Peças' | 'Clientes' | 'Agendamentos' | 'Garantias' | 'Etiquetas' | 'Maquininha' | 'Sistema';
-  icon: React.ElementType;
-  tabId: string;
+  description: string;
+  category: 'Navegação' | 'Aparelhos' | 'Vendas' | 'Atacado' | 'Ordens de Serviço' | 'Técnicos & Peças' | 'Clientes' | 'Agendamentos' | 'Garantias' | 'Etiquetas' | 'Maquininha' | 'Sistema';
+  icon: any;
+  tabId?: string;
+  actionId?: string;
   action?: () => void;
-  keywords?: string[];
+  keywords: string[];
 }
 
 interface CommandPaletteModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTab: (tabId: string, actionId?: string) => void;
+  onTriggerAction?: (actionId: string) => void;
 }
 
 export function CommandPaletteModal({
   isOpen,
   onClose,
   onSelectTab,
+  onTriggerAction,
 }: CommandPaletteModalProps) {
+  const { setTheme, theme } = useTheme();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const { theme, setTheme } = useTheme();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -69,6 +73,7 @@ export function CommandPaletteModal({
   const commands: CommandItem[] = useMemo(() => [
     // --- NAVEGAÇÃO RÁPIDA ---
     { id: 'tab-vendas', label: 'Vendas / PDV', description: 'Abrir painel de vendas e PDV da loja', category: 'Navegação', icon: ShoppingCart, tabId: 'vendas', keywords: ['pdv', 'caixa', 'loja', 'faturamento'] },
+    { id: 'tab-atacado', label: 'Painel de Atacado & Revenda', description: 'Gestão de vendas para lojistas, métricas e ranking', category: 'Navegação', icon: Boxes, tabId: 'atacado', keywords: ['b2b', 'revenda', 'lojistas', 'junior', 'distribuicao'] },
     { id: 'tab-aparelhos', label: 'Aparelhos & Estoque', description: 'Ver todos os aparelhos cadastrados no estoque', category: 'Navegação', icon: Smartphone, tabId: 'aparelhos', keywords: ['estoque', 'celulares', 'produtos', 'iphones'] },
     { id: 'tab-ordens', label: 'Ordens de Serviço (OS)', description: 'Gerenciar consertos e ordens de serviço', category: 'Navegação', icon: FileText, tabId: 'ordens', keywords: ['os', 'consertos', 'manutencao', 'assistencia'] },
     { id: 'tab-tecnicos', label: 'Técnicos', description: 'Lista e cadastro de técnicos da assistência', category: 'Navegação', icon: Wrench, tabId: 'tecnicos', keywords: ['equipe', 'assistencia', 'bancada'] },

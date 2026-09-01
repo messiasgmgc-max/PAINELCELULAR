@@ -21,6 +21,7 @@ import { ConfiguracoesTab } from '@/components/ConfiguracoesTab';
 import { MobileNav } from '@/components/MobileNav';
 import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
 import { EtiquetasTab } from '@/components/EtiquetasTab';
+import { AtacadoTab } from '@/components/AtacadoTab';
 import SuperAdminTab from '@/components/SuperAdminTab';
 import { LogsTab } from '@/components/LogsTab';
 import { UserAccountMenu } from '@/components/UserAccountMenu';
@@ -59,6 +60,7 @@ export default function Home() {
     const allowedTabs = new Set([
       'dashboard',
       'vendas',
+      'atacado',
       'taxas-maquininha',
       'clientes',
       'aparelhos',
@@ -117,6 +119,7 @@ export default function Home() {
   const handleSelectTabFromPalette = (tabId: string) => {
     const tabMap: Record<string, string> = {
       'vendas': 'vendas',
+      'atacado': 'atacado',
       'aparelhos': 'aparelhos',
       'ordens': 'orders',
       'taxas_maquininha': 'taxas-maquininha',
@@ -173,6 +176,8 @@ export default function Home() {
         return <ClientesTab />;
       case 'aparelhos':
         return <AparelhosTab />;
+      case 'atacado':
+        return <AtacadoTab />;
       case 'pecas':
         return <PecasTab />;
       case 'etiquetas':
