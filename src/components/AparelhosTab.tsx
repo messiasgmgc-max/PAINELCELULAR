@@ -1673,6 +1673,16 @@ export function AparelhosTab() {
                 Novo Aparelho
               </Button>
 
+              {/* 2. Botão Direto: Valores de Atacado */}
+              <Button
+                onClick={() => setShowAtacadoModal(true)}
+                className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-amber-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                title="Editar valores de atacado em lote para lojistas"
+              >
+                <Tag className="h-4 w-4 text-amber-400" />
+                Valores Atacado
+              </Button>
+
               {/* 2. Menu Importar */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -2198,8 +2208,8 @@ export function AparelhosTab() {
       {/* Modal de Novo/Editar Aparelho */}
       {showForm && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <div className="modal-panel modal-panel-fit modal-panel-xl w-full max-w-2xl p-4 sm:p-6 space-y-4 max-h-[92dvh] overflow-y-auto rounded-3xl shadow-2xl bg-slate-900 border border-slate-800">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                   <Package className="w-5 h-5 text-cyan-400" />
@@ -2696,28 +2706,30 @@ export function AparelhosTab() {
       {/* Modal Lista de Fornecedor */}
       {showSupplierModal && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <GlassCard className="modal-panel modal-panel-fit modal-panel-lg w-full">
-              <div className="modal-header">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <div>
-                  <h3 className="modal-title">Importar Lista de Fornecedor</h3>
-                  <p className="modal-subtitle">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
+                  <h3 className="text-lg font-bold text-white">Importar Lista de Fornecedor</h3>
+                  <p className="text-xs text-slate-400">Cole a lista abaixo. O sistema adicionará R$ 300,00 de margem automaticamente.</p>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setShowSupplierModal(false)}><X className="h-5 w-5" /></Button>
+                <Button variant="ghost" size="icon" onClick={() => setShowSupplierModal(false)} className="text-slate-400 hover:text-white rounded-full">
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
-              <div className="modal-body space-y-4">
+              <div className="space-y-4">
                 <textarea
-                  className="input-glass w-full h-96 font-mono text-xs"
+                  className="input-glass w-full h-80 font-mono text-xs p-3 bg-slate-950 border border-slate-800 rounded-xl"
                   placeholder="Cole a lista aqui..."
                   value={supplierListText}
                   onChange={(e) => setSupplierListText(e.target.value)}
                 />
-                <div className="flex gap-2 justify-end">
+                <div className="flex gap-2 justify-end pt-2 border-t border-white/10">
                   <Button variant="outline" onClick={() => setShowSupplierModal(false)}>Cancelar</Button>
                   <Button onClick={processarListaFornecedor} className="bg-blue-600 hover:bg-blue-700" disabled={!supplierListText.trim()}>Processar e Cadastrar</Button>
                 </div>
               </div>
-            </GlassCard>
+            </div>
           </div>
         </ModalPortal>
       )}
@@ -2725,108 +2737,106 @@ export function AparelhosTab() {
       {/* Modal Importar MercadoPhone */}
       {showMercadoPhoneModal && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <GlassCard className="modal-panel modal-panel-fit modal-panel-xl w-full my-4">
-              <div className="modal-header">
-                <h3 className="modal-title text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
                   <Smartphone className="h-5 w-5" /> Importar Aparelhos (Formato MercadoPhone)
                 </h3>
-                <Button variant="ghost" size="icon" onClick={() => setShowMercadoPhoneModal(false)}>
+                <Button variant="ghost" size="icon" onClick={() => setShowMercadoPhoneModal(false)} className="text-slate-400 hover:text-white rounded-full">
                   <X className="h-5 w-5" />
                 </Button>
               </div>
 
-              <div className="modal-body-scroll">
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="md:col-span-2 space-y-2">
-                      <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
-                        Cole as linhas da lista abaixo:
-                      </label>
-                      <textarea
-                        className="input-glass w-full h-64 font-mono text-xs p-3 leading-relaxed border-emerald-500/30 resize-none"
-                        placeholder="Cole aqui as linhas como:&#10;🔵 17 Pro Max 256gb Azul Lacrado - 2605&#10;🏜️ 16 Pro Max 256gb Desert 97% - 5177 | ID: 9410244&#10;🌸 15 128GB Rosa 90% MSG TELA - 8193 | ID: 9563370..."
-                        value={mercadoPhoneText}
-                        onChange={(e) => setMercadoPhoneText(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-4 bg-emerald-50/30 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20">
-                      <h4 className="font-bold text-sm text-emerald-700 dark:text-emerald-300">Configuração de Valores</h4>
-
-                      <div>
-                        <label className="text-xs font-medium block mb-1">Margem / Preço Inicial Padrão (R$)</label>
-                        <input
-                          type="number"
-                          value={mercadoPhoneMargem}
-                          onChange={(e) => setMercadoPhoneMargem(e.target.value)}
-                          placeholder="300"
-                          className="input-glass text-sm font-bold"
-                        />
-                        <p className="text-[11px] text-muted-foreground mt-1">
-                          Adicionada ao valor do custo de cada aparelho ou usada como valor padrão.
-                        </p>
-                      </div>
-
-                      <div className="p-3 bg-white/40 dark:bg-black/30 rounded-xl border border-emerald-500/20">
-                        <p className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
-                          📊 Aparelhos Detectados: <span className="font-bold text-base">{parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).length}</span>
-                        </p>
-                      </div>
-                    </div>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+                      Cole as linhas da lista abaixo:
+                    </label>
+                    <textarea
+                      className="w-full h-64 font-mono text-xs p-3 leading-relaxed bg-slate-950 border border-emerald-500/30 rounded-xl text-white resize-none outline-none focus:border-emerald-500"
+                      placeholder="Cole aqui as linhas como:&#10;🔵 17 Pro Max 256gb Azul Lacrado - 2605&#10;🏜️ 16 Pro Max 256gb Desert 97% - 5177 | ID: 9410244&#10;🌸 15 128GB Rosa 90% MSG TELA - 8193 | ID: 9563370..."
+                      value={mercadoPhoneText}
+                      onChange={(e) => setMercadoPhoneText(e.target.value)}
+                    />
                   </div>
 
-                  {/* Pré-visualização da Lista Interpretada */}
-                  {mercadoPhoneText.trim() && (
-                    <div className="mt-4 border border-white/10 rounded-2xl overflow-hidden bg-black/20">
-                      <div className="p-3 bg-white/5 border-b border-white/10 font-bold text-xs flex justify-between items-center">
-                        <span>Pré-visualização dos Aparelhos Interpretados</span>
-                        <Badge variant="outline" className="text-emerald-500 border-emerald-500">
-                          {parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).length} itens
-                        </Badge>
-                      </div>
-                      <div className="max-h-48 overflow-y-auto divide-y divide-white/5 text-xs font-mono">
-                        {parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).map((item, idx) => (
-                          <div key={idx} className="p-2.5 flex items-center justify-between hover:bg-white/5 gap-3">
-                            <div className="min-w-0 flex-1">
-                              <span className="font-bold text-emerald-500">ID: {item.idEtiqueta}</span>
-                              <span className="ml-2 font-semibold text-white">{item.modelo}</span>
-                              <span className="ml-2 text-muted-foreground">{item.capacidade}</span>
-                              <span className="ml-2 text-blue-400">{item.cor}</span>
-                              {item.bateria && <span className="ml-2 text-amber-400 font-bold">[{item.bateria}]</span>}
-                              {item.observacoes && <span className="ml-2 text-purple-400 font-semibold">(Obs: {item.observacoes})</span>}
-                              {item.sufixoSerial && <span className="ml-2 text-gray-400">({item.sufixoSerial})</span>}
-                            </div>
-                            <Badge variant={item.condicao === 'novo' ? 'default' : 'secondary'} className="text-[10px]">
-                              {item.condicao === 'novo' ? 'Lacrado' : 'Seminovo'}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div className="space-y-4 bg-emerald-950/20 p-4 rounded-2xl border border-emerald-500/20">
+                    <h4 className="font-bold text-sm text-emerald-300">Configuração de Valores</h4>
 
-                  <div className="flex flex-wrap gap-2 justify-end pt-4 border-t border-white/10">
-                    <Button variant="outline" onClick={() => setShowMercadoPhoneModal(false)}>Cancelar</Button>
-                    <Button
-                      onClick={handleRemontarEstoqueMercadoPhone}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 gap-1.5 shadow-lg shadow-blue-500/20"
-                      disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      {importingMercadoPhone ? 'Remontando...' : 'Atualizar Estoque por esta Lista'}
-                    </Button>
-                    <Button
-                      onClick={handleProcessMercadoPhoneList}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 shadow-lg shadow-emerald-500/20"
-                      disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
-                    >
-                      {importingMercadoPhone ? 'Processando...' : `Confirmar e Cadastrar no Estoque`}
-                    </Button>
+                    <div>
+                      <label className="text-xs font-medium block mb-1 text-slate-300">Margem / Preço Inicial Padrão (R$)</label>
+                      <input
+                        type="number"
+                        value={mercadoPhoneMargem}
+                        onChange={(e) => setMercadoPhoneMargem(e.target.value)}
+                        placeholder="300"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm font-bold text-white outline-none focus:border-emerald-500"
+                      />
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Adicionada ao valor do custo de cada aparelho ou usada como valor padrão.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-slate-950/80 rounded-xl border border-emerald-500/20">
+                      <p className="text-xs font-medium text-emerald-200">
+                        📊 Aparelhos Detectados: <span className="font-bold text-base">{parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).length}</span>
+                      </p>
+                    </div>
                   </div>
                 </div>
+
+                {/* Pré-visualização da Lista Interpretada */}
+                {mercadoPhoneText.trim() && (
+                  <div className="mt-4 border border-white/10 rounded-2xl overflow-hidden bg-slate-950">
+                    <div className="p-3 bg-white/5 border-b border-white/10 font-bold text-xs flex justify-between items-center">
+                      <span>Pré-visualização dos Aparelhos Interpretados</span>
+                      <Badge variant="outline" className="text-emerald-400 border-emerald-500/40">
+                        {parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).length} itens
+                      </Badge>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto divide-y divide-white/5 text-xs font-mono">
+                      {parseMercadoPhoneList(mercadoPhoneText, parseFloat(mercadoPhoneMargem) || 0).map((item, idx) => (
+                        <div key={idx} className="p-2.5 flex items-center justify-between hover:bg-white/5 gap-3">
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold text-emerald-400">ID: {item.idEtiqueta}</span>
+                            <span className="ml-2 font-semibold text-white">{item.modelo}</span>
+                            <span className="ml-2 text-slate-400">{item.capacidade}</span>
+                            <span className="ml-2 text-blue-400">{item.cor}</span>
+                            {item.bateria && <span className="ml-2 text-amber-400 font-bold">[{item.bateria}]</span>}
+                            {item.observacoes && <span className="ml-2 text-purple-400 font-semibold">(Obs: {item.observacoes})</span>}
+                            {item.sufixoSerial && <span className="ml-2 text-gray-400">({item.sufixoSerial})</span>}
+                          </div>
+                          <Badge variant={item.condicao === 'novo' ? 'default' : 'secondary'} className="text-[10px]">
+                            {item.condicao === 'novo' ? 'Lacrado' : 'Seminovo'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2 justify-end pt-4 border-t border-white/10">
+                  <Button variant="outline" onClick={() => setShowMercadoPhoneModal(false)}>Cancelar</Button>
+                  <Button
+                    onClick={handleRemontarEstoqueMercadoPhone}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 gap-1.5 shadow-lg shadow-blue-500/20"
+                    disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    {importingMercadoPhone ? 'Remontando...' : 'Atualizar Estoque por esta Lista'}
+                  </Button>
+                  <Button
+                    onClick={handleProcessMercadoPhoneList}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 shadow-lg shadow-emerald-500/20"
+                    disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
+                  >
+                    {importingMercadoPhone ? 'Processando...' : `Confirmar e Cadastrar no Estoque`}
+                  </Button>
+                </div>
               </div>
-            </GlassCard>
+            </div>
           </div>
         </ModalPortal>
       )}
@@ -2834,23 +2844,25 @@ export function AparelhosTab() {
       {/* Modal de Saídas */}
       {showSaidas && (
         <ModalPortal>
-          <div className="modal-overlay modal-overlay-fit">
-            <GlassCard className="modal-panel modal-panel-fit modal-panel-xl modal-panel-tall w-full flex flex-col">
-              <div className="modal-header">
-                <h3 className="modal-title flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
-                <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)}><X className="h-5 w-5" /></Button>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
+                <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)} className="text-slate-400 hover:text-white rounded-full">
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
-              <div className="modal-body-scroll overflow-x-auto">
-                <div className="divide-y min-w-[720px]">
+              <div className="overflow-x-auto">
+                <div className="divide-y divide-slate-800 min-w-[650px]">
                   {saidas.length === 0 ? (
-                    <p className="p-8 text-center text-muted-foreground">Nenhuma saída registrada.</p>
+                    <p className="p-8 text-center text-slate-500">Nenhuma saída registrada.</p>
                   ) : (
                     saidas.map((item, idx) => (
-                      <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-muted/50 min-w-full">
+                      <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-slate-800/40 rounded-xl min-w-full">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium">{item.marca} {item.modelo}</p>
-                          <p className="text-xs text-muted-foreground">IMEI: {item.imei || 'N/A'}</p>
-                          <p className="text-xs text-red-600 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
+                          <p className="font-medium text-white">{item.marca} {item.modelo}</p>
+                          <p className="text-xs text-slate-400">IMEI: {item.imei || 'N/A'}</p>
+                          <p className="text-xs text-red-400 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
                           {item.custo !== undefined && (
                             <p className="text-xs text-slate-400 mt-0.5">
                               Custo Cadastrado: <strong className="text-slate-200">R$ {(item.custo || 0).toFixed(2).replace('.', ',')}</strong>
@@ -2858,7 +2870,7 @@ export function AparelhosTab() {
                           )}
                         </div>
                         <div className="text-right shrink-0 min-w-[180px] space-y-1.5">
-                          <p className="text-xs text-muted-foreground">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
+                          <p className="text-xs text-slate-400">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
                           <div className="flex items-center gap-2 justify-end">
                             <Badge variant="outline">{item.condicao}</Badge>
                             <button
@@ -2890,7 +2902,7 @@ export function AparelhosTab() {
                   )}
                 </div>
               </div>
-            </GlassCard>
+            </div>
           </div>
         </ModalPortal>
       )}

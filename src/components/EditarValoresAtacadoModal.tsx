@@ -178,8 +178,8 @@ export function EditarValoresAtacadoModal({
   };
 
   return (
-    <div className="modal-overlay modal-overlay-fit">
-      <div className="modal-panel modal-panel-fit modal-panel-xl w-full max-w-4xl p-3.5 sm:p-6 space-y-4 max-h-[92dvh] overflow-y-auto rounded-3xl shadow-2xl bg-slate-900 border border-slate-800 text-white flex flex-col">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-3.5 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col my-auto">
         
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
