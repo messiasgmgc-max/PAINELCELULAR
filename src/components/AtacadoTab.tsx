@@ -39,6 +39,7 @@ import { toast } from 'sonner';
 import { Aparelho } from '@/lib/db/types';
 import { EditarValoresAtacadoModal } from '@/components/EditarValoresAtacadoModal';
 import { MarcarVendidoModal } from '@/components/MarcarVendidoModal';
+import { VendaLoteAtacadoModal } from '@/components/VendaLoteAtacadoModal';
 
 interface VendaAtacadoItem {
   id: string;
@@ -764,74 +765,16 @@ export function AtacadoTab() {
 
       </GlassCard>
 
-      {/* MODAL PARA SELECIONAR APARELHO E REALIZAR NOVA VENDA DE ATACADO */}
-      {showNovaVendaModal && (
-        <ModalPortal>
-          <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-            <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-white my-auto shrink-0 relative max-h-[90vh] flex flex-col">
-              
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
-                    <Plus className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-white">Selecione o Aparelho para Venda de Atacado</h3>
-                    <p className="text-xs text-slate-400">Escolha um aparelho do estoque ativo ({aparelhosEstoqueAtivo.length} disponíveis)</p>
-                  </div>
-                </div>
-
-                <button onClick={() => setShowNovaVendaModal(false)} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* LISTA DE APARELHOS ATIVOS PARA VENDA */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 max-h-[50vh]">
-                {aparelhosEstoqueAtivo.length === 0 ? (
-                  <p className="p-8 text-center text-slate-500 text-xs">Nenhum aparelho ativo em estoque no momento.</p>
-                ) : (
-                  aparelhosEstoqueAtivo.map((item) => (
-                    <div
-                      key={item.id}
-                      onClick={() => {
-                        setAparelhoSelecionadoVenda(item);
-                        setShowNovaVendaModal(false);
-                      }}
-                      className="p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-amber-500/60 flex items-center justify-between gap-3 text-xs transition-all cursor-pointer group"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="font-bold text-white flex items-center gap-2">
-                          <span>{item.modelo}</span>
-                          {item.capacidade && <span className="text-slate-400 text-[11px]">{item.capacidade}</span>}
-                          {item.cor && <span className="text-slate-400 text-[11px]">· {item.cor}</span>}
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                          ID: {getAparelhoCodigo(item)} {item.imei ? `· IMEI: ${item.imei}` : ''} · Custo: R$ {(item.custo || 0).toFixed(2)}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          <span className="text-[10px] text-amber-400 block font-semibold">Preço Atacado</span>
-                          <span className="font-bold font-mono text-sm text-white">
-                            R$ {((item as any).precoAtacado || item.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-
-                        <Button size="sm" className="bg-amber-500 group-hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs h-8 px-3">
-                          Vender
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-            </div>
-          </div>
-        </ModalPortal>
-      )}
+      {/* MODAL DE VENDA DE ATACADO EM LOTE (MÚLTIPLOS APARELHOS) */}
+      <ModalPortal>
+        <VendaLoteAtacadoModal
+          isOpen={showNovaVendaModal}
+          onClose={() => setShowNovaVendaModal(false)}
+          aparelhosEstoque={aparelhosEstoqueAtivo as any}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={fetchAparelhos}
+        />
+      </ModalPortal>
 
       {/* MODAL DE EDIÇÃO DE PREÇOS DE ATACADO */}
       <ModalPortal>
