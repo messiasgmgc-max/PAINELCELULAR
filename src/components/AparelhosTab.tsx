@@ -10,6 +10,7 @@ import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
 import { MarcarVendidoModal } from "@/components/MarcarVendidoModal";
+import { EditarVendaRegistroModal, VendaEditavelData } from "@/components/EditarVendaRegistroModal";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
@@ -45,6 +46,7 @@ export function AparelhosTab() {
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [aparelhoParaVenda, setAparelhoParaVenda] = useState<Aparelho | null>(null);
+  const [saidaParaEditar, setSaidaParaEditar] = useState<VendaEditavelData | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
   const [showSaidas, setShowSaidas] = useState(false);
@@ -2413,10 +2415,39 @@ export function AparelhosTab() {
                           <p className="font-medium">{item.marca} {item.modelo}</p>
                           <p className="text-xs text-muted-foreground">IMEI: {item.imei || 'N/A'}</p>
                           <p className="text-xs text-red-600 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
+                          {item.custo !== undefined && (
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Custo Cadastrado: <strong className="text-slate-200">R$ {(item.custo || 0).toFixed(2).replace('.', ',')}</strong>
+                            </p>
+                          )}
                         </div>
-                        <div className="text-right shrink-0 min-w-[180px]">
+                        <div className="text-right shrink-0 min-w-[180px] space-y-1.5">
                           <p className="text-xs text-muted-foreground">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
-                          <Badge variant="outline">{item.condicao}</Badge>
+                          <div className="flex items-center gap-2 justify-end">
+                            <Badge variant="outline">{item.condicao}</Badge>
+                            <button
+                              onClick={() => {
+                                setSaidaParaEditar({
+                                  aparelhoId: item.id,
+                                  data: item.dataSaida || item.dataCadastro,
+                                  comprador: item.cliente || '',
+                                  modelo: item.modelo,
+                                  marca: item.marca,
+                                  cor: item.cor,
+                                  capacidade: item.capacidade,
+                                  imei: item.imei,
+                                  codigo: getAparelhoCodigo(item),
+                                  valorVenda: item.preco || 0,
+                                  custo: item.custo || 0,
+                                  observacoes: item.observacoes || '',
+                                });
+                              }}
+                              className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-1 rounded-lg border border-blue-500/20 transition-colors cursor-pointer"
+                              title="Editar custo ou dados da saída"
+                            >
+                              <Edit2 className="w-3 h-3" /> Editar Custo
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))
@@ -2466,6 +2497,17 @@ export function AparelhosTab() {
           isOpen={!!aparelhoParaVenda}
           onClose={() => setAparelhoParaVenda(null)}
           aparelho={aparelhoParaVenda}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={fetchAparelhos}
+        />
+      </ModalPortal>
+
+      {/* MODAL DE EDIÇÃO RETROATIVA DE CUSTOS E REGISTROS */}
+      <ModalPortal>
+        <EditarVendaRegistroModal
+          isOpen={!!saidaParaEditar}
+          onClose={() => setSaidaParaEditar(null)}
+          venda={saidaParaEditar}
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
           onSuccess={fetchAparelhos}
         />

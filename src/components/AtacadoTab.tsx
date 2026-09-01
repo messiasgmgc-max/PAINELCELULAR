@@ -25,7 +25,8 @@ import {
   Tag,
   ChevronRight,
   ShieldCheck,
-  ShoppingBag
+  ShoppingBag,
+  Edit2
 } from 'lucide-react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,7 @@ import { Aparelho } from '@/lib/db/types';
 import { EditarValoresAtacadoModal } from '@/components/EditarValoresAtacadoModal';
 import { MarcarVendidoModal } from '@/components/MarcarVendidoModal';
 import { VendaLoteAtacadoModal } from '@/components/VendaLoteAtacadoModal';
+import { EditarVendaRegistroModal } from '@/components/EditarVendaRegistroModal';
 
 interface VendaAtacadoItem {
   id: string;
@@ -71,6 +73,7 @@ export function AtacadoTab() {
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showNovaVendaModal, setShowNovaVendaModal] = useState(false);
   const [aparelhoSelecionadoVenda, setAparelhoSelecionadoVenda] = useState<Aparelho | null>(null);
+  const [vendaParaEditar, setVendaParaEditar] = useState<any | null>(null);
 
   // ── 1. Aparelhos Ativos Disponíveis no Estoque ──
   const aparelhosEstoqueAtivo = useMemo(() => {
@@ -748,13 +751,22 @@ export function AtacadoTab() {
                     </td>
 
                     <td className="py-3 px-3 text-center">
-                      <button
-                        onClick={() => handleReverterVenda(v)}
-                        className="text-xs text-rose-400 hover:text-rose-300 font-semibold p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
-                        title="Cancelar venda e devolver aparelho ao estoque ativo"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => setVendaParaEditar(v)}
+                          className="text-xs text-blue-400 hover:text-blue-300 font-semibold p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
+                          title="Editar data, custo, valor ou lojista"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleReverterVenda(v)}
+                          className="text-xs text-rose-400 hover:text-rose-300 font-semibold p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
+                          title="Cancelar venda e devolver aparelho ao estoque ativo"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -795,6 +807,17 @@ export function AtacadoTab() {
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
           onSuccess={fetchAparelhos}
           tipoInicial="atacado"
+        />
+      </ModalPortal>
+
+      {/* MODAL PARA EDITAR VENDA / REGISTRO / CUSTOS RETROATIVOS */}
+      <ModalPortal>
+        <EditarVendaRegistroModal
+          isOpen={!!vendaParaEditar}
+          onClose={() => setVendaParaEditar(null)}
+          venda={vendaParaEditar}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={fetchAparelhos}
         />
       </ModalPortal>
 

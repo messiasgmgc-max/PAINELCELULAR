@@ -16,6 +16,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
+import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -378,6 +379,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const [carrinho, setCart] = useState<VendaItem[]>([]);
   const [posPagamento, setPosPagamento] = useState<PosPagamentoState>(() => createInitialPosPagamento());
+  const [vendaRegistroParaEditar, setVendaRegistroParaEditar] = useState<VendaEditavelData | null>(null);
 
   const formatCurrencyField = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -3067,9 +3069,30 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-52">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  const itemPrincipal = venda.itens?.[0];
+                                  setVendaRegistroParaEditar({
+                                    id: venda.id,
+                                    vendaId: venda.id,
+                                    aparelhoId: itemPrincipal?.aparelhoId,
+                                    data: venda.dataPagamento || (venda as any).data || new Date().toISOString(),
+                                    comprador: venda.clienteNome || '',
+                                    modelo: itemPrincipal?.descricao || venda.descricao || 'Item Venda',
+                                    valorVenda: venda.valor || 0,
+                                    custo: venda.custo || 0,
+                                    metodoPgto: venda.metodo || 'pix',
+                                    tipoVenda: (venda as any).tipoEntrega || 'Varejo',
+                                    observacoes: venda.descricao || '',
+                                  });
+                                }}
+                              >
+                                <Edit className="mr-2 h-4 w-4 text-amber-400" />
+                                Editar Custos / Dados
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEdit(venda)}>
-                                <Edit className="mr-2 h-4 w-4 text-blue-400" />
-                                Editar Venda
+                                <Repeat className="mr-2 h-4 w-4 text-blue-400" />
+                                Reabrir no PDV
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}>
                                 <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
@@ -3680,6 +3703,20 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           onScan={(barcode) => selecionarAparelhoPorCodigo(barcode)}
           title="Scanner de Código de Barras PDV"
           subtitle="Aponte a câmera ou bipe o código do aparelho com o leitor USB"
+        />
+      </ModalPortal>
+
+      {/* Modal de Edição de Custos / Dados de Venda Retroativa */}
+      <ModalPortal>
+        <EditarVendaRegistroModal
+          isOpen={!!vendaRegistroParaEditar}
+          onClose={() => setVendaRegistroParaEditar(null)}
+          venda={vendaRegistroParaEditar}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={async () => {
+            await carregarVendas();
+            await fetchAparelhos();
+          }}
         />
       </ModalPortal>
     </div>
