@@ -71,6 +71,54 @@ interface VendaAtacadoItem {
   raw?: any;
 }
 
+// Formatador seguro de data que jamais retorna "Invalid Date"
+function formatarDataSegura(dataStr: any): string {
+  if (!dataStr) return new Date().toLocaleDateString('pt-BR');
+  
+  let str = String(dataStr).trim();
+  // Se veio com hora parcial truncada (ex: "2026-09-01T12")
+  if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(str)) {
+    str += ':00:00';
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/.test(str)) {
+    str += ':00';
+  }
+
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString('pt-BR');
+  }
+
+  // Tenta extrair YYYY-MM-DD
+  const matchYmd = str.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (matchYmd) {
+    return `${matchYmd[3]}/${matchYmd[2]}/${matchYmd[1]}`;
+  }
+
+  // Tenta extrair DD/MM/YYYY
+  const matchDmy = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (matchDmy) {
+    return `${matchDmy[1]}/${matchDmy[2]}/${matchDmy[3]}`;
+  }
+
+  return new Date().toLocaleDateString('pt-BR');
+}
+
+function parseTimestampSeguro(dataStr: any): number {
+  if (!dataStr) return 0;
+  let str = String(dataStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(str)) str += ':00:00';
+  else if (/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/.test(str)) str += ':00';
+
+  const t = new Date(str).getTime();
+  if (!isNaN(t)) return t;
+
+  const matchYmd = str.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (matchYmd) {
+    return new Date(`${matchYmd[1]}-${matchYmd[2]}-${matchYmd[3]}T12:00:00`).getTime();
+  }
+  return 0;
+}
+
 export function AtacadoTab() {
   const { usuario } = useAuth();
   const { config } = useStoreConfig(usuario?.lojaId || usuario?.loja_id);
@@ -133,11 +181,20 @@ export function AtacadoTab() {
     // Busca nas observações de baixa dos aparelhos
     aparelhos.forEach((a: any) => {
       const obs = String(a.observacoes || '');
-      const matchBaixa = obs.match(/BAIXA_ESTOQUE:([^:]+):(.*?)$/m);
+      
+      // Regex robusto para pegar BAIXA_ESTOQUE com data ISO completa (com dois pontos)
+      const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*?)(?:\||$)/i)
+        || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):(.*)$/i)
+        || obs.match(/BAIXA_ESTOQUE:([^:]+):(.*)$/i);
 
       if (matchBaixa) {
-        const dataIso = matchBaixa[1];
-        const textoDetalhe = matchBaixa[2];
+        let dataIso = matchBaixa[1] || a.dataCadastro || new Date().toISOString();
+        const textoDetalhe = matchBaixa[2] || '';
+
+        // Se dataIso for parcial (ex: "2026-09-01T12"), normaliza
+        if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataIso)) {
+          dataIso += ':00:00';
+        }
 
         // Verifica se é uma saída de atacado
         const isAtacado = 
@@ -197,7 +254,7 @@ export function AtacadoTab() {
       }
     });
 
-    return lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+    return lista.sort((a, b) => parseTimestampSeguro(b.data) - parseTimestampSeguro(a.data));
   }, [aparelhos]);
 
   // Filtro de Vendas por Período e Busca
@@ -508,7 +565,7 @@ export function AtacadoTab() {
 
     const headers = ['Data', 'Comprador/Lojista', 'Modelo', 'Capacidade', 'Cor', 'IMEI/ID', 'Valor Venda (R$)', 'Custo (R$)', 'Lucro Líquido (R$)', 'Forma Pagamento'];
     const rows = vendasFiltradas.map(v => [
-      new Date(v.data).toLocaleDateString('pt-BR'),
+      formatarDataSegura(v.data),
       v.comprador,
       v.modelo,
       v.capacidade || '',
@@ -791,7 +848,7 @@ export function AtacadoTab() {
 
                         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-white/5">
                           <span>Lucro: R$ {comp.lucroGerado.toFixed(0)}</span>
-                          <span>{new Date(comp.ultimaCompra).toLocaleDateString('pt-BR')}</span>
+                          <span>{formatarDataSegura(comp.ultimaCompra)}</span>
                         </div>
                       </div>
                     );
@@ -897,7 +954,7 @@ export function AtacadoTab() {
                             )}
                           </div>
                           <span className="text-[10px] text-slate-400">
-                            Última compra: {new Date(lojista.ultimoPedido).toLocaleDateString('pt-BR')}
+                            Última compra: {formatarDataSegura(lojista.ultimoPedido)}
                           </span>
                         </div>
                       </div>
@@ -1071,7 +1128,7 @@ export function AtacadoTab() {
                   vendasFiltradas.map((v) => (
                     <tr key={v.id} className="hover:bg-slate-900/60 transition-colors">
                       <td className="py-3 px-3 text-slate-400 whitespace-nowrap">
-                        {new Date(v.data).toLocaleDateString('pt-BR')}
+                        {formatarDataSegura(v.data)}
                       </td>
 
                       <td className="py-3 px-3 font-bold text-white whitespace-nowrap">

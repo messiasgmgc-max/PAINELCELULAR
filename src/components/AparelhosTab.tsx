@@ -98,10 +98,19 @@ export function AparelhosTab() {
     const historicoSaidas = aparelhos
       .filter((aparelho: any) => aparelho.ativo === false)
       .map((aparelho: any) => {
-        const matchBaixa = String(aparelho.observacoes || '').match(/BAIXA_ESTOQUE:([^:]+):(.*)$/m);
+        const obs = String(aparelho.observacoes || '');
+        const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*?)(?:\||$)/i)
+          || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):(.*)$/i)
+          || obs.match(/BAIXA_ESTOQUE:([^:]+):(.*)$/i);
+
+        let dataSaida = matchBaixa?.[1] || aparelho.dataCadastro || new Date().toISOString();
+        if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataSaida)) {
+          dataSaida += ':00:00';
+        }
+
         return {
           ...aparelho,
-          dataSaida: matchBaixa?.[1] || aparelho.dataCadastro,
+          dataSaida,
           motivoSaida: matchBaixa?.[2] || 'Baixa de estoque',
         };
       })
