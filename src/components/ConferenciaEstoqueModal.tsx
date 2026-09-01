@@ -505,9 +505,9 @@ export function ConferenciaEstoqueModal({
   return (
     <div 
       ref={modalContainerRef}
-      className="fixed inset-0 z-[9999] flex flex-col items-center justify-start p-2 sm:p-4 pt-2 sm:pt-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200"
+      className="modal-overlay modal-overlay-fit"
     >
-      <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-3.5 sm:p-6 shadow-2xl space-y-4 text-white max-h-[96vh] flex flex-col my-0 shrink-0">
+      <div className="modal-panel modal-panel-fit modal-panel-xl w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-3.5 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col">
         
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">

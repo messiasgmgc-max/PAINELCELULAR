@@ -1588,7 +1588,7 @@ export function AparelhosTab() {
             </div>
 
             {/* Abas / Filtros de Categoria de Estoque */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 no-scrollbar">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 no-scrollbar touch-pan-x overscroll-contain">
               <button
                 type="button"
                 onClick={() => setCategoriaFiltro('todos')}
@@ -1654,7 +1654,7 @@ export function AparelhosTab() {
                 <Package className="w-3.5 h-3.5" /> 📦 Outros ({contagens.outros})
               </button>
             </div>
-            <div className="scroll-row w-full pb-1 flex items-center gap-2">
+            <div className="scroll-row no-scrollbar w-full pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
               {/* 1. Novo Aparelho */}
               <Button 
                 onClick={() => setShowForm(!showForm)} 
@@ -1974,137 +1974,207 @@ export function AparelhosTab() {
             </ModalPortal>
           )}
 
-          {/* Lista de Aparelhos */}
-          <div className="space-y-3">
+          {/* Lista de Aparelhos / Produtos */}
+          <div className="space-y-3.5">
             {aparelhosFiltrados.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                {aparelhos.length === 0
-                  ? 'Nenhum aparelho cadastrado. Clique em "Novo Aparelho" para começar.'
-                  : "Nenhum aparelho encontrado com os critérios de busca."}
-              </p>
+              <div className="p-8 text-center bg-slate-900/40 rounded-3xl border border-dashed border-white/10 space-y-2">
+                <Package className="w-8 h-8 text-slate-500 mx-auto" />
+                <p className="text-sm text-muted-foreground font-medium">
+                  {aparelhos.length === 0
+                    ? 'Nenhum item cadastrado no estoque geral. Clique em "Novo Aparelho" para começar.'
+                    : "Nenhum produto encontrado com os filtros e busca informados."}
+                </p>
+              </div>
             ) : (
-              aparelhosFiltrados.map((aparelho) => (
-                <div
-                  key={aparelho.id}
-                  className="flex items-start justify-between gap-4 border-b pb-4 last:border-0 hover:bg-muted/30 p-2 rounded transition-colors"
-                >
-                  <div className="flex-1 space-y-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-blue-400 bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded-md shrink-0">
-                        ID: {getAparelhoCodigo(aparelho)}
-                      </span>
+              aparelhosFiltrados.map((aparelho) => {
+                const custoNum = (aparelho as any).custo || 0;
+                const precoAtacadoNum = (aparelho as any).precoAtacado;
+                const saudeBat = (aparelho as any).saude_bateria || (aparelho as any).saudeBateria;
+                const qtd = (aparelho as any).quantidade || 1;
 
-                      {/* Badge da Categoria */}
-                      {aparelho.categoria === 'perfume' ? (
-                        <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/30 text-[10px] gap-1">
-                          🧴 Perfume
-                        </Badge>
-                      ) : aparelho.categoria === 'acessorio' ? (
-                        <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-[10px] gap-1">
-                          🎧 Acessório
-                        </Badge>
-                      ) : aparelho.categoria === 'outro' ? (
-                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px] gap-1">
-                          📦 Produto
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px] gap-1">
-                          📱 Celular
-                        </Badge>
-                      )}
+                return (
+                  <div
+                    key={aparelho.id}
+                    className="bg-slate-900/90 hover:bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 transition-all shadow-md space-y-3.5"
+                  >
+                    {/* TOPO: ID + Categoria + Condição + Data */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-[11px] font-bold text-cyan-400 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded-lg shrink-0">
+                          ID: {getAparelhoCodigo(aparelho)}
+                        </span>
 
-                      <div className="text-sm font-semibold">
-                        {aparelho.categoria === 'perfume' ? '🧴' : aparelho.categoria === 'acessorio' ? '🎧' : condicaoEmoji(aparelho.condicao)} {aparelho.marca} {aparelho.modelo}
+                        {/* Categoria Badge */}
+                        {aparelho.categoria === 'perfume' ? (
+                          <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/30 text-[10px] gap-1 font-semibold">
+                            🧴 Perfume
+                          </Badge>
+                        ) : aparelho.categoria === 'acessorio' ? (
+                          <Badge className="bg-purple-500/15 text-purple-300 border-purple-500/30 text-[10px] gap-1 font-semibold">
+                            🎧 Acessório
+                          </Badge>
+                        ) : aparelho.categoria === 'outro' ? (
+                          <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px] gap-1 font-semibold">
+                            📦 Produto
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-blue-500/15 text-blue-300 border-blue-500/30 text-[10px] gap-1 font-semibold">
+                            📱 Celular
+                          </Badge>
+                        )}
+
+                        {/* Condição */}
+                        {aparelho.categoria !== 'perfume' && aparelho.categoria !== 'acessorio' && (
+                          <span className="text-[11px] text-slate-300 font-medium px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/60">
+                            {condicaoEmoji(aparelho.condicao)} {condicaoLabel(aparelho.condicao)}
+                          </span>
+                        )}
+
                         {aparelho.clienteId && (
-                          <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700 border-yellow-200">
-                            MANUTENÇÃO - {aparelho.cliente}
+                          <Badge variant="outline" className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]">
+                            MANUTENÇÃO: {aparelho.cliente}
                           </Badge>
                         )}
                       </div>
+
+                      <span className="text-[11px] text-slate-500 shrink-0 ml-auto font-medium">
+                        {new Date(aparelho.dataCadastro).toLocaleDateString("pt-BR")}
+                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground pt-1">
-                      {aparelho.categoria === 'perfume' ? (
-                        <>
-                          {aparelho.capacidade && <span className="text-rose-400 font-semibold">💧 {aparelho.capacidade}</span>}
-                          {aparelho.cor && <span>✨ {aparelho.cor}</span>}
-                          {(aparelho as any).quantidade && <span className="text-emerald-400 font-bold">📦 {(aparelho as any).quantidade} un.</span>}
-                        </>
-                      ) : aparelho.categoria === 'acessorio' ? (
-                        <>
-                          {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
-                          {(aparelho as any).quantidade && <span className="text-purple-400 font-bold">📦 {(aparelho as any).quantidade} un.</span>}
-                        </>
-                      ) : (
-                        <>
-                          {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
-                          {aparelho.capacidade && <span>💾 {aparelho.capacidade}</span>}
-                          {((aparelho as any).saude_bateria || (aparelho as any).saudeBateria) && (
-                            <span className="text-emerald-400 font-semibold">🔋 Bateria: {(aparelho as any).saude_bateria || (aparelho as any).saudeBateria}</span>
-                          )}
-                          {aparelho.imei && <span>📱 IMEI: {aparelho.imei}</span>}
-                          {aparelho.cliente && <span>👤 {aparelho.cliente}</span>}
-                        </>
+
+                    {/* CORPO: Nome em destaque + Especificações claras */}
+                    <div className="space-y-2">
+                      <h4 className="text-base sm:text-lg font-bold text-white leading-tight">
+                        {aparelho.marca} {aparelho.modelo}
+                      </h4>
+
+                      {/* Chips de especificações */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        {aparelho.categoria === 'perfume' ? (
+                          <>
+                            {aparelho.capacidade && (
+                              <span className="bg-rose-950/40 text-rose-300 border border-rose-500/20 px-2 py-0.5 rounded-lg font-semibold text-[11px]">
+                                💧 {aparelho.capacidade}
+                              </span>
+                            )}
+                            {aparelho.cor && (
+                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
+                                ✨ {aparelho.cor}
+                              </span>
+                            )}
+                            <span className="bg-emerald-950/40 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-bold text-[11px]">
+                              📦 {qtd} un. em estoque
+                            </span>
+                          </>
+                        ) : aparelho.categoria === 'acessorio' ? (
+                          <>
+                            {aparelho.cor && (
+                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
+                                🎨 {aparelho.cor}
+                              </span>
+                            )}
+                            <span className="bg-purple-950/40 text-purple-300 border border-purple-500/20 px-2 py-0.5 rounded-lg font-bold text-[11px]">
+                              📦 {qtd} un. em estoque
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {aparelho.capacidade && (
+                              <span className="bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded-lg font-bold text-[11px]">
+                                💾 {aparelho.capacidade}
+                              </span>
+                            )}
+                            {aparelho.cor && (
+                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
+                                🎨 {aparelho.cor}
+                              </span>
+                            )}
+                            {saudeBat && (
+                              <span className="bg-emerald-950/40 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-bold text-[11px]">
+                                🔋 Bateria: {saudeBat}
+                              </span>
+                            )}
+                            {aparelho.imei && (
+                              <span className="bg-slate-800/70 text-slate-400 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px] font-mono">
+                                IMEI: {aparelho.imei}
+                              </span>
+                            )}
+                            {aparelho.cliente && (
+                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
+                                👤 {aparelho.cliente}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      {aparelho.descricao && (
+                        <p className="text-xs text-slate-400 bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
+                          📝 {aparelho.descricao}
+                        </p>
                       )}
                     </div>
-                    {aparelho.descricao && (
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        📝 {aparelho.descricao}
-                      </p>
-                    )}
-                  </div>
 
-                  <div className="flex flex-col items-end gap-2">
-                    <div className="text-right flex flex-col items-end gap-1">
-                      <p className="text-[10px] text-muted-foreground">Custo: R$ {((aparelho as any).custo || 0).toFixed(2).replace(".", ",")}</p>
-                      <div className="flex items-center gap-1.5">
-                        {(aparelho as any).precoAtacado ? (
-                          <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-xs">
-                            Atacado: R$ {Number((aparelho as any).precoAtacado).toFixed(2).replace(".", ",")}
-                          </Badge>
+                    {/* RODAPÉ DO CARD: Preços destacados + Botões de Ação Touch-Friendly */}
+                    <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      {/* Preços */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {custoNum > 0 && (
+                          <div className="text-xs text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-slate-800">
+                            <span className="text-[10px] text-slate-500 block leading-none">Custo</span>
+                            <span className="font-semibold text-slate-300">R$ {custoNum.toFixed(2).replace(".", ",")}</span>
+                          </div>
+                        )}
+
+                        {precoAtacadoNum ? (
+                          <div className="text-xs text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/30">
+                            <span className="text-[10px] text-amber-400/80 block leading-none font-bold">Atacado</span>
+                            <span className="font-bold">R$ {Number(precoAtacadoNum).toFixed(2).replace(".", ",")}</span>
+                          </div>
                         ) : null}
-                        <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                          R$ {aparelho.preco.toFixed(2).replace(".", ",")}
-                        </Badge>
+
+                        <div className="text-xs text-emerald-300 bg-emerald-500/15 px-3 py-1 rounded-xl border border-emerald-500/30 ml-auto sm:ml-0">
+                          <span className="text-[10px] text-emerald-400/80 block leading-none font-bold">Venda</span>
+                          <span className="font-extrabold text-sm text-emerald-400">R$ {aparelho.preco.toFixed(2).replace(".", ",")}</span>
+                        </div>
+                      </div>
+
+                      {/* Botões de Ação */}
+                      <div className="flex items-center gap-1.5 justify-end flex-wrap pt-1 sm:pt-0">
+                        <button
+                          onClick={() => setAparelhoParaVenda(aparelho)}
+                          className="text-xs text-slate-950 font-extrabold flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-amber-950/30 shrink-0"
+                          title="Marcar como vendido e registrar comprador (Atacado/Varejo)"
+                        >
+                          <ShoppingBag className="h-3.5 w-3.5" />
+                          Vender
+                        </button>
+                        <button
+                          onClick={() => handleGenerateCertificate(aparelho)}
+                          className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-2 rounded-xl border border-emerald-500/20 transition-all cursor-pointer shrink-0"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          PDF
+                        </button>
+                        <button
+                          onClick={() => handleEdit(aparelho)}
+                          className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-xl border border-blue-500/20 transition-all cursor-pointer shrink-0"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleDelete(aparelho.id)}
+                          className="text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 px-3 py-2 rounded-xl border border-rose-500/20 transition-all cursor-pointer shrink-0"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Deletar
+                        </button>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(aparelho.dataCadastro).toLocaleDateString(
-                        "pt-BR"
-                      )}
-                    </p>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        onClick={() => setAparelhoParaVenda(aparelho)}
-                        className="text-xs text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-lg border border-amber-500/30 transition-all cursor-pointer shadow-sm"
-                        title="Marcar como vendido e registrar comprador (Atacado/Varejo)"
-                      >
-                        <ShoppingBag className="h-3 w-3" />
-                        Vender
-                      </button>
-                      <button
-                        onClick={() => handleGenerateCertificate(aparelho)}
-                        className="text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 font-medium flex items-center gap-1 px-1.5 py-1"
-                      >
-                        <FileText className="h-3 w-3" />
-                        PDF
-                      </button>
-                      <button
-                        onClick={() => handleEdit(aparelho)}
-                        className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium flex items-center gap-1 px-1.5 py-1"
-                      >
-                        <Edit2 className="h-3 w-3" />
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => handleDelete(aparelho.id)}
-                        className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-medium px-1.5 py-1"
-                      >
-                        Deletar
-                      </button>
-                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -2119,10 +2189,10 @@ export function AparelhosTab() {
       {/* Modal de Novo/Editar Aparelho */}
       {showForm && (
         <ModalPortal>
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
-            <div className="bg-slate-900/98 border border-white/20 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative my-auto animate-in fade-in zoom-in-95 duration-200">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+          <div className="modal-overlay modal-overlay-fit">
+            <div className="modal-panel modal-panel-fit modal-panel-xl w-full max-w-2xl p-4 sm:p-6 space-y-4 max-h-[92dvh] overflow-y-auto rounded-3xl shadow-2xl bg-slate-900 border border-slate-800">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                   <Package className="w-5 h-5 text-cyan-400" />
                   {editingId ? "Editar Produto do Estoque" : "Cadastrar Novo Produto"}
                 </h3>

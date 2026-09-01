@@ -43,15 +43,27 @@ interface MobileNavProps {
 export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onToggleCollapse }: MobileNavProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [hasModalOpen, setHasModalOpen] = useState(false);
   const { usuario } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
-      // Ajuste fino: ativa o scroll um pouco antes para suavizar
       setScrolled(window.scrollY > 5);
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const checkModal = () => {
+      const modal = document.querySelector('.modal-overlay, [role="dialog"], [data-radix-popper-content-wrapper], .pos-modal-overlay, .modal-panel');
+      setHasModalOpen(!!modal);
+    };
+
+    checkModal();
+    const observer = new MutationObserver(checkModal);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+    return () => observer.disconnect();
   }, []);
 
   const isSuperAdmin = checkIsSuperAdmin(usuario);
@@ -129,48 +141,50 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
         )}
       </aside>
 
-      {/* Dock Mobile */}
-      <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pointer-events-none">
-        <div className={cn(
-          "pointer-events-auto border shadow-2xl rounded-[1.75rem] p-2 transition-all duration-300",
-          "bg-white/95 dark:bg-slate-950/98 border-slate-200/80 dark:border-slate-700/70",
-          "backdrop-filter backdrop-blur-xl",
-          scrolled ? "translate-y-0 opacity-100" : "translate-y-0 opacity-100"
-        )}>
-          <div className="flex gap-1 overflow-x-auto scrollbar-soft snap-x snap-mandatory">
-            {mobileDockTabs.map((tab) => {
-              if (tab.id === 'menu') {
+      {/* Dock Mobile (Ocultado automaticamente quando qualquer modal/popup estiver aberto) */}
+      {!hasModalOpen && (
+        <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pointer-events-none mobile-nav-dock transition-all duration-300">
+          <div className={cn(
+            "pointer-events-auto border shadow-2xl rounded-[1.75rem] p-2 transition-all duration-300",
+            "bg-white/95 dark:bg-slate-950/98 border-slate-200/80 dark:border-slate-700/70",
+            "backdrop-filter backdrop-blur-xl",
+            scrolled ? "translate-y-0 opacity-100" : "translate-y-0 opacity-100"
+          )}>
+            <div className="flex gap-1 overflow-x-auto scrollbar-soft snap-x snap-mandatory">
+              {mobileDockTabs.map((tab) => {
+                if (tab.id === 'menu') {
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={openDrawer}
+                      className="snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10 transition-all"
+                    >
+                      <Menu className="w-5 h-5" />
+                      <span>Menu</span>
+                    </button>
+                  );
+                }
+
                 return (
                   <button
                     key={tab.id}
-                    onClick={openDrawer}
-                    className="snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10 transition-all"
+                    onClick={() => onTabChange(tab.id)}
+                    className={cn(
+                      "snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold transition-all",
+                      currentTab === tab.id
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/40"
+                        : "text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10"
+                    )}
                   >
-                    <Menu className="w-5 h-5" />
-                    <span>Menu</span>
+                    {tab.icon}
+                    <span>{tab.label}</span>
                   </button>
                 );
-              }
-
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => onTabChange(tab.id)}
-                  className={cn(
-                    "snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold transition-all",
-                    currentTab === tab.id
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-500/40"
-                      : "text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10"
-                  )}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Menu Lateral (Drawer) */}
       {isOpen && (
