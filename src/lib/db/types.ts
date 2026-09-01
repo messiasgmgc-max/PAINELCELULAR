@@ -34,15 +34,20 @@ export interface Cliente {
   lojaId: string;
 }
 
-// Tipos para aparelhos
+// Tipos para aparelhos / produtos do estoque geral
 export interface Aparelho {
   id: string;
+  categoria?: "aparelho" | "perfume" | "acessorio" | "outro";
   marca: string;
   modelo: string;
   imei?: string;
   numeroSerie?: string;
   cor?: string;
   capacidade?: string;
+  tamanho_ml?: string; // Para perfumes (ex: "100ml", "50ml", "Decant 10ml")
+  tipo_perfume?: string; // Para perfumes (ex: "Eau de Parfum", "Eau de Toilette", "Tester", "Decant")
+  tipo_acessorio?: string; // Para acessórios (ex: "Capinha", "Película", "Cabo", "Fonte", "Fone")
+  quantidade?: number; // Quantidade de unidades em estoque
   condicao: "novo" | "seminovo" | "usado" | "danificado";
   preco: number;
   precoAtacado?: number;
@@ -51,7 +56,7 @@ export interface Aparelho {
   saude_bateria?: string;
   codigo?: string;
   descricao?: string;
-  cliente?: string; // Nome do cliente proprietário
+  cliente?: string; // Nome do cliente proprietário ou comprador
   clienteId?: string; // ID do cliente
   acessorios?: string; // Lista de acessórios inclusos
   observacoes?: string;
@@ -189,11 +194,13 @@ export interface VendaItem {
   observacao: string;
 }
 
-export interface VendaPagamento {
+export interface AbatimentoFiado {
   id: string;
-  metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto';
+  data: string;
   valor: number;
-  parcelas: number;
+  metodo: string;
+  observacao?: string;
+  registradoPor?: string;
 }
 
 export interface Venda {
@@ -208,8 +215,12 @@ export interface Venda {
   lucro: number;
   percentualLucro: number;
   dataPagamento: string;
-  status: 'pendente' | 'pago' | 'cancelado';
-  metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto';
+  dataVencimento?: string;
+  status: 'pendente' | 'pago' | 'parcial' | 'cancelado';
+  metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto' | 'fiado';
+  valorPago?: number;
+  saldoDevedor?: number;
+  historicoAbatimentos?: AbatimentoFiado[];
   descricao?: string;
   garantia?: string;
   descontoTotal?: number;

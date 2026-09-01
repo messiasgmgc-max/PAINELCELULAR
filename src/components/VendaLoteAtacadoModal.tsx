@@ -49,10 +49,13 @@ export function VendaLoteAtacadoModal({
   onSuccess,
 }: VendaLoteAtacadoModalProps) {
   const [busca, setBusca] = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [precosCustomizados, setPrecosCustomizados] = useState<Record<string, number>>({});
   const [comprador, setComprador] = useState('');
   const [metodoPgto, setMetodoPgto] = useState('pix');
+  const [valorEntrada, setValorEntrada] = useState('');
+  const [dataVencimento, setDataVencimento] = useState('');
   const [dataVenda, setDataVenda] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
@@ -75,16 +78,25 @@ export function VendaLoteAtacadoModal({
       setPrecosCustomizados({});
       setComprador('');
       setObservacoes('');
+      setValorEntrada('');
+      setDataVencimento('');
       setDataVenda(new Date().toISOString().split('T')[0]);
       setMetodoPgto('pix');
     }
   }, [isOpen]);
 
-  // Aparelhos filtrados na busca
+  // Aparelhos filtrados na busca e categoria
   const aparelhosFiltrados = useMemo(() => {
-    if (!busca.trim()) return aparelhosEstoque;
-    const t = busca.toLowerCase().trim();
     return aparelhosEstoque.filter((a) => {
+      // Filtro de categoria
+      if (categoriaFiltro !== 'todos') {
+        const cat = a.categoria || 'aparelho';
+        if (cat !== categoriaFiltro) return false;
+      }
+
+      // Filtro de texto
+      if (!busca.trim()) return true;
+      const t = busca.toLowerCase().trim();
       const mod = (a.modelo || '').toLowerCase();
       const cor = (a.cor || '').toLowerCase();
       const cap = (a.capacidade || '').toLowerCase();
@@ -92,7 +104,7 @@ export function VendaLoteAtacadoModal({
       const cod = (getAparelhoCodigo(a) || '').toLowerCase();
       return mod.includes(t) || cor.includes(t) || cap.includes(t) || ime.includes(t) || cod.includes(t);
     });
-  }, [aparelhosEstoque, busca]);
+  }, [aparelhosEstoque, busca, categoriaFiltro]);
 
   // Lista dos objetos de aparelhos selecionados
   const itensSelecionados = useMemo(() => {
@@ -201,6 +213,22 @@ export function VendaLoteAtacadoModal({
     try {
       const compradorFinal = comprador.trim();
       const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
+      const valorEntradaNum = parseFloat(valorEntrada.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
+      const isFiado = metodoPgto === 'fiado';
+      const statusFinal = isFiado ? (valorEntradaNum > 0 ? 'parcial' : 'pendente') : 'pago';
+      const saldoDevedorFinal = isFiado ? Math.max(0, totais.valorTotal - valorEntradaNum) : 0;
+      const valorPagoFinal = isFiado ? valorEntradaNum : totais.valorTotal;
+
+      const historicoAbatimentos = (isFiado && valorEntradaNum > 0) ? [
+        {
+          id: `${Date.now()}_entrada`,
+          data: dataIso,
+          valor: valorEntradaNum,
+          metodo: 'pix',
+          observacao: 'Entrada paga no momento da compra',
+          registradoPor: 'Sistema'
+        }
+      ] : [];
 
       // 1. Atualiza todos os aparelhos selecionados no Supabase
       for (const item of itensSelecionados) {
@@ -237,9 +265,13 @@ export function VendaLoteAtacadoModal({
         lucro: totais.lucroTotal,
         percentualLucro: parseFloat(totais.margemMedia) || 0,
         dataPagamento: dataIso,
-        status: 'pago',
+        dataVencimento: dataVencimento ? new Date(dataVencimento + 'T12:00:00').toISOString() : undefined,
+        status: statusFinal,
         metodo: metodoPgto,
-        descricao: `Venda ATACADO (Lote ${itensSelecionados.length} aparelhos) para ${compradorFinal}`,
+        valorPago: valorPagoFinal,
+        saldoDevedor: saldoDevedorFinal,
+        historicoAbatimentos,
+        descricao: `Venda ATACADO (Lote ${itensSelecionados.length} itens) para ${compradorFinal}`,
         garantia: 'Garantia de Atacado (Teste)',
         descontoTotal: 0,
         itens: itensSelecionados.map((item) => {
@@ -262,7 +294,7 @@ export function VendaLoteAtacadoModal({
           {
             id: Date.now().toString(),
             metodo: metodoPgto,
-            valor: totais.valorTotal,
+            valor: valorPagoFinal,
             parcelas: 1,
           },
         ],
@@ -315,12 +347,57 @@ export function VendaLoteAtacadoModal({
             
             {/* COLUNA ESQUERDA: LISTA DE APARELHOS DO ESTOQUE (7 cols) */}
             <div className="lg:col-span-7 flex flex-col space-y-2.5 min-h-0">
+              
+              {/* FILTROS DE CATEGORIA */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => setCategoriaFiltro('todos')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                    categoriaFiltro === 'todos' ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                  )}
+                >
+                  ✨ Todos ({aparelhosEstoque.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoriaFiltro('aparelho')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                    categoriaFiltro === 'aparelho' ? "bg-blue-500 text-white shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                  )}
+                >
+                  📱 Celulares
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoriaFiltro('perfume')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                    categoriaFiltro === 'perfume' ? "bg-rose-500 text-white shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                  )}
+                >
+                  🧴 Perfumes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoriaFiltro('acessorio')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                    categoriaFiltro === 'acessorio' ? "bg-purple-500 text-white shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                  )}
+                >
+                  🎧 Acessórios
+                </button>
+              </div>
+
               <div className="flex items-center justify-between gap-2">
                 <div className="relative flex-1">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Filtrar por modelo, cor, IMEI ou ID..."
+                    placeholder="Filtrar por modelo, marca, cor, IMEI ou ID..."
                     value={busca}
                     onChange={(e) => setBusca(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-amber-500 outline-none"
@@ -350,13 +427,15 @@ export function VendaLoteAtacadoModal({
               </div>
 
               {/* LISTA ROLÁVEL COM CHECKBOXES */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[360px] border border-slate-800/80 rounded-2xl p-2 bg-slate-950/60">
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[340px] border border-slate-800/80 rounded-2xl p-2 bg-slate-950/60">
                 {aparelhosFiltrados.length === 0 ? (
-                  <p className="p-8 text-center text-slate-500 text-xs">Nenhum aparelho disponível encontrado.</p>
+                  <p className="p-8 text-center text-slate-500 text-xs">Nenhum produto disponível encontrado.</p>
                 ) : (
                   aparelhosFiltrados.map((item) => {
                     const isChecked = selecionados.includes(item.id);
                     const precoItem = getPrecoItem(item);
+                    const isPerfume = item.categoria === 'perfume';
+                    const isAcessorio = item.categoria === 'acessorio';
 
                     return (
                       <div
@@ -378,13 +457,14 @@ export function VendaLoteAtacadoModal({
                           </button>
 
                           <div className="min-w-0">
-                            <div className="font-bold text-white flex items-center gap-1.5">
-                              <span className="truncate">{item.modelo}</span>
-                              {item.capacidade && <span className="text-slate-400 text-[10px]">{item.capacidade}</span>}
+                            <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                              <span>{isPerfume ? '🧴' : isAcessorio ? '🎧' : '📱'}</span>
+                              <span className="truncate">{item.marca} {item.modelo}</span>
+                              {item.capacidade && <span className="text-slate-400 text-[10px]">({item.capacidade})</span>}
                               {item.cor && <span className="text-slate-400 text-[10px]">· {item.cor}</span>}
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono">
-                              ID: {getAparelhoCodigo(item)} {item.imei ? `· ${item.imei}` : ''} · Custo: R$ {(item.custo || 0).toFixed(0)}
+                              ID: {getAparelhoCodigo(item)} {item.imei ? `· IMEI: ${item.imei}` : ''} · Custo: R$ {(item.custo || 0).toFixed(0)}
                             </div>
                           </div>
                         </div>
@@ -457,7 +537,7 @@ export function VendaLoteAtacadoModal({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-400">Data</label>
+                  <label className="text-[11px] font-bold text-slate-400">Data da Venda</label>
                   <input
                     type="date"
                     value={dataVenda}
@@ -466,6 +546,46 @@ export function VendaLoteAtacadoModal({
                   />
                 </div>
               </div>
+
+              {/* CAMPOS ADICIONAIS QUANDO FOR FIADO / A PRAZO */}
+              {metodoPgto === 'fiado' && (
+                <div className="p-3 bg-rose-950/30 border border-rose-500/30 rounded-xl space-y-2.5 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-1.5 text-rose-400 font-bold text-xs">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    Configuração de Fiado / A Prazo
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-300">Entrada Paga Agora (R$)</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: 500,00"
+                        value={valorEntrada}
+                        onChange={(e) => setValorEntrada(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500 font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-slate-300">Vencimento (Opcional)</label>
+                      <input
+                        type="date"
+                        value={dataVencimento}
+                        onChange={(e) => setDataVencimento(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-rose-300 flex items-center justify-between pt-1 border-t border-rose-500/20">
+                    <span>Ficará devendo:</span>
+                    <strong className="font-mono text-xs">
+                      R$ {Math.max(0, totais.valorTotal - (parseFloat(valorEntrada.replace(/[^\d,.]/g, '').replace(',', '.')) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </strong>
+                  </div>
+                </div>
+              )}
 
               {/* OBSERVAÇÃO */}
               <div className="space-y-1">
@@ -484,7 +604,7 @@ export function VendaLoteAtacadoModal({
                 <div className="flex items-center justify-between text-xs text-slate-400 pb-1.5 border-b border-white/5">
                   <span>Itens Selecionados:</span>
                   <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 font-mono text-xs font-bold">
-                    {itensSelecionados.length} aparelho(s)
+                    {itensSelecionados.length} item(ns)
                   </Badge>
                 </div>
 

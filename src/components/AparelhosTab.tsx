@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
@@ -16,7 +16,7 @@ import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
-import { getAparelhoCodigo } from "@/lib/utils";
+import { getAparelhoCodigo, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -25,23 +25,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Settings } from "lucide-react";
+import { formatarPreco, normalizarTexto, parseCurrencyString } from "@/lib/formatters";
+import { parseMercadoPhoneList } from "@/lib/mercadoPhoneParser";
 
 export function AparelhosTab() {
   const { usuario } = useAuth();
-  const {
-    aparelhos,
-    loading,
-    error,
-    fetchAparelhos,
-    criarAparelho,
-    deletarAparelho,
-    atualizarAparelho,
-  } = useAparelhos();
-
-  const { clientes, fetchClientes, criarCliente } = useClientes();
-
+  const { aparelhos, loading, fetchAparelhos, criarAparelho, atualizarAparelho, deletarAparelho } = useAparelhos();
+  const { clientes, fetchClientes } = useClientes();
   const [showForm, setShowForm] = useState(false);
+  const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
@@ -61,12 +53,17 @@ export function AparelhosTab() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [formData, setFormData] = useState({
+    categoria: "aparelho" as "aparelho" | "perfume" | "acessorio" | "outro",
     marca: "",
     modelo: "",
     imei: "",
     numeroSerie: "",
     cor: "",
     capacidade: "64GB" as string,
+    tamanho_ml: "100ml",
+    tipo_perfume: "Eau de Parfum",
+    tipo_acessorio: "Capinha",
+    quantidade: "1",
     condicao: "seminovo" as "novo" | "seminovo" | "usado" | "danificado",
     saudeBateria: "",
     preco: "",
@@ -115,14 +112,31 @@ export function AparelhosTab() {
     setSaidas(historicoSaidas);
   }, [aparelhos]);
 
+  // Contagens por categoria de estoque
+  const contagens = useMemo(() => {
+    const ativos = aparelhos.filter((a: any) => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+    return {
+      todos: ativos.length,
+      aparelhos: ativos.filter((a: any) => !a.categoria || a.categoria === 'aparelho').length,
+      perfumes: ativos.filter((a: any) => a.categoria === 'perfume').length,
+      acessorios: ativos.filter((a: any) => a.categoria === 'acessorio').length,
+      outros: ativos.filter((a: any) => a.categoria === 'outro').length,
+    };
+  }, [aparelhos]);
+
   // Filtrar aparelhos ativos em estoque (excluindo vendidos e baixados)
   const aparelhosAtivos = useMemo(() => {
     return aparelhos.filter((aparelho: any) => {
       if (aparelho.ativo === false) return false;
       if (aparelho.condicao === 'vendido' || (aparelho as any).status === 'vendido') return false;
+      if (categoriaFiltro !== 'todos') {
+        const cat = aparelho.categoria || 'aparelho';
+        if (cat !== categoriaFiltro) return false;
+      }
       return true;
     });
-  }, [aparelhos]);
+  }, [aparelhos, categoriaFiltro]);
+
   const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) => {
     const cod = (getAparelhoCodigo(aparelho) || '').toLowerCase();
     const term = (searchTerm || '').toLowerCase();
@@ -209,12 +223,17 @@ export function AparelhosTab() {
     setEditingId(aparelho.id);
     setShowOptionalFields(true);
     setFormData({
-      marca: aparelho.marca,
-      modelo: aparelho.modelo,
+      categoria: (aparelho as any).categoria || "aparelho",
+      marca: aparelho.marca || "",
+      modelo: aparelho.modelo || "",
       imei: aparelho.imei || "",
       numeroSerie: aparelho.numeroSerie || "",
       cor: aparelho.cor || "",
       capacidade: aparelho.capacidade || "64GB",
+      tamanho_ml: (aparelho as any).tamanho_ml || aparelho.capacidade || "100ml",
+      tipo_perfume: (aparelho as any).tipo_perfume || "Eau de Parfum",
+      tipo_acessorio: (aparelho as any).tipo_acessorio || "Capinha",
+      quantidade: String((aparelho as any).quantidade || 1),
       condicao: aparelho.condicao,
       saudeBateria: (aparelho as any).saude_bateria || (aparelho as any).saudeBateria || "",
       preco: String(Math.round(aparelho.preco * 100)),
@@ -820,16 +839,22 @@ export function AparelhosTab() {
     e.preventDefault();
 
     if (!formData.marca || !formData.modelo) {
-      alert("Preencha marca e modelo!");
+      alert("Preencha marca e modelo/nome do produto!");
       return;
     }
 
     const precoNumerico = formData.preco ? parseInt(formData.preco) / 100 : 0;
     const precoAtacadoNumerico = formData.precoAtacado ? parseInt(formData.precoAtacado) / 100 : undefined;
     const custoNumerico = formData.custo ? parseInt(formData.custo) / 100 : 0;
+    const qtd = parseInt(formData.quantidade) || 1;
 
     const payload = {
       ...formData,
+      categoria: formData.categoria || 'aparelho',
+      quantidade: qtd,
+      capacidade: formData.categoria === 'perfume' ? formData.tamanho_ml : (formData.categoria === 'acessorio' ? formData.tipo_acessorio : formData.capacidade),
+      cor: formData.categoria === 'perfume' ? (formData.tipo_perfume || 'Perfume') : (formData.cor || 'Padrão'),
+      condicao: (formData.categoria === 'perfume' || formData.categoria === 'acessorio') ? 'novo' as const : formData.condicao,
       preco: precoNumerico,
       precoAtacado: precoAtacadoNumerico,
       custo: custoNumerico,
@@ -1453,12 +1478,17 @@ export function AparelhosTab() {
     setEditingId(null);
     setShowOptionalFields(false);
     setFormData({
+      categoria: "aparelho",
       marca: "",
       modelo: "",
       imei: "",
       numeroSerie: "",
       cor: "",
       capacidade: "64GB",
+      tamanho_ml: "100ml",
+      tipo_perfume: "Eau de Parfum",
+      tipo_acessorio: "Capinha",
+      quantidade: "1",
       condicao: "seminovo",
       saudeBateria: "",
       preco: "",
@@ -1552,11 +1582,79 @@ export function AparelhosTab() {
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base sm:text-lg font-bold">Aparelhos Cadastrados</h3>
+                <h3 className="text-base sm:text-lg font-bold">Estoque Geral & Produtos</h3>
                 <p className="text-xs sm:text-sm text-muted-foreground">
-                  Gerencie seus aparelhos e gere certificados ({aparelhosAtivos.length} em estoque)
+                  Gerencie celulares, perfumes, acessórios e produtos gerais ({aparelhosAtivos.length} exibidos / {contagens.todos} no estoque total)
                 </p>
               </div>
+            </div>
+
+            {/* Abas / Filtros de Categoria de Estoque */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 no-scrollbar">
+              <button
+                type="button"
+                onClick={() => setCategoriaFiltro('todos')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  categoriaFiltro === 'todos' 
+                    ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/40" 
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                )}
+              >
+                <Sparkles className="w-3.5 h-3.5" /> Todos ({contagens.todos})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCategoriaFiltro('aparelho')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  categoriaFiltro === 'aparelho' 
+                    ? "bg-blue-500 text-white shadow-md shadow-blue-950/40" 
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                )}
+              >
+                <Smartphone className="w-3.5 h-3.5" /> 📱 Celulares ({contagens.aparelhos})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCategoriaFiltro('perfume')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  categoriaFiltro === 'perfume' 
+                    ? "bg-rose-500 text-white shadow-md shadow-rose-950/40" 
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                )}
+              >
+                🧴 Perfumes ({contagens.perfumes})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCategoriaFiltro('acessorio')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  categoriaFiltro === 'acessorio' 
+                    ? "bg-purple-500 text-white shadow-md shadow-purple-950/40" 
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                )}
+              >
+                <Headphones className="w-3.5 h-3.5" /> 🎧 Acessórios ({contagens.acessorios})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCategoriaFiltro('outro')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  categoriaFiltro === 'outro' 
+                    ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-950/40" 
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
+                )}
+              >
+                <Package className="w-3.5 h-3.5" /> 📦 Outros ({contagens.outros})
+              </button>
             </div>
             <div className="scroll-row w-full pb-1 flex items-center gap-2">
               {/* 1. Novo Aparelho */}
@@ -1897,8 +1995,28 @@ export function AparelhosTab() {
                       <span className="font-mono text-xs font-bold text-blue-400 bg-blue-500/10 border border-blue-500/30 px-2 py-0.5 rounded-md shrink-0">
                         ID: {getAparelhoCodigo(aparelho)}
                       </span>
+
+                      {/* Badge da Categoria */}
+                      {aparelho.categoria === 'perfume' ? (
+                        <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/30 text-[10px] gap-1">
+                          🧴 Perfume
+                        </Badge>
+                      ) : aparelho.categoria === 'acessorio' ? (
+                        <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-[10px] gap-1">
+                          🎧 Acessório
+                        </Badge>
+                      ) : aparelho.categoria === 'outro' ? (
+                        <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px] gap-1">
+                          📦 Produto
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px] gap-1">
+                          📱 Celular
+                        </Badge>
+                      )}
+
                       <div className="text-sm font-semibold">
-                        {condicaoEmoji(aparelho.condicao)} {aparelho.marca} {aparelho.modelo}
+                        {aparelho.categoria === 'perfume' ? '🧴' : aparelho.categoria === 'acessorio' ? '🎧' : condicaoEmoji(aparelho.condicao)} {aparelho.marca} {aparelho.modelo}
                         {aparelho.clienteId && (
                           <Badge variant="outline" className="ml-2 bg-yellow-50 text-yellow-700 border-yellow-200">
                             MANUTENÇÃO - {aparelho.cliente}
@@ -1907,13 +2025,28 @@ export function AparelhosTab() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground pt-1">
-                      {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
-                      {aparelho.capacidade && <span>💾 {aparelho.capacidade}</span>}
-                      {((aparelho as any).saude_bateria || (aparelho as any).saudeBateria) && (
-                        <span className="text-emerald-400 font-semibold">🔋 Bateria: {(aparelho as any).saude_bateria || (aparelho as any).saudeBateria}</span>
+                      {aparelho.categoria === 'perfume' ? (
+                        <>
+                          {aparelho.capacidade && <span className="text-rose-400 font-semibold">💧 {aparelho.capacidade}</span>}
+                          {aparelho.cor && <span>✨ {aparelho.cor}</span>}
+                          {(aparelho as any).quantidade && <span className="text-emerald-400 font-bold">📦 {(aparelho as any).quantidade} un.</span>}
+                        </>
+                      ) : aparelho.categoria === 'acessorio' ? (
+                        <>
+                          {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
+                          {(aparelho as any).quantidade && <span className="text-purple-400 font-bold">📦 {(aparelho as any).quantidade} un.</span>}
+                        </>
+                      ) : (
+                        <>
+                          {aparelho.cor && <span>🎨 {aparelho.cor}</span>}
+                          {aparelho.capacidade && <span>💾 {aparelho.capacidade}</span>}
+                          {((aparelho as any).saude_bateria || (aparelho as any).saudeBateria) && (
+                            <span className="text-emerald-400 font-semibold">🔋 Bateria: {(aparelho as any).saude_bateria || (aparelho as any).saudeBateria}</span>
+                          )}
+                          {aparelho.imei && <span>📱 IMEI: {aparelho.imei}</span>}
+                          {aparelho.cliente && <span>👤 {aparelho.cliente}</span>}
+                        </>
                       )}
-                      {aparelho.imei && <span>📱 IMEI: {aparelho.imei}</span>}
-                      {aparelho.cliente && <span>👤 {aparelho.cliente}</span>}
                     </div>
                     {aparelho.descricao && (
                       <p className="text-xs text-muted-foreground line-clamp-2">
@@ -1992,8 +2125,8 @@ export function AparelhosTab() {
             <div className="bg-slate-900/98 border border-white/20 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative my-auto animate-in fade-in zoom-in-95 duration-200">
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Smartphone className="w-5 h-5 text-blue-400" />
-                  {editingId ? "Editar Aparelho" : "Cadastrar Novo Aparelho"}
+                  <Package className="w-5 h-5 text-cyan-400" />
+                  {editingId ? "Editar Produto do Estoque" : "Cadastrar Novo Produto"}
                 </h3>
                 <Button variant="ghost" size="icon" onClick={handleCancel} className="text-slate-400 hover:text-white rounded-full">
                   <X className="h-5 w-5" />
@@ -2001,94 +2134,320 @@ export function AparelhosTab() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Linha 1: Marca e Modelo */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Marca *</label>
-                    <input
-                      type="text"
-                      name="marca"
-                      placeholder="Ex: Apple"
-                      value={formData.marca}
-                      onChange={handleInputChange}
-                      required
-                      className="input-glass w-full"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Modelo *</label>
-                    <input
-                      type="text"
-                      name="modelo"
-                      placeholder="Ex: iPhone 11 Pro Max"
-                      value={formData.modelo}
-                      onChange={handleInputChange}
-                      required
-                      className="input-glass w-full"
-                    />
-                  </div>
-                </div>
-
-                {/* Linha 2: IMEI e Série */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">IMEI (opcional)</label>
-                    <input
-                      type="text"
-                      name="imei"
-                      placeholder="15 dígitos máx"
-                      value={formData.imei}
-                      onChange={handleIMEIChange}
-                      maxLength={15}
-                      inputMode="numeric"
-                      className="input-glass w-full"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      {formData.imei.length}/15 dígitos
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">Número de Série (opcional)</label>
-                    <input
-                      type="text"
-                      name="numeroSerie"
-                      placeholder="Ex: F17C..."
-                      value={formData.numeroSerie}
-                      onChange={handleInputChange}
-                      className="input-glass w-full"
-                    />
-                  </div>
-                </div>
-
-                {/* Linha 3: Condição, Saúde Bateria, Custo, Atacado e Venda Varejo */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">Condição</label>
-                    <select
-                      name="condicao"
-                      value={formData.condicao}
-                      onChange={handleInputChange}
-                      className="input-glass w-full"
+                {/* SELETOR DE CATEGORIA DO PRODUTO */}
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1.5">Categoria do Produto *</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, categoria: 'aparelho' }))}
+                      className={cn(
+                        "p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
+                        formData.categoria === 'aparelho' 
+                          ? "bg-blue-600 text-white border-blue-400 shadow-lg shadow-blue-950/40 scale-[1.02]" 
+                          : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
+                      )}
                     >
-                      <option value="novo">🆕 Novo</option>
-                      <option value="seminovo">⭐ Seminovo</option>
-                      <option value="usado">♻️ Usado</option>
-                      <option value="danificado">⚠️ Danificado</option>
-                    </select>
+                      <Smartphone className="w-4 h-4" /> 📱 Celular
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, categoria: 'perfume' }))}
+                      className={cn(
+                        "p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
+                        formData.categoria === 'perfume' 
+                          ? "bg-rose-600 text-white border-rose-400 shadow-lg shadow-rose-950/40 scale-[1.02]" 
+                          : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
+                      )}
+                    >
+                      🧴 Perfume
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, categoria: 'acessorio' }))}
+                      className={cn(
+                        "p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
+                        formData.categoria === 'acessorio' 
+                          ? "bg-purple-600 text-white border-purple-400 shadow-lg shadow-purple-950/40 scale-[1.02]" 
+                          : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
+                      )}
+                    >
+                      <Headphones className="w-4 h-4" /> 🎧 Acessório
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, categoria: 'outro' }))}
+                      className={cn(
+                        "p-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer",
+                        formData.categoria === 'outro' 
+                          ? "bg-amber-600 text-white border-amber-400 shadow-lg shadow-amber-950/40 scale-[1.02]" 
+                          : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
+                      )}
+                    >
+                      <Package className="w-4 h-4" /> 📦 Outro
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">Bateria (%)</label>
-                    <input
-                      type="text"
-                      name="saudeBateria"
-                      placeholder="Ex: 85% ou 100"
-                      value={formData.saudeBateria}
-                      onChange={handleInputChange}
-                      className="input-glass w-full font-bold text-emerald-400 placeholder:font-normal placeholder:text-slate-500"
-                    />
+                </div>
+
+                {/* FORMULÁRIO ESPECÍFICO: PERFUME */}
+                {formData.categoria === 'perfume' && (
+                  <div className="space-y-4 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Marca da Grife / Fabricante *</label>
+                        <input
+                          type="text"
+                          name="marca"
+                          placeholder="Ex: Dior, Chanel, Natura, Paco Rabanne"
+                          value={formData.marca}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Nome da Fragrância / Perfume *</label>
+                        <input
+                          type="text"
+                          name="modelo"
+                          placeholder="Ex: Sauvage, 212 VIP Black, Invictus"
+                          value={formData.modelo}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass w-full"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">Volume / ML</label>
+                        <select
+                          name="tamanho_ml"
+                          value={formData.tamanho_ml}
+                          onChange={handleInputChange}
+                          className="input-glass w-full"
+                        >
+                          <option value="100ml">100ml</option>
+                          <option value="50ml">50ml</option>
+                          <option value="200ml">200ml</option>
+                          <option value="30ml">30ml</option>
+                          <option value="Decant 10ml">Decant 10ml</option>
+                          <option value="Decant 5ml">Decant 5ml</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">Tipo de Perfume</label>
+                        <select
+                          name="tipo_perfume"
+                          value={formData.tipo_perfume}
+                          onChange={handleInputChange}
+                          className="input-glass w-full"
+                        >
+                          <option value="Eau de Parfum (EDP)">Eau de Parfum (EDP)</option>
+                          <option value="Eau de Toilette (EDT)">Eau de Toilette (EDT)</option>
+                          <option value="Parfum">Parfum</option>
+                          <option value="Tester">Tester</option>
+                          <option value="Decant Fracionado">Decant Fracionado</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">Qtd em Estoque</label>
+                        <input
+                          type="number"
+                          name="quantidade"
+                          min="1"
+                          value={formData.quantidade}
+                          onChange={handleInputChange}
+                          className="input-glass w-full font-bold text-emerald-400"
+                        />
+                      </div>
+                    </div>
                   </div>
+                )}
+
+                {/* FORMULÁRIO ESPECÍFICO: ACESSÓRIO */}
+                {formData.categoria === 'acessorio' && (
+                  <div className="space-y-4 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Tipo de Acessório *</label>
+                        <select
+                          name="tipo_acessorio"
+                          value={formData.tipo_acessorio}
+                          onChange={(e) => {
+                            handleInputChange(e);
+                            if (!formData.marca) setFormData(p => ({ ...p, marca: 'Acessórios' }));
+                          }}
+                          className="input-glass w-full font-bold text-purple-400"
+                        >
+                          <option value="Capinha / Case">Capinha / Case</option>
+                          <option value="Película de Vidro / 3D">Película de Vidro / 3D</option>
+                          <option value="Cabo USB-C / Lightning">Cabo USB-C / Lightning</option>
+                          <option value="Fonte / Carregador 20W">Fonte / Carregador 20W</option>
+                          <option value="Fone de Ouvido / AirPods">Fone de Ouvido / AirPods</option>
+                          <option value="Smartwatch / Pulseira">Smartwatch / Pulseira</option>
+                          <option value="Outro Acessório">Outro Acessório</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Modelo / Compatibilidade *</label>
+                        <input
+                          type="text"
+                          name="modelo"
+                          placeholder="Ex: iPhone 13, Tipo-C 20W, Universal"
+                          value={formData.modelo}
+                          onChange={(e) => {
+                            handleInputChange(e);
+                            if (!formData.marca) setFormData(p => ({ ...p, marca: 'Acessórios' }));
+                          }}
+                          required
+                          className="input-glass w-full"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Marca / Linha</label>
+                        <input
+                          type="text"
+                          name="marca"
+                          placeholder="Ex: Apple, Baseus, Hrebos, Genérico"
+                          value={formData.marca}
+                          onChange={handleInputChange}
+                          className="input-glass w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Cor / Acabamento</label>
+                        <input
+                          type="text"
+                          name="cor"
+                          placeholder="Ex: Transparente, Preto, Branco"
+                          value={formData.cor}
+                          onChange={handleInputChange}
+                          className="input-glass w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-purple-400 uppercase block mb-1">Qtd em Estoque</label>
+                        <input
+                          type="number"
+                          name="quantidade"
+                          min="1"
+                          value={formData.quantidade}
+                          onChange={handleInputChange}
+                          className="input-glass w-full font-bold text-purple-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* FORMULÁRIO ESPECÍFICO: CELULARES OU OUTROS */}
+                {(formData.categoria === 'aparelho' || formData.categoria === 'outro') && (
+                  <div className="space-y-4 animate-in fade-in duration-150">
+                    {/* Linha 1: Marca e Modelo */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Marca *</label>
+                        <input
+                          type="text"
+                          name="marca"
+                          placeholder="Ex: Apple, Xiaomi, Samsung"
+                          value={formData.marca}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Modelo *</label>
+                        <input
+                          type="text"
+                          name="modelo"
+                          placeholder="Ex: iPhone 11 Pro Max"
+                          value={formData.modelo}
+                          onChange={handleInputChange}
+                          required
+                          className="input-glass w-full"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Linha 2: IMEI e Série */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">IMEI (opcional)</label>
+                        <input
+                          type="text"
+                          name="imei"
+                          placeholder="15 dígitos máx"
+                          value={formData.imei}
+                          onChange={handleIMEIChange}
+                          maxLength={15}
+                          inputMode="numeric"
+                          className="input-glass w-full"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {formData.imei.length}/15 dígitos
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-300 block mb-1">Número de Série (opcional)</label>
+                        <input
+                          type="text"
+                          name="numeroSerie"
+                          placeholder="Ex: F17C..."
+                          value={formData.numeroSerie}
+                          onChange={handleInputChange}
+                          className="input-glass w-full"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Linha 3: Condição e Saúde Bateria */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-300 uppercase block mb-1">Condição</label>
+                        <select
+                          name="condicao"
+                          value={formData.condicao}
+                          onChange={handleInputChange}
+                          className="input-glass w-full"
+                        >
+                          <option value="novo">🆕 Novo</option>
+                          <option value="seminovo">⭐ Seminovo</option>
+                          <option value="usado">♻️ Usado</option>
+                          <option value="danificado">⚠️ Danificado</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">Bateria (%)</label>
+                        <input
+                          type="text"
+                          name="saudeBateria"
+                          placeholder="Ex: 85% ou 100"
+                          value={formData.saudeBateria}
+                          onChange={handleInputChange}
+                          className="input-glass w-full font-bold text-emerald-400 placeholder:font-normal placeholder:text-slate-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* VALORES: CUSTO, ATACADO E VENDA VAREJO (COMUM A TODOS) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-white/5">
                   <div>
-                    <label className="text-[10px] font-bold text-blue-400 uppercase block mb-1">Custo</label>
+                    <label className="text-[10px] font-bold text-blue-400 uppercase block mb-1">Custo (R$)</label>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -2100,7 +2459,7 @@ export function AparelhosTab() {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Atacado</label>
+                    <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Preço Atacado (R$)</label>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -2112,7 +2471,7 @@ export function AparelhosTab() {
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-green-400 uppercase block mb-1">Venda Varejo</label>
+                    <label className="text-[10px] font-bold text-green-400 uppercase block mb-1">Venda Varejo (R$)</label>
                     <input
                       type="text"
                       inputMode="decimal"

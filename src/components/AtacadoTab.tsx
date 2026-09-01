@@ -42,6 +42,8 @@ import { EditarValoresAtacadoModal } from '@/components/EditarValoresAtacadoModa
 import { MarcarVendidoModal } from '@/components/MarcarVendidoModal';
 import { VendaLoteAtacadoModal } from '@/components/VendaLoteAtacadoModal';
 import { EditarVendaRegistroModal } from '@/components/EditarVendaRegistroModal';
+import { BaixaFiadoModal } from '@/components/BaixaFiadoModal';
+import { ExtratoFiadoLojistaModal } from '@/components/ExtratoFiadoLojistaModal';
 
 interface VendaAtacadoItem {
   id: string;
@@ -70,10 +72,34 @@ export function AtacadoTab() {
   const [busca, setBusca] = useState('');
   const [compradorFiltro, setCompradorFiltro] = useState<string>('todos');
   const [periodoFiltro, setPeriodoFiltro] = useState<'todos' | 'mes' | 'ano'>('todos');
+  const [abaSubTab, setAbaSubTab] = useState<'metricas' | 'fiado' | 'historico'>('metricas');
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showNovaVendaModal, setShowNovaVendaModal] = useState(false);
   const [aparelhoSelecionadoVenda, setAparelhoSelecionadoVenda] = useState<Aparelho | null>(null);
   const [vendaParaEditar, setVendaParaEditar] = useState<any | null>(null);
+  const [lojistaParaBaixa, setLojistaParaBaixa] = useState<{ lojistaNome: string; saldoDevedorTotal: number; vendasEmAberto: any[] } | null>(null);
+  const [lojistaParaExtrato, setLojistaParaExtrato] = useState<{ lojistaNome: string; vendasLojista: any[] } | null>(null);
+  const [vendasBanco, setVendasBanco] = useState<any[]>([]);
+
+  // Carrega vendas do Supabase para controle de fiado e histórico
+  const fetchVendasBanco = React.useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('vendas')
+        .select('*')
+        .order('dataPagamento', { ascending: false });
+
+      if (data && !error) {
+        setVendasBanco(data);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar vendas:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchVendasBanco();
+  }, [fetchVendasBanco]);
 
   // ── 1. Aparelhos Ativos Disponíveis no Estoque ──
   const aparelhosEstoqueAtivo = useMemo(() => {
@@ -262,6 +288,85 @@ export function AtacadoTab() {
 
     return Object.values(map).sort((a, b) => b.qtd - a.qtd).slice(0, 5);
   }, [vendasAtacado]);
+
+  // ── 6. Lojistas Devedores & Controle Milimétrico de Fiado ──
+  const lojistasDevedores = useMemo(() => {
+    const mapa = new Map<string, {
+      lojistaNome: string;
+      totalComprado: number;
+      totalPago: number;
+      saldoDevedor: number;
+      pedidos: any[];
+      ultimoPedido: string;
+    }>();
+
+    // 1. Processa vendas da tabela 'vendas'
+    vendasBanco.forEach(v => {
+      const isFiadoOuPendente = v.metodo === 'fiado' || v.status === 'pendente' || v.status === 'parcial';
+      const cliente = (v.clienteNome || 'Lojista / Revenda').trim();
+      const total = Number(v.valor || 0);
+      const pago = Number(v.valorPago || 0);
+      const devedor = v.saldoDevedor !== undefined ? Number(v.saldoDevedor) : Math.max(0, total - pago);
+
+      if (isFiadoOuPendente && devedor > 0.01) {
+        if (!mapa.has(cliente)) {
+          mapa.set(cliente, {
+            lojistaNome: cliente,
+            totalComprado: 0,
+            totalPago: 0,
+            saldoDevedor: 0,
+            pedidos: [],
+            ultimoPedido: v.dataPagamento || v.data || v.created_at,
+          });
+        }
+
+        const entry = mapa.get(cliente)!;
+        entry.totalComprado += total;
+        entry.totalPago += pago;
+        entry.saldoDevedor += devedor;
+        entry.pedidos.push(v);
+      }
+    });
+
+    // 2. Processa também baixas de aparelhos marcadas como fiado
+    vendasAtacado.forEach(va => {
+      if (va.metodoPgto === 'fiado') {
+        const cliente = va.comprador.trim();
+        const jaExiste = vendasBanco.some(vb => vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === va.aparelhoId));
+        if (!jaExiste) {
+          if (!mapa.has(cliente)) {
+            mapa.set(cliente, {
+              lojistaNome: cliente,
+              totalComprado: 0,
+              totalPago: 0,
+              saldoDevedor: 0,
+              pedidos: [],
+              ultimoPedido: va.data,
+            });
+          }
+          const entry = mapa.get(cliente)!;
+          entry.totalComprado += va.valorVenda;
+          entry.saldoDevedor += va.valorVenda;
+          entry.pedidos.push({
+            id: va.id,
+            descricao: `${va.marca} ${va.modelo} (${va.capacidade || ''})`,
+            valor: va.valorVenda,
+            valorPago: 0,
+            saldoDevedor: va.valorVenda,
+            dataPagamento: va.data,
+            metodo: 'fiado',
+            status: 'pendente',
+          });
+        }
+      }
+    });
+
+    return Array.from(mapa.values()).sort((a, b) => b.saldoDevedor - a.saldoDevedor);
+  }, [vendasBanco, vendasAtacado]);
+
+  const totalFiadoEmAberto = useMemo(() => {
+    return lojistasDevedores.reduce((acc, l) => acc + l.saldoDevedor, 0);
+  }, [lojistasDevedores]);
 
   // Reverter/Cancelar Venda de Atacado (Devolve o aparelho para o estoque ativo)
   const handleReverterVenda = async (venda: VendaAtacadoItem) => {
@@ -500,291 +605,478 @@ export function AtacadoTab() {
             </div>
           </div>
 
-          {/* Card 5: Compradores Ativos */}
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 space-y-1 shadow-sm col-span-2 lg:col-span-1">
+          {/* Card 5: Fiado a Receber (Dívidas) */}
+          <div className="bg-slate-950/70 border border-rose-900/40 rounded-2xl p-3.5 space-y-1 shadow-sm col-span-2 lg:col-span-1">
             <div className="flex items-center justify-between text-slate-400 text-xs">
-              <span>Parceiros / Lojistas</span>
-              <Users className="w-4 h-4 text-purple-400" />
+              <span className="text-rose-400 font-bold">Fiado a Receber</span>
+              <DollarSign className="w-4 h-4 text-rose-400" />
             </div>
-            <div className="text-base sm:text-xl font-bold font-mono text-purple-400">
-              {rankingCompradores.length} <span className="text-xs font-normal text-slate-400">lojistas</span>
+            <div className="text-base sm:text-xl font-bold font-mono text-rose-400">
+              R$ {totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-[10px] text-slate-500">
-              {rankingCompradores[0] ? `Top 1: ${rankingCompradores[0].nome}` : 'Nenhum comprador ainda'}
+              {lojistasDevedores.length} lojista(s) com débitos
             </div>
           </div>
 
         </div>
+
+        {/* SUB-ABAS DO PAINEL DE ATACADO */}
+        <div className="flex items-center gap-2 pt-4 border-t border-white/10 mt-4 overflow-x-auto no-scrollbar">
+          <button
+            type="button"
+            onClick={() => setAbaSubTab('metricas')}
+            className={cn(
+              "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
+              abaSubTab === 'metricas'
+                ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-950/40"
+                : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
+            )}
+          >
+            <TrendingUp className="w-4 h-4" /> 📊 Visão Geral & Métricas
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAbaSubTab('fiado')}
+            className={cn(
+              "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
+              abaSubTab === 'fiado'
+                ? "bg-rose-500 text-white shadow-lg shadow-rose-950/40"
+                : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
+            )}
+          >
+            <DollarSign className="w-4 h-4 text-rose-300" /> 💸 Fiado & Lojistas Devedores ({lojistasDevedores.length})
+            {totalFiadoEmAberto > 0 && (
+              <Badge className="bg-rose-950 text-rose-300 text-[10px] ml-1">
+                R$ {totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+              </Badge>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAbaSubTab('historico')}
+            className={cn(
+              "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
+              abaSubTab === 'historico'
+                ? "bg-blue-500 text-white shadow-lg shadow-blue-950/40"
+                : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
+            )}
+          >
+            <History className="w-4 h-4" /> 📜 Histórico Geral de Saídas ({vendasAtacado.length})
+          </button>
+        </div>
       </GlassCard>
 
-      {/* GRID DE RANKING DE COMPRADORES & MODELOS */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        
-        {/* RANKING DOS PRINCIPAIS COMPRADORES (Lado Esquerdo) */}
-        <GlassCard className="lg:col-span-8 rounded-3xl p-4 sm:p-5 space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-white/10">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-amber-400" />
-              <h3 className="font-bold text-sm text-white">Ranking dos Principais Compradores / Lojistas</h3>
-            </div>
-            <span className="text-[11px] text-slate-400">{rankingCompradores.length} lojistas cadastrados</span>
-          </div>
+      {/* CONTEÚDO 1: ABA DE MÉTRICAS & RANKINGS */}
+      {abaSubTab === 'metricas' && (
+        <div className="space-y-5 animate-in fade-in duration-200">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* RANKING DOS PRINCIPAIS COMPRADORES */}
+            <GlassCard className="lg:col-span-8 rounded-3xl p-4 sm:p-5 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  <h3 className="font-bold text-sm text-white">Ranking dos Principais Compradores / Lojistas</h3>
+                </div>
+                <span className="text-[11px] text-slate-400">{rankingCompradores.length} lojistas cadastrados</span>
+              </div>
 
-          {rankingCompradores.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 space-y-2">
-              <Users className="w-8 h-8 opacity-40 mx-auto" />
-              <p className="text-xs">Nenhuma venda de atacado registrada ainda.</p>
-              <p className="text-[11px] text-slate-600">Venda aparelhos marcando como "Atacado" e informando o nome do comprador (ex: "Junior").</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
-              {rankingCompradores.slice(0, 6).map((comp, idx) => {
-                const isSelected = compradorFiltro.toLowerCase() === comp.nome.toLowerCase();
+              {rankingCompradores.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 space-y-2">
+                  <Users className="w-8 h-8 opacity-40 mx-auto" />
+                  <p className="text-xs">Nenhuma venda de atacado registrada ainda.</p>
+                  <p className="text-[11px] text-slate-600">Venda produtos marcando como "Atacado" e informando o nome do comprador (ex: "Junior").</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+                  {rankingCompradores.slice(0, 6).map((comp, idx) => {
+                    const isSelected = compradorFiltro.toLowerCase() === comp.nome.toLowerCase();
 
-                return (
-                  <div
-                    key={comp.nome}
-                    onClick={() => setCompradorFiltro(isSelected ? 'todos' : comp.nome)}
-                    className={cn(
-                      "p-3 rounded-2xl border transition-all cursor-pointer select-none relative group",
-                      isSelected
-                        ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-950/30"
-                        : "bg-slate-950/70 border-slate-800/80 hover:border-slate-700"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className={cn(
-                          "w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center",
-                          idx === 0 ? "bg-amber-500 text-slate-950" :
-                          idx === 1 ? "bg-slate-300 text-slate-950" :
-                          idx === 2 ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-300"
-                        )}>
-                          {idx + 1}
-                        </span>
-                        <span className="font-bold text-xs text-white truncate max-w-[120px]">{comp.nome}</span>
+                    return (
+                      <div
+                        key={comp.nome}
+                        onClick={() => setCompradorFiltro(isSelected ? 'todos' : comp.nome)}
+                        className={cn(
+                          "p-3 rounded-2xl border transition-all cursor-pointer select-none relative group",
+                          isSelected
+                            ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-950/30"
+                            : "bg-slate-950/70 border-slate-800/80 hover:border-slate-700"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center",
+                              idx === 0 ? "bg-amber-500 text-slate-950" :
+                              idx === 1 ? "bg-slate-300 text-slate-950" :
+                              idx === 2 ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-300"
+                            )}>
+                              {idx + 1}
+                            </span>
+                            <span className="font-bold text-xs text-white truncate max-w-[120px]">{comp.nome}</span>
+                          </div>
+                          <Badge variant="outline" className="text-[9px] bg-slate-900 border-slate-700 text-amber-300">
+                            {comp.totalAparelhos} unid.
+                          </Badge>
+                        </div>
+
+                        <div className="text-sm font-bold font-mono text-emerald-400">
+                          R$ {comp.totalGasto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-white/5">
+                          <span>Lucro: R$ {comp.lucroGerado.toFixed(0)}</span>
+                          <span>{new Date(comp.ultimaCompra).toLocaleDateString('pt-BR')}</span>
+                        </div>
                       </div>
-                      <Badge variant="outline" className="text-[9px] bg-slate-900 border-slate-700 text-amber-300">
-                        {comp.totalAparelhos} unid.
+                    );
+                  })}
+                </div>
+              )}
+            </GlassCard>
+
+            {/* TOP MODELOS VENDIDOS NO ATACADO */}
+            <GlassCard className="lg:col-span-4 rounded-3xl p-4 sm:p-5 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-cyan-400" />
+                  <h3 className="font-bold text-sm text-white">Modelos Mais Vendidos</h3>
+                </div>
+              </div>
+
+              {rankingModelos.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-6">Nenhum dado disponível.</p>
+              ) : (
+                <div className="space-y-2 pt-1">
+                  {rankingModelos.map((m, idx) => (
+                    <div key={m.modelo} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-slate-500 text-[11px]">#{idx + 1}</span>
+                        <span className="font-bold text-white truncate">{m.modelo}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[10px]">
+                          {m.qtd} unid.
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </GlassCard>
+          </div>
+        </div>
+      )}
+
+      {/* CONTEÚDO 2: ABA DE FIADO & CONTAS A RECEBER DE LOJISTAS */}
+      {abaSubTab === 'fiado' && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          
+          {/* BANNER DE RESUMO DO FIADO */}
+          <GlassCard className="rounded-3xl p-4 sm:p-5 border border-rose-500/30 bg-gradient-to-r from-rose-950/30 via-slate-950/80 to-slate-900/50">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold border border-rose-500/30">
+                  <DollarSign className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    Controle Milimétrico de Fiado & Lojistas Devedores
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Acompanhe exatamente o que cada lojista pegou (celulares, perfumes, acessórios) e abata pagamentos parciais
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right shrink-0 bg-slate-950/90 p-3 rounded-2xl border border-rose-500/20">
+                <span className="text-[11px] text-slate-400 block">Total a Receber</span>
+                <span className="text-xl sm:text-2xl font-bold font-mono text-rose-400">
+                  R$ {totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+          </GlassCard>
+
+          {/* LISTA DE CARDS POR LOJISTA DEVEDOR */}
+          {lojistasDevedores.length === 0 ? (
+            <GlassCard className="rounded-3xl p-8 text-center text-slate-500 space-y-2">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-60" />
+              <h4 className="text-sm font-bold text-white">Nenhum fiado em aberto no momento! 🎉</h4>
+              <p className="text-xs text-slate-400">Todos os lojistas e compradores estão 100% quitados.</p>
+            </GlassCard>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {lojistasDevedores.map((lojista) => (
+                <GlassCard key={lojista.lojistaNome} className="rounded-3xl p-4 sm:p-5 space-y-3.5 border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-all">
+                  
+                  {/* CABEÇALHO DO CARD DO LOJISTA */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm border border-amber-500/30">
+                          {lojista.lojistaNome.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-sm text-white">{lojista.lojistaNome}</h4>
+                          <span className="text-[10px] text-slate-400">
+                            Última compra: {new Date(lojista.ultimoPedido).toLocaleDateString('pt-BR')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/30 text-[10px]">
+                        {lojista.pedidos.length} pedido(s)
                       </Badge>
                     </div>
 
-                    <div className="text-sm font-bold font-mono text-emerald-400">
-                      R$ {comp.totalGasto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    {/* DÍVIDA ATUAL */}
+                    <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800/80 space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Saldo Devedor:</span>
+                        <span className="text-rose-400 font-bold font-mono text-base">
+                          R$ {lojista.saldoDevedor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-white/5">
+                        <span>Pego: R$ {lojista.totalComprado.toFixed(0)}</span>
+                        <span className="text-emerald-400">Pago: R$ {lojista.totalPago.toFixed(0)}</span>
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1 pt-1 border-t border-white/5">
-                      <span>Lucro: R$ {comp.lucroGerado.toFixed(0)}</span>
-                      <span>{new Date(comp.ultimaCompra).toLocaleDateString('pt-BR')}</span>
+                    {/* PRÉVIA DOS ITENS PEGOS */}
+                    <div className="space-y-1 pt-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                        Itens em Aberto:
+                      </span>
+                      <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                        {lojista.pedidos.slice(0, 3).map((p, pIdx) => (
+                          <div key={pIdx} className="text-[11px] bg-slate-900/80 px-2 py-1 rounded-lg text-slate-300 flex items-center justify-between">
+                            <span className="truncate max-w-[170px]">{p.descricao || 'Item de Estoque'}</span>
+                            <span className="font-mono text-rose-400 font-bold shrink-0">
+                              R$ {Number(p.saldoDevedor !== undefined ? p.saldoDevedor : p.valor).toFixed(0)}
+                            </span>
+                          </div>
+                        ))}
+                        {lojista.pedidos.length > 3 && (
+                          <span className="text-[10px] text-slate-500 block text-center">
+                            + {lojista.pedidos.length - 3} outros itens...
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </GlassCard>
 
-        {/* TOP MODELOS VENDIDOS NO ATACADO (Lado Direito) */}
-        <GlassCard className="lg:col-span-4 rounded-3xl p-4 sm:p-5 space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-white/10">
-            <div className="flex items-center gap-2">
-              <Smartphone className="w-4 h-4 text-cyan-400" />
-              <h3 className="font-bold text-sm text-white">Modelos Mais Vendidos</h3>
-            </div>
-          </div>
+                  {/* BOTÕES DE AÇÃO DO FIADO */}
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
+                    <Button
+                      size="sm"
+                      onClick={() => setLojistaParaBaixa({
+                        lojistaNome: lojista.lojistaNome,
+                        saldoDevedorTotal: lojista.saldoDevedor,
+                        vendasEmAberto: lojista.pedidos,
+                      })}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-9 rounded-xl gap-1.5 shadow-md shadow-emerald-950/30 cursor-pointer"
+                    >
+                      <DollarSign className="w-3.5 h-3.5" /> Abater / Pagar
+                    </Button>
 
-          {rankingModelos.length === 0 ? (
-            <p className="text-xs text-slate-500 text-center py-6">Nenhum dado disponível.</p>
-          ) : (
-            <div className="space-y-2 pt-1">
-              {rankingModelos.map((m, idx) => (
-                <div key={m.modelo} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-bold text-slate-500 text-[11px]">#{idx + 1}</span>
-                    <span className="font-bold text-white truncate">{m.modelo}</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setLojistaParaExtrato({
+                        lojistaNome: lojista.lojistaNome,
+                        vendasLojista: lojista.pedidos,
+                      })}
+                      className="bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200 text-xs h-9 rounded-xl gap-1.5 cursor-pointer"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> Extrato WhatsApp
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[10px]">
-                      {m.qtd} unid.
-                    </Badge>
-                  </div>
-                </div>
+
+                </GlassCard>
               ))}
             </div>
           )}
-        </GlassCard>
+        </div>
+      )}
 
-      </div>
+      {/* CONTEÚDO 3: HISTÓRICO GERAL DE VENDAS EM ATACADO (SELECIONADO OU DEFAULT) */}
+      {(abaSubTab === 'historico' || abaSubTab === 'metricas') && (
+        <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-4">
+          
+          {/* BARRA DE FILTROS */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+            <div>
+              <h3 className="font-bold text-sm sm:text-base text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-amber-400" />
+                Histórico de Vendas em Atacado
+              </h3>
+              <p className="text-xs text-slate-400">
+                {vendasFiltradas.length} venda(s) encontrada(s)
+              </p>
+            </div>
 
-      {/* HISTÓRICO COMPLETO DE VENDAS EM ATACADO */}
-      <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-4">
-        
-        {/* BARRA DE FILTROS */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
-          <div>
-            <h3 className="font-bold text-sm sm:text-base text-white flex items-center gap-2">
-              <History className="w-4 h-4 text-amber-400" />
-              Histórico de Vendas em Atacado
-            </h3>
-            <p className="text-xs text-slate-400">
-              {vendasFiltradas.length} venda(s) encontrada(s)
-            </p>
-          </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Filtro Comprador */}
+              {rankingCompradores.length > 0 && (
+                <select
+                  value={compradorFiltro}
+                  onChange={(e) => setCompradorFiltro(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  <option value="todos">Todos os Compradores</option>
+                  {rankingCompradores.map((c) => (
+                    <option key={c.nome} value={c.nome}>{c.nome} ({c.totalAparelhos})</option>
+                  ))}
+                </select>
+              )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Filtro Comprador */}
-            {rankingCompradores.length > 0 && (
-              <select
-                value={compradorFiltro}
-                onChange={(e) => setCompradorFiltro(e.target.value)}
-                className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none focus:border-amber-500 cursor-pointer"
-              >
-                <option value="todos">Todos os Compradores</option>
-                {rankingCompradores.map((c) => (
-                  <option key={c.nome} value={c.nome}>{c.nome} ({c.totalAparelhos})</option>
-                ))}
-              </select>
-            )}
+              {/* Filtro Período */}
+              <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-800 text-xs">
+                <button
+                  onClick={() => setPeriodoFiltro('todos')}
+                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'todos' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
+                >
+                  Tudo
+                </button>
+                <button
+                  onClick={() => setPeriodoFiltro('mes')}
+                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'mes' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
+                >
+                  Este Mês
+                </button>
+                <button
+                  onClick={() => setPeriodoFiltro('ano')}
+                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'ano' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
+                >
+                  Este Ano
+                </button>
+              </div>
 
-            {/* Filtro Período */}
-            <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-800 text-xs">
-              <button
-                onClick={() => setPeriodoFiltro('todos')}
-                className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'todos' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
-              >
-                Tudo
-              </button>
-              <button
-                onClick={() => setPeriodoFiltro('mes')}
-                className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'mes' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
-              >
-                Este Mês
-              </button>
-              <button
-                onClick={() => setPeriodoFiltro('ano')}
-                className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'ano' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
-              >
-                Este Ano
-              </button>
+              {/* Campo de Busca */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar modelo, lojista, IMEI..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-amber-500 w-44 sm:w-56"
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* CAMPO DE BUSCA */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Buscar por modelo, comprador, IMEI ou código..."
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-amber-500 outline-none"
-          />
-        </div>
-
-        {/* TABELA DE VENDAS */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-medium border-collapse min-w-[700px]">
-            <thead>
-              <tr className="border-b border-white/10 text-slate-400 uppercase text-[10px] tracking-wider">
-                <th className="py-3 px-3">Data</th>
-                <th className="py-3 px-3">Comprador / Lojista</th>
-                <th className="py-3 px-3">Aparelho</th>
-                <th className="py-3 px-3 text-right">Valor Venda</th>
-                <th className="py-3 px-3 text-right">Custo</th>
-                <th className="py-3 px-3 text-right">Lucro Líquido</th>
-                <th className="py-3 px-3 text-center">Pagamento</th>
-                <th className="py-3 px-3 text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {vendasFiltradas.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-10 text-slate-500">
-                    Nenhuma venda de atacado encontrada para os filtros selecionados.
-                  </td>
+          {/* TABELA DE VENDAS */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                  <th className="py-2 px-3">Data</th>
+                  <th className="py-2 px-3">Comprador / Lojista</th>
+                  <th className="py-2 px-3">Produto / Aparelho</th>
+                  <th className="py-2 px-3 text-right">Valor Venda</th>
+                  <th className="py-2 px-3 text-right">Custo</th>
+                  <th className="py-2 px-3 text-right">Lucro Líquido</th>
+                  <th className="py-2 px-3 text-center">Pagamento</th>
+                  <th className="py-2 px-3 text-center">Ações</th>
                 </tr>
-              ) : (
-                vendasFiltradas.map((v) => (
-                  <tr key={v.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="py-3 px-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">
-                      {new Date(v.data).toLocaleDateString('pt-BR')}
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <div className="font-bold text-white flex items-center gap-1.5">
-                        <Users className="w-3 h-3 text-amber-400" />
-                        <span>{v.comprador}</span>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      <div className="font-bold text-white">
-                        {v.modelo}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-mono">
-                        {v.capacidade} · {v.cor} · ID: {v.codigo || v.imei || '-'}
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3 text-right font-mono font-bold text-white whitespace-nowrap">
-                      R$ {v.valorVenda.toFixed(2).replace('.', ',')}
-                    </td>
-
-                    <td className="py-3 px-3 text-right font-mono text-slate-400 whitespace-nowrap">
-                      R$ {v.custo.toFixed(2).replace('.', ',')}
-                    </td>
-
-                    <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap">
-                      <span className={v.lucro >= 0 ? "text-emerald-400" : "text-rose-400"}>
-                        R$ {v.lucro.toFixed(2).replace('.', ',')}
-                      </span>
-                      <span className="text-[10px] text-slate-500 block">
-                        ({v.margem.toFixed(1)}%)
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3 text-center">
-                      <Badge variant="outline" className="text-[10px] bg-slate-900 border-slate-800 text-slate-300 uppercase">
-                        {v.metodoPgto}
-                      </Badge>
-                    </td>
-
-                    <td className="py-3 px-3 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => setVendaParaEditar(v)}
-                          className="text-xs text-blue-400 hover:text-blue-300 font-semibold p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
-                          title="Editar data, custo, valor ou lojista"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleReverterVenda(v)}
-                          className="text-xs text-rose-400 hover:text-rose-300 font-semibold p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
-                          title="Cancelar venda e devolver aparelho ao estoque ativo"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {vendasFiltradas.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-500">
+                      Nenhuma venda de atacado encontrada para este filtro.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  vendasFiltradas.map((v) => (
+                    <tr key={v.id} className="hover:bg-slate-900/60 transition-colors">
+                      <td className="py-3 px-3 text-slate-400 whitespace-nowrap">
+                        {new Date(v.data).toLocaleDateString('pt-BR')}
+                      </td>
 
-      </GlassCard>
+                      <td className="py-3 px-3 font-bold text-white whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-amber-400" />
+                          {v.comprador}
+                        </div>
+                      </td>
 
-      {/* MODAL DE VENDA DE ATACADO EM LOTE (MÚLTIPLOS APARELHOS) */}
+                      <td className="py-3 px-3">
+                        <div className="font-bold text-white">
+                          {v.modelo}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {v.capacidade} · {v.cor} · ID: {v.codigo || v.imei || '-'}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3 text-right font-mono font-bold text-white whitespace-nowrap">
+                        R$ {v.valorVenda.toFixed(2).replace('.', ',')}
+                      </td>
+
+                      <td className="py-3 px-3 text-right font-mono text-slate-400 whitespace-nowrap">
+                        R$ {v.custo.toFixed(2).replace('.', ',')}
+                      </td>
+
+                      <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap">
+                        <span className={v.lucro >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                          R$ {v.lucro.toFixed(2).replace('.', ',')}
+                        </span>
+                        <span className="text-[10px] text-slate-500 block">
+                          ({v.margem.toFixed(1)}%)
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3 text-center">
+                        <Badge variant="outline" className={cn("text-[10px] uppercase", v.metodoPgto === 'fiado' ? "bg-rose-500/20 border-rose-500/30 text-rose-300" : "bg-slate-900 border-slate-800 text-slate-300")}>
+                          {v.metodoPgto}
+                        </Badge>
+                      </td>
+
+                      <td className="py-3 px-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => setVendaParaEditar(v)}
+                            className="text-xs text-blue-400 hover:text-blue-300 font-semibold p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
+                            title="Editar data, custo, valor ou lojista"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleReverterVenda(v)}
+                            className="text-xs text-rose-400 hover:text-rose-300 font-semibold p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
+                            title="Cancelar venda e devolver aparelho ao estoque ativo"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+        </GlassCard>
+      )}
+
+      {/* MODAL DE VENDA DE ATACADO EM LOTE (MÚLTIPLOS PRODUTOS) */}
       <ModalPortal>
         <VendaLoteAtacadoModal
           isOpen={showNovaVendaModal}
           onClose={() => setShowNovaVendaModal(false)}
           aparelhosEstoque={aparelhosEstoqueAtivo as any}
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
-          onSuccess={fetchAparelhos}
+          onSuccess={async () => {
+            await fetchAparelhos();
+            await fetchVendasBanco();
+          }}
         />
       </ModalPortal>
 
@@ -817,7 +1109,46 @@ export function AtacadoTab() {
           onClose={() => setVendaParaEditar(null)}
           venda={vendaParaEditar}
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
-          onSuccess={fetchAparelhos}
+          onSuccess={async () => {
+            await fetchAparelhos();
+            await fetchVendasBanco();
+          }}
+        />
+      </ModalPortal>
+
+      {/* MODAL DE RECEBER PAGAMENTO / ABATIMENTO DE FIADO */}
+      <ModalPortal>
+        <BaixaFiadoModal
+          isOpen={!!lojistaParaBaixa}
+          onClose={() => setLojistaParaBaixa(null)}
+          lojistaNome={lojistaParaBaixa?.lojistaNome || ''}
+          saldoDevedorTotal={lojistaParaBaixa?.saldoDevedorTotal || 0}
+          vendasEmAberto={lojistaParaBaixa?.vendasEmAberto || []}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={async () => {
+            await fetchAparelhos();
+            await fetchVendasBanco();
+          }}
+        />
+      </ModalPortal>
+
+      {/* MODAL DE EXTRATO DE FIADO & COBRANÇA WHATSAPP */}
+      <ModalPortal>
+        <ExtratoFiadoLojistaModal
+          isOpen={!!lojistaParaExtrato}
+          onClose={() => setLojistaParaExtrato(null)}
+          lojistaNome={lojistaParaExtrato?.lojistaNome || ''}
+          vendasLojista={lojistaParaExtrato?.vendasLojista || []}
+          onAbrirBaixaModal={() => {
+            if (lojistaParaExtrato) {
+              const devedor = lojistaParaExtrato.vendasLojista.reduce((acc, v) => acc + (Number(v.saldoDevedor !== undefined ? v.saldoDevedor : (Number(v.valor || 0) - Number(v.valorPago || 0)))), 0);
+              setLojistaParaBaixa({
+                lojistaNome: lojistaParaExtrato.lojistaNome,
+                saldoDevedorTotal: devedor,
+                vendasEmAberto: lojistaParaExtrato.vendasLojista,
+              });
+            }
+          }}
         />
       </ModalPortal>
 
