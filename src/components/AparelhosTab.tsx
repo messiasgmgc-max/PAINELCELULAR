@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
@@ -25,13 +25,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatarPreco, normalizarTexto, parseCurrencyString } from "@/lib/formatters";
-import { parseMercadoPhoneList } from "@/lib/mercadoPhoneParser";
 
 export function AparelhosTab() {
   const { usuario } = useAuth();
-  const { aparelhos, loading, fetchAparelhos, criarAparelho, atualizarAparelho, deletarAparelho } = useAparelhos();
-  const { clientes, fetchClientes } = useClientes();
+  const { aparelhos, loading, error, fetchAparelhos, criarAparelho, atualizarAparelho, deletarAparelho } = useAparelhos();
+  const { clientes, fetchClientes, criarCliente } = useClientes();
   const [showForm, setShowForm] = useState(false);
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
@@ -713,7 +711,7 @@ export function AparelhosTab() {
     }
 
     // Salva ponto de backup preventivo antes de remontar o estoque
-    salvarSnapshotBackup(aparelhos, usuario?.lojaId, 'Backup Automático Antes de Remontar Estoque');
+    salvarSnapshotBackup(aparelhos, usuario?.lojaId || null, 'Backup Automático Antes de Remontar Estoque');
 
     setImportingMercadoPhone(true);
     const toastId = toast.loading(`Remontando estoque (${itensImportados.length} aparelhos)...`);
@@ -2824,7 +2822,7 @@ export function AparelhosTab() {
           isOpen={showConferenciaModal}
           onClose={() => setShowConferenciaModal(false)}
           aparelhosEstoque={aparelhosAtivos as any}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || (usuario as any)?.loja_id || null}
           onEstoqueAtualizado={fetchAparelhos}
         />
       </ModalPortal>
@@ -2845,7 +2843,7 @@ export function AparelhosTab() {
           isOpen={showBackupModal}
           onClose={() => setShowBackupModal(false)}
           aparelhosAtuais={aparelhos as any}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || (usuario as any)?.loja_id || null}
           onEstoqueAtualizado={fetchAparelhos}
         />
       </ModalPortal>
@@ -2856,7 +2854,7 @@ export function AparelhosTab() {
           isOpen={!!aparelhoParaVenda}
           onClose={() => setAparelhoParaVenda(null)}
           aparelho={aparelhoParaVenda}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || (usuario as any)?.loja_id || null}
           onSuccess={fetchAparelhos}
         />
       </ModalPortal>
@@ -2867,7 +2865,7 @@ export function AparelhosTab() {
           isOpen={!!saidaParaEditar}
           onClose={() => setSaidaParaEditar(null)}
           venda={saidaParaEditar}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || (usuario as any)?.loja_id || null}
           onSuccess={fetchAparelhos}
         />
       </ModalPortal>

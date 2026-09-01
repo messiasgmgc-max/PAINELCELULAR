@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
-  ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes
+  ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes, Layers
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -21,8 +21,8 @@ const TABS: Tab[] = [
   { id: 'atacado', label: 'Atacado', icon: <Boxes className="w-5 h-5" /> },
   { id: 'taxas-maquininha', label: 'Calculadora de Taxa', icon: <Percent className="w-5 h-5" /> },
   { id: 'clientes', label: 'Clientes', icon: <Users className="w-5 h-5" /> },
-  { id: 'aparelhos', label: 'Estoque Geral', icon: <Smartphone className="w-5 h-5" /> },
-  { id: 'pecas', label: 'Peças', icon: <Package className="w-5 h-5" /> },
+  { id: 'aparelhos', label: 'Estoque Geral', icon: <Package className="w-5 h-5" /> },
+  { id: 'pecas', label: 'Peças', icon: <Layers className="w-5 h-5" /> },
   { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-5 h-5" /> },
   { id: 'orders', label: 'OS', icon: <ListTodo className="w-5 h-5" /> },
   { id: 'tecnicos', label: 'Equipe', icon: <Wrench className="w-5 h-5" /> },

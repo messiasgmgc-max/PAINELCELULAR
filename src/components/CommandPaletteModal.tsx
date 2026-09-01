@@ -33,7 +33,8 @@ import {
   Layers,
   Key,
   Calculator,
-  Boxes
+  Boxes,
+  Package
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from 'next-themes';
@@ -74,7 +75,7 @@ export function CommandPaletteModal({
     // --- NAVEGAÇÃO RÁPIDA ---
     { id: 'tab-vendas', label: 'Vendas / PDV', description: 'Abrir painel de vendas e PDV da loja', category: 'Navegação', icon: ShoppingCart, tabId: 'vendas', keywords: ['pdv', 'caixa', 'loja', 'faturamento'] },
     { id: 'tab-atacado', label: 'Painel de Atacado & Revenda', description: 'Gestão de vendas para lojistas, métricas e ranking', category: 'Navegação', icon: Boxes, tabId: 'atacado', keywords: ['b2b', 'revenda', 'lojistas', 'junior', 'distribuicao'] },
-    { id: 'tab-aparelhos', label: 'Aparelhos & Estoque', description: 'Ver todos os aparelhos cadastrados no estoque', category: 'Navegação', icon: Smartphone, tabId: 'aparelhos', keywords: ['estoque', 'celulares', 'produtos', 'iphones'] },
+    { id: 'tab-aparelhos', label: 'Aparelhos & Estoque', description: 'Ver todos os aparelhos cadastrados no estoque', category: 'Navegação', icon: Package, tabId: 'aparelhos', keywords: ['estoque', 'celulares', 'produtos', 'iphones'] },
     { id: 'tab-ordens', label: 'Ordens de Serviço (OS)', description: 'Gerenciar consertos e ordens de serviço', category: 'Navegação', icon: FileText, tabId: 'ordens', keywords: ['os', 'consertos', 'manutencao', 'assistencia'] },
     { id: 'tab-tecnicos', label: 'Técnicos', description: 'Lista e cadastro de técnicos da assistência', category: 'Navegação', icon: Wrench, tabId: 'tecnicos', keywords: ['equipe', 'assistencia', 'bancada'] },
     { id: 'tab-pecas', label: 'Peças & Componentes', description: 'Controle de estoque de peças de reposição', category: 'Navegação', icon: Layers, tabId: 'pecas', keywords: ['telas', 'baterias', 'componentes'] },
