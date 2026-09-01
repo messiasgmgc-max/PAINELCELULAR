@@ -26,7 +26,8 @@ import {
   ChevronRight,
   ShieldCheck,
   ShoppingBag,
-  Edit2
+  Edit2,
+  Camera
 } from 'lucide-react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
@@ -61,7 +62,11 @@ interface VendaAtacadoItem {
   custo: number;
   lucro: number;
   margem: number;
-  metodoPgto: string;
+  metodoPgto?: string;
+  status?: string;
+  valorPago?: number;
+  saldoDevedor?: number;
+  dataVencimento?: string;
   observacoes?: string;
   raw?: any;
 }
@@ -77,6 +82,7 @@ export function AtacadoTab() {
   const [abaSubTab, setAbaSubTab] = useState<'metricas' | 'fiado' | 'historico'>('metricas');
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showNovaVendaModal, setShowNovaVendaModal] = useState(false);
+  const [abrirScannerAtacado, setAbrirScannerAtacado] = useState(false);
   const [aparelhoSelecionadoVenda, setAparelhoSelecionadoVenda] = useState<Aparelho | null>(null);
   const [vendaParaEditar, setVendaParaEditar] = useState<any | null>(null);
   const [lojistaParaBaixa, setLojistaParaBaixa] = useState<{ lojistaNome: string; saldoDevedorTotal: number; vendasEmAberto: any[] } | null>(null);
@@ -555,11 +561,26 @@ export function AtacadoTab() {
           {/* BOTÕES DE AÇÃO RÁPIDA */}
           <div className="flex items-center gap-2 flex-wrap">
             <Button
-              onClick={() => setShowNovaVendaModal(true)}
+              onClick={() => {
+                setAbrirScannerAtacado(false);
+                setShowNovaVendaModal(true);
+              }}
               className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-amber-950/30 flex items-center gap-2 border border-amber-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               Nova Venda Atacado
+            </Button>
+
+            <Button
+              onClick={() => {
+                setAbrirScannerAtacado(true);
+                setShowNovaVendaModal(true);
+              }}
+              className="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-cyan-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer shadow-sm"
+              title="Bipar aparelhos no atacado via Câmera ou Leitor de Código de Barras USB"
+            >
+              <Camera className="w-4 h-4 text-cyan-400" />
+              Bipar Venda
             </Button>
 
             <Button
@@ -1124,7 +1145,11 @@ export function AtacadoTab() {
       <ModalPortal>
         <VendaLoteAtacadoModal
           isOpen={showNovaVendaModal}
-          onClose={() => setShowNovaVendaModal(false)}
+          onClose={() => {
+            setShowNovaVendaModal(false);
+            setAbrirScannerAtacado(false);
+          }}
+          abrirScannerInicial={abrirScannerAtacado}
           aparelhosEstoque={aparelhosEstoqueAtivo as any}
           lojaId={usuario?.lojaId || usuario?.loja_id || null}
           onSuccess={async () => {

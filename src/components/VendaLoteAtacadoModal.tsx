@@ -1,6 +1,4 @@
-'use client';
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   X, 
   Boxes, 
@@ -15,7 +13,9 @@ import {
   CreditCard, 
   CheckCircle2, 
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Camera,
+  QrCode
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { cn, getAparelhoCodigo } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
+import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 
 interface VendaLoteAtacadoModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ interface VendaLoteAtacadoModalProps {
   aparelhosEstoque: Aparelho[];
   lojaId: string | null;
   onSuccess: () => Promise<void>;
+  abrirScannerInicial?: boolean;
 }
 
 const FORMAS_PAGAMENTO = [
@@ -47,6 +49,7 @@ export function VendaLoteAtacadoModal({
   aparelhosEstoque,
   lojaId,
   onSuccess,
+  abrirScannerInicial = false,
 }: VendaLoteAtacadoModalProps) {
   const [busca, setBusca] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
@@ -59,7 +62,11 @@ export function VendaLoteAtacadoModal({
   const [dataVenda, setDataVenda] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
+  const [showScannerModal, setShowScannerModal] = useState(false);
   const [compradoresRecentes, setCompradoresRecentes] = useState<string[]>([]);
+  
+  const keyBufferRef = useRef<string>('');
+  const keyTimeoutRef = useRef<any>(null);
 
   // Carrega compradores recentes do localStorage
   useEffect(() => {
@@ -82,8 +89,85 @@ export function VendaLoteAtacadoModal({
       setDataVencimento('');
       setDataVenda(new Date().toISOString().split('T')[0]);
       setMetodoPgto('pix');
+      if (abrirScannerInicial) {
+        setShowScannerModal(true);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, abrirScannerInicial]);
+
+  // Processamento de código de barras lido por Câmera ou Leitor USB
+  const handleBarcodeScanned = (barcode: string) => {
+    if (!barcode || !barcode.trim()) return;
+    const clean = barcode.trim().toLowerCase();
+
+    const found = aparelhosEstoque.find((a) => {
+      const cod = (getAparelhoCodigo(a) || '').toLowerCase();
+      const aCod = (a.codigo || '').toLowerCase();
+      const ime = (a.imei || '').toLowerCase();
+      const num = (a.numeroSerie || '').toLowerCase();
+      const id = (a.id || '').toLowerCase();
+
+      return (
+        cod === clean ||
+        aCod === clean ||
+        ime === clean ||
+        num === clean ||
+        id === clean ||
+        (clean.length >= 4 && (ime.endsWith(clean) || cod.endsWith(clean)))
+      );
+    });
+
+    if (found) {
+      setSelecionados((prev) => {
+        if (!prev.includes(found.id)) {
+          if (precosCustomizados[found.id] === undefined) {
+            const valAtacado = (found as any).precoAtacado || found.preco || 0;
+            setPrecosCustomizados((p) => ({ ...p, [found.id]: valAtacado }));
+          }
+          toast.success(`📦 ${found.marca} ${found.modelo} adicionado ao lote!`, { duration: 3000 });
+          return [...prev, found.id];
+        } else {
+          toast.info(`ℹ️ ${found.marca} ${found.modelo} já está no lote.`);
+          return prev;
+        }
+      });
+    } else {
+      toast.error(`⚠️ Código "${barcode}" não encontrado no estoque ativo.`);
+    }
+  };
+
+  // Captura automática de leitor USB / Bluetooth no modal
+  useEffect(() => {
+    if (!isOpen || showScannerModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.tagName === 'SELECT';
+      if (isInput) return;
+
+      if (e.key === 'Enter') {
+        if (keyBufferRef.current.length >= 3) {
+          e.preventDefault();
+          const codeToProcess = keyBufferRef.current;
+          keyBufferRef.current = '';
+          handleBarcodeScanned(codeToProcess);
+        }
+        keyBufferRef.current = '';
+      } else if (e.key.length === 1) {
+        keyBufferRef.current += e.key;
+        if (keyTimeoutRef.current) clearTimeout(keyTimeoutRef.current);
+        keyTimeoutRef.current = setTimeout(() => {
+          keyBufferRef.current = '';
+        }, 120);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (keyTimeoutRef.current) clearTimeout(keyTimeoutRef.current);
+    };
+  }, [isOpen, showScannerModal, aparelhosEstoque]);
 
   // Aparelhos filtrados na busca e categoria
   const aparelhosFiltrados = useMemo(() => {
@@ -318,8 +402,8 @@ export function VendaLoteAtacadoModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-white my-auto shrink-0 relative max-h-[92vh] flex flex-col">
+    <div className="modal-overlay modal-overlay-fit">
+      <div className="modal-panel modal-panel-fit modal-panel-xl w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col">
         
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
@@ -328,9 +412,19 @@ export function VendaLoteAtacadoModal({
               <Boxes className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base sm:text-lg text-white">Nova Venda de Atacado (Lote / Múltiplos)</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-base sm:text-lg text-white">Nova Venda de Atacado (Lote / Múltiplos)</h3>
+                <Button
+                  type="button"
+                  onClick={() => setShowScannerModal(true)}
+                  className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold rounded-xl h-6 px-2 flex items-center gap-1 shadow-sm cursor-pointer shrink-0"
+                >
+                  <Camera className="w-3 h-3 text-amber-400" />
+                  Bipar Câmera/USB
+                </Button>
+              </div>
               <p className="text-xs text-slate-400">
-                Selecione um ou vários aparelhos para fechar o pedido de atacado para um lojista
+                Selecione ou bipe aparelhos para fechar o pedido de atacado para um lojista
               </p>
             </div>
           </div>
@@ -349,7 +443,7 @@ export function VendaLoteAtacadoModal({
             <div className="lg:col-span-7 flex flex-col space-y-2.5 min-h-0">
               
               {/* FILTROS DE CATEGORIA */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar touch-pan-x">
                 <button
                   type="button"
                   onClick={() => setCategoriaFiltro('todos')}
@@ -405,6 +499,15 @@ export function VendaLoteAtacadoModal({
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    onClick={() => setShowScannerModal(true)}
+                    className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold rounded-xl h-8 px-2.5 flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0"
+                    title="Bipar código de barras ou IMEI com a câmera ou leitor USB"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Bipar</span>
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -665,6 +768,16 @@ export function VendaLoteAtacadoModal({
         </form>
 
       </div>
+
+      {/* MODAL SCANNER DE CÓDIGO DE BARRAS / CÂMERA / USB */}
+      <BarcodeScannerModal
+        isOpen={showScannerModal}
+        onClose={() => setShowScannerModal(false)}
+        onScan={handleBarcodeScanned}
+        keepOpenOnScan={true}
+        title="Bipar Produtos do Atacado"
+        subtitle="Aponte a câmera ou use o leitor de código de barras USB"
+      />
     </div>
   );
 }
