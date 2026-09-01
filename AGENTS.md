@@ -62,3 +62,9 @@ export default function Dashboard() {
 ```
 
 3. Route is automatically registered as `/dashboard`
+
+## Git Workflow Rules
+
+1. **Auto Commit & Push**: Sempre que finalizar uma alteração ou correção no código, realize `git commit` com mensagem descritiva e `git push` imediatamente para a branch remota.
+2. **Auto Pull**: Ao iniciar conversas ou quando o usuário avisar que está alternando entre computadores, execute `git pull` imediatamente para sincronizar o trabalho mais recente antes de qualquer alteração.
+
