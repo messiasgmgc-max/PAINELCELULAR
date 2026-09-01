@@ -31,6 +31,7 @@ export function ConfiguracoesTab() {
   const [telefoneEmpresa, setTelefoneEmpresa] = useState('');
   const [enderecoEmpresa, setEnderecoEmpresa] = useState('');
   const [emailEmpresa, setEmailEmpresa] = useState('');
+  const [chavePix, setChavePix] = useState('');
   const [cnpj, setCnpj] = useState('');
   const [garantiaDias, setGarantiaDias] = useState(90);
 
@@ -73,6 +74,7 @@ export function ConfiguracoesTab() {
       setCnpj(config.cnpjLoja !== 'Não informado' ? config.cnpjLoja : '');
       setTelefoneEmpresa(config.telefoneLoja !== 'Não informado' ? config.telefoneLoja : '');
       setEmailEmpresa(config.emailLoja !== 'contato@loja.com' ? config.emailLoja : '');
+      setChavePix(config.chavePix || '');
       setGarantiaDias(config.garantiaDias || 90);
     }
   }, [config]);
@@ -134,6 +136,9 @@ export function ConfiguracoesTab() {
           endereco: enderecoEmpresa,
           email: emailEmpresa,
           cnpj,
+          chave_pix: chavePix,
+          pix: chavePix,
+          chave_pix_cobranca: chavePix,
           garantia_dias: Number(garantiaDias),
           dias_garantia: Number(garantiaDias),
         }).eq('id', usuario.lojaId);
@@ -156,6 +161,7 @@ export function ConfiguracoesTab() {
       enderecoLoja: enderecoEmpresa,
       emailLoja: emailEmpresa,
       cnpjLoja: cnpj,
+      chavePix,
       garantiaDias: Number(garantiaDias),
     });
 
@@ -700,6 +706,25 @@ export function ConfiguracoesTab() {
                         placeholder="Rua, número, complemento"
                         className="input-glass mt-2"
                       />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium flex items-center justify-between">
+                        <span>Chave PIX Oficial (para Extratos e Cobranças de Fiado)</span>
+                        <Badge variant="outline" className="text-xs font-mono text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+                          PIX Cobrança
+                        </Badge>
+                      </label>
+                      <input
+                        type="text"
+                        value={chavePix}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setChavePix(e.target.value)}
+                        placeholder="Ex: seuemail@loja.com, CPF/CNPJ ou celular"
+                        className="input-glass mt-2 font-mono font-bold text-emerald-400"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Esta chave PIX será preenchida automaticamente em mensagens de WhatsApp e extratos de lojistas devedores.
+                      </p>
                     </div>
 
                     <div>

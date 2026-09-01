@@ -18,13 +18,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, getAparelhoCodigo } from '@/lib/utils';
+import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
 
 export interface VendaEditavelData {
   id?: string;
   vendaId?: string;
   aparelhoId?: string;
   data: string;
+  dataVencimento?: string;
   comprador: string;
   modelo?: string;
   marca?: string;
@@ -68,6 +69,7 @@ export function EditarVendaRegistroModal({
   const [valorVenda, setValorVenda] = useState('');
   const [custo, setCusto] = useState('');
   const [dataVenda, setDataVenda] = useState('');
+  const [dataVencimento, setDataVencimento] = useState('');
   const [metodoPgto, setMetodoPgto] = useState('pix');
   const [tipoVenda, setTipoVenda] = useState('Atacado');
   const [observacoes, setObservacoes] = useState('');
@@ -83,14 +85,22 @@ export function EditarVendaRegistroModal({
       const d = venda.data ? new Date(venda.data) : new Date();
       setDataVenda(!isNaN(d.getTime()) ? d.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
       
+      const rawVenc = venda.dataVencimento || (venda.raw && (venda.raw.dataVencimento || venda.raw.data_vencimento));
+      if (rawVenc) {
+        const dV = new Date(rawVenc);
+        setDataVencimento(!isNaN(dV.getTime()) ? dV.toISOString().split('T')[0] : '');
+      } else {
+        setDataVencimento('');
+      }
+
       setMetodoPgto(venda.metodoPgto || 'pix');
       setTipoVenda(venda.tipoVenda || (venda.modelo ? 'Atacado' : 'Varejo'));
       setObservacoes(venda.observacoes || '');
     }
   }, [isOpen, venda]);
 
-  const valorVendaNum = parseFloat(valorVenda.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
-  const custoNum = parseFloat(custo.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
+  const valorVendaNum = parseMonetaryValue(valorVenda);
+  const custoNum = parseMonetaryValue(custo);
   const lucroNum = valorVendaNum - custoNum;
   const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
 
@@ -128,6 +138,7 @@ export function EditarVendaRegistroModal({
 
       // 2. Se tem vendaId ou id correspondente na tabela 'vendas', atualiza a venda
       const idParaVenda = venda.vendaId || (venda.id && !venda.id.startsWith('venda_') ? venda.id : null);
+      const dataVencIso = dataVencimento ? new Date(dataVencimento + 'T12:00:00').toISOString() : null;
       
       if (idParaVenda) {
         const payloadVendaUpdate: any = {
@@ -137,6 +148,7 @@ export function EditarVendaRegistroModal({
           lucro: lucroNum,
           percentualLucro: parseFloat(margemPercent) || 0,
           dataPagamento: dataIso,
+          dataVencimento: dataVencIso,
           metodo: metodoPgto,
           tipoEntrega: tipoVenda,
           descricao: `Venda ${tipoVenda.toUpperCase()} - ${venda.modelo || ''} para ${compradorFinal}`,
@@ -170,6 +182,7 @@ export function EditarVendaRegistroModal({
                 lucro: lucroNum,
                 percentualLucro: parseFloat(margemPercent) || 0,
                 dataPagamento: dataIso,
+                dataVencimento: dataVencIso,
                 metodo: metodoPgto,
               })
               .eq('id', vendaEncontrada.id);
@@ -325,6 +338,25 @@ export function EditarVendaRegistroModal({
               </select>
             </div>
           </div>
+
+          {/* DATA DE VENCIMENTO / PREVISÃO (QUANDO FOR FIADO) */}
+          {metodoPgto === 'fiado' && (
+            <div className="space-y-1 bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-2xl">
+              <label className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                Data de Vencimento / Previsão de Pagamento
+              </label>
+              <input
+                type="date"
+                value={dataVencimento}
+                onChange={(e) => setDataVencimento(e.target.value)}
+                className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-2 text-xs text-amber-300 font-bold outline-none focus:border-amber-400"
+              />
+              <p className="text-[10px] text-slate-400">
+                Se passar desta data, o sistema indicará atraso e calculará juros automaticamente no extrato.
+              </p>
+            </div>
+          )}
 
           {/* OBSERVAÇÕES */}
           <div className="space-y-1">

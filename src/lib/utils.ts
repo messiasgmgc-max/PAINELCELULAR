@@ -67,6 +67,45 @@ export function getAparelhoCodigo(aparelho: any): string {
   }
   const hashAbs = Math.abs(hash);
   const id8Digitos = String(10000000 + (hashAbs % 89999999));
-  return id8Digitos;
 }
 
+/**
+ * Converte qualquer string monetária para número decimal de forma segura,
+ * evitando problemas de multiplicação por 100 ao remover pontos de decimais.
+ * Suporta formatos: "1.750,00", "1750.00", "1750,00", "1,750.00", "1750"
+ */
+export function parseMonetaryValue(rawVal: any): number {
+  if (typeof rawVal === 'number') return isNaN(rawVal) ? 0 : rawVal;
+  if (!rawVal) return 0;
+  let str = String(rawVal).trim();
+
+  // Remove símbolos de moeda ou espaços
+  str = str.replace(/[R$\s]/g, '');
+
+  if (str.includes('.') && str.includes(',')) {
+    if (str.lastIndexOf(',') > str.lastIndexOf('.')) {
+      // Padrão Brasileiro: 1.750,50 -> 1750.50
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Padrão Internacional: 1,750.50 -> 1750.50
+      str = str.replace(/,/g, '');
+    }
+  } else if (str.includes(',')) {
+    // Apenas vírgula: 1750,50 -> 1750.50
+    str = str.replace(',', '.');
+  } else if (str.includes('.')) {
+    // Apenas ponto:
+    const parts = str.split('.');
+    if (parts.length > 2) {
+      // Mais de um ponto (ex: 1.750.000)
+      str = str.replace(/\./g, '');
+    } else if (parts[1] && parts[1].length === 3 && parseFloat(parts[0]) > 0 && !str.includes(',')) {
+      // Ex: "1.750" (sem vírgula e exatamente 3 dígitos depois do ponto) -> milhar 1750
+      str = str.replace(/\./g, '');
+    }
+    // Caso seja "1750.00" ou "1750.50" (2 dígitos decimais), mantém o ponto como decimal
+  }
+
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+}

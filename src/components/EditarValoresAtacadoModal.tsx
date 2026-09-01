@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, parseMonetaryValue } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 
 interface EditarValoresAtacadoModalProps {
@@ -70,8 +70,7 @@ export function EditarValoresAtacadoModal({
   if (!isOpen) return null;
 
   const handlePrecoAtacadoChange = (id: string, val: string) => {
-    const valLimpo = val.replace(/[^\d,.]/g, '').replace(',', '.');
-    const num = parseFloat(valLimpo) || 0;
+    const num = parseMonetaryValue(val);
     setValoresEditados((prev) => ({
       ...prev,
       [id]: num,
@@ -82,12 +81,12 @@ export function EditarValoresAtacadoModal({
     if (valoresEditados[a.id] !== undefined) {
       return valoresEditados[a.id];
     }
-    return (a as any).precoAtacado || a.preco || 0;
+    return (a as any).precoAtacado || (a as any).preco_atacado || a.preco || 0;
   };
 
   // Aplica margem Custo + R$ X para todos os aparelhos filtrados
   const aplicarMargemEmLote = () => {
-    const margem = parseFloat(margemPadrao) || 0;
+    const margem = parseMonetaryValue(margemPadrao) || 0;
     const novosValores: Record<string, number> = { ...valoresEditados };
     let alterados = 0;
 
@@ -133,10 +132,33 @@ export function EditarValoresAtacadoModal({
 
       for (const id of idsParaAtualizar) {
         const novoPrecoAtacado = valoresEditados[id];
-        const { error } = await supabase
+        
+        // Tenta atualizar com precoAtacado (camelCase)
+        let { error } = await supabase
           .from('aparelhos')
-          .update({ precoAtacado: novoPrecoAtacado })
+          .update({ 
+            precoAtacado: novoPrecoAtacado,
+            preco_atacado: novoPrecoAtacado 
+          })
           .eq('id', id);
+
+        // Se der erro de coluna não encontrada, tenta individualmente
+        if (error) {
+          const res1 = await supabase
+            .from('aparelhos')
+            .update({ precoAtacado: novoPrecoAtacado })
+            .eq('id', id);
+
+          if (res1.error) {
+            const res2 = await supabase
+              .from('aparelhos')
+              .update({ preco_atacado: novoPrecoAtacado })
+              .eq('id', id);
+            error = res2.error;
+          } else {
+            error = null;
+          }
+        }
 
         if (!error) {
           alteradosSucesso++;

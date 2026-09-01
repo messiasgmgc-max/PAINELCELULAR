@@ -34,8 +34,9 @@ import { Badge } from '@/components/ui/badge';
 import { ModalPortal } from '@/components/ModalPortal';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useAuth } from '@/hooks/useAuth';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
-import { getAparelhoCodigo, cn } from '@/lib/utils';
+import { getAparelhoCodigo, cn, parseMonetaryValue } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Aparelho } from '@/lib/db/types';
 import { EditarValoresAtacadoModal } from '@/components/EditarValoresAtacadoModal';
@@ -67,6 +68,7 @@ interface VendaAtacadoItem {
 
 export function AtacadoTab() {
   const { usuario } = useAuth();
+  const { config } = useStoreConfig(usuario?.lojaId || usuario?.loja_id);
   const { aparelhos, loading, fetchAparelhos } = useAparelhos();
 
   const [busca, setBusca] = useState('');
@@ -145,19 +147,19 @@ export function AtacadoTab() {
           // Extrai valor da venda
           const matchValor = textoDetalhe.match(/por\s+R\$\s*([\d.,]+)/i);
           const valorVenda = matchValor 
-            ? parseFloat(matchValor[1].replace(/\./g, '').replace(',', '.')) 
-            : ((a as any).precoAtacado || a.preco || 0);
+            ? parseMonetaryValue(matchValor[1])
+            : ((a as any).precoAtacado || (a as any).preco_atacado || a.preco || 0);
 
           // Extrai custo
           const matchCusto = textoDetalhe.match(/Custo:\s*R\$\s*([\d.,]+)/i);
           const custo = matchCusto 
-            ? parseFloat(matchCusto[1].replace(/\./g, '').replace(',', '.')) 
+            ? parseMonetaryValue(matchCusto[1])
             : (a.custo || 0);
 
           // Extrai lucro
           const matchLucro = textoDetalhe.match(/Lucro:\s*R\$\s*([\d.,]+)/i);
           const lucro = matchLucro 
-            ? parseFloat(matchLucro[1].replace(/\./g, '').replace(',', '.')) 
+            ? parseMonetaryValue(matchLucro[1])
             : (valorVenda - custo);
 
           // Extrai forma de pagamento
@@ -298,6 +300,9 @@ export function AtacadoTab() {
       saldoDevedor: number;
       pedidos: any[];
       ultimoPedido: string;
+      dataVencimentoMaisAntiga?: string;
+      diasAtraso: number;
+      estaEmAtraso: boolean;
     }>();
 
     // 1. Processa vendas da tabela 'vendas'
@@ -317,6 +322,8 @@ export function AtacadoTab() {
             saldoDevedor: 0,
             pedidos: [],
             ultimoPedido: v.dataPagamento || v.data || v.created_at,
+            diasAtraso: 0,
+            estaEmAtraso: false,
           });
         }
 
@@ -342,6 +349,8 @@ export function AtacadoTab() {
               saldoDevedor: 0,
               pedidos: [],
               ultimoPedido: va.data,
+              diasAtraso: 0,
+              estaEmAtraso: false,
             });
           }
           const entry = mapa.get(cliente)!;
@@ -361,7 +370,40 @@ export function AtacadoTab() {
       }
     });
 
-    return Array.from(mapa.values()).sort((a, b) => b.saldoDevedor - a.saldoDevedor);
+    // 3. Calcula datas de vencimento e dias em atraso
+    const agora = new Date();
+    mapa.forEach((entry) => {
+      let menorVencimento: Date | null = null;
+      entry.pedidos.forEach((p: any) => {
+        const dataVencStr = p.dataVencimento || (p.raw && p.raw.dataVencimento);
+        if (dataVencStr) {
+          const d = new Date(dataVencStr);
+          if (!isNaN(d.getTime())) {
+            if (!menorVencimento || d < menorVencimento) {
+              menorVencimento = d;
+            }
+          }
+        }
+      });
+
+      if (menorVencimento) {
+        entry.dataVencimentoMaisAntiga = menorVencimento.toISOString();
+        if (menorVencimento.getTime() < agora.getTime()) {
+          const diffMs = agora.getTime() - menorVencimento.getTime();
+          const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          entry.diasAtraso = dias;
+          entry.estaEmAtraso = dias > 0;
+        }
+      }
+    });
+
+    return Array.from(mapa.values()).sort((a, b) => {
+      // Prioriza quem está em atraso, depois maior saldo devedor
+      if (a.estaEmAtraso !== b.estaEmAtraso) {
+        return a.estaEmAtraso ? -1 : 1;
+      }
+      return b.saldoDevedor - a.saldoDevedor;
+    });
   }, [vendasBanco, vendasAtacado]);
 
   const totalFiadoEmAberto = useMemo(() => {
@@ -816,11 +858,23 @@ export function AtacadoTab() {
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm border border-amber-500/30">
+                        <div className={cn(
+                          "w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm border",
+                          lojista.estaEmAtraso 
+                            ? "bg-red-500/20 text-red-400 border-red-500/40" 
+                            : "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                        )}>
                           {lojista.lojistaNome.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <h4 className="font-bold text-sm text-white">{lojista.lojistaNome}</h4>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="font-bold text-sm text-white">{lojista.lojistaNome}</h4>
+                            {lojista.estaEmAtraso && (
+                              <Badge className="bg-red-500/20 text-red-300 border-red-500/40 text-[9px] px-1.5 py-0 animate-pulse font-mono font-bold">
+                                ⚠️ {lojista.diasAtraso}d atraso
+                              </Badge>
+                            )}
+                          </div>
                           <span className="text-[10px] text-slate-400">
                             Última compra: {new Date(lojista.ultimoPedido).toLocaleDateString('pt-BR')}
                           </span>
@@ -1139,6 +1193,7 @@ export function AtacadoTab() {
           onClose={() => setLojistaParaExtrato(null)}
           lojistaNome={lojistaParaExtrato?.lojistaNome || ''}
           vendasLojista={lojistaParaExtrato?.vendasLojista || []}
+          chavePix={config.chavePix || ''}
           onAbrirBaixaModal={() => {
             if (lojistaParaExtrato) {
               const devedor = lojistaParaExtrato.vendasLojista.reduce((acc, v) => acc + (Number(v.saldoDevedor !== undefined ? v.saldoDevedor : (Number(v.valor || 0) - Number(v.valorPago || 0)))), 0);

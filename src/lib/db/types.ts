@@ -216,6 +216,8 @@ export interface Venda {
   percentualLucro: number;
   dataPagamento: string;
   dataVencimento?: string;
+  taxaJurosMensal?: number;
+  valorJuros?: number;
   status: 'pendente' | 'pago' | 'parcial' | 'cancelado';
   metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto' | 'fiado';
   valorPago?: number;

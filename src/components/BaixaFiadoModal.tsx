@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, parseMonetaryValue } from '@/lib/utils';
 import { AbatimentoFiado } from '@/lib/db/types';
 
 interface BaixaFiadoModalProps {
@@ -62,7 +62,7 @@ export function BaixaFiadoModal({
     }
   }, [isOpen]);
 
-  const valorNum = parseFloat(valorAbatimento.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
+  const valorNum = parseMonetaryValue(valorAbatimento);
   const saldoRestante = Math.max(0, saldoDevedorTotal - valorNum);
 
   if (!isOpen) return null;

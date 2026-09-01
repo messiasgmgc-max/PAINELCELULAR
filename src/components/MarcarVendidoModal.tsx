@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, getAparelhoCodigo } from '@/lib/utils';
+import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 
 interface MarcarVendidoModalProps {
@@ -27,8 +27,8 @@ interface MarcarVendidoModalProps {
   onClose: () => void;
   aparelho: Aparelho | null;
   lojaId: string | null;
-  onSuccess: () => Promise<void>;
   tipoInicial?: 'atacado' | 'varejo';
+  onSuccess: () => Promise<void>;
 }
 
 const FORMAS_PAGAMENTO = [
@@ -37,7 +37,7 @@ const FORMAS_PAGAMENTO = [
   { id: 'cartao_credito', label: 'Cartão de Crédito' },
   { id: 'cartao_debito', label: 'Cartão de Débito' },
   { id: 'fiado', label: 'A Prazo / Fiado' },
-  { id: 'boleto', label: 'Boleto' },
+  { id: 'troca', label: 'Troca / Base de Troca' },
 ];
 
 export function MarcarVendidoModal({
@@ -45,14 +45,15 @@ export function MarcarVendidoModal({
   onClose,
   aparelho,
   lojaId,
-  onSuccess,
   tipoInicial = 'atacado',
+  onSuccess,
 }: MarcarVendidoModalProps) {
   const [tipoVenda, setTipoVenda] = useState<'atacado' | 'varejo' | 'manutencao' | 'perda'>('atacado');
   const [comprador, setComprador] = useState('');
   const [valorVenda, setValorVenda] = useState<string>('');
   const [metodoPgto, setMetodoPgto] = useState<string>('pix');
   const [dataVenda, setDataVenda] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [dataVencimento, setDataVencimento] = useState<string>('');
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [compradoresRecentes, setCompradoresRecentes] = useState<string[]>([]);
@@ -101,7 +102,7 @@ export function MarcarVendidoModal({
   };
 
   const custoNum = aparelho?.custo || 0;
-  const valorVendaNum = parseFloat(valorVenda.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
+  const valorVendaNum = parseMonetaryValue(valorVenda);
   const lucroNum = valorVendaNum - custoNum;
   const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
 
@@ -132,6 +133,8 @@ export function MarcarVendidoModal({
     try {
       const compradorFinal = comprador.trim() || (tipoVenda === 'atacado' ? 'Lojista / Revenda' : 'Venda Varejo');
       const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
+      const isFiado = metodoPgto === 'fiado';
+      const dataVencIso = (isFiado && dataVencimento) ? new Date(dataVencimento + 'T12:00:00').toISOString() : undefined;
 
       // Monta tag estruturada de baixa no estoque
       const obsBaixa = [
@@ -165,8 +168,12 @@ export function MarcarVendidoModal({
         lucro: lucroNum,
         percentualLucro: parseFloat(margemPercent) || 0,
         dataPagamento: dataIso,
-        status: 'pago',
+        dataVencimento: dataVencIso,
+        status: isFiado ? 'pendente' : 'pago',
         metodo: metodoPgto,
+        saldoDevedor: isFiado ? valorVendaNum : 0,
+        valorPago: isFiado ? 0 : valorVendaNum,
+        historicoAbatimentos: [],
         descricao: `Venda ${tipoVenda.toUpperCase()} - ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''})`,
         garantia: tipoVenda === 'atacado' ? 'Garantia de Atacado (Teste)' : '90 dias',
         descontoTotal: 0,
@@ -188,7 +195,7 @@ export function MarcarVendidoModal({
           {
             id: Date.now().toString(),
             metodo: metodoPgto,
-            valor: valorVendaNum,
+            valor: isFiado ? 0 : valorVendaNum,
             parcelas: 1,
           },
         ],
@@ -349,6 +356,24 @@ export function MarcarVendidoModal({
               </select>
             </div>
           </div>
+
+          {/* PREVISÃO DE PAGAMENTO / VENCIMENTO SE FOR FIADO */}
+          {metodoPgto === 'fiado' && (
+            <div className="space-y-1 bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-2xl">
+              <label className="text-xs font-bold text-amber-400">
+                📅 Data Prevista de Pagamento / Vencimento
+              </label>
+              <input
+                type="date"
+                value={dataVencimento}
+                onChange={(e) => setDataVencimento(e.target.value)}
+                className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-2 text-xs text-amber-300 font-bold outline-none focus:border-amber-400"
+              />
+              <p className="text-[10px] text-slate-400">
+                Utilizada para sinalizar fiados em atraso e calcular juros no extrato de cobrança.
+              </p>
+            </div>
+          )}
 
           {/* CARD DE LUCRO EM TEMPO REAL */}
           <div className="p-3 bg-slate-950/80 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">

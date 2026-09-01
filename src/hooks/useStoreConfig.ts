@@ -13,6 +13,7 @@ export interface StoreConfig {
   telefoneLoja: string;
   emailLoja: string;
   garantiaDias: number;
+  chavePix: string;
 }
 
 const DEFAULT_CONFIG: StoreConfig = {
@@ -25,6 +26,7 @@ const DEFAULT_CONFIG: StoreConfig = {
   telefoneLoja: 'Não informado',
   emailLoja: 'contato@loja.com',
   garantiaDias: 90,
+  chavePix: '',
 };
 
 export function useStoreConfig(providedLojaId?: string | null) {
@@ -119,6 +121,7 @@ export function useStoreConfig(providedLojaId?: string | null) {
           telefoneLoja: lojaDb.telefone || DEFAULT_CONFIG.telefoneLoja,
           emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
           garantiaDias: Number(lojaDb.garantia_dias || lojaDb.dias_garantia || DEFAULT_CONFIG.garantiaDias),
+          chavePix: lojaDb.chave_pix || lojaDb.pix || lojaDb.chave_pix_cobranca || lojaDb.chavePix || DEFAULT_CONFIG.chavePix,
         };
         setConfig(configDb);
         return;
@@ -180,6 +183,11 @@ export function useStoreConfig(providedLojaId?: string | null) {
       if (novaConfig.cnpjLoja !== undefined) updatePayload.cnpj = novaConfig.cnpjLoja;
       if (novaConfig.telefoneLoja !== undefined) updatePayload.telefone = novaConfig.telefoneLoja;
       if (novaConfig.emailLoja !== undefined) updatePayload.email = novaConfig.emailLoja;
+      if (novaConfig.chavePix !== undefined) {
+        updatePayload.chave_pix = novaConfig.chavePix;
+        updatePayload.pix = novaConfig.chavePix;
+        updatePayload.chave_pix_cobranca = novaConfig.chavePix;
+      }
       if (novaConfig.garantiaDias !== undefined) {
         updatePayload.garantia_dias = novaConfig.garantiaDias;
         updatePayload.dias_garantia = novaConfig.garantiaDias;
