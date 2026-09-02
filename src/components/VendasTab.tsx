@@ -702,6 +702,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
     const currentUrl = `${pathname}?${searchParams.toString()}`;
     const nextQuery = nextParams.toString();
+    const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+
     if (currentUrl !== nextUrl && typeof window !== 'undefined') {
       window.history.replaceState(window.history.state, '', nextUrl);
     }
@@ -731,12 +733,26 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         .order('dataPagamento', { ascending: false });
 
       if (targetLojaId) {
-        query = query.or(`loja_id.eq.${targetLojaId},lojaId.eq.${targetLojaId},loja_id.is.null`);
+        query = query.or(`loja_id.eq.${targetLojaId},loja_id.is.null`);
       }
 
       const { data, error } = await query;
       
-      if (error) throw error;
+      if (error) {
+        console.warn('Filtro por loja_id falhou em vendas, buscando sem filtro:', error);
+        const resFallback = await supabase
+          .from('vendas')
+          .select('*')
+          .order('dataPagamento', { ascending: false });
+
+        if (resFallback.data) {
+          setVendas(resFallback.data);
+          calcularVendasPorPeriodo(resFallback.data);
+          return;
+        }
+        throw error;
+      }
+
       const vendasData = data || [];
       setVendas(vendasData);
       calcularVendasPorPeriodo(vendasData);
