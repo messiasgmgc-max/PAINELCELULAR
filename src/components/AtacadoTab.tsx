@@ -196,11 +196,42 @@ export function AtacadoTab() {
           dataIso += ':00:00';
         }
 
-        // Verifica se é uma saída de atacado
+        // Cross-check prévio com a tabela 'vendas' do Supabase
+        const vendaCorrespondente = vendasBanco.find(vb => 
+          (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === a.id)) ||
+          vb.aparelhoId === a.id
+        );
+
+        const obsLower = obs.toLowerCase();
+        const detalheLower = textoDetalhe.toLowerCase();
+
+        // 1. Se for explicitamente VAREJO, NUNCA deve entrar na lista de atacado!
+        const isVarejo = 
+          detalheLower.includes('venda varejo') || 
+          detalheLower.includes('varejo') || 
+          obsLower.includes('venda varejo') ||
+          (vendaCorrespondente && (
+            vendaCorrespondente.tipoEntrega?.toLowerCase().includes('varejo') ||
+            vendaCorrespondente.descricao?.toLowerCase().includes('varejo')
+          ));
+
+        if (isVarejo) {
+          return; // Pula com segurança! É saída de varejo
+        }
+
+        // 2. Se for manutenção, perda ou defeito, não é atacado
+        if (detalheLower.includes('manutencao') || detalheLower.includes('perda') || obsLower.includes('manutencao')) {
+          return;
+        }
+
+        // 3. Verifica se é verdadeiramente uma saída de atacado
         const isAtacado = 
-          textoDetalhe.toLowerCase().includes('atacado') || 
-          obs.toLowerCase().includes('atacado') ||
-          (a.cliente && a.cliente.toLowerCase() !== 'venda varejo' && a.cliente.toLowerCase() !== 'cliente final');
+          detalheLower.includes('atacado') || 
+          obsLower.includes('atacado') ||
+          (vendaCorrespondente && (
+            vendaCorrespondente.tipoEntrega?.toLowerCase().includes('atacado') ||
+            vendaCorrespondente.descricao?.toLowerCase().includes('atacado')
+          ));
 
         if (isAtacado) {
           // Extrai comprador
@@ -229,11 +260,6 @@ export function AtacadoTab() {
           const matchPgto = textoDetalhe.match(/Pgto:\s*([A-Za-z0-9_]+)/i) || obs.match(/Pgto:\s*([A-Za-z0-9_]+)/i);
           let metodoPgto = matchPgto ? matchPgto[1].toLowerCase() : 'pix';
 
-          // Cross-check com a tabela 'vendas' do Supabase
-          const vendaCorrespondente = vendasBanco.find(vb => 
-            (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === a.id)) ||
-            vb.aparelhoId === a.id
-          );
           if (vendaCorrespondente && vendaCorrespondente.metodo) {
             metodoPgto = vendaCorrespondente.metodo.toLowerCase();
           }
@@ -379,6 +405,12 @@ export function AtacadoTab() {
 
     // 1. Processa vendas da tabela 'vendas'
     vendasBanco.forEach(v => {
+      // Ignora vendas explicitamente de varejo no painel de lojistas de atacado
+      const tipoEntregaLower = String(v.tipoEntrega || '').toLowerCase();
+      const descLower = String(v.descricao || '').toLowerCase();
+      const isVarejo = tipoEntregaLower.includes('varejo') || (descLower.includes('varejo') && !descLower.includes('atacado'));
+      if (isVarejo) return;
+
       const isFiadoOuPendente = v.metodo === 'fiado' || v.status === 'pendente' || v.status === 'parcial';
       const cliente = (v.clienteNome || 'Lojista / Revenda').trim();
       const total = Number(v.valor || 0);

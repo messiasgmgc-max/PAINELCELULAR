@@ -86,6 +86,8 @@ export function AparelhosTab() {
   });
 
   const [saidas, setSaidas] = useState<any[]>([]);
+  const [filtroSaidaTipo, setFiltroSaidaTipo] = useState<'todos' | 'varejo' | 'atacado' | 'outro'>('todos');
+  const [buscaSaida, setBuscaSaida] = useState('');
 
   // Carregar dados ao montar
   useEffect(() => {
@@ -108,16 +110,56 @@ export function AparelhosTab() {
           dataSaida += ':00:00';
         }
 
+        const motivoLower = (matchBaixa?.[2] || '').toLowerCase();
+        const obsLower = obs.toLowerCase();
+        let tipoSaida: 'varejo' | 'atacado' | 'outro' = 'outro';
+        if (motivoLower.includes('varejo') || obsLower.includes('venda varejo')) {
+          tipoSaida = 'varejo';
+        } else if (motivoLower.includes('atacado') || obsLower.includes('venda atacado') || obsLower.includes('atacado')) {
+          tipoSaida = 'atacado';
+        } else if (aparelho.condicao === 'vendido') {
+          tipoSaida = 'varejo';
+        }
+
         return {
           ...aparelho,
           dataSaida,
-          motivoSaida: matchBaixa?.[2] || 'Baixa de estoque',
+          motivoSaida: matchBaixa?.[2] || (aparelho.condicao === 'vendido' ? 'Venda de Aparelho' : 'Baixa de estoque'),
+          tipoSaida,
         };
       })
       .sort((a, b) => new Date(b.dataSaida).getTime() - new Date(a.dataSaida).getTime());
 
     setSaidas(historicoSaidas);
   }, [aparelhos]);
+
+  // Contagens e filtro de saídas
+  const saidasFiltradas = useMemo(() => {
+    return saidas.filter((item) => {
+      if (filtroSaidaTipo !== 'todos' && item.tipoSaida !== filtroSaidaTipo) {
+        return false;
+      }
+      if (buscaSaida.trim()) {
+        const b = buscaSaida.toLowerCase().trim();
+        const mod = (item.modelo || '').toLowerCase();
+        const mar = (item.marca || '').toLowerCase();
+        const imei = (item.imei || '').toLowerCase();
+        const cli = (item.cliente || '').toLowerCase();
+        const mot = (item.motivoSaida || '').toLowerCase();
+        return mod.includes(b) || mar.includes(b) || imei.includes(b) || cli.includes(b) || mot.includes(b);
+      }
+      return true;
+    });
+  }, [saidas, filtroSaidaTipo, buscaSaida]);
+
+  const contagensSaidas = useMemo(() => {
+    return {
+      todos: saidas.length,
+      varejo: saidas.filter(s => s.tipoSaida === 'varejo').length,
+      atacado: saidas.filter(s => s.tipoSaida === 'atacado').length,
+      outro: saidas.filter(s => s.tipoSaida === 'outro').length,
+    };
+  }, [saidas]);
 
   // Contagens por categoria de estoque
   const contagens = useMemo(() => {
@@ -2847,28 +2889,152 @@ export function AparelhosTab() {
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2"><ArrowUpRight className="h-5 w-5 text-red-500" /> Histórico de Saídas</h3>
+                <div className="flex items-center gap-2.5">
+                  <ArrowUpRight className="h-5 w-5 text-red-400" />
+                  <div>
+                    <h3 className="text-lg font-bold text-white leading-tight">Histórico de Saídas do Estoque</h3>
+                    <p className="text-xs text-slate-400">Controle completo de baixas, vendas de varejo e vendas de atacado</p>
+                  </div>
+                </div>
                 <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)} className="text-slate-400 hover:text-white rounded-full">
                   <X className="h-5 w-5" />
                 </Button>
               </div>
+
+              {/* FILTROS E BUSCA */}
+              <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between pb-1">
+                {/* Abas de filtro */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scroll-row">
+                  <button
+                    onClick={() => setFiltroSaidaTipo('todos')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer",
+                      filtroSaidaTipo === 'todos'
+                        ? "bg-white text-slate-950 shadow-md"
+                        : "bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white"
+                    )}
+                  >
+                    Todas ({contagensSaidas.todos})
+                  </button>
+
+                  <button
+                    onClick={() => setFiltroSaidaTipo('varejo')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5",
+                      filtroSaidaTipo === 'varejo'
+                        ? "bg-emerald-500 text-slate-950 font-extrabold shadow-md shadow-emerald-500/20"
+                        : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30"
+                    )}
+                  >
+                    🛒 Saídas Varejo ({contagensSaidas.varejo})
+                  </button>
+
+                  <button
+                    onClick={() => setFiltroSaidaTipo('atacado')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5",
+                      filtroSaidaTipo === 'atacado'
+                        ? "bg-amber-400 text-slate-950 font-extrabold shadow-md shadow-amber-400/20"
+                        : "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30"
+                    )}
+                  >
+                    📦 Saídas Atacado ({contagensSaidas.atacado})
+                  </button>
+
+                  <button
+                    onClick={() => setFiltroSaidaTipo('outro')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5",
+                      filtroSaidaTipo === 'outro'
+                        ? "bg-slate-300 text-slate-950 shadow-md"
+                        : "bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-white"
+                    )}
+                  >
+                    🔧 Outras Baixas ({contagensSaidas.outro})
+                  </button>
+                </div>
+
+                {/* Campo de Busca Rápida */}
+                <div className="relative min-w-[200px] sm:w-64">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar modelo, comprador, IMEI..."
+                    value={buscaSaida}
+                    onChange={(e) => setBuscaSaida(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500 transition-colors"
+                  />
+                  {buscaSaida && (
+                    <button
+                      onClick={() => setBuscaSaida('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <div className="overflow-x-auto">
                 <div className="divide-y divide-slate-800 min-w-[650px]">
-                  {saidas.length === 0 ? (
-                    <p className="p-8 text-center text-slate-500">Nenhuma saída registrada.</p>
+                  {saidasFiltradas.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 space-y-1">
+                      <p className="font-semibold text-sm text-slate-400">Nenhuma saída encontrada.</p>
+                      <p className="text-xs">Verifique o filtro selecionado ou a busca digitada.</p>
+                    </div>
                   ) : (
-                    saidas.map((item, idx) => (
-                      <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-slate-800/40 rounded-xl min-w-full">
+                    saidasFiltradas.map((item, idx) => (
+                      <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-slate-800/40 rounded-xl min-w-full transition-colors">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-white">{item.marca} {item.modelo}</p>
-                          <p className="text-xs text-slate-400">IMEI: {item.imei || 'N/A'}</p>
-                          <p className="text-xs text-red-400 font-medium mt-1 break-words">Motivo: {item.motivoSaida}</p>
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <p className="font-bold text-white text-sm">{item.marca} {item.modelo}</p>
+                            {item.capacidade && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-bold">
+                                {item.capacidade}
+                              </span>
+                            )}
+                            {item.cor && (
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                • {item.cor}
+                              </span>
+                            )}
+                            {item.tipoSaida === 'varejo' && (
+                              <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                🛒 Saída Varejo
+                              </span>
+                            )}
+                            {item.tipoSaida === 'atacado' && (
+                              <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                📦 Saída Atacado
+                              </span>
+                            )}
+                            {item.tipoSaida === 'outro' && (
+                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-700/50 text-slate-300 border border-slate-600">
+                                🔧 Baixa Manual
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-slate-400">
+                            IMEI: <strong className="text-slate-300">{item.imei || 'N/A'}</strong>
+                            {item.cliente && (
+                              <span className="ml-3 text-slate-300">
+                                Destino / Comprador: <strong className="text-white">{item.cliente}</strong>
+                              </span>
+                            )}
+                          </p>
+
+                          <p className="text-xs text-slate-300 font-medium mt-1 break-words">
+                            Detalhe: <span className="text-slate-400">{item.motivoSaida}</span>
+                          </p>
+
                           {item.custo !== undefined && (
                             <p className="text-xs text-slate-400 mt-0.5">
                               Custo Cadastrado: <strong className="text-slate-200">R$ {(item.custo || 0).toFixed(2).replace('.', ',')}</strong>
                             </p>
                           )}
                         </div>
+
                         <div className="text-right shrink-0 min-w-[180px] space-y-1.5">
                           <p className="text-xs text-slate-400">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
                           <div className="flex items-center gap-2 justify-end">
@@ -2946,6 +3112,7 @@ export function AparelhosTab() {
           onClose={() => setAparelhoParaVenda(null)}
           aparelho={aparelhoParaVenda}
           lojaId={usuario?.lojaId || (usuario as any)?.loja_id || null}
+          tipoInicial="varejo"
           onSuccess={fetchAparelhos}
         />
       </ModalPortal>

@@ -71,11 +71,11 @@ export function MarcarVendidoModal({
   // Preenche dados padrão ao abrir para um aparelho
   useEffect(() => {
     if (isOpen && aparelho) {
-      const tipo = tipoInicial || ((aparelho as any).precoAtacado ? 'atacado' : 'varejo');
+      const tipo = tipoInicial || 'varejo';
       setTipoVenda(tipo);
       
       const precoPadrao = tipo === 'atacado' 
-        ? ((aparelho as any).precoAtacado || aparelho.preco || 0)
+        ? ((aparelho as any).precoAtacado || (aparelho as any).preco_atacado || aparelho.preco || 0)
         : (aparelho.preco || 0);
 
       setValorVenda(precoPadrao > 0 ? String(precoPadrao) : '');
@@ -203,7 +203,25 @@ export function MarcarVendidoModal({
         lojaId: lojaId || null,
       };
 
-      await supabase.from('vendas').insert([payloadVenda]);
+      let { error: errVenda } = await supabase.from('vendas').insert([payloadVenda]);
+      if (errVenda) {
+        console.warn('Tentando inserção de venda em formato compatível com o schema:', errVenda);
+        const {
+          lojaId: _lid,
+          saldoDevedor: _sd,
+          valorPago: _vp,
+          dataVencimento: _dv,
+          taxaJurosMensal: _tjm,
+          valorJuros: _vj,
+          historicoAbatimentos: _ha,
+          ...payloadCompativel
+        } = payloadVenda;
+
+        const resFallback = await supabase.from('vendas').insert([payloadCompativel]);
+        if (resFallback.error) {
+          console.error('Falha no fallback de inserção na tabela vendas:', resFallback.error);
+        }
+      }
 
       salvarCompradorRecente(compradorFinal);
 

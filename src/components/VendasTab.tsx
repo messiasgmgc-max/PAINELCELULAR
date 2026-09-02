@@ -634,13 +634,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       : undefined;
 
   useEffect(() => {
-    if (usuario?.lojaId) {
-      carregarVendas();
-    }
+    carregarVendas();
     fetchClientes();
     fetchAparelhos();
     fetchTecnicos();
-  }, [usuario?.lojaId]);
+  }, [usuario?.lojaId, (usuario as any)?.loja_id]);
 
   useEffect(() => {
     if (!isClient || !isVendasRoute) return;
@@ -666,35 +664,80 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     else nextParams.delete('dashboard');
 
     const currentQuery = searchParams.toString();
+    let actionParam: string | null = null;
+
+    if (showPOS) {
+      actionParam = 'pdv';
+    } else if (showNovoCliente) {
+      actionParam = 'novo-cliente';
+    } else if (showNovoAparelho) {
+      actionParam = 'novo-aparelho';
+    } else if (showBarcodeScanner) {
+      actionParam = 'barcode-scanner';
+    } else if (showImportarPedidoModal) {
+      actionParam = 'importar-pedido';
+    } else if (showDeleteAllModal) {
+      actionParam = 'excluir-todas-vendas';
+    } else if (editingId) {
+      actionParam = 'editar-venda';
+    }
+
+    if (showSalesDashboard) {
+      panelParam = 'metricas';
+    } else if (mostrarFiltrosAvancados) {
+      panelParam = 'filtros-avancados';
+    }
+
+    if (panelParam) {
+      nextParams.set('painel', panelParam);
+    } else {
+      nextParams.delete('painel');
+    }
+
+    if (actionParam) {
+      nextParams.set('acao', actionParam);
+    } else {
+      nextParams.delete('acao');
+    }
+
+    const currentUrl = `${pathname}?${searchParams.toString()}`;
     const nextQuery = nextParams.toString();
-
-    if (nextQuery === currentQuery) return;
-
     const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-    window.history.replaceState(window.history.state, '', nextUrl);
+
+    if (currentUrl !== nextUrl) {
+      router.replace(nextUrl, { scroll: false });
+    }
   }, [
     isClient,
     isVendasRoute,
     pathname,
+    router,
     searchParams,
-    showPOS,
-    closingPOS,
-    showNovoCliente,
-    showNovoAparelho,
+    editingId,
+    mostrarFiltrosAvancados,
+    showBarcodeScanner,
     showDeleteAllModal,
+    showNovoAparelho,
+    showNovoCliente,
+    showPOS,
     showImportarPedidoModal,
     showSalesDashboard,
   ]);
 
   const carregarVendas = async () => {
-    if (!usuario?.lojaId) return;
+    const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
     try {
       setLoading(true);
-      const { data, error } = await supabase
+      let query = supabase
         .from('vendas')
         .select('*')
-        .eq('loja_id', usuario.lojaId)
         .order('dataPagamento', { ascending: false });
+
+      if (targetLojaId) {
+        query = query.or(`loja_id.eq.${targetLojaId},lojaId.eq.${targetLojaId},loja_id.is.null`);
+      }
+
+      const { data, error } = await query;
       
       if (error) throw error;
       const vendasData = data || [];
