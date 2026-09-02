@@ -286,6 +286,86 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
+  // Estados de Trade-In / Aparelho na Troca
+  interface TradeInVendaInfo {
+    avaliacaoId?: string;
+    modelo: string;
+    capacidade: string;
+    valor: number;
+    cor?: string;
+    imei?: string;
+    bateria?: number;
+  }
+  const [tradeInVenda, setTradeInVenda] = useState<TradeInVendaInfo | null>(null);
+  const [showTradeInModal, setShowTradeInModal] = useState(false);
+  const [avaliacoesUpgradeDisponiveis, setAvaliacoesUpgradeDisponiveis] = useState<any[]>([]);
+  const [carregandoAvaliacoesTradeIn, setCarregandoAvaliacoesTradeIn] = useState(false);
+  const [abaModalTradeIn, setAbaModalTradeIn] = useState<'avaliacoes' | 'manual'>('avaliacoes');
+
+  // Formulário manual de Trade-In
+  const [modeloTradeInManual, setModeloTradeInManual] = useState('iPhone 12');
+  const [capacidadeTradeInManual, setCapacidadeTradeInManual] = useState('128GB');
+  const [valorTradeInManual, setValorTradeInManual] = useState<number>(1500);
+  const [imeiTradeInManual, setImeiTradeInManual] = useState('');
+  const [bateriaTradeInManual, setBateriaTradeInManual] = useState<number>(85);
+
+  const carregarAvaliacoesParaTradeIn = async () => {
+    try {
+      setCarregandoAvaliacoesTradeIn(true);
+      const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
+      let q = supabase
+        .from('avaliacoes_upgrade')
+        .select('*')
+        .in('status', ['pendente', 'em_negociacao', 'aprovado'])
+        .order('created_at', { ascending: false });
+
+      if (targetLojaId) {
+        q = q.or(`loja_id.eq.${targetLojaId},loja_id.is.null`);
+      }
+
+      const { data, error } = await q;
+      if (!error && data) {
+        setAvaliacoesUpgradeDisponiveis(data);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar avaliações para trade-in:', e);
+    } finally {
+      setCarregandoAvaliacoesTradeIn(false);
+    }
+  };
+
+  const handleAbrirModalTradeIn = () => {
+    carregarAvaliacoesParaTradeIn();
+    setShowTradeInModal(true);
+  };
+
+  const aplicarTradeInNaVenda = (info: TradeInVendaInfo) => {
+    setTradeInVenda(info);
+
+    setPosPagamento((prev) => {
+      const temTradeIn = prev.pagamentos.some((p) => p.metodo === ('trade_in' as any));
+      if (temTradeIn) {
+        return {
+          ...prev,
+          pagamentos: prev.pagamentos.map((p) =>
+            p.metodo === ('trade_in' as any) ? { ...p, valor: info.valor } : p
+          ),
+        };
+      } else {
+        return {
+          ...prev,
+          pagamentos: [
+            ...prev.pagamentos,
+            createPagamentoItem({ metodo: 'trade_in' as any, valor: info.valor, parcelas: 1 }),
+          ],
+        };
+      }
+    });
+
+    setShowTradeInModal(false);
+    toast.success(`Aparelho na troca (${info.modelo} ${info.capacidade}) aplicado! Entrada: R$ ${info.valor.toFixed(2)}`);
+  };
+
   const selecionarAparelhoPorCodigo = (codeScanned: string) => {
     const codeClean = codeScanned.trim().toLowerCase();
     const aparelhoEncontrado = aparelhos.find(a => {
@@ -1199,6 +1279,41 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         await fetchAparelhos();
       }
 
+      // Entrada automática no Estoque do aparelho recebido na troca (Trade-In / Upgrade)
+      const temPagamentoTradeIn = posPagamento.pagamentos.some(p => p.metodo === ('trade_in' as any));
+      if (temPagamentoTradeIn && tradeInVenda && tradeInVenda.valor > 0) {
+        try {
+          const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
+          await supabase.from('aparelhos').insert([{
+            modelo: tradeInVenda.modelo,
+            capacidade: tradeInVenda.capacidade,
+            cor: tradeInVenda.cor || 'Preto',
+            imei: tradeInVenda.imei || null,
+            bateria: tradeInVenda.bateria || 85,
+            condicao: 'seminovo',
+            custo: tradeInVenda.valor,
+            preco: Math.round(tradeInVenda.valor * 1.30),
+            precoAtacado: Math.round(tradeInVenda.valor * 1.15),
+            status: 'disponivel',
+            ativo: true,
+            loja_id: targetLojaId || null,
+            observacoes: `Recebido como Trade-In na venda #${vendaSalva?.id ? String(vendaSalva.id).slice(-6).toUpperCase() : 'NOVA'}`
+          }]);
+
+          if (tradeInVenda.avaliacaoId) {
+            await supabase.from('avaliacoes_upgrade').update({
+              status: 'convertido_venda',
+              venda_id: vendaSalva?.id || null,
+            }).eq('id', tradeInVenda.avaliacaoId);
+          }
+
+          toast.success(`Aparelho na troca (${tradeInVenda.modelo}) entrou no Estoque Geral!`);
+          await fetchAparelhos();
+        } catch (errTradeIn) {
+          console.warn('Aviso ao registrar aparelho de troca no estoque:', errTradeIn);
+        }
+      }
+
        
       const clienteVenda = clientes.find(c => c.id === posDados.clienteId);
       
@@ -1330,6 +1445,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     setCart([]);
     setPosItem({ quantidade: 1, valorInterno: 0, valorExibir: 0, desconto: 0, tipoDesconto: 'R$', observacao: '' });
     setPosPagamento(createInitialPosPagamento());
+    setTradeInVenda(null);
     setEditingId(null);
   };
 
@@ -2688,11 +2804,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     </h3>
                   </div>
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <label className="text-xs text-gray-500 ml-1">Formas de Pagamento</label>
-                      <Button type="button" variant="outline" size="sm" onClick={handleAddPagamento} className="h-8 gap-2">
-                        <Plus className="h-4 w-4" /> Adicionar forma
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleAbrirModalTradeIn}
+                          className="h-8 gap-1.5 border-emerald-500/40 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 font-bold text-xs rounded-xl cursor-pointer"
+                        >
+                          <Repeat className="h-3.5 w-3.5" /> + Aparelho na Troca
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={handleAddPagamento} className="h-8 gap-1.5">
+                          <Plus className="h-4 w-4" /> Adicionar forma
+                        </Button>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
@@ -2710,6 +2837,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                               <option value="cartao_debito">Cartão Débito</option>
                               <option value="pix">PIX</option>
                               <option value="boleto">Boleto</option>
+                              <option value="trade_in">🔁 Aparelho na Troca (Upgrade)</option>
                             </select>
                           </div>
                           <div>
@@ -2746,6 +2874,29 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                               <X className="h-4 w-4" />
                             </Button>
                           </div>
+
+                          {pagamento.metodo === ('trade_in' as any) && (
+                            <div className="col-span-full pt-1">
+                              <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between gap-2 text-xs">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Repeat className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  <span className="text-emerald-300 font-bold truncate">
+                                    {tradeInVenda
+                                      ? `📱 ${tradeInVenda.modelo} ${tradeInVenda.capacidade} (Entrada: R$ ${tradeInVenda.valor.toFixed(2)})`
+                                      : 'Nenhum aparelho configurado para a troca'}
+                                  </span>
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={handleAbrirModalTradeIn}
+                                  className="h-7 px-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] rounded-lg shrink-0 cursor-pointer"
+                                >
+                                  {tradeInVenda ? 'Alterar' : 'Configurar Troca'}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2794,6 +2945,185 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </Button>
               </div>
             </div>
+
+            {/* MODAL DE TRADE-IN / UPGRADE NA VENDA */}
+            {showTradeInModal && (
+              <div className="fixed inset-0 z-[80] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-lg w-full space-y-4 shadow-2xl animate-in zoom-in-95">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                        <Repeat className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-extrabold text-white">Inserir Aparelho na Troca (Trade-In)</h3>
+                        <p className="text-xs text-slate-400">Abater valor de aparelho usado como entrada nesta venda</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowTradeInModal(false)}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg text-lg cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Sub-abas do Modal */}
+                  <div className="flex items-center gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setAbaModalTradeIn('avaliacoes')}
+                      className={cn(
+                        "flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer",
+                        abaModalTradeIn === 'avaliacoes' ? "bg-cyan-500 text-slate-950 font-black" : "text-slate-400 hover:text-white"
+                      )}
+                    >
+                      Propostas Salvas ({avaliacoesUpgradeDisponiveis.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAbaModalTradeIn('manual')}
+                      className={cn(
+                        "flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer",
+                        abaModalTradeIn === 'manual' ? "bg-cyan-500 text-slate-950 font-black" : "text-slate-400 hover:text-white"
+                      )}
+                    >
+                      Informar na Hora (Manual)
+                    </button>
+                  </div>
+
+                  {/* ABA 1: Propostas Salvas */}
+                  {abaModalTradeIn === 'avaliacoes' && (
+                    <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
+                      {carregandoAvaliacoesTradeIn ? (
+                        <div className="p-8 text-center text-xs text-slate-400">Carregando avaliações...</div>
+                      ) : avaliacoesUpgradeDisponiveis.length === 0 ? (
+                        <div className="p-8 text-center bg-slate-950/60 border border-slate-800 rounded-2xl space-y-1">
+                          <p className="text-xs font-bold text-slate-300">Nenhuma proposta de upgrade pendente</p>
+                          <p className="text-[11px] text-slate-500">Alterne para a aba "Informar na Hora" para cadastrar o aparelho trazido pelo cliente.</p>
+                        </div>
+                      ) : (
+                        avaliacoesUpgradeDisponiveis.map((av) => (
+                          <div
+                            key={av.id}
+                            className="p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-3 hover:border-slate-700 transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-extrabold text-xs text-white truncate">{av.cliente_nome}</span>
+                                <span className="text-[10px] font-mono text-cyan-400 font-bold">{av.protocolo}</span>
+                              </div>
+                              <p className="text-xs font-bold text-slate-300">{av.modelo} {av.capacidade}</p>
+                              <span className="text-[11px] text-emerald-400 font-extrabold">
+                                Valor: R$ {(av.valor_aprovado || av.valor_avaliado || 0).toFixed(2)}
+                              </span>
+                            </div>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => aplicarTradeInNaVenda({
+                                avaliacaoId: av.id,
+                                modelo: av.modelo,
+                                capacidade: av.capacidade,
+                                valor: av.valor_aprovado || av.valor_avaliado || 0,
+                                bateria: av.bateria_saude || 85,
+                                cor: av.cor || 'Preto',
+                              })}
+                              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl h-8 px-3 shrink-0 cursor-pointer"
+                            >
+                              Usar na Troca ➔
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* ABA 2: Manual */}
+                  {abaModalTradeIn === 'manual' && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 block mb-1">Modelo do Aparelho</label>
+                          <input
+                            type="text"
+                            placeholder="Ex: iPhone 12 Pro"
+                            value={modeloTradeInManual}
+                            onChange={(e) => setModeloTradeInManual(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 block mb-1">Capacidade</label>
+                          <input
+                            type="text"
+                            placeholder="Ex: 128GB"
+                            value={capacidadeTradeInManual}
+                            onChange={(e) => setCapacidadeTradeInManual(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="col-span-2">
+                          <label className="text-[11px] font-bold text-slate-400 block mb-1">Valor de Entrada / Troca (R$)</label>
+                          <input
+                            type="number"
+                            placeholder="0.00"
+                            value={valorTradeInManual}
+                            onChange={(e) => setValorTradeInManual(parseFloat(e.target.value) || 0)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-emerald-400 font-extrabold outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-400 block mb-1">Bateria (%)</label>
+                          <input
+                            type="number"
+                            value={bateriaTradeInManual}
+                            onChange={(e) => setBateriaTradeInManual(parseInt(e.target.value) || 85)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-400 block mb-1">IMEI ou Número de Série (Opcional)</label>
+                        <input
+                          type="text"
+                          placeholder="Para já cadastrar no estoque..."
+                          value={imeiTradeInManual}
+                          onChange={(e) => setImeiTradeInManual(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                        />
+                      </div>
+
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (!modeloTradeInManual.trim() || valorTradeInManual <= 0) {
+                            toast.error('Informe o modelo e um valor válido de troca.');
+                            return;
+                          }
+                          aplicarTradeInNaVenda({
+                            modelo: modeloTradeInManual.trim(),
+                            capacidade: capacidadeTradeInManual.trim(),
+                            valor: valorTradeInManual,
+                            bateria: bateriaTradeInManual,
+                            imei: imeiTradeInManual.trim(),
+                          });
+                        }}
+                        className="w-full bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-black text-xs py-2.5 rounded-xl cursor-pointer"
+                      >
+                        Confirmar Aparelho de Entrada (R$ {valorTradeInManual.toFixed(2)}) ➔
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>,
           document.body
         )}

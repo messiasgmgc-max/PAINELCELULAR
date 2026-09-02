@@ -218,8 +218,8 @@ export interface Venda {
   dataVencimento?: string;
   taxaJurosMensal?: number;
   valorJuros?: number;
-  status: 'pendente' | 'pago' | 'parcial' | 'cancelado';
-  metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto' | 'fiado';
+  status: 'pago' | 'parcial' | 'pendente' | 'cancelado';
+  metodo: 'dinheiro' | 'cartao_credito' | 'cartao_debito' | 'pix' | 'boleto' | 'fiado' | 'trade_in';
   valorPago?: number;
   saldoDevedor?: number;
   historicoAbatimentos?: AbatimentoFiado[];

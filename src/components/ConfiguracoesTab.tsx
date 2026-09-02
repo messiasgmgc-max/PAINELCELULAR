@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus } from 'lucide-react';
+import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
 import { useColorTheme, ColorTheme } from '@/components/ThemeProvider';
 import { useTecnicos } from '@/hooks/useTecnicos';
+import { toast } from 'sonner';
 
 interface Configuracao {
   id: string;
@@ -481,6 +482,68 @@ export function ConfiguracoesTab() {
                       <p className="text-sm text-muted-foreground italic">Ninguém cadastrado ainda.</p>
                     )}
                   </div>
+                </div>
+              </GlassCard>
+
+              {/* Link Público da Calculadora de Aparelhos & Trade-In Upgrade */}
+              <GlassCard className="border-2 border-emerald-500/30 bg-emerald-950/10 dark:bg-emerald-950/20 rounded-3xl mt-4 sm:mt-6">
+                <div className="pb-4 border-b border-white/10 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-emerald-400 flex items-center gap-2">
+                      <Repeat className="w-5 h-5 text-emerald-400" /> Calculadora de Aparelhos & Trade-In Upgrade (Pública)
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-400">
+                      Link exclusivo da sua loja para clientes avaliarem celulares usados e enviarem propostas diretamente para seu painel.
+                    </p>
+                  </div>
+                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-xs font-black uppercase w-fit">
+                    Ativo
+                  </Badge>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="text-xs font-mono text-cyan-300 truncate select-all">
+                        {typeof window !== 'undefined' ? `${window.location.origin}/avaliar/${usuario?.lojaId || 'principal'}` : ''}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (typeof window !== 'undefined') {
+                            const url = `${window.location.origin}/avaliar/${usuario?.lojaId || 'principal'}`;
+                            navigator.clipboard.writeText(url);
+                            toast.success('Link público copiado com sucesso!');
+                          }
+                        }}
+                        className="bg-emerald-500 text-slate-950 hover:bg-emerald-400 font-bold text-xs rounded-xl gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copiar Link
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (typeof window !== 'undefined') {
+                            const url = `${window.location.origin}/avaliar/${usuario?.lojaId || 'principal'}`;
+                            window.open(url, '_blank');
+                          }
+                        }}
+                        className="border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold gap-1.5 cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-cyan-400" /> Abrir
+                      </Button>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-400">
+                    💡 <strong>Dica:</strong> Para gerenciar os preços de compra que sua loja paga em cada iPhone, conferir as propostas recebidas de clientes ou fazer simulações no balcão, acesse a aba <strong>Calculadora Upgrade</strong> no menu lateral.
+                  </p>
                 </div>
               </GlassCard>
 

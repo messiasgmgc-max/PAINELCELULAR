@@ -20,6 +20,7 @@ import { WhatsappTab } from '@/components/WhatsappTab';
 import { ConfiguracoesTab } from '@/components/ConfiguracoesTab';
 import { MobileNav } from '@/components/MobileNav';
 import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
+import { CalculadoraUpgradeTab } from '@/components/CalculadoraUpgradeTab';
 import { EtiquetasTab } from '@/components/EtiquetasTab';
 import { AtacadoTab } from '@/components/AtacadoTab';
 import SuperAdminTab from '@/components/SuperAdminTab';
@@ -62,6 +63,7 @@ export default function Home() {
       'vendas',
       'atacado',
       'taxas-maquininha',
+      'calculadora-upgrade',
       'clientes',
       'aparelhos',
       'pecas',
@@ -123,6 +125,8 @@ export default function Home() {
       'aparelhos': 'aparelhos',
       'ordens': 'orders',
       'taxas_maquininha': 'taxas-maquininha',
+      'calculadora_upgrade': 'calculadora-upgrade',
+      'calculadora-upgrade': 'calculadora-upgrade',
       'tecnicos': 'tecnicos',
       'pecas': 'pecas',
       'clientes': 'clientes',
@@ -196,6 +200,8 @@ export default function Home() {
         return <VendasTab isSidebarCollapsed={isSidebarCollapsed} setSidebarCollapsed={setIsSidebarCollapsed} />;
       case 'taxas-maquininha':
         return <TaxasMaquininhaTab />;
+      case 'calculadora-upgrade':
+        return <CalculadoraUpgradeTab />;
       case 'whatsapp':
         return <WhatsappTab />;
       case 'configuracoes':
