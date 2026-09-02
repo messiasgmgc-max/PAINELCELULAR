@@ -50,7 +50,7 @@ import {
   RespostaCondicaoUpgrade
 } from '@/lib/upgradeEngine';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, sortModelosCronologico } from '@/lib/utils';
 
 export function CalculadoraUpgradeTab() {
   const { usuario } = useAuth();
@@ -72,8 +72,8 @@ export function CalculadoraUpgradeTab() {
 
   const { motoboys, cadastrarMotoboy, excluirMotoboy } = useMotoboys(targetLojaId);
 
-  // Sub-abas: 'leads' | 'vistorias' | 'balcao' | 'tabela' | 'divulgacao'
-  const [subAba, setSubAba] = useState<'leads' | 'vistorias' | 'balcao' | 'tabela' | 'divulgacao'>('leads');
+  // Sub-abas: 'leads' | 'vistorias' | 'motoboys' | 'balcao' | 'tabela' | 'divulgacao'
+  const [subAba, setSubAba] = useState<'leads' | 'vistorias' | 'motoboys' | 'balcao' | 'tabela' | 'divulgacao'>('leads');
 
   // Filtros de Leads
   const [buscaLead, setBuscaLead] = useState('');
@@ -113,11 +113,101 @@ export function CalculadoraUpgradeTab() {
   const [regrasEditaveis, setRegrasEditaveis] = useState(regrasDeducao);
   const [modeloEditor, setModeloEditor] = useState<string>('iPhone 13');
 
+  // Adicionar Novo Modelo na Tabela
+  const [modalNovoModeloAberto, setModalNovoModeloAberto] = useState(false);
+  const [novoModeloNome, setNovoModeloNome] = useState('');
+  const [novaCapacidadeInput, setNovaCapacidadeInput] = useState('128GB');
+  const [novoPrecoCapacidadeInput, setNovoPrecoCapacidadeInput] = useState<number>(2000);
+  const [capacidadesNovoModelo, setCapacidadesNovoModelo] = useState<{ [cap: string]: number }>({
+    '128GB': 2000,
+    '256GB': 2300,
+  });
+
+  // Lista dinâmica ordenada de modelos disponíveis
+  const modelosDisponiveis = useMemo(() => {
+    const keys = Object.keys(tabelaEditavel);
+    if (keys.length === 0) return MODELOS_UPGRADE_DISPONIVEIS;
+    return keys.sort((a, b) => sortModelosCronologico(a, b, 'antigo_para_novo'));
+  }, [tabelaEditavel]);
+
   // Sincroniza tabela editável quando as configs forem carregadas
   React.useEffect(() => {
     setTabelaEditavel(tabelaPrecos);
     setRegrasEditaveis(regrasDeducao);
   }, [tabelaPrecos, regrasDeducao]);
+
+  const handleAdicionarNovoModelo = () => {
+    if (!novoModeloNome.trim()) {
+      toast.error('Informe o nome do novo modelo (ex: iPhone 17, Samsung S24, etc.).');
+      return;
+    }
+    const nomeLimpo = novoModeloNome.trim();
+    if (tabelaEditavel[nomeLimpo]) {
+      toast.error('Este modelo já existe na tabela.');
+      return;
+    }
+
+    const novasCapacidades = { ...capacidadesNovoModelo };
+    if (Object.keys(novasCapacidades).length === 0) {
+      novasCapacidades['128GB'] = 2000;
+    }
+
+    const novaTabela = {
+      ...tabelaEditavel,
+      [nomeLimpo]: novasCapacidades,
+    };
+
+    setTabelaEditavel(novaTabela);
+    setModeloEditor(nomeLimpo);
+    setModalNovoModeloAberto(false);
+    setNovoModeloNome('');
+    salvarConfiguracoesPrecos(novaTabela, regrasEditaveis);
+    toast.success(`Modelo "${nomeLimpo}" adicionado com sucesso!`);
+  };
+
+  const handleExcluirModelo = (modeloParaExcluir: string) => {
+    if (window.confirm(`Tem certeza que deseja remover o modelo "${modeloParaExcluir}" da tabela de recompra?`)) {
+      const novaTabela = { ...tabelaEditavel };
+      delete novaTabela[modeloParaExcluir];
+      setTabelaEditavel(novaTabela);
+      const restantes = Object.keys(novaTabela);
+      if (restantes.length > 0) {
+        setModeloEditor(restantes[0]);
+      }
+      salvarConfiguracoesPrecos(novaTabela, regrasEditaveis);
+      toast.success(`Modelo "${modeloParaExcluir}" removido da tabela.`);
+    }
+  };
+
+  const handleAdicionarCapacidadeAoModelo = (cap: string, preco: number) => {
+    if (!cap.trim() || preco <= 0) {
+      toast.error('Informe uma capacidade e um preço válido.');
+      return;
+    }
+    const capLimpa = cap.trim().toUpperCase();
+    const novaTabela = {
+      ...tabelaEditavel,
+      [modeloEditor]: {
+        ...(tabelaEditavel[modeloEditor] || {}),
+        [capLimpa]: preco,
+      },
+    };
+    setTabelaEditavel(novaTabela);
+    salvarConfiguracoesPrecos(novaTabela, regrasEditaveis);
+    toast.success(`Capacidade ${capLimpa} adicionada ao ${modeloEditor}!`);
+  };
+
+  const handleRemoverCapacidadeDoModelo = (cap: string) => {
+    const caps = { ...(tabelaEditavel[modeloEditor] || {}) };
+    delete caps[cap];
+    const novaTabela = {
+      ...tabelaEditavel,
+      [modeloEditor]: caps,
+    };
+    setTabelaEditavel(novaTabela);
+    salvarConfiguracoesPrecos(novaTabela, regrasEditaveis);
+    toast.success(`Capacidade ${cap} removida de ${modeloEditor}.`);
+  };
 
   // Link público da loja
   const publicUrl = useMemo(() => {
@@ -285,7 +375,8 @@ export function CalculadoraUpgradeTab() {
       <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl w-fit flex-wrap">
         {[
           { id: 'leads', label: `Propostas Recebidas (${metricas.pendentes})`, icon: <MessageCircle className="w-4 h-4" /> },
-          { id: 'vistorias', label: `Coletas Motoboys (${vistorias.length})`, icon: <Truck className="w-4 h-4" /> },
+          { id: 'vistorias', label: `Coletas Realizadas (${vistorias.length})`, icon: <Truck className="w-4 h-4" /> },
+          { id: 'motoboys', label: `🛵 Cadastrar Motoboys (${motoboys.length})`, icon: <User className="w-4 h-4" /> },
           { id: 'balcao', label: 'Simulador de Balcão', icon: <Smartphone className="w-4 h-4" /> },
           { id: 'tabela', label: 'Tabela de Preços & Regras', icon: <Sliders className="w-4 h-4" /> },
           { id: 'divulgacao', label: 'Link Público & QR Code', icon: <QrCode className="w-4 h-4" /> },
@@ -470,6 +561,221 @@ export function CalculadoraUpgradeTab() {
         </div>
       )}
 
+      {/* ── CONTEÚDO DA SUB-ABA: CADASTRO E GESTÃO DE MOTOBOYS ── */}
+      {subAba === 'motoboys' && (
+        <div className="space-y-6">
+          {/* Banner de Instrução e Link de Acesso do Motoboy */}
+          <GlassCard className="p-6 bg-gradient-to-r from-cyan-950/40 via-slate-900 to-slate-950 border-cyan-500/30 rounded-3xl space-y-4 shadow-xl">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-xs font-black uppercase text-cyan-400 tracking-wider flex items-center gap-1.5">
+                  <Truck className="w-4 h-4" /> Equipe de Coletas em Campo
+                </span>
+                <h3 className="text-xl font-black text-white">Cadastre os Motoboys da Sua Loja</h3>
+                <p className="text-xs text-slate-400 max-w-xl">
+                  Ao cadastrar os motoboys aqui, o nome deles aparece automaticamente com <strong>botões de 1 toque no App do Motoboy</strong> para eles realizarem vistorias de aparelhos com 4 fotos e assinatura na rua sem precisar escrever!
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const url = `${window.location.origin}/coleta/${targetLojaId}`;
+                    navigator.clipboard.writeText(url);
+                    toast.success('Link de Coleta copiado para o WhatsApp dos motoboys!');
+                  }}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 cursor-pointer shadow-lg shadow-cyan-950/40"
+                >
+                  <Copy className="w-3.5 h-3.5" /> Copiar Link para Motoboys
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    window.open(`${window.location.origin}/coleta/${targetLojaId}`, '_blank');
+                  }}
+                  className="border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold gap-1.5 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-cyan-400" /> Abrir no Celular
+                </Button>
+              </div>
+            </div>
+
+            {/* Caixa com o link visível */}
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-2xl flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 truncate text-cyan-300 font-mono">
+                <Smartphone className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span className="truncate">{typeof window !== 'undefined' ? `${window.location.origin}/coleta/${targetLojaId}` : ''}</span>
+              </div>
+              <span className="text-[11px] text-slate-500 shrink-0 hidden sm:inline">Envie este link no grupo de entregas</span>
+            </div>
+          </GlassCard>
+
+          {/* Formulário de Cadastro do Motoboy */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+            <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+              <Plus className="w-4 h-4 text-cyan-400" /> Adicionar Novo Motoboy à Equipe
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-400">Nome do Motoboy *</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Carlos Silva"
+                  value={novoMotoboyNome}
+                  onChange={(e) => setNovoMotoboyNome(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-400">WhatsApp / Celular</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 31999999999"
+                  value={novoMotoboyTel}
+                  onChange={(e) => setNovoMotoboyTel(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-400">Veículo / Modelo</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Honda CG 160 Fan"
+                  value={novoMotoboyVeiculo}
+                  onChange={(e) => setNovoMotoboyVeiculo(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-400">Placa (Opcional)</label>
+                <input
+                  type="text"
+                  placeholder="Ex: ABC-1234"
+                  value={novoMotoboyPlaca}
+                  onChange={(e) => setNovoMotoboyPlaca(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-xs text-white outline-none uppercase"
+                />
+              </div>
+
+              <div className="flex items-end">
+                <Button
+                  onClick={async () => {
+                    if (!novoMotoboyNome.trim()) {
+                      toast.error('Informe o nome do motoboy.');
+                      return;
+                    }
+                    const ok = await cadastrarMotoboy({
+                      nome: novoMotoboyNome,
+                      telefone: novoMotoboyTel,
+                      veiculo: novoMotoboyVeiculo,
+                      placa: novoMotoboyPlaca,
+                    });
+                    if (ok) {
+                      setNovoMotoboyNome('');
+                      setNovoMotoboyTel('');
+                      setNovoMotoboyPlaca('');
+                      toast.success('Motoboy cadastrado com sucesso!');
+                    }
+                  }}
+                  className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs rounded-xl h-9 cursor-pointer shadow-md"
+                >
+                  <Plus className="w-4 h-4" /> Cadastrar Motoboy
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Cards dos Motoboys Ativos */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
+                Motoboys Cadastrados ({motoboys.length})
+              </h4>
+              <span className="text-[11px] text-slate-500">Aparecem imediatamente para seleção no app mobile</span>
+            </div>
+
+            {motoboys.length === 0 ? (
+              <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-3xl space-y-2">
+                <Truck className="w-8 h-8 text-slate-600 mx-auto" />
+                <p className="text-sm font-bold text-slate-300">Nenhum motoboy cadastrado ainda</p>
+                <p className="text-xs text-slate-500">Utilize o formulário acima para cadastrar seu primeiro entregador.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {motoboys.map((m) => {
+                  const coletasDoMotoboy = vistorias.filter((v) => v.motoboy_id === m.id || v.motoboy_nome === m.nome).length;
+                  return (
+                    <div
+                      key={m.id}
+                      className="p-5 bg-slate-900 border border-slate-800 hover:border-cyan-500/50 rounded-3xl space-y-4 transition-all shadow-md group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 text-lg shadow-sm">
+                            🛵
+                          </div>
+                          <div>
+                            <h5 className="text-sm font-extrabold text-white group-hover:text-cyan-300 transition-colors">
+                              {m.nome}
+                            </h5>
+                            <span className="text-[11px] text-slate-400 font-medium">
+                              {m.veiculo || 'Moto'} {m.placa ? `• ${m.placa}` : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px] font-black uppercase">
+                          Ativo
+                        </Badge>
+                      </div>
+
+                      <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-2xl flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Coletas Registradas:</span>
+                        <span className="font-extrabold text-cyan-400">{coletasDoMotoboy} vistoria{coletasDoMotoboy !== 1 ? 's' : ''}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 gap-2">
+                        {m.telefone ? (
+                          <a
+                            href={`https://wa.me/55${m.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${m.nome}! Segue o link de coleta de celulares da loja: ${window.location.origin}/coleta/${targetLojaId}`)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 py-1.5 px-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-[11px] font-bold rounded-xl text-center flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Phone className="w-3.5 h-3.5" /> Chamar WhatsApp
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-slate-600">Sem telefone cadastrado</span>
+                        )}
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (window.confirm(`Tem certeza que deseja remover o motoboy ${m.nome}?`)) {
+                              excluirMotoboy(m.id);
+                            }
+                          }}
+                          className="border-red-900/40 text-red-400 hover:bg-red-900/30 text-[11px] font-bold rounded-xl h-8 px-3 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Remover
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── CONTEÚDO DA SUB-ABA 2: SIMULADOR DE BALCÃO ── */}
       {subAba === 'balcao' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -488,13 +794,13 @@ export function CalculadoraUpgradeTab() {
             {/* Modelo e Capacidade */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">Modelo do iPhone</label>
+                <label className="text-xs font-bold text-slate-300 block mb-1">Modelo do Aparelho</label>
                 <select
                   value={modeloBalcao}
                   onChange={(e) => setModeloBalcao(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2.5 text-xs text-white outline-none"
                 >
-                  {MODELOS_UPGRADE_DISPONIVEIS.map((m) => (
+                  {modelosDisponiveis.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
@@ -699,15 +1005,33 @@ export function CalculadoraUpgradeTab() {
 
           {/* Selecionar Modelo para Editar Preços */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2 overflow-x-auto pb-2">
-              {MODELOS_UPGRADE_DISPONIVEIS.map((m) => (
+            {/* Header da lista de modelos com botão de Adicionar */}
+            <div className="flex items-center justify-between gap-2 flex-wrap pb-1">
+              <span className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Smartphone className="w-3.5 h-3.5 text-cyan-400" /> Modelos Cadastrados na Tabela ({modelosDisponiveis.length}):
+              </span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setCapacidadesNovoModelo({ '128GB': 2000, '256GB': 2300 });
+                  setNovoModeloNome('');
+                  setModalNovoModeloAberto(true);
+                }}
+                className="bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 h-8 px-3 cursor-pointer shadow-md"
+              >
+                <Plus className="w-3.5 h-3.5" /> + Adicionar Novo Modelo
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
+              {modelosDisponiveis.map((m) => (
                 <button
                   key={m}
                   onClick={() => setModeloEditor(m)}
                   className={cn(
-                    "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer",
+                    "px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer shrink-0",
                     modeloEditor === m
-                      ? "bg-cyan-500 text-slate-950 font-black"
+                      ? "bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-950/40"
                       : "bg-slate-800 text-slate-400 hover:text-white"
                   )}
                 >
@@ -717,15 +1041,41 @@ export function CalculadoraUpgradeTab() {
             </div>
 
             {/* Inputs de Capacidade do Modelo Selecionado */}
-            <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
-              <span className="text-xs font-extrabold text-white block">Preços de Compra para: {modeloEditor}</span>
+            <div className="p-5 bg-slate-950 border border-slate-800 rounded-3xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+                <div>
+                  <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+                    Preços de Compra para: <span className="text-cyan-400">{modeloEditor}</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400">Valores máximos pagos na recompra por capacidade</p>
+                </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleExcluirModelo(modeloEditor)}
+                  className="border-red-900/60 bg-red-950/20 text-red-400 hover:bg-red-900/50 hover:text-white text-xs h-8 rounded-xl gap-1 cursor-pointer w-fit"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Excluir {modeloEditor} da Tabela
+                </Button>
+              </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {Object.entries(tabelaEditavel[modeloEditor] || TABELA_BASE_UPGRADE_PADRAO[modeloEditor] || {}).map(([cap, valor]) => (
-                  <div key={cap} className="space-y-1">
-                    <label className="text-xs font-bold text-slate-400 block">{cap}</label>
+                  <div key={cap} className="p-3 bg-slate-900 border border-slate-800 rounded-2xl space-y-1.5 relative group">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-cyan-400">{cap}</label>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoverCapacidadeDoModelo(cap)}
+                        className="text-slate-500 hover:text-red-400 text-xs p-0.5 rounded cursor-pointer"
+                        title="Remover capacidade"
+                      >
+                        ✕
+                      </button>
+                    </div>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-bold">R$</span>
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-bold">R$</span>
                       <input
                         type="number"
                         value={valor}
@@ -739,11 +1089,42 @@ export function CalculadoraUpgradeTab() {
                             },
                           }));
                         }}
-                        className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white font-bold outline-none"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-emerald-400 font-extrabold outline-none"
                       />
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Adicionar nova capacidade ao modelo atual */}
+              <div className="pt-3 border-t border-slate-800/80 flex items-center gap-2 flex-wrap text-xs">
+                <span className="text-slate-400 font-bold">+ Adicionar capacidade para {modeloEditor}:</span>
+                <select
+                  value={novaCapacidadeInput}
+                  onChange={(e) => setNovaCapacidadeInput(e.target.value)}
+                  className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-bold outline-none"
+                >
+                  {['32GB', '64GB', '128GB', '256GB', '512GB', '1TB', '2TB'].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-bold">R$</span>
+                  <input
+                    type="number"
+                    placeholder="Valor..."
+                    value={novoPrecoCapacidadeInput}
+                    onChange={(e) => setNovoPrecoCapacidadeInput(parseInt(e.target.value) || 0)}
+                    className="w-28 bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2 py-1.5 text-emerald-400 font-bold outline-none"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => handleAdicionarCapacidadeAoModelo(novaCapacidadeInput, novoPrecoCapacidadeInput)}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs h-8 px-3 rounded-xl cursor-pointer"
+                >
+                  Adicionar Capacidade
+                </Button>
               </div>
             </div>
 
@@ -1396,6 +1777,119 @@ export function CalculadoraUpgradeTab() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE ADICIONAR NOVO MODELO NA TABELA DE UPGRADE */}
+      {modalNovoModeloAberto && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Cadastrar Novo Modelo</h3>
+                  <p className="text-xs text-slate-400">Adicione novos aparelhos na tabela de recompra</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModalNovoModeloAberto(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 block">Nome do Modelo *</label>
+                <input
+                  type="text"
+                  placeholder="Ex: iPhone 17, Samsung S24 Ultra, Xiaomi 14..."
+                  value={novoModeloNome}
+                  onChange={(e) => setNovoModeloNome(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-sm text-white font-bold outline-none"
+                />
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Capacidades & Preços de Compra (R$):
+                </label>
+                <p className="text-[11px] text-slate-400">
+                  Defina os valores que sua loja paga para as capacidades deste aparelho:
+                </p>
+
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {['64GB', '128GB', '256GB', '512GB', '1TB'].map((cap) => {
+                    const ativo = cap in capacidadesNovoModelo;
+                    const preco = capacidadesNovoModelo[cap] || 0;
+                    return (
+                      <div
+                        key={cap}
+                        className={cn(
+                          "p-2.5 rounded-xl border transition-all space-y-1",
+                          ativo ? "bg-slate-950 border-cyan-500/50" : "bg-slate-950/40 border-slate-800 opacity-60"
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-black text-white flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={ativo}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setCapacidadesNovoModelo((prev) => ({ ...prev, [cap]: 2000 }));
+                                } else {
+                                  const novo = { ...capacidadesNovoModelo };
+                                  delete novo[cap];
+                                  setCapacidadesNovoModelo(novo);
+                                }
+                              }}
+                              className="rounded border-slate-700 text-cyan-500 focus:ring-cyan-500"
+                            />
+                            {cap}
+                          </label>
+                        </div>
+                        {ativo && (
+                          <div className="relative">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">R$</span>
+                            <input
+                              type="number"
+                              value={preco}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 0;
+                                setCapacidadesNovoModelo((prev) => ({ ...prev, [cap]: val }));
+                              }}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-6 pr-2 py-1 text-xs text-emerald-400 font-bold outline-none"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+              <Button
+                variant="outline"
+                onClick={() => setModalNovoModeloAberto(false)}
+                className="flex-1 border-slate-800 text-slate-400 hover:text-white rounded-xl text-xs cursor-pointer"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAdicionarNovoModelo}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black rounded-xl text-xs cursor-pointer shadow-md"
+              >
+                Salvar Modelo
+              </Button>
             </div>
           </div>
         </div>

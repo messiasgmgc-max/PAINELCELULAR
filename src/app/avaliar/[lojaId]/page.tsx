@@ -29,7 +29,7 @@ import {
   Building2,
   AlertCircle
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, sortModelosCronologico } from '@/lib/utils';
 
 export default function AvaliacaoPublicaUpgradePage() {
   const params = useParams();
@@ -96,12 +96,21 @@ export default function AvaliacaoPublicaUpgradePage() {
     carregarLoja();
   }, [lojaId]);
 
+  // Modelos disponíveis dinamicamente da loja (padrão + novos cadastrados pelo lojista)
+  const modelosDisponiveis = useMemo(() => {
+    const tabela = loja?.tabela_upgrade && Object.keys(loja.tabela_upgrade).length > 0
+      ? { ...TABELA_BASE_UPGRADE_PADRAO, ...loja.tabela_upgrade }
+      : TABELA_BASE_UPGRADE_PADRAO;
+    const keys = Object.keys(tabela);
+    return keys.sort((a, b) => sortModelosCronologico(a, b, 'antigo_para_novo'));
+  }, [loja]);
+
   // Lista de modelos filtrados
   const modelosFiltrados = useMemo(() => {
-    if (!buscaModelo.trim()) return MODELOS_UPGRADE_DISPONIVEIS;
+    if (!buscaModelo.trim()) return modelosDisponiveis;
     const b = buscaModelo.toLowerCase().trim();
-    return MODELOS_UPGRADE_DISPONIVEIS.filter((m) => m.toLowerCase().includes(b));
-  }, [buscaModelo]);
+    return modelosDisponiveis.filter((m) => m.toLowerCase().includes(b));
+  }, [buscaModelo, modelosDisponiveis]);
 
   // Capacidades disponíveis para o modelo selecionado
   const capacidadesDisponiveis = useMemo(() => {
