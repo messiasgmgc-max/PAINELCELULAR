@@ -37,12 +37,40 @@ export interface AvaliacaoUpgradeItem {
   created_at: string;
 }
 
+export interface VistoriaUpgradeItem {
+  id: string;
+  loja_id?: string | null;
+  avaliacao_id?: string | null;
+  protocolo?: string;
+  motoboy_id?: string | null;
+  motoboy_nome: string;
+  cliente_nome: string;
+  cliente_telefone?: string;
+  endereco_coleta?: string;
+  modelo: string;
+  capacidade: string;
+  cor?: string;
+  imei?: string;
+  bateria_saude?: number;
+  condicao_geral?: string;
+  detalhes_checklist?: any;
+  valor_avaliado: number;
+  valor_acordado: number;
+  fotos: string[];
+  observacoes_motoboy?: string;
+  status_coleta: 'coletado' | 'em_transito' | 'entregue_loja' | 'cancelado';
+  assinatura_cliente?: string;
+  created_at: string;
+}
+
 const LOCAL_STORAGE_AVALIACOES_KEY = 'painel_avaliacoes_upgrade_cache';
+const LOCAL_STORAGE_VISTORIAS_KEY = 'painel_vistorias_upgrade_cache';
 const LOCAL_STORAGE_TABELA_KEY = 'painel_tabela_upgrade_custom';
 const LOCAL_STORAGE_REGRAS_KEY = 'painel_regras_upgrade_custom';
 
 export function useUpgrade(lojaId?: string | null) {
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoUpgradeItem[]>([]);
+  const [vistorias, setVistorias] = useState<VistoriaUpgradeItem[]>([]);
   const [tabelaPrecos, setTabelaPrecos] = useState<Record<string, Record<string, number>>>(TABELA_BASE_UPGRADE_PADRAO);
   const [regrasDeducao, setRegrasDeducao] = useState(REGRAS_DEDUCAO_PADRAO);
   const [loading, setLoading] = useState(true);
@@ -53,6 +81,11 @@ export function useUpgrade(lojaId?: string | null) {
       const cachedAvaliacoes = localStorage.getItem(LOCAL_STORAGE_AVALIACOES_KEY);
       if (cachedAvaliacoes) {
         setAvaliacoes(JSON.parse(cachedAvaliacoes));
+      }
+
+      const cachedVistorias = localStorage.getItem(LOCAL_STORAGE_VISTORIAS_KEY);
+      if (cachedVistorias) {
+        setVistorias(JSON.parse(cachedVistorias));
       }
 
       const cachedTabela = localStorage.getItem(LOCAL_STORAGE_TABELA_KEY);
@@ -260,13 +293,104 @@ export function useUpgrade(lojaId?: string | null) {
     }
   };
 
+  // 7. Buscar Vistorias do Supabase
+  const fetchVistorias = useCallback(async () => {
+    try {
+      let query = supabase
+        .from('vistorias_upgrade')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (lojaId) {
+        query = query.or(`loja_id.eq.${lojaId},loja_id.is.null`);
+      }
+
+      const { data, error } = await query;
+      if (!error && data) {
+        setVistorias(data as VistoriaUpgradeItem[]);
+        try {
+          localStorage.setItem(LOCAL_STORAGE_VISTORIAS_KEY, JSON.stringify(data));
+        } catch (e) {}
+      } else if (error) {
+        console.warn('Tabela vistorias_upgrade ainda não disponível no Supabase:', error.message);
+      }
+    } catch (e) {
+      console.error('Erro ao buscar vistorias de upgrade:', e);
+    }
+  }, [lojaId]);
+
+  useEffect(() => {
+    fetchVistorias();
+  }, [fetchVistorias]);
+
+  // 8. Salvar Vistoria de Coleta (Feita pelo Motoboy)
+  const salvarVistoria = async (dados: Omit<VistoriaUpgradeItem, 'id' | 'created_at'>): Promise<{ id: string; protocolo?: string }> => {
+    const protocolo = dados.protocolo || gerarProtocoloUpgrade();
+    const payload = {
+      ...dados,
+      protocolo,
+      loja_id: lojaId || null,
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from('vistorias_upgrade')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const itemSalvo = data as VistoriaUpgradeItem;
+      setVistorias((prev) => [itemSalvo, ...prev]);
+
+      // Se estiver vinculada a uma avaliação_upgrade, atualiza o status dela
+      if (dados.avaliacao_id) {
+        await supabase
+          .from('avaliacoes_upgrade')
+          .update({ status: 'em_negociacao' })
+          .eq('id', dados.avaliacao_id);
+      }
+
+      return { id: itemSalvo.id, protocolo };
+    } catch (e: any) {
+      console.warn('Salvando vistoria localmente:', e.message);
+      const itemLocal: VistoriaUpgradeItem = {
+        ...payload,
+        id: `local_vistoria_${Date.now()}`,
+      };
+      setVistorias((prev) => [itemLocal, ...prev]);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_VISTORIAS_KEY, JSON.stringify([itemLocal, ...vistorias]));
+      } catch (err) {}
+      return { id: itemLocal.id, protocolo };
+    }
+  };
+
+  // 9. Atualizar Status da Vistoria (ex: entregue na loja)
+  const atualizarStatusVistoria = async (id: string, status: VistoriaUpgradeItem['status_coleta']) => {
+    try {
+      await supabase.from('vistorias_upgrade').update({ status_coleta: status }).eq('id', id);
+    } catch (e) {}
+
+    setVistorias((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, status_coleta: status } : item))
+    );
+    toast.success(`Status da coleta atualizado para ${status === 'entregue_loja' ? 'Entregue na Loja' : status}!`);
+  };
+
   return {
     avaliacoes,
+    vistorias,
     tabelaPrecos,
     regrasDeducao,
     loading,
     fetchAvaliacoes,
+    fetchVistorias,
     salvarAvaliacao,
+    salvarVistoria,
+    atualizarStatusVistoria,
     atualizarStatusAvaliacao,
     salvarConfiguracoesPrecos,
   };

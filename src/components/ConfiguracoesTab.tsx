@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone } from 'lucide-react';
+import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
 import { useColorTheme, ColorTheme } from '@/components/ThemeProvider';
 import { useTecnicos } from '@/hooks/useTecnicos';
+import { useMotoboys } from '@/hooks/useMotoboys';
 import { toast } from 'sonner';
 
 interface Configuracao {
@@ -27,6 +28,12 @@ export function ConfiguracoesTab() {
   const { usuario, logout } = useAuth();
   const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja, atualizarDadosEmpresa, removerLogo, removerAssinatura } = useStoreConfig(usuario?.lojaId);
   const { colorTheme, setColorTheme } = useColorTheme();
+  const { motoboys, cadastrarMotoboy, excluirMotoboy } = useMotoboys(usuario?.lojaId);
+
+  const [novoMotoboyNome, setNovoMotoboyNome] = useState('');
+  const [novoMotoboyTel, setNovoMotoboyTel] = useState('');
+  const [novoMotoboyVeiculo, setNovoMotoboyVeiculo] = useState('Moto');
+  const [novoMotoboyPlaca, setNovoMotoboyPlaca] = useState('');
   
   const [nomeEmpresa, setNomeEmpresa] = useState('Phone Center');
   const [telefoneEmpresa, setTelefoneEmpresa] = useState('');
@@ -544,6 +551,151 @@ export function ConfiguracoesTab() {
                   <p className="text-xs text-slate-400">
                     💡 <strong>Dica:</strong> Para gerenciar os preços de compra que sua loja paga em cada iPhone, conferir as propostas recebidas de clientes ou fazer simulações no balcão, acesse a aba <strong>Calculadora Upgrade</strong> no menu lateral.
                   </p>
+                </div>
+              </GlassCard>
+
+              {/* CARD OFICIAL: EQUIPE DE MOTOBOYS & LINK DE COLETA MOBILE */}
+              <GlassCard className="border-2 border-cyan-500/30 bg-gradient-to-br from-cyan-950/20 via-slate-900/40 to-slate-950/60 rounded-3xl p-6 shadow-xl">
+                <div className="pb-4 border-b border-white/10 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-cyan-400 flex items-center gap-2">
+                      <Truck className="w-5 h-5 text-cyan-400" /> Equipe de Motoboys & Link de Coleta em Campo
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-400">
+                      Link mobile exclusivo para seus motoboys realizarem vistorias com 4 fotos, checklist e assinatura do cliente na rua.
+                    </p>
+                  </div>
+                  <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/40 text-xs font-black uppercase w-fit">
+                    {motoboys.length} Motoboy{motoboys.length !== 1 ? 's' : ''}
+                  </Badge>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Link Mobile do Motoboy */}
+                  <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Truck className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span className="text-xs font-mono text-cyan-300 truncate select-all">
+                        {typeof window !== 'undefined' ? `${window.location.origin}/coleta/${usuario?.lojaId || 'principal'}` : ''}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (typeof window !== 'undefined') {
+                            const url = `${window.location.origin}/coleta/${usuario?.lojaId || 'principal'}`;
+                            navigator.clipboard.writeText(url);
+                            toast.success('Link de Coleta copiado para enviar aos motoboys!');
+                          }
+                        }}
+                        className="bg-cyan-500 text-slate-950 hover:bg-cyan-400 font-bold text-xs rounded-xl gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copiar Link Coleta
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (typeof window !== 'undefined') {
+                            const url = `${window.location.origin}/coleta/${usuario?.lojaId || 'principal'}`;
+                            window.open(url, '_blank');
+                          }
+                        }}
+                        className="border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold gap-1.5 cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-cyan-400" /> Abrir no Celular
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Cadastro Rápido de Motoboy */}
+                  <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                    <span className="text-xs font-extrabold text-white block">Cadastrar Novo Motoboy</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nome do Motoboy..."
+                        value={novoMotoboyNome}
+                        onChange={(e) => setNovoMotoboyNome(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
+                      <input
+                        type="text"
+                        placeholder="WhatsApp (ex: 31999999999)..."
+                        value={novoMotoboyTel}
+                        onChange={(e) => setNovoMotoboyTel(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Veículo (ex: Titan 160)..."
+                        value={novoMotoboyVeiculo}
+                        onChange={(e) => setNovoMotoboyVeiculo(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                      />
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="Placa..."
+                          value={novoMotoboyPlaca}
+                          onChange={(e) => setNovoMotoboyPlaca(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none uppercase"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            if (!novoMotoboyNome.trim()) {
+                              toast.error('Informe o nome do motoboy.');
+                              return;
+                            }
+                            const ok = await cadastrarMotoboy({
+                              nome: novoMotoboyNome,
+                              telefone: novoMotoboyTel,
+                              veiculo: novoMotoboyVeiculo,
+                              placa: novoMotoboyPlaca,
+                            });
+                            if (ok) {
+                              setNovoMotoboyNome('');
+                              setNovoMotoboyTel('');
+                              setNovoMotoboyPlaca('');
+                            }
+                          }}
+                          className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs px-3 rounded-xl cursor-pointer shrink-0"
+                        >
+                          Salvar
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Lista dos Motoboys Atuais */}
+                    <div className="pt-2 border-t border-slate-800/80">
+                      <div className="flex flex-wrap gap-2">
+                        {motoboys.length === 0 ? (
+                          <span className="text-xs text-slate-500">Nenhum motoboy cadastrado na equipe.</span>
+                        ) : (
+                          motoboys.map((m) => (
+                            <div
+                              key={m.id}
+                              className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2 text-xs"
+                            >
+                              <span className="font-bold text-white">🛵 {m.nome}</span>
+                              <span className="text-slate-400 text-[11px]">{m.veiculo || 'Moto'} {m.placa ? `(${m.placa})` : ''}</span>
+                              <button
+                                type="button"
+                                onClick={() => excluirMotoboy(m.id)}
+                                className="text-red-400 hover:text-red-300 ml-1 font-bold cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </GlassCard>
 

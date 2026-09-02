@@ -30,10 +30,18 @@ import {
   Battery,
   Layers,
   ArrowRight,
-  Filter
+  Filter,
+  Truck,
+  Camera,
+  Image as ImageIcon,
+  MapPin,
+  Phone,
+  CheckSquare
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { useUpgrade, AvaliacaoUpgradeItem } from '@/hooks/useUpgrade';
+import { useUpgrade, AvaliacaoUpgradeItem, VistoriaUpgradeItem } from '@/hooks/useUpgrade';
+import { useMotoboys } from '@/hooks/useMotoboys';
+import { supabase } from '@/lib/supabaseClient';
 import { 
   calcularAvaliacaoUpgrade, 
   TABELA_BASE_UPGRADE_PADRAO, 
@@ -50,17 +58,22 @@ export function CalculadoraUpgradeTab() {
 
   const {
     avaliacoes,
+    vistorias,
     tabelaPrecos,
     regrasDeducao,
     loading,
     salvarAvaliacao,
     atualizarStatusAvaliacao,
+    atualizarStatusVistoria,
     salvarConfiguracoesPrecos,
     fetchAvaliacoes,
+    fetchVistorias,
   } = useUpgrade(targetLojaId);
 
-  // Sub-abas: 'leads' | 'balcao' | 'tabela' | 'divulgacao'
-  const [subAba, setSubAba] = useState<'leads' | 'balcao' | 'tabela' | 'divulgacao'>('leads');
+  const { motoboys, cadastrarMotoboy, excluirMotoboy } = useMotoboys(targetLojaId);
+
+  // Sub-abas: 'leads' | 'vistorias' | 'balcao' | 'tabela' | 'divulgacao'
+  const [subAba, setSubAba] = useState<'leads' | 'vistorias' | 'balcao' | 'tabela' | 'divulgacao'>('leads');
 
   // Filtros de Leads
   const [buscaLead, setBuscaLead] = useState('');
@@ -68,6 +81,16 @@ export function CalculadoraUpgradeTab() {
   const [itemSelecionado, setItemSelecionado] = useState<AvaliacaoUpgradeItem | null>(null);
   const [modalDetalhesAberto, setModalDetalhesAberto] = useState(false);
   const [novoValorAprovado, setNovoValorAprovado] = useState<string>('');
+
+  // Estados de Vistorias dos Motoboys
+  const [buscaVistoria, setBuscaVistoria] = useState('');
+  const [filtroStatusVistoria, setFiltroStatusVistoria] = useState<string>('todos');
+  const [fotoModalAberta, setFotoModalAberta] = useState<{ url: string; titulo: string } | null>(null);
+  const [modalMotoboysAberto, setModalMotoboysAberto] = useState(false);
+  const [novoMotoboyNome, setNovoMotoboyNome] = useState('');
+  const [novoMotoboyTel, setNovoMotoboyTel] = useState('');
+  const [novoMotoboyVeiculo, setNovoMotoboyVeiculo] = useState('Moto');
+  const [novoMotoboyPlaca, setNovoMotoboyPlaca] = useState('');
 
   // Estados do Simulador de Balcão
   const [modeloBalcao, setModeloBalcao] = useState<string>('iPhone 13');
@@ -262,6 +285,7 @@ export function CalculadoraUpgradeTab() {
       <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl w-fit flex-wrap">
         {[
           { id: 'leads', label: `Propostas Recebidas (${metricas.pendentes})`, icon: <MessageCircle className="w-4 h-4" /> },
+          { id: 'vistorias', label: `Coletas Motoboys (${vistorias.length})`, icon: <Truck className="w-4 h-4" /> },
           { id: 'balcao', label: 'Simulador de Balcão', icon: <Smartphone className="w-4 h-4" /> },
           { id: 'tabela', label: 'Tabela de Preços & Regras', icon: <Sliders className="w-4 h-4" /> },
           { id: 'divulgacao', label: 'Link Público & QR Code', icon: <QrCode className="w-4 h-4" /> },
@@ -826,6 +850,313 @@ export function CalculadoraUpgradeTab() {
         </div>
       )}
 
+      {/* ── CONTEÚDO DA SUB-ABA: VISTORIAS DOS MOTOBOYS ── */}
+      {subAba === 'vistorias' && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          {/* Header da Sub-Aba com Link e Ações */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900/90 p-4 rounded-3xl border border-slate-800">
+            <div>
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                <Truck className="w-4 h-4 text-cyan-400" />
+                Laudos & Vistorias Realizadas pelos Motoboys
+              </h3>
+              <p className="text-xs text-slate-400">
+                Acompanhe o estado de entrada com 4 fotos, checklist e assinatura do cliente em tempo real.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const url = `${window.location.origin}/coleta/${targetLojaId}`;
+                  navigator.clipboard.writeText(url);
+                  toast.success('Link de Coleta do Motoboy copiado!');
+                }}
+                className="bg-slate-950 border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-bold gap-1.5 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5 text-cyan-400" /> Copiar Link do Motoboy
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.open(`${window.location.origin}/coleta/${targetLojaId}`, '_blank')}
+                className="bg-slate-950 border-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-bold gap-1.5 cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-cyan-400" /> Testar App Motoboy
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => setModalMotoboysAberto(true)}
+                className="bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black rounded-xl text-xs gap-1.5 cursor-pointer shadow-md"
+              >
+                <User className="w-3.5 h-3.5" /> Equipe de Motoboys ({motoboys.length})
+              </Button>
+            </div>
+          </div>
+
+          {/* Barra de Filtros de Vistorias */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por cliente, motoboy, modelo, IMEI ou protocolo..."
+                value={buscaVistoria}
+                onChange={(e) => setBuscaVistoria(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
+              {[
+                { id: 'todos', label: 'Todas' },
+                { id: 'coletado', label: 'Coletado' },
+                { id: 'em_transito', label: 'Em Trânsito' },
+                { id: 'entregue_loja', label: 'Entregue na Loja' },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setFiltroStatusVistoria(f.id)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer",
+                    filtroStatusVistoria === f.id
+                      ? "bg-cyan-500 text-slate-950 font-black"
+                      : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800/80"
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Lista de Vistorias */}
+          {vistorias.length === 0 ? (
+            <div className="p-12 text-center bg-slate-900/40 border border-slate-800/60 rounded-3xl space-y-3">
+              <Truck className="w-10 h-10 text-slate-600 mx-auto" />
+              <p className="text-sm font-bold text-slate-300">Nenhuma vistoria de coleta registrada ainda</p>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Envie o link <strong>/coleta/{targetLojaId}</strong> para seus motoboys. Quando eles coletarem aparelhos na rua, o laudo com 4 fotos e assinatura aparecerá aqui em tempo real!
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {vistorias
+                .filter((v) => {
+                  const matchBusca =
+                    !buscaVistoria ||
+                    v.cliente_nome?.toLowerCase().includes(buscaVistoria.toLowerCase()) ||
+                    v.motoboy_nome?.toLowerCase().includes(buscaVistoria.toLowerCase()) ||
+                    v.modelo?.toLowerCase().includes(buscaVistoria.toLowerCase()) ||
+                    v.protocolo?.toLowerCase().includes(buscaVistoria.toLowerCase()) ||
+                    v.imei?.toLowerCase().includes(buscaVistoria.toLowerCase());
+                  const matchStatus = filtroStatusVistoria === 'todos' || v.status_coleta === filtroStatusVistoria;
+                  return matchBusca && matchStatus;
+                })
+                .map((vistoria) => (
+                  <GlassCard key={vistoria.id} className="p-5 bg-slate-900/80 border-slate-800 rounded-3xl space-y-4">
+                    {/* Topo do Card */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-black text-cyan-400 bg-cyan-950/60 border border-cyan-500/30 px-2.5 py-1 rounded-xl">
+                          {vistoria.protocolo || '#COLETA'}
+                        </span>
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                          <User className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Motoboy: <strong>{vistoria.motoboy_nome}</strong></span>
+                        </div>
+                        <span className="text-[11px] text-slate-500">
+                          {new Date(vistoria.created_at).toLocaleString('pt-BR')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          className={cn(
+                            "text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-lg border",
+                            vistoria.status_coleta === 'entregue_loja'
+                              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                              : vistoria.status_coleta === 'em_transito'
+                              ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                              : "bg-blue-500/20 text-blue-400 border-blue-500/40"
+                          )}
+                        >
+                          {vistoria.status_coleta === 'entregue_loja'
+                            ? '✅ Entregue na Loja'
+                            : vistoria.status_coleta === 'em_transito'
+                            ? '🛵 Em Trânsito'
+                            : '📦 Coletado'}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Dados Detalhados */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                      {/* Cliente e Endereço */}
+                      <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800/80 space-y-1.5">
+                        <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                          Cliente & Local
+                        </span>
+                        <p className="font-black text-white text-sm">{vistoria.cliente_nome}</p>
+                        {vistoria.cliente_telefone && (
+                          <p className="text-slate-400 flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-cyan-400" /> {vistoria.cliente_telefone}
+                          </p>
+                        )}
+                        {vistoria.endereco_coleta && (
+                          <p className="text-slate-400 flex items-start gap-1">
+                            <MapPin className="w-3 h-3 text-purple-400 shrink-0 mt-0.5" />
+                            <span>{vistoria.endereco_coleta}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Aparelho & Vistoria Técnica */}
+                      <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800/80 space-y-1.5">
+                        <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                          Aparelho & Checklist
+                        </span>
+                        <p className="font-extrabold text-white text-sm">
+                          {vistoria.modelo} {vistoria.capacidade} ({vistoria.cor || 'Padrão'})
+                        </p>
+                        <div className="flex flex-wrap gap-2 text-[11px]">
+                          <span className="text-emerald-400 font-bold">🔋 {vistoria.bateria_saude || 85}%</span>
+                          {vistoria.imei && <span className="font-mono text-cyan-300">IMEI: {vistoria.imei}</span>}
+                        </div>
+                        <div className="text-slate-400 text-[11px] space-y-0.5 pt-1">
+                          <p>• Tela: <strong className="text-slate-200">{vistoria.detalhes_checklist?.tela || 'Original'}</strong></p>
+                          <p>• Carcaça: <strong className="text-slate-200">{vistoria.detalhes_checklist?.carcaca || 'Normal'}</strong></p>
+                          <p>• iCloud: <strong className="text-emerald-400">✅ Desconectado</strong></p>
+                        </div>
+                      </div>
+
+                      {/* Valores & Observações */}
+                      <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800/80 flex flex-col justify-between space-y-2">
+                        <div>
+                          <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                            Valores Acordados
+                          </span>
+                          <div className="mt-1">
+                            <span className="text-xs text-slate-400">Valor Acordado:</span>
+                            <p className="text-2xl font-black text-emerald-400 font-mono">
+                              R$ {(vistoria.valor_acordado || vistoria.valor_avaliado || 0).toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {vistoria.observacoes_motoboy && (
+                          <div className="text-[11px] text-slate-400 bg-slate-900 p-2 rounded-xl border border-slate-800">
+                            <strong>Obs Motoboy:</strong> {vistoria.observacoes_motoboy}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* FOTOS DA VISTORIA & ASSINATURA */}
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-3 pt-2">
+                      {/* 4 Fotos */}
+                      <div className="md:col-span-4 space-y-1.5">
+                        <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-cyan-400" /> Fotos Reais da Vistoria ({vistoria.fotos?.length || 0})
+                        </span>
+
+                        {vistoria.fotos && vistoria.fotos.length > 0 ? (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {vistoria.fotos.map((foto, idx) => {
+                              const titulos = ['Frente (Tela)', 'Traseira', 'Laterais/Aro', 'Ajustes/IMEI'];
+                              const titulo = titulos[idx] || `Foto ${idx + 1}`;
+                              return (
+                                <div
+                                  key={idx}
+                                  onClick={() => setFotoModalAberta({ url: foto, titulo })}
+                                  className="relative group aspect-[4/3] rounded-xl overflow-hidden border border-slate-800 hover:border-cyan-500 cursor-pointer transition-all shadow-md"
+                                >
+                                  <img src={foto} alt={titulo} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                                  <div className="absolute inset-x-0 bottom-0 bg-slate-950/80 px-2 py-1 text-[10px] font-bold text-cyan-300 truncate text-center">
+                                    {titulo}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="p-4 rounded-xl border border-dashed border-slate-800 text-center text-slate-500 text-xs">
+                            Nenhuma foto anexada
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Assinatura do Cliente */}
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                          Assinatura Cliente
+                        </span>
+                        {vistoria.assinatura_cliente ? (
+                          <div className="aspect-[4/3] bg-slate-950 rounded-xl border border-slate-800 p-2 flex items-center justify-center">
+                            <img src={vistoria.assinatura_cliente} alt="Assinatura" className="max-h-full max-w-full object-contain filter invert" />
+                          </div>
+                        ) : (
+                          <div className="aspect-[4/3] rounded-xl border border-dashed border-slate-800 flex items-center justify-center text-[10px] text-slate-600">
+                            Sem assinatura
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Ações do Card */}
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800 flex-wrap">
+                      {vistoria.status_coleta !== 'entregue_loja' && (
+                        <Button
+                          size="sm"
+                          onClick={() => atualizarStatusVistoria(vistoria.id, 'entregue_loja')}
+                          className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl h-8 gap-1.5 cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Confirmar Entrega na Loja
+                        </Button>
+                      )}
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            // Cadastra no estoque geral (aparelhos)
+                            await supabase.from('aparelhos').insert([{
+                              modelo: vistoria.modelo,
+                              capacidade: vistoria.capacidade,
+                              cor: vistoria.cor || 'Preto',
+                              imei: vistoria.imei || null,
+                              bateria: vistoria.bateria_saude || 85,
+                              condicao: 'seminovo',
+                              custo: vistoria.valor_acordado || vistoria.valor_avaliado,
+                              preco: Math.round((vistoria.valor_acordado || vistoria.valor_avaliado) * 1.30),
+                              precoAtacado: Math.round((vistoria.valor_acordado || vistoria.valor_avaliado) * 1.15),
+                              status: 'disponivel',
+                              ativo: true,
+                              loja_id: targetLojaId,
+                              observacoes: `Coleta ${vistoria.protocolo} por ${vistoria.motoboy_nome}`
+                            }]);
+                            toast.success(`Aparelho ${vistoria.modelo} cadastrado no Estoque Geral com sucesso!`);
+                          } catch (err: any) {
+                            toast.error('Erro ao adicionar ao estoque: ' + err.message);
+                          }
+                        }}
+                        className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border-cyan-500/30 text-xs font-bold rounded-xl h-8 gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Dar Entrada no Estoque
+                      </Button>
+                    </div>
+                  </GlassCard>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* MODAL DE DETALHES E EDIÇÃO DO STATUS DA AVALIAÇÃO */}
       {modalDetalhesAberto && itemSelecionado && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -926,6 +1257,145 @@ export function CalculadoraUpgradeTab() {
                   Recusar / Descartar
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE FOTO DA VISTORIA EM TELA CHEIA */}
+      {fotoModalAberta && (
+        <div 
+          onClick={() => setFotoModalAberta(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 cursor-zoom-out animate-in fade-in duration-200"
+        >
+          <div className="max-w-2xl w-full space-y-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between text-white">
+              <span className="text-sm font-extrabold flex items-center gap-2">
+                <Camera className="w-4 h-4 text-cyan-400" /> {fotoModalAberta.titulo}
+              </span>
+              <button
+                onClick={() => setFotoModalAberta(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center max-h-[80vh]">
+              <img src={fotoModalAberta.url} alt={fotoModalAberta.titulo} className="w-full h-auto max-h-[80vh] object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CADASTRO E GESTÃO DE MOTOBOYS */}
+      {modalMotoboysAberto && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Equipe de Motoboys / Entregadores</h3>
+                  <p className="text-xs text-slate-400">Cadastre os motoboys que realizam coletas externas de aparelhos</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModalMotoboysAberto(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Formulário de Novo Motoboy */}
+            <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800/80 space-y-2.5">
+              <span className="text-xs font-extrabold text-slate-300 block">Novo Motoboy</span>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Nome do Motoboy..."
+                  value={novoMotoboyNome}
+                  onChange={(e) => setNovoMotoboyNome(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+                <input
+                  type="text"
+                  placeholder="WhatsApp..."
+                  value={novoMotoboyTel}
+                  onChange={(e) => setNovoMotoboyTel(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Veículo (ex: Honda CG 160)..."
+                  value={novoMotoboyVeiculo}
+                  onChange={(e) => setNovoMotoboyVeiculo(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Placa (opcional)..."
+                  value={novoMotoboyPlaca}
+                  onChange={(e) => setNovoMotoboyPlaca(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none uppercase"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  if (!novoMotoboyNome.trim()) {
+                    toast.error('Informe o nome do motoboy.');
+                    return;
+                  }
+                  const ok = await cadastrarMotoboy({
+                    nome: novoMotoboyNome,
+                    telefone: novoMotoboyTel,
+                    veiculo: novoMotoboyVeiculo,
+                    placa: novoMotoboyPlaca,
+                  });
+                  if (ok) {
+                    setNovoMotoboyNome('');
+                    setNovoMotoboyTel('');
+                    setNovoMotoboyPlaca('');
+                  }
+                }}
+                className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs h-8.5 rounded-xl cursor-pointer"
+              >
+                + Adicionar à Equipe
+              </Button>
+            </div>
+
+            {/* Lista dos Cadastrados */}
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+              <span className="text-xs font-bold text-slate-400 block">Motoboys Ativos ({motoboys.length}):</span>
+              {motoboys.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-4">Nenhum motoboy cadastrado ainda.</p>
+              ) : (
+                motoboys.map((m) => (
+                  <div
+                    key={m.id}
+                    className="p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-2"
+                  >
+                    <div>
+                      <p className="text-xs font-bold text-white">{m.nome}</p>
+                      <p className="text-[11px] text-slate-400">
+                        {m.veiculo || 'Moto'} {m.placa ? `• Placa: ${m.placa}` : ''} {m.telefone ? `• Tel: ${m.telefone}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => excluirMotoboy(m.id)}
+                      className="text-red-400 hover:text-red-300 p-1.5 rounded-lg text-xs cursor-pointer"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
