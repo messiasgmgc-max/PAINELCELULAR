@@ -20,14 +20,15 @@ import {
   Search,
   Plus,
   CheckSquare,
-  Square
+  Square,
+  ArrowUpDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, sortModelosCronologico } from '@/lib/utils';
 
 interface AparelhoAuditoria {
   id: string;
@@ -117,6 +118,7 @@ export function ConferenciaEstoqueModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [salvandoAjustes, setSalvandoAjustes] = useState(false);
+  const [ordemModelos, setOrdemModelos] = useState<'antigo_para_novo' | 'novo_para_antigo'>('antigo_para_novo');
 
   // Mapeamento de ações para aparelhos faltantes: idAparelho -> AcaoFaltante
   const [acoesFaltantes, setAcoesFaltantes] = useState<Record<string, AcaoFaltante>>({});
@@ -343,11 +345,13 @@ export function ConferenciaEstoqueModal({
     });
   }, [aparelhosEstoque, escaneados]);
 
-  // Aparelhos ativos no banco que NÃO foram bipados (Faltantes)
+  // Aparelhos ativos no banco que NÃO foram bipados (Faltantes) - Ordenados cronologicamente do mais antigo para o mais novo
   const aparelhosFaltantes = useMemo(() => {
     const idsConfirmados = new Set(aparelhosConfirmados.map((a) => a.id));
-    return aparelhosEstoque.filter((aparelho) => !idsConfirmados.has(aparelho.id));
-  }, [aparelhosEstoque, aparelhosConfirmados]);
+    return aparelhosEstoque
+      .filter((aparelho) => !idsConfirmados.has(aparelho.id))
+      .sort((a, b) => sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos));
+  }, [aparelhosEstoque, aparelhosConfirmados, ordemModelos]);
 
   // Códigos bipados que NÃO correspondem a nenhum aparelho ativo no banco (Sobrando / Não cadastrado)
   const codigosSobrando = useMemo(() => {
@@ -372,15 +376,29 @@ export function ConferenciaEstoqueModal({
     });
   }, [aparelhosEstoque, buscaManual]);
 
-  const gruposModelosManual = useMemo(() => {
+  // Agrupa e ordena modelos do mais ANTIGO para o mais NOVO
+  const gruposModelosOrdenados = useMemo(() => {
     const map: Record<string, AparelhoAuditoria[]> = {};
     aparelhosFiltradosManual.forEach((a) => {
       const modeloKey = a.modelo ? a.modelo.replace(/^Apple\s+/i, '').trim() : 'Outros';
       if (!map[modeloKey]) map[modeloKey] = [];
       map[modeloKey].push(a);
     });
-    return map;
-  }, [aparelhosFiltradosManual]);
+
+    const entries = Object.entries(map).sort(([modA], [modB]) => {
+      return sortModelosCronologico(modA, modB, ordemModelos);
+    });
+
+    return entries.map(([modelo, itens]) => {
+      const itensOrdenados = [...itens].sort((a, b) => {
+        const capNumA = parseInt(String(a.capacidade || '').replace(/\D/g, ''), 10) || 0;
+        const capNumB = parseInt(String(b.capacidade || '').replace(/\D/g, ''), 10) || 0;
+        if (capNumA !== capNumB) return capNumA - capNumB;
+        return (a.cor || '').localeCompare(b.cor || '', 'pt-BR');
+      });
+      return { modelo, itens: itensOrdenados };
+    });
+  }, [aparelhosFiltradosManual, ordemModelos]);
 
   const toggleItemManual = (aparelho: AparelhoAuditoria) => {
     const jaConfirmado = idsConfirmadosSet.has(aparelho.id);
@@ -750,7 +768,16 @@ export function ConferenciaEstoqueModal({
                   className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none"
                 />
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setOrdemModelos((prev) => (prev === 'antigo_para_novo' ? 'novo_para_antigo' : 'antigo_para_novo'))}
+                  className="text-xs bg-slate-900 text-slate-200 border border-slate-700 hover:border-slate-600 font-bold px-3 py-1.5 rounded-xl gap-1.5 flex items-center cursor-pointer transition-colors shadow-sm"
+                  title="Alterar ordem de exibição dos modelos (padrão: mais antigo para o mais novo)"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{ordemModelos === 'antigo_para_novo' ? 'Mais Antigo ➔ Mais Novo' : 'Mais Novo ➔ Mais Antigo'}</span>
+                </button>
                 <Button
                   size="sm"
                   variant="outline"
@@ -772,13 +799,13 @@ export function ConferenciaEstoqueModal({
 
             {/* Lista Agrupada por Modelo */}
             <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0 max-h-[380px]">
-              {Object.keys(gruposModelosManual).length === 0 ? (
+              {gruposModelosOrdenados.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500 space-y-2">
                   <Package className="w-8 h-8 opacity-40 mx-auto" />
                   <p className="text-xs font-medium">Nenhum aparelho localizado com o termo pesquisado.</p>
                 </div>
               ) : (
-                Object.entries(gruposModelosManual).map(([modelo, itens]) => {
+                gruposModelosOrdenados.map(({ modelo, itens }) => {
                   const todosGrupoConfirmados = itens.every((item) => idsConfirmadosSet.has(item.id));
                   const confirmadosNoGrupo = itens.filter((item) => idsConfirmadosSet.has(item.id)).length;
 

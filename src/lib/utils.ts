@@ -67,6 +67,7 @@ export function getAparelhoCodigo(aparelho: any): string {
   }
   const hashAbs = Math.abs(hash);
   const id8Digitos = String(10000000 + (hashAbs % 89999999));
+  return id8Digitos;
 }
 
 /**
@@ -108,4 +109,71 @@ export function parseMonetaryValue(rawVal: any): number {
 
   const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
+}
+
+/**
+ * Retorna uma pontuação cronológica crescente do modelo (do mais ANTIGO para o mais NOVO).
+ * Quanto menor o número, mais antigo é o modelo (ex: iPhone 7 = 7.1, iPhone 12 = 12.1, iPhone 14 Pro Max = 14.6).
+ */
+export function getModeloOrdemCronologica(modeloStr: string): number {
+  if (!modeloStr) return 9999;
+  const mod = modeloStr.toLowerCase().replace(/^apple\s+/i, '').trim();
+
+  // Detecta SE (Edições Especiais)
+  if (mod.includes('se 3') || mod.includes('se (3') || mod.includes('se 2022') || mod.includes('se 3ª')) return 12.8;
+  if (mod.includes('se 2') || mod.includes('se (2') || mod.includes('se 2020') || mod.includes('se 2ª')) return 10.8;
+  if (/\bse\b/i.test(mod)) return 6.5;
+
+  // Detecta geração numérica: 11, 12, 13, 14, 15, 16, 17, 4, 5, 6, 7, 8
+  const matchNum = mod.match(/\b(1[1-7]|[4-9])\b/);
+  let gen = 0;
+  if (matchNum) {
+    gen = parseInt(matchNum[1], 10);
+  } else if (mod.includes('xs max') || mod.includes('xsmax')) {
+    gen = 10.6;
+  } else if (mod.includes('xs')) {
+    gen = 10.4;
+  } else if (mod.includes('xr')) {
+    gen = 10.2;
+  } else if (/\bx\b/i.test(mod)) {
+    gen = 10.0;
+  }
+
+  if (gen > 0) {
+    let sub = 0.1; // Modelo base (ex: iPhone 14)
+    if (mod.includes('mini')) sub = 0.0;
+    else if (mod.includes('plus')) sub = 0.2;
+    else if (mod.includes('pro max') || mod.includes('promax')) sub = 0.6;
+    else if (mod.includes('pro')) sub = 0.4;
+
+    if (Number.isInteger(gen)) {
+      return gen + sub;
+    }
+    return gen;
+  }
+
+  // iPads
+  if (mod.includes('ipad')) return 200;
+  // Apple Watch
+  if (mod.includes('watch')) return 300;
+  // Mac / MacBook
+  if (mod.includes('mac')) return 400;
+  // AirPods
+  if (mod.includes('airpods') || mod.includes('fone')) return 500;
+
+  return 600;
+}
+
+/**
+ * Ordena dois modelos alfabeticamente e cronologicamente do MAIS ANTIGO para o MAIS NOVO (Crescente).
+ */
+export function sortModelosCronologico(modeloA: string, modeloB: string, ordem: 'antigo_para_novo' | 'novo_para_antigo' = 'antigo_para_novo'): number {
+  const scoreA = getModeloOrdemCronologica(modeloA);
+  const scoreB = getModeloOrdemCronologica(modeloB);
+
+  if (scoreA !== scoreB) {
+    return ordem === 'antigo_para_novo' ? scoreA - scoreB : scoreB - scoreA;
+  }
+
+  return modeloA.localeCompare(modeloB, 'pt-BR');
 }

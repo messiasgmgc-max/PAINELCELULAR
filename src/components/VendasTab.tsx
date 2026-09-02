@@ -702,16 +702,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
     const currentUrl = `${pathname}?${searchParams.toString()}`;
     const nextQuery = nextParams.toString();
-    const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-
-    if (currentUrl !== nextUrl) {
-      router.replace(nextUrl, { scroll: false });
+    if (currentUrl !== nextUrl && typeof window !== 'undefined') {
+      window.history.replaceState(window.history.state, '', nextUrl);
     }
   }, [
     isClient,
     isVendasRoute,
     pathname,
-    router,
     searchParams,
     editingId,
     mostrarFiltrosAvancados,
