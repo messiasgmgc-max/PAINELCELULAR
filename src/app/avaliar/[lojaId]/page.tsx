@@ -30,6 +30,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { cn, sortModelosCronologico } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 export default function AvaliacaoPublicaUpgradePage() {
   const params = useParams();

@@ -8,7 +8,8 @@ import {
   REGRAS_DEDUCAO_PADRAO, 
   MODELOS_IPHONE_ORDENADOS, 
   CAPACIDADES_IPHONE,
-  gerarProtocoloUpgrade 
+  gerarProtocoloUpgrade,
+  RespostaCondicaoUpgrade
 } from '@/lib/upgradeEngine';
 import { 
   Camera, 
@@ -179,23 +180,27 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
 
   // Cálculo da avaliação em tempo real
   const calculo = React.useMemo(() => {
+    const condicoesUpgrade: RespostaCondicaoUpgrade = {
+      bateriaPercentual: Number(bateriaSaude) || 85,
+      estadoTela: telaCondicao === 'impecavel' ? 'original_impecavel' : telaCondicao === 'leves_riscos' ? 'riscos_leves' : telaCondicao === 'trocada_com_aviso' ? 'trocada_compativel' : 'trincada_quebrada',
+      estadoCarcaca: carcacaCondicao === 'impecavel' ? 'impecavel' : carcacaCondicao === 'leves_marcas' ? 'marcas_leves' : 'trincada_quebrada',
+      faceIdFunciona: Boolean(faceIdOk),
+      camerasFuncionam: Boolean(camerasOk),
+      temCaixaAcessorios: Boolean(temCaixaOriginal),
+      conectorCarregadorOk: true,
+    };
+
     return calcularAvaliacaoUpgrade(
       modelo,
       capacidade,
-      {
-        saudeBateria: bateriaSaude,
-        telaCondicao,
-        carcacaCondicao,
-        faceIdFunciona: faceIdOk,
-        camerasFuncionam: camerasOk,
-        temCaixa: temCaixaOriginal,
-      },
+      condicoesUpgrade,
       tabelaPrecos,
       regrasDeducao
     );
   }, [modelo, capacidade, bateriaSaude, telaCondicao, carcacaCondicao, faceIdOk, camerasOk, temCaixaOriginal, tabelaPrecos, regrasDeducao]);
 
-  const valorFinal = valorAcordadoCustom ? parseFloat(valorAcordadoCustom) || calculo.valorFinalAvaliacao : calculo.valorFinalAvaliacao;
+  const valorCalculado = calculo?.valorFinal ?? 0;
+  const valorFinal = valorAcordadoCustom ? parseFloat(valorAcordadoCustom) || valorCalculado : valorCalculado;
 
   // Função para comprimir e capturar foto via câmera do celular
   const handleFotoUpload = (slotIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -340,7 +345,7 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
           tem_caixa: temCaixaOriginal,
           icloud_removido: icloudRemovido,
         },
-        valor_avaliado: calculo.valorFinalAvaliacao,
+        valor_avaliado: valorCalculado,
         valor_acordado: valorFinal,
         fotos: arrayFotos,
         observacoes_motoboy: observacoesMotoboy.trim(),
@@ -929,13 +934,13 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
               <div>
                 <p className="text-xs text-slate-400">{modelo} {capacidade}</p>
                 <div className="text-3xl font-black text-emerald-400 font-mono tracking-tight my-1">
-                  R$ {calculo.valorFinalAvaliacao.toFixed(2)}
+                  R$ {valorCalculado.toFixed(2)}
                 </div>
                 <p className="text-[11px] text-slate-500">Valor sugerido de entrada na troca</p>
               </div>
 
               {/* Detalhamento das Deduções */}
-              {calculo.deducoes.length > 0 && (
+              {calculo?.deducoes && calculo.deducoes.length > 0 && (
                 <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 text-left space-y-1.5 text-xs">
                   <span className="text-[11px] font-extrabold text-slate-400 block mb-1">
                     Deduções por conservação:
@@ -944,7 +949,7 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
                     <div key={i} className="flex justify-between text-slate-400">
                       <span>• {d.motivo}</span>
                       <span className="text-red-400 font-mono">
-                        {d.tipo === 'porcentagem' ? `-${d.valor}%` : `-R$ ${d.valor}`}
+                        {d.tipo === 'percentual' ? `-${d.valor}%` : `-R$ ${d.valor}`}
                       </span>
                     </div>
                   ))}
@@ -958,7 +963,7 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
                 </label>
                 <input
                   type="number"
-                  placeholder={String(calculo.valorFinalAvaliacao)}
+                  placeholder={String(valorCalculado)}
                   value={valorAcordadoCustom}
                   onChange={(e) => setValorAcordadoCustom(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-sm font-bold text-emerald-400 outline-none"
