@@ -69,6 +69,8 @@ export const TABELA_BASE_UPGRADE_PADRAO: Record<string, Record<string, number>> 
 export const MODELOS_UPGRADE_DISPONIVEIS = Object.keys(TABELA_BASE_UPGRADE_PADRAO).sort((a, b) =>
   sortModelosCronologico(a, b, 'antigo_para_novo')
 );
+export const MODELOS_IPHONE_ORDENADOS = MODELOS_UPGRADE_DISPONIVEIS;
+export const CAPACIDADES_IPHONE = ['64GB', '128GB', '256GB', '512GB', '1TB'];
 
 // ── 2. Regras Padrão de Dedução por Estado de Conservação ──
 export const REGRAS_DEDUCAO_PADRAO = {
