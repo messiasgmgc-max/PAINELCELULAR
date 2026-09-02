@@ -36,7 +36,8 @@ import {
   Image as ImageIcon,
   MapPin,
   Phone,
-  CheckSquare
+  CheckSquare,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useUpgrade, AvaliacaoUpgradeItem, VistoriaUpgradeItem } from '@/hooks/useUpgrade';
