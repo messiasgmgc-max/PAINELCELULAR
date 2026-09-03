@@ -142,10 +142,13 @@ export function useUpgrade(lojaId?: string | null) {
         .maybeSingle();
 
       if (!error && data) {
-        if (data.tabela_upgrade && Object.keys(data.tabela_upgrade).length > 0) {
-          setTabelaPrecos({ ...TABELA_BASE_UPGRADE_PADRAO, ...data.tabela_upgrade });
+        if (data.tabela_upgrade && typeof data.tabela_upgrade === 'object' && Object.keys(data.tabela_upgrade).length > 0) {
+          setTabelaPrecos(data.tabela_upgrade);
+          try {
+            localStorage.setItem(LOCAL_STORAGE_TABELA_KEY, JSON.stringify(data.tabela_upgrade));
+          } catch (e) {}
         }
-        if (data.regras_upgrade && Object.keys(data.regras_upgrade).length > 0) {
+        if (data.regras_upgrade && typeof data.regras_upgrade === 'object' && Object.keys(data.regras_upgrade).length > 0) {
           setRegrasDeducao({ ...REGRAS_DEDUCAO_PADRAO, ...data.regras_upgrade });
         }
       }
@@ -286,11 +289,18 @@ export function useUpgrade(lojaId?: string | null) {
           })
           .eq('id', lojaId);
       }
-      toast.success('Tabela de preços de upgrade salva com sucesso!');
+      toast.success('Tabela de preços salva com sucesso!');
+      return true;
     } catch (e) {
       console.error('Erro ao persistir configurações de upgrade:', e);
       toast.success('Salvo nas configurações locais!');
+      return false;
     }
+  };
+
+  const restaurarTabelaPadrao = async () => {
+    await salvarConfiguracoesPrecos(TABELA_BASE_UPGRADE_PADRAO, REGRAS_DEDUCAO_PADRAO);
+    toast.success('Tabela restaurada para o padrão oficial!');
   };
 
   // 7. Buscar Vistorias do Supabase
@@ -393,5 +403,6 @@ export function useUpgrade(lojaId?: string | null) {
     atualizarStatusVistoria,
     atualizarStatusAvaliacao,
     salvarConfiguracoesPrecos,
+    restaurarTabelaPadrao,
   };
 }

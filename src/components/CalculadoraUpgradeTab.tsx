@@ -67,14 +67,16 @@ export function CalculadoraUpgradeTab() {
     atualizarStatusAvaliacao,
     atualizarStatusVistoria,
     salvarConfiguracoesPrecos,
+    restaurarTabelaPadrao,
     fetchAvaliacoes,
     fetchVistorias,
   } = useUpgrade(targetLojaId);
 
   const { motoboys, cadastrarMotoboy, excluirMotoboy } = useMotoboys(targetLojaId);
 
-  // Sub-abas: 'leads' | 'vistorias' | 'motoboys' | 'balcao' | 'tabela' | 'divulgacao'
+  // Sub-abas principais simplificadas
   const [subAba, setSubAba] = useState<'leads' | 'vistorias' | 'motoboys' | 'balcao' | 'tabela' | 'divulgacao'>('leads');
+  const [subAbaMotoboyView, setSubAbaMotoboyView] = useState<'vistorias' | 'equipe'>('vistorias');
 
   // Filtros de Leads
   const [buscaLead, setBuscaLead] = useState('');
@@ -109,10 +111,15 @@ export function CalculadoraUpgradeTab() {
   const [clienteBalcaoTel, setClienteBalcaoTel] = useState('');
   const [clienteBalcaoInteresse, setClienteBalcaoInteresse] = useState('');
 
-  // Estados do Editor da Tabela de Preços
+  // Estados do Editor da Tabela de Preços (Clean & Descomplicado)
   const [tabelaEditavel, setTabelaEditavel] = useState<Record<string, Record<string, number>>>(tabelaPrecos);
   const [regrasEditaveis, setRegrasEditaveis] = useState(regrasDeducao);
   const [modeloEditor, setModeloEditor] = useState<string>('iPhone 13');
+  const [buscaModeloTabela, setBuscaModeloTabela] = useState('');
+  const [filtroFamiliaModelo, setFiltroFamiliaModelo] = useState('todos');
+  const [accordionRegrasAberto, setAccordionRegrasAberto] = useState(false);
+  const [modeloParaExcluirConfirm, setModeloParaExcluirConfirm] = useState<string | null>(null);
+  const [modalRestaurarPadraoAberto, setModalRestaurarPadraoAberto] = useState(false);
 
   // Adicionar Novo Modelo na Tabela
   const [modalNovoModeloAberto, setModalNovoModeloAberto] = useState(false);
@@ -127,9 +134,34 @@ export function CalculadoraUpgradeTab() {
   // Lista dinâmica ordenada de modelos disponíveis
   const modelosDisponiveis = useMemo(() => {
     const keys = Object.keys(tabelaEditavel);
-    if (keys.length === 0) return MODELOS_UPGRADE_DISPONIVEIS;
     return keys.sort((a, b) => sortModelosCronologico(a, b, 'antigo_para_novo'));
   }, [tabelaEditavel]);
+
+  // Modelos filtrados pela busca ou família na tabela
+  const modelosFiltradosTabela = useMemo(() => {
+    return modelosDisponiveis.filter((m) => {
+      const nomeUpper = m.toUpperCase();
+      const matchBusca = !buscaModeloTabela.trim() || nomeUpper.includes(buscaModeloTabela.trim().toUpperCase());
+      if (!matchBusca) return false;
+
+      if (filtroFamiliaModelo === 'todos') return true;
+      if (filtroFamiliaModelo === '16') return nomeUpper.includes('16');
+      if (filtroFamiliaModelo === '15') return nomeUpper.includes('15');
+      if (filtroFamiliaModelo === '14') return nomeUpper.includes('14');
+      if (filtroFamiliaModelo === '13') return nomeUpper.includes('13');
+      if (filtroFamiliaModelo === '12') return nomeUpper.includes('12') || nomeUpper.includes('11');
+      if (filtroFamiliaModelo === 'anteriores') return nomeUpper.includes('XR') || nomeUpper.includes('XS') || nomeUpper.includes(' X') || nomeUpper.includes(' 8') || nomeUpper.includes(' 7') || nomeUpper.includes('SE');
+      if (filtroFamiliaModelo === 'outros') return !nomeUpper.includes('IPHONE');
+      return true;
+    });
+  }, [modelosDisponiveis, buscaModeloTabela, filtroFamiliaModelo]);
+
+  // Se o modelo atual foi apagado ou não existe na tabela, seleciona o primeiro disponível
+  React.useEffect(() => {
+    if (modelosDisponiveis.length > 0 && !modelosDisponiveis.includes(modeloEditor)) {
+      setModeloEditor(modelosDisponiveis[0]);
+    }
+  }, [modelosDisponiveis, modeloEditor]);
 
   // Sincroniza tabela editável quando as configs forem carregadas
   React.useEffect(() => {
@@ -167,17 +199,22 @@ export function CalculadoraUpgradeTab() {
   };
 
   const handleExcluirModelo = (modeloParaExcluir: string) => {
-    if (window.confirm(`Tem certeza que deseja remover o modelo "${modeloParaExcluir}" da tabela de recompra?`)) {
-      const novaTabela = { ...tabelaEditavel };
-      delete novaTabela[modeloParaExcluir];
-      setTabelaEditavel(novaTabela);
-      const restantes = Object.keys(novaTabela);
-      if (restantes.length > 0) {
-        setModeloEditor(restantes[0]);
-      }
-      salvarConfiguracoesPrecos(novaTabela, regrasEditaveis);
-      toast.success(`Modelo "${modeloParaExcluir}" removido da tabela.`);
+    setModeloParaExcluirConfirm(modeloParaExcluir);
+  };
+
+  const handleConfirmarExclusaoModelo = async (modeloParaExcluir: string) => {
+    const novaTabela = { ...tabelaEditavel };
+    delete novaTabela[modeloParaExcluir];
+    setTabelaEditavel(novaTabela);
+    const restantes = Object.keys(novaTabela);
+    if (restantes.length > 0) {
+      setModeloEditor(restantes[0]);
+    } else {
+      setModeloEditor('');
     }
+    setModeloParaExcluirConfirm(null);
+    await salvarConfiguracoesPrecos(novaTabela, regrasEditaveis);
+    toast.success(`Modelo "${modeloParaExcluir}" apagado com sucesso!`);
   };
 
   const handleAdicionarCapacidadeAoModelo = (cap: string, preco: number) => {
@@ -290,112 +327,136 @@ export function CalculadoraUpgradeTab() {
   return (
     <div className="space-y-6 animate-in fade-in duration-300 pb-12">
       
-      {/* CABEÇALHO DO PAINEL */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 p-5 rounded-3xl border border-slate-800">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-cyan-500 to-emerald-500 text-slate-950 font-black shadow-lg shadow-cyan-950/40">
+      {/* CABEÇALHO DO PAINEL SLIM & CLEAN */}
+      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-4 shadow-lg space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 flex items-center justify-center text-slate-950 font-black shadow-md shadow-cyan-950/40 shrink-0">
               <Repeat className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-black text-white flex items-center gap-2">
-                Calculadora de Aparelhos & Upgrade
-                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px] uppercase font-black">
-                  Trade-In Oficial
-                </Badge>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Avalie o valor de compra de aparelhos usados, receba leads do site e converta em vendas no PDV.
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-black text-white">Calculadora Upgrade</h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Trade-In
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Avaliação de recompra de seminovos, coletas com motoboy e tabela de preços
               </p>
             </div>
           </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              onClick={handleCopiarLink}
+              variant="outline"
+              className="border-slate-800 bg-slate-950 text-slate-300 hover:text-white rounded-xl text-xs font-bold gap-1.5 h-8 px-3 cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5 text-cyan-400" /> Copiar Link
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={() => setSubAba('divulgacao')}
+              variant="outline"
+              className="border-slate-800 bg-slate-950 text-slate-300 hover:text-white rounded-xl text-xs font-bold gap-1.5 h-8 px-3 cursor-pointer"
+            >
+              <QrCode className="w-3.5 h-3.5 text-purple-400" /> QR Code
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={() => window.open(publicUrl, '_blank')}
+              className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 h-8 px-3 shadow-md shadow-cyan-950/40 cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Abrir Página ➔
+            </Button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            size="sm"
-            onClick={handleCopiarLink}
-            variant="outline"
-            className="border-slate-700 bg-slate-800 text-slate-200 hover:text-white rounded-2xl text-xs font-bold gap-1.5 cursor-pointer"
-          >
-            <Copy className="w-3.5 h-3.5 text-cyan-400" /> Copiar Link Público
-          </Button>
+        {/* BARRA COMPACTA DE MÉTRICAS (KPIs) */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2.5 border-t border-slate-800/80">
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800/60">
+            <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
+              <Smartphone className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-500 block leading-tight">Avaliações</span>
+              <span className="text-sm font-black text-white">{metricas.total}</span>
+            </div>
+          </div>
 
-          <Button
-            size="sm"
-            onClick={() => window.open(publicUrl, '_blank')}
-            className="bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black rounded-2xl text-xs gap-1.5 shadow-lg shadow-cyan-950/40 cursor-pointer"
-          >
-            <ExternalLink className="w-3.5 h-3.5" /> Abrir Calculadora ➔
-          </Button>
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800/60">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-500 block leading-tight">Leads Pendentes</span>
+              <span className="text-sm font-black text-amber-400">{metricas.pendentes}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800/60">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-500 block leading-tight">Convertidos</span>
+              <span className="text-sm font-black text-emerald-400">{metricas.convertidas}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800/60">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+              <DollarSign className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-500 block leading-tight">Volume Recompra</span>
+              <span className="text-sm font-black text-white">R$ {metricas.volumeTotalAvaliado.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* KPI CARDS */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <GlassCard className="p-4 bg-slate-900/80 border-slate-800 rounded-2xl">
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-xs font-bold uppercase tracking-wider">Total de Avaliações</span>
-            <Smartphone className="w-4 h-4 text-cyan-400" />
-          </div>
-          <span className="text-2xl font-black text-white">{metricas.total}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">Simulações de clientes & loja</span>
-        </GlassCard>
-
-        <GlassCard className="p-4 bg-slate-900/80 border-slate-800 rounded-2xl">
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-xs font-bold uppercase tracking-wider">Leads Pendentes</span>
-            <Clock className="w-4 h-4 text-amber-400" />
-          </div>
-          <span className="text-2xl font-black text-amber-400">{metricas.pendentes}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">Aguardando contato da loja</span>
-        </GlassCard>
-
-        <GlassCard className="p-4 bg-slate-900/80 border-slate-800 rounded-2xl">
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-xs font-bold uppercase tracking-wider">Convertidos em Venda</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          </div>
-          <span className="text-2xl font-black text-emerald-400">{metricas.convertidas}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">Aparelhos usados na troca</span>
-        </GlassCard>
-
-        <GlassCard className="p-4 bg-slate-900/80 border-slate-800 rounded-2xl">
-          <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-xs font-bold uppercase tracking-wider">Volume de Recompra</span>
-            <DollarSign className="w-4 h-4 text-emerald-400" />
-          </div>
-          <span className="text-2xl font-black text-white">
-            R$ {metricas.volumeTotalAvaliado.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-          </span>
-          <span className="text-[10px] text-slate-500 block mt-1">Valor acumulado avaliado</span>
-        </GlassCard>
-      </div>
-
-      {/* NAVEGAÇÃO DE SUB-ABAS */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl w-fit flex-wrap">
+      {/* NAVEGAÇÃO DE SUB-ABAS SIMPLIFICADA */}
+      <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl w-fit flex-wrap">
         {[
-          { id: 'leads', label: `Propostas Recebidas (${metricas.pendentes})`, icon: <MessageCircle className="w-4 h-4" /> },
-          { id: 'vistorias', label: `Coletas Realizadas (${vistorias.length})`, icon: <Truck className="w-4 h-4" /> },
-          { id: 'motoboys', label: `🛵 Cadastrar Motoboys (${motoboys.length})`, icon: <User className="w-4 h-4" /> },
-          { id: 'balcao', label: 'Simulador de Balcão', icon: <Smartphone className="w-4 h-4" /> },
-          { id: 'tabela', label: 'Tabela de Preços & Regras', icon: <Sliders className="w-4 h-4" /> },
-          { id: 'divulgacao', label: 'Link Público & QR Code', icon: <QrCode className="w-4 h-4" /> },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setSubAba(tab.id as any)}
-            className={cn(
-              "px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer",
-              subAba === tab.id
-                ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-sm"
-                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-            )}
-          >
-            {tab.icon}
-            <span>{tab.label}</span>
-          </button>
-        ))}
+          { id: 'leads', label: 'Propostas & Leads', badge: metricas.pendentes, icon: <MessageCircle className="w-3.5 h-3.5" /> },
+          { id: 'motoboys', label: 'Motoboys & Coletas', badge: vistorias.length, icon: <Truck className="w-3.5 h-3.5" /> },
+          { id: 'balcao', label: 'Simulador Balcão', icon: <Smartphone className="w-3.5 h-3.5" /> },
+          { id: 'tabela', label: 'Tabela de Preços', badge: modelosDisponiveis.length, icon: <Sliders className="w-3.5 h-3.5" /> },
+          { id: 'divulgacao', label: 'Divulgação & QR', icon: <QrCode className="w-3.5 h-3.5" /> },
+        ].map((tab) => {
+          const isAtiva = subAba === tab.id || (tab.id === 'motoboys' && (subAba as string) === 'vistorias');
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setSubAba(tab.id as any);
+              }}
+              className={cn(
+                "px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer",
+                isAtiva
+                  ? "bg-cyan-500 text-slate-950 font-black shadow-sm"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+              )}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              {tab.badge !== undefined && tab.badge > 0 && (
+                <span className={cn(
+                  "px-1.5 py-0.2 rounded-full text-[10px] font-black leading-tight",
+                  isAtiva ? "bg-slate-950/30 text-slate-950" : "bg-slate-800 text-cyan-300"
+                )}>
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── CONTEÚDO DA SUB-ABA 1: PROPOSTAS / LEADS ── */}
@@ -983,34 +1044,37 @@ export function CalculadoraUpgradeTab() {
         </div>
       )}
 
-      {/* ── CONTEÚDO DA SUB-ABA 3: TABELA DE PREÇOS & REGRAS ── */}
+      {/* ── CONTEÚDO DA SUB-ABA 3: TABELA DE PREÇOS & REGRAS (DESCOMPLICADA) ── */}
       {subAba === 'tabela' && (
-        <div className="space-y-5 bg-slate-900 border border-slate-800 p-5 rounded-3xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+        <div className="space-y-4">
+          
+          {/* BARRA SUPERIOR DA TABELA COM CONTROLES */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/90 p-4 rounded-2xl border border-slate-800">
             <div>
-              <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-cyan-400" /> Tabela de Preços Base de Recompra
-              </h3>
-              <p className="text-xs text-slate-400">
-                Ajuste os valores máximos que sua loja paga em cada modelo quando o aparelho está em excelente estado.
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-cyan-400" /> Tabela de Preços de Recompra
+                </h3>
+                <span className="text-[11px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+                  {modelosDisponiveis.length} modelos
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Preços pagos pela loja na compra de aparelhos seminovos por capacidade.
               </p>
             </div>
 
-            <Button
-              onClick={handleSalvarTabela}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 shadow-lg shadow-emerald-950/40 cursor-pointer"
-            >
-              <Check className="w-4 h-4" /> Salvar Alterações
-            </Button>
-          </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setModalRestaurarPadraoAberto(true)}
+                className="border-slate-800 bg-slate-950 text-slate-400 hover:text-white rounded-xl text-xs font-bold gap-1.5 h-8 px-2.5 cursor-pointer"
+                title="Restaura todos os modelos padrão"
+              >
+                <Sliders className="w-3.5 h-3.5 text-amber-400" /> Restaurar Padrão
+              </Button>
 
-          {/* Selecionar Modelo para Editar Preços */}
-          <div className="space-y-4">
-            {/* Header da lista de modelos com botão de Adicionar */}
-            <div className="flex items-center justify-between gap-2 flex-wrap pb-1">
-              <span className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Smartphone className="w-3.5 h-3.5 text-cyan-400" /> Modelos Cadastrados na Tabela ({modelosDisponiveis.length}):
-              </span>
               <Button
                 size="sm"
                 onClick={() => {
@@ -1018,92 +1082,176 @@ export function CalculadoraUpgradeTab() {
                   setNovoModeloNome('');
                   setModalNovoModeloAberto(true);
                 }}
-                className="bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 h-8 px-3 cursor-pointer shadow-md"
+                className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 h-8 px-3 cursor-pointer shadow-md"
               >
-                <Plus className="w-3.5 h-3.5" /> + Adicionar Novo Modelo
+                <Plus className="w-3.5 h-3.5" /> + Novo Modelo
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={handleSalvarTabela}
+                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs gap-1.5 h-8 px-3 cursor-pointer shadow-md shadow-emerald-950/40"
+              >
+                <Check className="w-3.5 h-3.5" /> Salvar Tabela
               </Button>
             </div>
+          </div>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-              {modelosDisponiveis.map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setModeloEditor(m)}
-                  className={cn(
-                    "px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer shrink-0",
-                    modeloEditor === m
-                      ? "bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-950/40"
-                      : "bg-slate-800 text-slate-400 hover:text-white"
-                  )}
-                >
-                  {m}
-                </button>
-              ))}
+          {/* FILTRO E BUSCA RÁPIDA DE MODELOS */}
+          <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80 space-y-2.5">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filtrar modelos (ex: 15, Pro Max, 13, S24...)"
+                  value={buscaModeloTabela}
+                  onChange={(e) => setBuscaModeloTabela(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              {/* Categorias Rápidas */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                {[
+                  { id: 'todos', label: 'Todos' },
+                  { id: '16', label: 'iPhone 16' },
+                  { id: '15', label: 'iPhone 15' },
+                  { id: '14', label: 'iPhone 14' },
+                  { id: '13', label: 'iPhone 13' },
+                  { id: '12', label: '12 / 11' },
+                  { id: 'anteriores', label: 'Anteriores' },
+                  { id: 'outros', label: 'Outros' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFiltroFamiliaModelo(f.id)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors whitespace-nowrap cursor-pointer",
+                      filtroFamiliaModelo === f.id
+                        ? "bg-cyan-500 text-slate-950 font-black"
+                        : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-white"
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Inputs de Capacidade do Modelo Selecionado */}
-            <div className="p-5 bg-slate-950 border border-slate-800 rounded-3xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
-                <div>
-                  <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
-                    Preços de Compra para: <span className="text-cyan-400">{modeloEditor}</span>
-                  </h4>
-                  <p className="text-[11px] text-slate-400">Valores máximos pagos na recompra por capacidade</p>
+            {/* Lista de Modelos Filtrados (Clean & Sem rolagem infinita) */}
+            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-slate-950/60 rounded-xl border border-slate-800/60 scrollbar-thin">
+              {modelosFiltradosTabela.map((m) => {
+                const isSelected = modeloEditor === m;
+                const countCaps = Object.keys(tabelaEditavel[m] || {}).length;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setModeloEditor(m)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                      isSelected
+                        ? "bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-950/40"
+                        : "bg-slate-900 border border-slate-800/80 text-slate-400 hover:text-white hover:border-slate-700"
+                    )}
+                  >
+                    <span>{m}</span>
+                    <span className={cn(
+                      "text-[9px] px-1 py-0.2 rounded-full",
+                      isSelected ? "bg-slate-950/20 text-slate-950 font-black" : "bg-slate-800 text-slate-500"
+                    )}>
+                      {countCaps} cap
+                    </span>
+                  </button>
+                );
+              })}
+              {modelosFiltradosTabela.length === 0 && (
+                <span className="text-xs text-slate-500 p-2">Nenhum modelo encontrado com esse filtro.</span>
+              )}
+            </div>
+          </div>
+
+          {/* CARD DO MODELO SELECIONADO (LIMPO E ESPAÇOSO) */}
+          {modeloEditor && (
+            <div className="p-5 bg-slate-900/90 border border-slate-800 rounded-3xl space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-black text-white flex items-center gap-2">
+                      {modeloEditor}
+                    </h4>
+                    <p className="text-xs text-slate-400">Valores de compra cadastrados por capacidade de armazenamento</p>
+                  </div>
                 </div>
 
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => handleExcluirModelo(modeloEditor)}
-                  className="border-red-900/60 bg-red-950/20 text-red-400 hover:bg-red-900/50 hover:text-white text-xs h-8 rounded-xl gap-1 cursor-pointer w-fit"
+                  className="border-red-900/50 bg-red-950/30 text-red-400 hover:bg-red-900/50 hover:text-white text-xs h-8 rounded-xl gap-1.5 cursor-pointer w-fit"
                 >
-                  <Trash2 className="w-3.5 h-3.5" /> Excluir {modeloEditor} da Tabela
+                  <Trash2 className="w-3.5 h-3.5" /> Apagar Modelo da Tabela
                 </Button>
               </div>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {Object.entries(tabelaEditavel[modeloEditor] || TABELA_BASE_UPGRADE_PADRAO[modeloEditor] || {}).map(([cap, valor]) => (
-                  <div key={cap} className="p-3 bg-slate-900 border border-slate-800 rounded-2xl space-y-1.5 relative group">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-black text-cyan-400">{cap}</label>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoverCapacidadeDoModelo(cap)}
-                        className="text-slate-500 hover:text-red-400 text-xs p-0.5 rounded cursor-pointer"
-                        title="Remover capacidade"
-                      >
-                        ✕
-                      </button>
+
+              {/* Grid de Capacidades Cadastradas */}
+              {Object.keys(tabelaEditavel[modeloEditor] || {}).length === 0 ? (
+                <div className="p-8 text-center bg-slate-950 border border-slate-800/80 rounded-2xl space-y-1">
+                  <p className="text-xs font-bold text-slate-400">Nenhuma capacidade cadastrada para {modeloEditor}</p>
+                  <p className="text-[11px] text-slate-500">Adicione uma capacidade abaixo (ex: 128GB - R$ 2.000)</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {Object.entries(tabelaEditavel[modeloEditor] || {}).map(([cap, valor]) => (
+                    <div key={cap} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 relative group hover:border-slate-700 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-lg border border-cyan-500/20">
+                          {cap}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoverCapacidadeDoModelo(cap)}
+                          className="text-slate-500 hover:text-red-400 text-xs p-1 rounded-md cursor-pointer transition-colors"
+                          title="Remover capacidade"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-bold">R$</span>
+                        <input
+                          type="number"
+                          value={valor}
+                          onChange={(e) => {
+                            const novoValor = parseInt(e.target.value) || 0;
+                            setTabelaEditavel((prev) => ({
+                              ...prev,
+                              [modeloEditor]: {
+                                ...(prev[modeloEditor] || {}),
+                                [cap]: novoValor,
+                              },
+                            }));
+                          }}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-500 rounded-xl pl-8 pr-2.5 py-2 text-sm text-emerald-400 font-black outline-none"
+                        />
+                      </div>
                     </div>
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-bold">R$</span>
-                      <input
-                        type="number"
-                        value={valor}
-                        onChange={(e) => {
-                          const novoValor = parseInt(e.target.value) || 0;
-                          setTabelaEditavel((prev) => ({
-                            ...prev,
-                            [modeloEditor]: {
-                              ...(prev[modeloEditor] || {}),
-                              [cap]: novoValor,
-                            },
-                          }));
-                        }}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-emerald-400 font-extrabold outline-none"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
 
               {/* Adicionar nova capacidade ao modelo atual */}
               <div className="pt-3 border-t border-slate-800/80 flex items-center gap-2 flex-wrap text-xs">
-                <span className="text-slate-400 font-bold">+ Adicionar capacidade para {modeloEditor}:</span>
+                <span className="text-slate-400 font-bold">+ Adicionar capacidade:</span>
                 <select
                   value={novaCapacidadeInput}
                   onChange={(e) => setNovaCapacidadeInput(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-bold outline-none"
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-bold outline-none"
                 >
                   {['32GB', '64GB', '128GB', '256GB', '512GB', '1TB', '2TB'].map((c) => (
                     <option key={c} value={c}>{c}</option>
@@ -1116,7 +1264,7 @@ export function CalculadoraUpgradeTab() {
                     placeholder="Valor..."
                     value={novoPrecoCapacidadeInput}
                     onChange={(e) => setNovoPrecoCapacidadeInput(parseInt(e.target.value) || 0)}
-                    className="w-28 bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2 py-1.5 text-emerald-400 font-bold outline-none"
+                    className="w-28 bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-2 py-1.5 text-emerald-400 font-bold outline-none"
                   />
                 </div>
                 <Button
@@ -1124,47 +1272,66 @@ export function CalculadoraUpgradeTab() {
                   onClick={() => handleAdicionarCapacidadeAoModelo(novaCapacidadeInput, novoPrecoCapacidadeInput)}
                   className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs h-8 px-3 rounded-xl cursor-pointer"
                 >
-                  Adicionar Capacidade
+                  Adicionar
                 </Button>
               </div>
             </div>
+          )}
 
-            {/* Editor de Regras de Dedução */}
-            <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
-              <span className="text-xs font-extrabold text-white block uppercase tracking-wider">Regras de Dedução Padrão (Avarias)</span>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div>
-                  <label className="text-slate-400 block mb-1">Dedução Bateria &lt; 80% (R$)</label>
-                  <input
-                    type="number"
-                    value={regrasEditaveis.bateriaGastaValor}
-                    onChange={(e) => setRegrasEditaveis({ ...regrasEditaveis, bateriaGastaValor: parseInt(e.target.value) || 0 })}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold outline-none"
-                  />
-                </div>
+          {/* ACORDEÃO RECOLHÍVEL DE REGRAS DE DEDUÇÃO (AVARIAS) */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-md">
+            <button
+              type="button"
+              onClick={() => setAccordionRegrasAberto(!accordionRegrasAberto)}
+              className="w-full p-4 flex items-center justify-between text-left text-xs font-bold text-slate-300 hover:text-white transition-colors cursor-pointer bg-slate-950/40"
+            >
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-cyan-400" />
+                <span>Configurar Deduções de Avarias (Bateria &lt; 80%, Tela Trocada, Trincas, etc.)</span>
+              </div>
+              <span className="text-[11px] text-cyan-400 font-extrabold bg-cyan-500/10 px-2.5 py-1 rounded-lg border border-cyan-500/20">
+                {accordionRegrasAberto ? '▲ Recolher' : '▼ Expandir e Editar'}
+              </span>
+            </button>
 
-                <div>
-                  <label className="text-slate-400 block mb-1">Dedução Tela Trocada (R$)</label>
-                  <input
-                    type="number"
-                    value={regrasEditaveis.telaTrocadaCompativelValor}
-                    onChange={(e) => setRegrasEditaveis({ ...regrasEditaveis, telaTrocadaCompativelValor: parseInt(e.target.value) || 0 })}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold outline-none"
-                  />
-                </div>
+            {accordionRegrasAberto && (
+              <div className="p-5 border-t border-slate-800 space-y-3 animate-in fade-in">
+                <p className="text-[11px] text-slate-400">
+                  Defina os descontos automáticos aplicados na cotação caso o aparelho do cliente apresente avarias:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                    <label className="text-slate-400 block font-bold">Dedução Bateria &lt; 80% (R$)</label>
+                    <input
+                      type="number"
+                      value={regrasEditaveis.bateriaGastaValor}
+                      onChange={(e) => setRegrasEditaveis({ ...regrasEditaveis, bateriaGastaValor: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-emerald-400 font-extrabold outline-none"
+                    />
+                  </div>
 
-                <div>
-                  <label className="text-slate-400 block mb-1">Dedução Tela Trincada (R$)</label>
-                  <input
-                    type="number"
-                    value={regrasEditaveis.telaTrincadaQuebradaValor}
-                    onChange={(e) => setRegrasEditaveis({ ...regrasEditaveis, telaTrincadaQuebradaValor: parseInt(e.target.value) || 0 })}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold outline-none"
-                  />
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                    <label className="text-slate-400 block font-bold">Dedução Tela Trocada (R$)</label>
+                    <input
+                      type="number"
+                      value={regrasEditaveis.telaTrocadaCompativelValor}
+                      onChange={(e) => setRegrasEditaveis({ ...regrasEditaveis, telaTrocadaCompativelValor: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-emerald-400 font-extrabold outline-none"
+                    />
+                  </div>
+
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                    <label className="text-slate-400 block font-bold">Dedução Tela Trincada (R$)</label>
+                    <input
+                      type="number"
+                      value={regrasEditaveis.telaTrincadaQuebradaValor}
+                      onChange={(e) => setRegrasEditaveis({ ...regrasEditaveis, telaTrincadaQuebradaValor: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-emerald-400 font-extrabold outline-none"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1890,6 +2057,80 @@ export function CalculadoraUpgradeTab() {
                 className="flex-1 bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black rounded-xl text-xs cursor-pointer shadow-md"
               >
                 Salvar Modelo
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE MODELO */}
+      {modeloParaExcluirConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white">Apagar Modelo da Tabela?</h3>
+                <p className="text-xs text-slate-400">Esta ação remove o aparelho da calculadora.</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-300">
+              Tem certeza que deseja apagar o <strong className="text-white">{modeloParaExcluirConfirm}</strong>?
+              Ele não aparecerá mais no simulador de balcão, no app de coleta do motoboy nem nas cotações dos clientes.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setModeloParaExcluirConfirm(null)}
+                className="border-slate-800 text-slate-400 hover:text-white rounded-xl text-xs h-9 cursor-pointer"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => handleConfirmarExclusaoModelo(modeloParaExcluirConfirm)}
+                className="bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-xs h-9 gap-1.5 cursor-pointer shadow-lg shadow-red-950/40"
+              >
+                <Trash2 className="w-4 h-4" /> Sim, Apagar Modelo
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO RESTAURAR PADRÃO */}
+      {modalRestaurarPadraoAberto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+                <Sliders className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-white">Restaurar Tabela Padrão?</h3>
+                <p className="text-xs text-slate-400">Recupera a lista oficial de fábrica de iPhones.</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-300">
+              Isso irá recarregar todos os iPhones de fábrica com seus preços sugeridos padrão. Todos os modelos que você apagou voltarão.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setModalRestaurarPadraoAberto(false)}
+                className="border-slate-800 text-slate-400 hover:text-white rounded-xl text-xs h-9 cursor-pointer"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={async () => {
+                  await restaurarTabelaPadrao();
+                  setModalRestaurarPadraoAberto(false);
+                }}
+                className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs h-9 gap-1.5 cursor-pointer shadow-lg shadow-amber-950/40"
+              >
+                Restaurar Tabela Padrão
               </Button>
             </div>
           </div>

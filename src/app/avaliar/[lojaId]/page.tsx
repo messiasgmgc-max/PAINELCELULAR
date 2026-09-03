@@ -99,8 +99,8 @@ export default function AvaliacaoPublicaUpgradePage() {
 
   // Modelos disponíveis dinamicamente da loja (padrão + novos cadastrados pelo lojista)
   const modelosDisponiveis = useMemo(() => {
-    const tabela = loja?.tabela_upgrade && Object.keys(loja.tabela_upgrade).length > 0
-      ? { ...TABELA_BASE_UPGRADE_PADRAO, ...loja.tabela_upgrade }
+    const tabela = loja?.tabela_upgrade && typeof loja.tabela_upgrade === 'object' && Object.keys(loja.tabela_upgrade).length > 0
+      ? loja.tabela_upgrade
       : TABELA_BASE_UPGRADE_PADRAO;
     const keys = Object.keys(tabela);
     return keys.sort((a, b) => sortModelosCronologico(a, b, 'antigo_para_novo'));
@@ -116,11 +116,11 @@ export default function AvaliacaoPublicaUpgradePage() {
   // Capacidades disponíveis para o modelo selecionado
   const capacidadesDisponiveis = useMemo(() => {
     if (!modeloSelecionado) return ['64GB', '128GB', '256GB'];
-    const tabela = loja?.tabela_upgrade && Object.keys(loja.tabela_upgrade).length > 0
-      ? { ...TABELA_BASE_UPGRADE_PADRAO, ...loja.tabela_upgrade }
+    const tabela = loja?.tabela_upgrade && typeof loja.tabela_upgrade === 'object' && Object.keys(loja.tabela_upgrade).length > 0
+      ? loja.tabela_upgrade
       : TABELA_BASE_UPGRADE_PADRAO;
 
-    const modeloData = tabela[modeloSelecionado] || TABELA_BASE_UPGRADE_PADRAO[modeloSelecionado];
+    const modeloData = tabela[modeloSelecionado];
     if (modeloData) {
       return Object.keys(modeloData);
     }

@@ -120,8 +120,8 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
 
         if (loja) {
           setLojaInfo(loja);
-          if (loja.tabela_upgrade) {
-            setTabelaPrecos({ ...TABELA_BASE_UPGRADE_PADRAO, ...loja.tabela_upgrade });
+          if (loja.tabela_upgrade && typeof loja.tabela_upgrade === 'object' && Object.keys(loja.tabela_upgrade).length > 0) {
+            setTabelaPrecos(loja.tabela_upgrade);
           }
           if (loja.regras_upgrade) {
             setRegrasDeducao({ ...REGRAS_DEDUCAO_PADRAO, ...loja.regras_upgrade });

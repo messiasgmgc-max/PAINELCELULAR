@@ -12,6 +12,8 @@ ALTER TABLE public.lojas ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE public.lojas ADD COLUMN IF NOT EXISTS logo_url TEXT;
 ALTER TABLE public.lojas ADD COLUMN IF NOT EXISTS assinatura_url TEXT;
 ALTER TABLE public.lojas ADD COLUMN IF NOT EXISTS ativo BOOLEAN DEFAULT true;
+ALTER TABLE public.lojas ADD COLUMN IF NOT EXISTS tabela_upgrade JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.lojas ADD COLUMN IF NOT EXISTS regras_upgrade JSONB DEFAULT '{}'::jsonb;
 
 -- Garante permissões de SELECT e UPDATE para os usuários autenticados
 ALTER TABLE public.lojas ENABLE ROW LEVEL SECURITY;
