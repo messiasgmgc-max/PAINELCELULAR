@@ -21,14 +21,15 @@ import {
   Plus,
   CheckSquare,
   Square,
-  ArrowUpDown
+  ArrowUpDown,
+  Copy
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, sortModelosCronologico } from '@/lib/utils';
+import { cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
 
 interface AparelhoAuditoria {
   id: string;
@@ -467,6 +468,100 @@ export function ConferenciaEstoqueModal({
     setEtapa('relatorio');
   };
 
+  const copiarParaAreaTransferencia = async (texto: string) => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(texto);
+        return true;
+      }
+    } catch (e) {
+      console.warn('Falha no navigator.clipboard, tentando fallback:', e);
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = texto;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const copiado = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return copiado;
+    } catch (errFallback) {
+      console.error('Falha geral no clipboard:', errFallback);
+      return false;
+    }
+  };
+
+  const gerarTextoSaidasGrupo = () => {
+    const dataHora = new Date().toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const itensComSaida = aparelhosFaltantes
+      .map((a) => ({ aparelho: a, acao: acoesFaltantes[a.id] || 'remover' }))
+      .filter((item) => item.acao !== 'manter');
+
+    let txt = `📦 *CONFERÊNCIA DE ESTOQUE - RELATÓRIO DE SAÍDAS*\n`;
+    txt += `📅 *Data/Hora:* ${dataHora}\n`;
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    txt += `✅ *Aparelhos no estoque físico:* ${aparelhosConfirmados.length}\n`;
+    txt += `⚠️ *Total de baixas/saídas:* ${itensComSaida.length}\n`;
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    if (itensComSaida.length === 0) {
+      txt += `🎉 *NENHUMA SAÍDA REGISTRADA!*\n`;
+      txt += `Todos os ${aparelhosConfirmados.length} aparelhos foram conferidos e localizados fisicamente.\n`;
+    } else {
+      txt += `📋 *DETALHAMENTO DAS SAÍDAS:*\n\n`;
+
+      const porAcao: Record<string, Array<{ aparelho: AparelhoAuditoria; acao: AcaoFaltante }>> = {};
+      itensComSaida.forEach((item) => {
+        if (!porAcao[item.acao]) porAcao[item.acao] = [];
+        porAcao[item.acao].push(item);
+      });
+
+      const titulos: Record<string, { label: string; icon: string }> = {
+        vendido: { label: 'VENDIDOS (VAREJO)', icon: '🛒' },
+        atacado: { label: 'VENDA ATACADO (LOJISTA)', icon: '📦' },
+        manutencao: { label: 'ENCAMINHADOS PARA MANUTENÇÃO', icon: '🛠️' },
+        remover: { label: 'BAIXAS / EXTRAVIOS / REMOVIDOS', icon: '❌' },
+      };
+
+      Object.entries(porAcao).forEach(([acaoKey, lista]) => {
+        const info = titulos[acaoKey] || { label: acaoKey.toUpperCase(), icon: '📍' };
+        txt += `${info.icon} *${info.label} (${lista.length}):*\n`;
+        lista.forEach(({ aparelho }) => {
+          const cod = getAparelhoCodigo(aparelho as any);
+          const imeiStr = aparelho.imei ? ` | IMEI: ${aparelho.imei}` : '';
+          const capStr = aparelho.capacidade ? ` ${aparelho.capacidade}` : '';
+          const corStr = aparelho.cor ? ` ${aparelho.cor}` : '';
+          txt += `• *${aparelho.marca || ''} ${aparelho.modelo}*${capStr}${corStr} (ID: ${cod}${imeiStr})\n`;
+        });
+        txt += `\n`;
+      });
+    }
+
+    if (codigosSobrando.length > 0) {
+      txt += `❓ *CÓDIGOS BIPADOS SEM CADASTRO (${codigosSobrando.length}):*\n`;
+      codigosSobrando.forEach((s) => {
+        txt += `• Código: ${s.codigoLido}\n`;
+      });
+      txt += `\n`;
+    }
+
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    txt += `📲 _Copiado automaticamente na conferência do estoque._`;
+    return txt;
+  };
+
   const handleSalvarAjustesEstoque = async () => {
     setSalvandoAjustes(true);
     try {
@@ -496,11 +591,57 @@ export function ConferenciaEstoqueModal({
 
           if (!error) {
             alterados += 1;
+
+            // Se for vendido ou atacado, registra também em vendas com dados pendentes
+            if (acao === 'vendido' || acao === 'atacado') {
+              try {
+                const dataIso = new Date().toISOString();
+                const precoNum = aparelho.preco || 0;
+                await supabase.from('vendas').insert([{
+                  clienteNome: acao === 'atacado' ? 'Venda Atacado (Conferência)' : 'Venda Varejo (Conferência)',
+                  tipoEntrega: acao === 'atacado' ? 'Atacado / Lojista' : 'Varejo',
+                  valor: precoNum,
+                  custo: 0,
+                  lucro: precoNum,
+                  percentualLucro: 100,
+                  dataPagamento: dataIso,
+                  status: 'pago',
+                  metodo: 'dinheiro',
+                  saldoDevedor: 0,
+                  valorPago: precoNum,
+                  dados_cliente_pendente: acao === 'vendido',
+                  descricao: `Baixa na conferência de estoque: ${aparelho.modelo}`,
+                  itens: [{
+                    id: `${Date.now()}_${aparelho.id}`,
+                    aparelhoId: aparelho.id,
+                    descricao: `${aparelho.marca || ''} ${aparelho.modelo} (ID: ${getAparelhoCodigo(aparelho as any)})`,
+                    quantidade: 1,
+                    valorInterno: 0,
+                    valorExibir: precoNum,
+                    total: precoNum,
+                  }],
+                  loja_id: (aparelho as any).loja_id || (aparelho as any).lojaId || null
+                }]);
+              } catch (errV) {
+                console.warn('Registro de venda na conferência:', errV);
+              }
+            }
           }
         }
       }
 
-      toast.success(`🚀 Auditoria concluída! ${alterados} aparelhos tiveram baixa/ajuste no estoque.`);
+      // Copia automaticamente o texto das saídas para a área de transferência!
+      const textoSaidas = gerarTextoSaidasGrupo();
+      const copiou = await copiarParaAreaTransferencia(textoSaidas);
+
+      if (copiou) {
+        toast.success(`📋 Todas as saídas (${alterados}) copiadas para a área de transferência! Só colar no grupo WhatsApp!`, {
+          duration: 9000,
+        });
+      } else {
+        toast.success(`🚀 Auditoria concluída! ${alterados} aparelhos tiveram baixa/ajuste no estoque.`);
+      }
+
       onEstoqueAtualizado();
       handleClose();
     } catch (err: any) {
@@ -980,26 +1121,47 @@ export function ConferenciaEstoqueModal({
             </div>
 
             {/* BOTÕES DE AÇÃO DO RELATÓRIO */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-800">
               <Button variant="ghost" size="sm" onClick={() => setEtapa('escaneamento')} className="text-xs text-slate-400 hover:text-white">
                 ← Voltar para Escaneamento
               </Button>
 
-              <Button
-                onClick={handleSalvarAjustesEstoque}
-                disabled={salvandoAjustes}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs gap-2 px-6 py-2.5 rounded-xl shadow-lg shadow-cyan-900/20"
-              >
-                {salvandoAjustes ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" /> Atualizando Estoque...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" /> Aplicar Ajustes no Estoque
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const txt = gerarTextoSaidasGrupo();
+                    const ok = await copiarParaAreaTransferencia(txt);
+                    if (ok) {
+                      toast.success('📋 Mensagem de saídas copiada para a área de transferência! Pronta para colar no grupo WhatsApp!');
+                    } else {
+                      toast.error('Não foi possível copiar para a área de transferência.');
+                    }
+                  }}
+                  className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 font-bold text-xs gap-1.5 cursor-pointer h-9 px-4 rounded-xl"
+                  title="Copiar texto formatado das saídas para colar no WhatsApp"
+                >
+                  <Copy className="w-3.5 h-3.5 text-emerald-400" /> Copiar Saídas p/ WhatsApp
+                </Button>
+
+                <Button
+                  onClick={handleSalvarAjustesEstoque}
+                  disabled={salvandoAjustes}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs gap-2 px-6 py-2.5 rounded-xl shadow-lg shadow-cyan-900/20 cursor-pointer h-9"
+                >
+                  {salvandoAjustes ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Atualizando Estoque...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" /> Aplicar Ajustes & Copiar Saídas
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
 
           </div>
