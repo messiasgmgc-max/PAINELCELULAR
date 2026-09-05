@@ -66,7 +66,39 @@ export async function POST(request: Request) {
         .eq('id', lojaId)
         .maybeSingle();
 
-      const novoVencimento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      // Extrair dias e destino do histórico se existirem
+      let diasAdicionar = 30;
+      let destinoWhatsApp = '';
+      let instanciaWhatsApp = 'lucasimports';
+
+      if (historico?.observacao) {
+        const matchDias = historico.observacao.match(/Dias:\s*(\d+)/i);
+        if (matchDias) diasAdicionar = parseInt(matchDias[1], 10);
+        const matchDest = historico.observacao.match(/Destino:\s*([^\s|]+)/i);
+        if (matchDest) destinoWhatsApp = matchDest[1];
+        const matchInst = historico.observacao.match(/Instancia:\s*([^\s|]+)/i);
+        if (matchInst) instanciaWhatsApp = matchInst[1];
+      }
+
+      // Calcula novo vencimento respeitando a data atual se ainda não venceu
+      let baseDate = new Date();
+      if (lojaAtual?.data_vencimento) {
+        const parts = String(lojaAtual.data_vencimento).split('T')[0].split('-');
+        if (parts.length === 3) {
+          const year = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const day = parseInt(parts[2], 10);
+          const vencAtual = new Date(year, month, day);
+          if (vencAtual.getTime() > baseDate.getTime()) {
+            baseDate = vencAtual;
+          }
+        }
+      }
+
+      const novaDataMs = baseDate.getTime() + diasAdicionar * 24 * 60 * 60 * 1000;
+      const novoVencimento = new Date(novaDataMs).toISOString().split('T')[0];
+      const [ny, nm, nd] = novoVencimento.split('-');
+      const novoVencimentoFmt = `${nd}/${nm}/${ny}`;
 
       // 2. Liberar loja e renovar plano
       await supabaseAdmin
@@ -84,7 +116,7 @@ export async function POST(request: Request) {
         .from('historico_pagamentos_planos')
         .update({
           status: 'aprovado',
-          observacao: `Aprovado via Webhook Mercado Pago (ID: ${paymentId})`
+          observacao: `Aprovado via Webhook Mercado Pago (ID: ${paymentId}) | Renovado +${diasAdicionar} dias até ${novoVencimentoFmt}`
         })
         .eq('mp_payment_id', String(paymentId));
 
@@ -93,10 +125,37 @@ export async function POST(request: Request) {
         loja_id: lojaId,
         tipo_evento: 'plano',
         acao: 'Mensalidade Paga via Webhook PIX',
-        detalhes: `Pagamento de R$ ${mpPayment.transaction_amount} confirmado automaticamente via Webhook. Novo vencimento: ${novoVencimento}`
+        detalhes: `Pagamento de R$ ${mpPayment.transaction_amount} confirmado automaticamente via Webhook. Novo vencimento: ${novoVencimentoFmt}`
       });
 
-      console.log(`[Webhook MercadoPago] Loja ${lojaId} renovada com sucesso até ${novoVencimento}`);
+      console.log(`[Webhook MercadoPago] Loja ${lojaId} renovada com sucesso até ${novoVencimentoFmt}`);
+
+      // 5. Notificar no WhatsApp se houver destino registrado
+      if (destinoWhatsApp) {
+        const evolutionUrl = (process.env.EVOLUTION_API_URL || 'http://13.140.36.50:8080').trim().replace(/\/+$/, '');
+        const apiKey = (process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449').trim();
+        const isGroup = destinoWhatsApp.endsWith('@g.us');
+        const cleanDestination = isGroup ? destinoWhatsApp : destinoWhatsApp.replace(/\D/g, '');
+
+        if (evolutionUrl && apiKey && cleanDestination) {
+          const valorPago = Number(mpPayment.transaction_amount || 0).toFixed(2).replace('.', ',');
+          const msgAprovado = `🎉 *PAGAMENTO CONFIRMADO COM SUCESSO!*\n\n` +
+            `Recebemos seu PIX de *R$ ${valorPago}*!\n` +
+            `Sua assinatura foi estendida em *+${diasAdicionar} dias*.\n\n` +
+            `📅 *Novo Vencimento*: *${novoVencimentoFmt}*\n` +
+            `✅ O sistema está 100% liberado e ativo. Boas vendas! 🚀`;
+
+          try {
+            await fetch(`${evolutionUrl}/message/sendText/${instanciaWhatsApp || 'lucasimports'}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', apikey: apiKey },
+              body: JSON.stringify({ number: cleanDestination, text: msgAprovado })
+            });
+          } catch (whatsErr) {
+            console.error('Falha ao enviar notificação no WhatsApp pelo webhook MP:', whatsErr);
+          }
+        }
+      }
     }
 
     return NextResponse.json({ received: true });

@@ -1,7 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWhatsAppText, parseGeminiPlan } from './commandExecutor';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
+
+export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
 // Instancia cliente do Supabase com Service Role Key para bypass de RLS no backend
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -91,6 +93,206 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
     console.error('❌ Falha na requisição para Evolution API:', err?.message || err);
     return false;
   }
+}
+
+// ── AUXILIAR: Enviar Imagem / QR Code via Evolution API ──
+async function enviarImagemWhatsApp(
+  instanceName: string,
+  destination: string,
+  mediaUrlOrBase64: string,
+  caption?: string
+) {
+  if (!EVOLUTION_URL || !EVOLUTION_API_KEY) {
+    console.warn('⚠️ EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados no .env.local');
+    return false;
+  }
+
+  const isGroup = destination.endsWith('@g.us');
+  const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
+  if (!cleanDestination) return false;
+
+  const targetInstance = instanceName || DEFAULT_INSTANCE;
+  const endpoint = `${EVOLUTION_URL}/message/sendMedia/${targetInstance}`;
+
+  // Se for string base64 pura sem o prefixo data URI, inclui o prefixo
+  let mediaPayload = mediaUrlOrBase64;
+  if (!mediaPayload.startsWith('http://') && !mediaPayload.startsWith('https://') && !mediaPayload.startsWith('data:')) {
+    mediaPayload = `data:image/png;base64,${mediaPayload}`;
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        number: cleanDestination,
+        mediatype: 'image',
+        mimetype: 'image/png',
+        caption: caption || '',
+        media: mediaPayload,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`❌ Erro ao enviar imagem via Evolution API (${response.status}):`, errText);
+      return false;
+    }
+
+    console.log(`✅ Imagem enviada com sucesso para ${cleanDestination} via instância "${targetInstance}"`);
+    return true;
+  } catch (err: any) {
+    console.error('❌ Falha na requisição sendMedia para Evolution API:', err?.message || err);
+    return false;
+  }
+}
+
+// ── AUXILIAR: Aprovar Renovação de Loja e Notificar no WhatsApp ──
+async function aprovarRenovacaoLoja(
+  lojaId: string,
+  diasAdicionar: number,
+  paymentId: string,
+  valor: number,
+  instanceName?: string,
+  destination?: string
+) {
+  const { data: loja } = await supabase
+    .from('lojas')
+    .select('*')
+    .eq('id', lojaId)
+    .maybeSingle();
+
+  if (!loja) return;
+
+  // Calcula nova data de vencimento
+  let baseDate = new Date();
+  if (loja.data_vencimento) {
+    const parts = String(loja.data_vencimento).split('T')[0].split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const vencAtual = new Date(year, month, day);
+      if (vencAtual.getTime() > baseDate.getTime()) {
+        baseDate = vencAtual;
+      }
+    }
+  }
+
+  const novaDataMs = baseDate.getTime() + diasAdicionar * 24 * 60 * 60 * 1000;
+  const novoVencimento = new Date(novaDataMs).toISOString().split('T')[0];
+  const [ny, nm, nd] = novoVencimento.split('-');
+  const novoVencimentoFmt = `${nd}/${nm}/${ny}`;
+
+  // 1. Atualizar a loja para ativo
+  await supabase
+    .from('lojas')
+    .update({
+      plano_status: 'ativo',
+      data_vencimento: novoVencimento,
+      solicitacao_liberacao_status: 'aprovado',
+      ativo: true,
+    })
+    .eq('id', lojaId);
+
+  // 2. Atualizar histórico
+  await supabase
+    .from('historico_pagamentos_planos')
+    .update({
+      status: 'aprovado',
+      observacao: `Aprovado (ID: ${paymentId}) | Renovado +${diasAdicionar} dias até ${novoVencimentoFmt}`,
+    })
+    .eq('mp_payment_id', paymentId);
+
+  // 3. Notificar no WhatsApp
+  if (destination) {
+    const msgAprovado = `🎉 *PAGAMENTO CONFIRMADO COM SUCESSO!*\n\n` +
+      `Recebemos seu PIX de *R$ ${valor.toFixed(2).replace('.', ',')}*!\n` +
+      `Sua assinatura foi estendida em *+${diasAdicionar} dias*.\n\n` +
+      `📅 *Novo Vencimento*: *${novoVencimentoFmt}*\n` +
+      `✅ O sistema está 100% liberado. Boas vendas! 🚀`;
+    await enviarMensagemWhatsApp(instanceName || DEFAULT_INSTANCE, destination, msgAprovado);
+  }
+}
+
+// ── AUXILIAR: Monitorar Ciclo de Vida do PIX (5 minutos com aviso a 1 min de expirar) ──
+async function monitorarCicloVidaPix(params: {
+  paymentId: string;
+  lojaId: string;
+  diasAdicionar: number;
+  valorFinal: number;
+  instanceName: string;
+  targetDestination: string;
+  tokenMercadoPago: string;
+}) {
+  const { paymentId, lojaId, diasAdicionar, valorFinal, instanceName, targetDestination, tokenMercadoPago } = params;
+
+  const verificarSeAprovado = async () => {
+    // 1. Verifica no banco se já foi aprovado pelo Webhook
+    const { data: hist } = await supabase
+      .from('historico_pagamentos_planos')
+      .select('status')
+      .eq('mp_payment_id', paymentId)
+      .maybeSingle();
+
+    if (hist?.status === 'aprovado') return true;
+
+    // 2. Consulta API do Mercado Pago
+    try {
+      const res = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+        headers: { Authorization: `Bearer ${tokenMercadoPago}` },
+      });
+      if (res.ok) {
+        const mpData = await res.json();
+        if (mpData.status === 'approved') {
+          await aprovarRenovacaoLoja(lojaId, diasAdicionar, paymentId, valorFinal, instanceName, targetDestination);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao consultar Mercado Pago no monitoramento:', e);
+    }
+    return false;
+  };
+
+  // Aguarda 4 minutos (240 segundos)
+  await new Promise((resolve) => setTimeout(resolve, 240 * 1000));
+
+  if (await verificarSeAprovado()) {
+    return;
+  }
+
+  // Avisa no WhatsApp que falta 1 minuto para expirar
+  await enviarMensagemWhatsApp(
+    instanceName,
+    targetDestination,
+    `⚠️ *Aviso de Expiração do PIX*\n\nResta apenas *1 minuto* para o código PIX de *R$ ${valorFinal.toFixed(2).replace('.', ',')}* expirar!\n\nCaso já tenha efetuado o pagamento, aguarde alguns instantes pela confirmação automática. ✅`
+  );
+
+  // Aguarda o minuto final (60 segundos)
+  await new Promise((resolve) => setTimeout(resolve, 60 * 1000));
+
+  if (await verificarSeAprovado()) {
+    return;
+  }
+
+  // Marca como expirado e avisa
+  await supabase
+    .from('historico_pagamentos_planos')
+    .update({
+      status: 'expirado',
+      observacao: `Expirado após 5 minutos sem pagamento (ID: ${paymentId})`,
+    })
+    .eq('mp_payment_id', paymentId);
+
+  await enviarMensagemWhatsApp(
+    instanceName,
+    targetDestination,
+    `⌛ *Código PIX Expirado*\n\nO prazo de 5 minutos encerrou e o código PIX foi cancelado para sua segurança.\n\nPara gerar um novo quando quiser, basta enviar:\n👉 *!plano pagar*`
+  );
 }
 
 // ── AUXILIAR: Resolver ID da Loja ──
@@ -501,25 +703,44 @@ async function responderConsultaEstoqueNatural(
     'preco', 'preço', 'procurando', 'procuro', 'preciso de', 'tem ai', 'tem aí', 'vende'
   ];
 
-  const mencaoIphone = /iphone|\bip\s*\d|\b1[1-7]\s*(?:pro|promax|pro max|mini|plus)?\b|\bxr\b|\bxs\b|\bse\b/i.test(textoLimpo);
+  const mencaoIphone = /iphone|\bip\s*\d|\b1[1-7]\s*(?:pro|promax|pro max|pmax|pm|pro|p|mini|plus|\+)?\b|\bxr\b|\bxs\b|\bse\b/i.test(textoLimpo);
   const temPergunta = termosPergunta.some((termo) => textoLimpo.includes(termo));
 
   if (!mencaoIphone && !temPergunta) {
     return null;
   }
 
-  const modeloMatch = textoLimpo.match(/(?:iphone\s*)?(1[1-7]|[78x]|xr|xs|se)(?:\s*(pro\s*max|promax|pro|mini|plus))?/i);
-  let modeloAlvo = '';
+  // Regex estrita com suporte a pm, promax, pro max, pmax, p, pro, plus, +, mini
+  const modeloMatch = textoLimpo.match(/(?:iphone\s*|ip\s*)?(1[1-7]|[78x]|xr|xs|se)\s*(pro\s*max|promax|pmax|pm|pro|p|plus|\+|mini)?(?:\b|\s|[?!.,]|$)/i);
   let termoNumero = '';
+  let variante: 'PRO_MAX' | 'PRO' | 'PLUS' | 'MINI' | 'BASE_ONLY' | 'QUALQUER' = 'QUALQUER';
+  let modeloAlvoFormatado = '';
+
   if (modeloMatch) {
     termoNumero = modeloMatch[1].toUpperCase();
-    const suf = modeloMatch[2] ? modeloMatch[2].toUpperCase().replace(/\s+/g, ' ') : '';
-    modeloAlvo = `iPhone ${termoNumero}${suf ? ' ' + suf : ''}`.trim();
+    const sufRaw = (modeloMatch[2] || '').toLowerCase().replace(/\s+/g, '');
+
+    if (['pm', 'promax', 'pmax'].includes(sufRaw)) {
+      variante = 'PRO_MAX';
+      modeloAlvoFormatado = `iPhone ${termoNumero} Pro Max`;
+    } else if (['p', 'pro'].includes(sufRaw)) {
+      variante = 'PRO';
+      modeloAlvoFormatado = `iPhone ${termoNumero} Pro`;
+    } else if (['plus', '+', 'pl'].includes(sufRaw)) {
+      variante = 'PLUS';
+      modeloAlvoFormatado = `iPhone ${termoNumero} Plus`;
+    } else if (sufRaw === 'mini') {
+      variante = 'MINI';
+      modeloAlvoFormatado = `iPhone ${termoNumero} Mini`;
+    } else if (!sufRaw) {
+      variante = 'BASE_ONLY';
+      modeloAlvoFormatado = `iPhone ${termoNumero}`;
+    }
   }
 
   let query = supabase
     .from('aparelhos')
-    .select('*')
+    .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
     .eq('ativo', true)
     .neq('condicao', 'vendido')
     .neq('status', 'vendido');
@@ -532,7 +753,7 @@ async function responderConsultaEstoqueNatural(
   if ((error || !aparelhos || aparelhos.length === 0) && lojaId) {
     const { data: fallbackAparelhos } = await supabase
       .from('aparelhos')
-      .select('*')
+      .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
       .eq('ativo', true)
       .neq('condicao', 'vendido')
       .neq('status', 'vendido');
@@ -547,53 +768,87 @@ async function responderConsultaEstoqueNatural(
 
   let aparelhosEncontrados: any[] = [];
   if (termoNumero) {
-    aparelhosEncontrados = aparelhos.filter((a) => {
+    const numLower = termoNumero.toLowerCase();
+
+    // Filtra aparelhos da geração / modelo indicado
+    const aparelhosDaGeracao = aparelhos.filter((a) => {
       const mod = String(a.modelo || '').toLowerCase();
-      const matchNum = new RegExp(`\\b${termoNumero.toLowerCase()}\\b`).test(mod) || mod.includes(termoNumero.toLowerCase());
-      if (modeloAlvo.includes('PRO MAX') || modeloAlvo.includes('PROMAX')) {
-        return matchNum && (mod.includes('pro max') || mod.includes('promax'));
-      }
-      if (modeloAlvo.includes('PRO')) {
-        return matchNum && mod.includes('pro') && !mod.includes('max');
-      }
-      if (modeloAlvo.includes('MINI')) {
-        return matchNum && mod.includes('mini');
-      }
-      if (modeloAlvo.includes('PLUS')) {
-        return matchNum && mod.includes('plus');
-      }
-      return matchNum;
+      return new RegExp(`\\b${numLower}\\b`).test(mod) || mod.includes(`iphone ${numLower}`) || mod.includes(`ip ${numLower}`) || mod.startsWith(numLower);
     });
+
+    if (variante === 'PRO_MAX') {
+      // Somente Pro Max / ProMax / PMax
+      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+        const mod = String(a.modelo || '').toLowerCase();
+        return mod.includes('pro max') || mod.includes('promax') || mod.includes('pmax');
+      });
+    } else if (variante === 'PRO') {
+      // Somente Pro (excluindo Pro Max)
+      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+        const mod = String(a.modelo || '').toLowerCase();
+        return (mod.includes('pro') || mod.includes(' pro ')) && !mod.includes('max') && !mod.includes('promax');
+      });
+    } else if (variante === 'PLUS') {
+      // Somente Plus
+      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+        const mod = String(a.modelo || '').toLowerCase();
+        return mod.includes('plus') || mod.includes('+');
+      });
+    } else if (variante === 'MINI') {
+      // Somente Mini
+      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+        const mod = String(a.modelo || '').toLowerCase();
+        return mod.includes('mini');
+      });
+    } else if (variante === 'BASE_ONLY') {
+      // Quando perguntou apenas o modelo base (ex: "tem 15?", "tem 11?"):
+      // Primeiro prioriza o modelo standard (sem pro, sem max, sem plus, sem mini)
+      const baseModels = aparelhosDaGeracao.filter((a) => {
+        const mod = String(a.modelo || '').toLowerCase();
+        return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('mini');
+      });
+      if (baseModels.length > 0) {
+        aparelhosEncontrados = baseModels;
+      } else {
+        // Se não tiver base, traz os outros modelos da mesma geração
+        aparelhosEncontrados = aparelhosDaGeracao;
+      }
+    } else {
+      aparelhosEncontrados = aparelhosDaGeracao;
+    }
   } else if (mencaoIphone) {
     aparelhosEncontrados = aparelhos.filter((a) => String(a.modelo || '').toLowerCase().includes('iphone'));
   }
 
   if (aparelhosEncontrados.length > 0) {
-    const itensTexto = aparelhosEncontrados.slice(0, 10).map((a) => {
-      const precoValor = a.precoAtacado || a.preco_atacado || a.preco;
+    // Ordena por modelo e capacidade
+    aparelhosEncontrados.sort((a, b) => (a.modelo || '').localeCompare(b.modelo || ''));
+
+    const itensTexto = aparelhosEncontrados.map((a) => {
+      const precoValor = a.preco_atacado || a.precoAtacado || a.preco;
       const precoFinal = precoValor ? ` - R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
       const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-      const cor = a.cor && a.cor !== 'N/A' ? `${a.cor}` : '';
+      const cor = a.cor && a.cor !== 'N/A' ? `- ${a.cor}` : '';
       const batVal = a.saude_bateria || a.saudeBateria;
       const bat = batVal ? `(🔋 ${String(batVal).replace(/\D/g, '')}%)` : '';
-      const extras = [cap, cor].filter(Boolean).join(' ');
-      return `📱 ${a.modelo} ${extras}${precoFinal} ${bat}`.replace(/\s+/g, ' ').trim();
+      const modCap = [a.modelo, cap].filter(Boolean).join(' ');
+      return `📱 ${modCap} ${cor} ${bat} ${precoFinal}`.replace(/\s+/g, ' ').trim();
     }).join('\n');
 
     return `Tem aqui esses modelos:\n\n${itensTexto}`;
   }
 
-  if (modeloAlvo) {
+  if (modeloAlvoFormatado) {
     const outrasOpcoes = aparelhos.slice(0, 5).map((a) => {
-      const precoValor = a.precoAtacado || a.preco_atacado || a.preco;
+      const precoValor = a.preco_atacado || a.precoAtacado || a.preco;
       const precoFinal = precoValor ? ` - R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
       const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-      const cor = a.cor && a.cor !== 'N/A' ? `${a.cor}` : '';
+      const cor = a.cor && a.cor !== 'N/A' ? `- ${a.cor}` : '';
       const extras = [cap, cor].filter(Boolean).join(' ');
       return `• ${a.modelo} ${extras}${precoFinal}`.replace(/\s+/g, ' ').trim();
     }).join('\n');
 
-    return `No momento o *${modeloAlvo}* esgotou. Temos esses modelos disponíveis:\n\n${outrasOpcoes}`;
+    return `No momento o *${modeloAlvoFormatado}* esgotou. Temos esses modelos disponíveis:\n\n${outrasOpcoes}`;
   }
 
   return null;
@@ -1041,58 +1296,335 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       }
     }
 
-    // ── 9. CONSULTA NATURAL DE ESTOQUE (GRUPOS E PRIVADO) ──
+    // ── 9. COMANDO: !plano e !assinatura ──
+    if (lowerText.startsWith('!plano') || lowerText.startsWith('!assinatura') || lowerText === 'plano' || lowerText === 'assinatura') {
+      const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
+      if (!resolvedLojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Nenhuma loja encontrada vinculada a esta sessão do WhatsApp.');
+        return NextResponse.json({ status: 'error', message: 'Loja não encontrada' }, { status: 200 });
+      }
+
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('*')
+        .eq('id', resolvedLojaId)
+        .maybeSingle();
+
+      if (!loja) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Informações da loja não localizadas.');
+        return NextResponse.json({ status: 'error', message: 'Loja não encontrada' }, { status: 200 });
+      }
+
+      // 1. Calcular dias restantes e status
+      let diasRestantes = 0;
+      let dataVencimentoFmt = 'Não definida';
+      let isVencido = false;
+
+      if (loja.data_vencimento) {
+        const parts = String(loja.data_vencimento).split('T')[0].split('-');
+        if (parts.length === 3) {
+          const year = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const day = parseInt(parts[2], 10);
+          const venc = new Date(year, month, day, 23, 59, 59, 999);
+          const diffTime = venc.getTime() - Date.now();
+          diasRestantes = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          dataVencimentoFmt = `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
+          isVencido = diasRestantes <= 0;
+        }
+      }
+
+      const valorMensalBase = Number(loja.valor_mensalidade || 99.90);
+      const valorDiaria = valorMensalBase / 30;
+
+      // 2. Se for apenas consulta (!plano ou !assinatura sem intenção explícita de pagar)
+      const querPagar = lowerText.includes('pagar') || lowerText.includes('renovar') || lowerText.includes('pix');
+      if (!querPagar) {
+        let label1Mes = `R$ ${valorMensalBase.toFixed(2).replace('.', ',')} (30 dias)`;
+        if (diasRestantes > 0 && diasRestantes < 30 && (loja.plano_status === 'ativo' || !loja.plano_status)) {
+          const diasFaltantes = 30 - diasRestantes;
+          const valorParcial = Math.max(1.00, Number((diasFaltantes * valorDiaria).toFixed(2)));
+          label1Mes = `R$ ${valorParcial.toFixed(2).replace('.', ',')} (Proporcional: ${diasFaltantes} dias p/ completar 30 dias)`;
+        }
+
+        const v3Meses = (valorMensalBase * 3).toFixed(2).replace('.', ',');
+        const v6Meses = (valorMensalBase * 6).toFixed(2).replace('.', ',');
+        const v1Ano = (valorMensalBase * 12).toFixed(2).replace('.', ',');
+
+        const statusTexto = isVencido 
+          ? `🔴 *Vencido* (Vencido há ${Math.abs(diasRestantes)} dias)` 
+          : `🟢 *Ativo* (Restam ${diasRestantes} dias)`;
+
+        const msgMenuPlano = `📋 *ASSINATURA - ${loja.nome || 'SISTEMA'}*\n\n` +
+          `• *Status*: ${statusTexto}\n` +
+          `• *Vencimento*: ${dataVencimentoFmt}\n` +
+          `• *Mensalidade Base*: R$ ${valorMensalBase.toFixed(2).replace('.', ',')}/mês\n\n` +
+          `💡 *Deseja renovar ou adiantar sua assinatura?*\n` +
+          `Envie um dos comandos abaixo para gerar o PIX imediato:\n\n` +
+          `👉 *!plano pagar*\n` +
+          `_${label1Mes}_\n\n` +
+          `👉 *!plano pagar 3 meses*\n` +
+          `_3 Meses (+90 dias): R$ ${v3Meses}_\n\n` +
+          `👉 *!plano pagar 6 meses*\n` +
+          `_6 Meses (+180 dias): R$ ${v6Meses}_\n\n` +
+          `👉 *!plano pagar 1 ano*\n` +
+          `_1 Ano (+365 dias): R$ ${v1Ano}_\n\n` +
+          `_⚡ O PIX gerado possui validade de 5 minutos com Copia e Cola e imagem do QR Code._`;
+
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgMenuPlano);
+        return NextResponse.json({ status: 'ok', message: 'Menu de planos enviado.' }, { status: 200 });
+      }
+
+      // 3. Se solicitou pagamento (!plano pagar ...)
+      let diasAdicionar = 30;
+      let valorFinal = valorMensalBase;
+      let labelPeriodo = '1 Mês';
+
+      if (lowerText.includes('1 ano') || lowerText.includes('12 meses') || lowerText.includes('ano') || lowerText.includes('anual')) {
+        diasAdicionar = 365;
+        valorFinal = Number((valorMensalBase * 12).toFixed(2));
+        labelPeriodo = '1 Ano (+365 dias)';
+      } else if (lowerText.includes('6 meses') || lowerText.includes('semestral')) {
+        diasAdicionar = 180;
+        valorFinal = Number((valorMensalBase * 6).toFixed(2));
+        labelPeriodo = '6 Meses (+180 dias)';
+      } else if (lowerText.includes('3 meses') || lowerText.includes('trimestral')) {
+        diasAdicionar = 90;
+        valorFinal = Number((valorMensalBase * 3).toFixed(2));
+        labelPeriodo = '3 Meses (+90 dias)';
+      } else {
+        // 1 Mês (aplica proporcionalidade se estiver ativo com dias restantes < 30)
+        if (diasRestantes > 0 && diasRestantes < 30 && (loja.plano_status === 'ativo' || !loja.plano_status)) {
+          const diasFaltantes = 30 - diasRestantes;
+          valorFinal = Math.max(1.00, Number((diasFaltantes * valorDiaria).toFixed(2)));
+          diasAdicionar = diasFaltantes;
+          labelPeriodo = `Renovação Proporcional (${diasFaltantes} dias)`;
+        } else {
+          valorFinal = valorMensalBase;
+          diasAdicionar = 30;
+          labelPeriodo = '1 Mês (+30 dias)';
+        }
+      }
+
+      // Buscar Access Token Mercado Pago
+      let tokenMercadoPago = loja.mp_access_token?.trim();
+      if (!tokenMercadoPago) {
+        const { data: anyLojaWithMp } = await supabase
+          .from('lojas')
+          .select('mp_access_token')
+          .not('mp_access_token', 'is', null)
+          .neq('mp_access_token', '')
+          .limit(1)
+          .maybeSingle();
+        if (anyLojaWithMp?.mp_access_token) {
+          tokenMercadoPago = anyLojaWithMp.mp_access_token.trim();
+        }
+      }
+      if (!tokenMercadoPago) {
+        tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
+      }
+
+      if (!tokenMercadoPago) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ O Mercado Pago ainda não está configurado no sistema. Contate o suporte.');
+        return NextResponse.json({ status: 'error', message: 'Token Mercado Pago não configurado' }, { status: 200 });
+      }
+
+      // Gerar PIX no Mercado Pago com expiração em 5 minutos
+      const payerEmail = (loja.email && loja.email.includes('@')) ? loja.email.trim() : 'financeiro@painelcelular.com.br';
+      const payerName = (loja.nome || pushName || 'Cliente').trim().slice(0, 30);
+      const expiraEm5Min = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+      try {
+        const mpResponse = await fetch('https://api.mercadopago.com/v1/payments', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${tokenMercadoPago}`,
+            'Content-Type': 'application/json',
+            'X-Idempotency-Key': `${loja.id}-${Date.now()}`,
+          },
+          body: JSON.stringify({
+            transaction_amount: Number(valorFinal.toFixed(2)),
+            description: `Assinatura ${labelPeriodo} - ${(loja.nome || 'Loja').slice(0, 30)}`,
+            payment_method_id: 'pix',
+            date_of_expiration: expiraEm5Min,
+            payer: {
+              email: payerEmail,
+              first_name: payerName,
+            },
+            external_reference: loja.id,
+          }),
+        });
+
+        const mpData = await mpResponse.json().catch(() => ({}));
+
+        if (!mpResponse.ok || !mpData.point_of_interaction?.transaction_data) {
+          const erroMp = mpData.message || mpData.cause?.[0]?.description || 'Erro ao comunicar com Mercado Pago';
+          await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Falha ao gerar PIX no Mercado Pago: ${erroMp}`);
+          return NextResponse.json({ status: 'error', message: erroMp }, { status: 200 });
+        }
+
+        const txData = mpData.point_of_interaction.transaction_data;
+        const paymentId = String(mpData.id);
+        const qrCode = txData.qr_code;
+        const qrCodeBase64 = txData.qr_code_base64;
+
+        // Registrar no histórico de pagamentos com rastreamento completo
+        await supabase.from('historico_pagamentos_planos').insert({
+          loja_id: loja.id,
+          valor: valorFinal,
+          status: 'pendente',
+          mp_payment_id: paymentId,
+          qr_code: qrCode,
+          qr_code_base64: qrCodeBase64,
+          observacao: `PIX WhatsApp | Periodo: ${labelPeriodo} | Dias: ${diasAdicionar} | Destino: ${targetDestination} | Instancia: ${instanceName}`,
+        });
+
+        // 1. Enviar mensagem de texto com instruções e Copia e Cola
+        const msgTextoPix = `💳 *PIX DE ASSINATURA GERADO!* 💳\n\n` +
+          `📌 *Plano*: ${labelPeriodo}\n` +
+          `💰 *Valor*: R$ ${valorFinal.toFixed(2).replace('.', ',')}\n` +
+          `⏳ *Validade*: 5 minutos\n\n` +
+          `👇 *PIX Copia e Cola (toque para copiar):*`;
+
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgTextoPix);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, qrCode);
+
+        // 2. Enviar QR Code visual em imagem
+        const qrMedia = qrCodeBase64
+          ? `data:image/png;base64,${qrCodeBase64}`
+          : `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qrCode)}`;
+
+        await enviarImagemWhatsApp(
+          instanceName,
+          targetDestination,
+          qrMedia,
+          `📱 *QR Code PIX*\nEscaneie no app do seu banco para pagar R$ ${valorFinal.toFixed(2).replace('.', ',')}.\nValidade: 5 minutos.`
+        );
+
+        // 3. Monitoramento em background do ciclo de vida de 5 minutos
+        after(async () => {
+          await monitorarCicloVidaPix({
+            paymentId,
+            lojaId: loja.id,
+            diasAdicionar,
+            valorFinal,
+            instanceName,
+            targetDestination,
+            tokenMercadoPago,
+          });
+        });
+
+        return NextResponse.json({ status: 'ok', message: 'PIX gerado e enviado com sucesso.' }, { status: 200 });
+      } catch (mpErr: any) {
+        console.error('Erro na requisição ao Mercado Pago:', mpErr);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Falha ao conectar ao Mercado Pago: ${mpErr?.message || 'Erro de rede'}`);
+        return NextResponse.json({ status: 'error', message: mpErr?.message }, { status: 200 });
+      }
+    }
+
+    // ── 10. COMANDO: !estoque e !estoque completo ──
+    if (lowerText.startsWith('!estoque') || lowerText === 'estoque' || lowerText === 'cardapio' || lowerText === 'tabela') {
+      const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
+      const isCompleto = lowerText.includes('completo') || lowerText.includes('atacado') || lowerText.includes('detalhe');
+
+      let query = supabase
+        .from('aparelhos')
+        .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+        .eq('ativo', true)
+        .neq('status', 'vendido')
+        .neq('condicao', 'vendido');
+
+      if (resolvedLojaId) {
+        query = query.eq('loja_id', resolvedLojaId);
+      }
+
+      let { data: aparelhos } = await query;
+
+      if ((!aparelhos || aparelhos.length === 0) && resolvedLojaId) {
+        const { data: fallback } = await supabase
+          .from('aparelhos')
+          .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+          .eq('ativo', true)
+          .neq('status', 'vendido')
+          .neq('condicao', 'vendido');
+        if (fallback && fallback.length > 0) {
+          aparelhos = fallback;
+        }
+      }
+
+      if (!aparelhos || aparelhos.length === 0) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '📱 *ESTOQUE PHONE CENTER*\n\nNenhum aparelho disponível em estoque no momento.');
+        return NextResponse.json({ status: 'ok', message: 'Estoque vazio.' }, { status: 200 });
+      }
+
+      // Ordena por modelo e capacidade
+      aparelhos.sort((a, b) => (a.modelo || '').localeCompare(b.modelo || ''));
+
+      const itens = aparelhos.map((a) => {
+        const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+        const cor = a.cor && a.cor !== 'N/A' ? `${a.cor}` : '';
+        const batVal = a.saude_bateria || a.saudeBateria;
+        const bat = batVal ? `(🔋 ${String(batVal).replace(/\D/g, '')}%)` : '';
+        const modCap = [a.modelo, cap].filter(Boolean).join(' ');
+        const extras = [cor, bat].filter(Boolean).join(' ');
+
+        if (isCompleto) {
+          const cod = a.codigo || (a.imei ? `...${String(a.imei).slice(-4)}` : `#${String(a.id).slice(0, 4)}`);
+          const precoAtacadoVal = a.preco_atacado || a.precoAtacado || a.preco;
+          const atacadoFmt = precoAtacadoVal ? `R$ ${Number(precoAtacadoVal).toFixed(2).replace('.', ',')}` : 'Consulte';
+          return `📱 ${modCap}${extras ? ` - ${extras}` : ''} | Cód: ${cod} | Atacado: ${atacadoFmt}`.replace(/\s+/g, ' ').trim();
+        } else {
+          return `📱 ${modCap}${extras ? ` - ${extras}` : ''}`.replace(/\s+/g, ' ').trim();
+        }
+      });
+
+      const cabecalho = isCompleto
+        ? `📋 *ESTOQUE COMPLETO (ATACADO) - PHONE CENTER*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`
+        : `📱 *ESTOQUE DISPONÍVEL - PHONE CENTER*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`;
+
+      const rodape = isCompleto
+        ? `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`
+        : `\n\n💡 _Para ver códigos e preços de atacado envie:_ *!estoque completo*`;
+
+      const mensagemEstoque = cabecalho + itens.join('\n') + rodape;
+      await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemEstoque);
+      return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens).` }, { status: 200 });
+    }
+
+    // ── 11. COMANDOS BÁSICOS (!ajuda, !menu) ──
+    if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
+      const menuAjuda = `📱 *PHONE CENTER BOT - INTELIGÊNCIA ARTIFICIAL*
+
+📸 *Reconhecimento Visual de Etiquetas (OCR):*
+• Envie uma foto da etiqueta/caixa do aparelho! Eu reconheço modelo, capacidade, IMEI, bateria e verifico o estoque na hora.
+
+💳 *Assinatura do Sistema:*
+• *!plano* - Consulta status da assinatura, vencimento e opções de renovação
+• *!plano pagar* - Gera o PIX da mensalidade (1 mês proporcional)
+• *!plano pagar [3 meses | 6 meses | 1 ano]* - Gera o PIX para períodos estendidos
+
+⚡ *Comandos Operacionais de Estoque:*
+• *!estoque* - Consulta todos os aparelhos disponíveis (Modelo, Cor, Bateria)
+• *!estoque completo* - Exibe aparelhos com códigos e preços de atacado
+• *!vender [IMEI/Cód] [Valor] [Nome]* - Registra venda e baixa do estoque
+• *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Entrada em novo aparelho
+• *!preco [IMEI/Cód] [Novo Valor]* - Atualiza preço no sistema
+
+💬 *Atendimento Inteligente:*
+• Pergunte qualquer coisa em grupos ou privado (ex: *"tem 15pm?"*, *"tem iphone 11?"*) e eu respondo na hora!`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
+      return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
+    }
+
+    // ── 12. CONSULTA NATURAL DE ESTOQUE (GRUPOS E PRIVADO) ──
     const respostaNatural = await responderConsultaEstoqueNatural(textContent, pushName, lojaId);
     if (respostaNatural) {
       await enviarMensagemWhatsApp(instanceName, targetDestination, respostaNatural);
       return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida naturalmente.' }, { status: 200 });
     }
 
-    // ── 10. COMANDOS BÁSICOS (!estoque, !ajuda, !menu) ──
-    if (lowerText.startsWith('!estoque') || lowerText === 'estoque' || lowerText === 'cardapio' || lowerText === 'tabela') {
-      if (lojaId) {
-        const { data: aparelhos } = await supabase
-          .from('aparelhos')
-          .select('marca, modelo, capacidade, cor, preco, condicao')
-          .eq('loja_id', lojaId)
-          .eq('ativo', true)
-          .neq('status', 'vendido')
-          .neq('condicao', 'vendido')
-          .limit(10);
-
-        if (aparelhos && aparelhos.length > 0) {
-          let respostaEstoque = `📱 *ESTOQUE DISPONÍVEL - PHONE CENTER*\n\n`;
-          aparelhos.forEach((a) => {
-            const precoFmt = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : 'Consulte';
-            respostaEstoque += `• *${a.marca} ${a.modelo}* (${a.capacidade || 'N/A'}) - ${a.cor || 'Padrão'} - ${precoFmt}\n`;
-          });
-          respostaEstoque += `\nPara mais detalhes ou compras, fale com nossa equipe! 💬`;
-          await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEstoque);
-          return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida.' }, { status: 200 });
-        }
-      }
-    }
-
-    if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
-      const menuAjuda = `📱 *PHONE CENTER BOT - INTELIGÊNCIA ARTIFICIAL*
-
-📸 *Reconhecimento Visual de Etiquetas (OCR):*
-• Envie uma foto da etiqueta/caixa do aparelho! Eu reconheço o modelo, capacidade, IMEI, bateria e verifico o estoque na hora.
-
-⚡ *Comandos Operacionais Rápidos:*
-• *!estoque* - Consulta aparelhos disponíveis
-• *!vender [IMEI/ID] [Valor] [Nome]* - Registra venda e baixa do estoque
-• *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Dá entrada em novo aparelho
-• *!preco [IMEI/ID] [Novo Valor]* - Atualiza preço no sistema
-
-💬 *Atendimento Inteligente:*
-• Pergunte qualquer coisa sobre aparelhos (ex: *"tem iphone 13?"*) e eu respondo na hora!`;
-
-      await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
-      return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
-    }
-
-    // ── 11. COMANDOS ESTRUTURADOS GEMINI PLAN ──
+    // ── 13. COMANDOS ESTRUTURADOS GEMINI PLAN ──
     const geminiPlan = parseGeminiPlan(textContent);
     if (geminiPlan) {
       const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
