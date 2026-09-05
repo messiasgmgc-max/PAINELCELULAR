@@ -755,72 +755,220 @@ function formatarCorEEmoji(corOriginal?: string | null): { emoji: string; nomeCo
   return { emoji, nomeCor: nomeCorLimpo };
 }
 
+// ── CACHE DE BUFFER E ANTI-FLOOD PARA GRUPOS DE WHATSAPP ──
+// Buffer da última mensagem por participante para lidar com mensagens divididas (ex: "15 Pro Max" + "Quem tem?")
+const bufferUltimaMensagemParticipante = new Map<string, { texto: string; timestamp: number }>();
+
+// Histórico de respostas enviadas no grupo para evitar flood e repetição desnecessária
+const historicoRespostasGrupo = new Map<string, number>();
+
 // ── AUXILIAR: Resposta Natural de Estoque / iPhone para Grupos e Privado ──
 async function responderConsultaEstoqueNatural(
   texto: string,
   pushName: string,
   lojaId: string | null,
   instanceName: string,
-  isGroup: boolean
+  isGroup: boolean,
+  senderPhone?: string,
+  remoteJid?: string
 ): Promise<string | null> {
   // 1. Exceção de Negócio: A escuta e resposta automática a conversas em grupos ("tem tal modelo? Responde: Tem aqui...")
   // é uma funcionalidade EXCLUSIVA da Lucas Imports.
   // Lojistas e clientes comuns da plataforma NÃO têm essa escuta automática ativada em grupos para não banalizar o bot
   // e evitar misturar estoques. Eles utilizam os comandos normais no privado ou o comando explícito !estoque.
   const isLucas = await verificarSeLojaLucasImports(lojaId, instanceName);
-  if (!isLucas) {
+  if (!isLucas || !lojaId) {
     return null;
   }
 
-  if (!lojaId) {
-    return null;
+  const cleanSender = (senderPhone || '').replace(/\D/g, '');
+  const cleanPushName = (pushName || '').toLowerCase();
+
+  // Se a mensagem em grupo vier do próprio Lucas ou da equipe da loja, o bot nunca responde a si mesmo
+  if (isGroup) {
+    if (
+      cleanSender.endsWith('94986029') ||
+      cleanSender.endsWith('994986029') ||
+      cleanPushName.includes('lucas imports') ||
+      cleanPushName === 'lucas'
+    ) {
+      return null;
+    }
   }
 
   const textoLimpo = texto.toLowerCase().trim();
 
-  const termosPergunta = [
-    'tem', 'alguem tem', 'alguém tem', 'vcs tem', 'voces tem', 'vocês tem', 'ta tendo', 'tá tendo',
-    'disponivel', 'disponível', 'estoque', 'qual valor', 'quanto ta', 'quanto tá', 'quanto custa',
-    'preco', 'preço', 'procurando', 'procuro', 'preciso de', 'tem ai', 'tem aí', 'vende'
-  ];
-
-  const mencaoIphone = /iphone|\bip\s*\d|\b1[1-7]\s*(?:pro|promax|pro max|pmax|pm|pro|p|mini|plus|\+)?\b|\bxr\b|\bxs\b|\bse\b/i.test(textoLimpo);
-  const temPergunta = termosPergunta.some((termo) => textoLimpo.includes(termo));
-
-  if (!mencaoIphone && !temPergunta) {
+  // Em grupos, ignora textos excessivamente longos (listas de terceiros, bate-papo longo, etc.)
+  if (isGroup && textoLimpo.length > 160) {
     return null;
   }
 
-  // Regex estrita com suporte a pm, promax, pro max, pmax, p, pro, plus, +, mini
-  const modeloMatch = textoLimpo.match(/(?:iphone\s*|ip\s*)?(1[1-7]|[78x]|xr|xs|se)\s*(pro\s*max|promax|pmax|pm|pro|p|plus|\+|mini)?(?:\b|\s|[?!.,]|$)/i);
-  let termoNumero = '';
+  // Lógica de buffer para mensagens consecutivas do mesmo participante (ex: "15 pro max 256gb" e logo em seguida "quem tem?")
+  const participantKey = `${remoteJid || 'direct'}:${cleanSender || 'unknown'}`;
+  let textoParaAnalise = textoLimpo;
+
+  const IPHONE_REGEX = /(?:iphone\s*|ip\s*)?(1[1-7]|xr|xs|se|16e)\s*(pro\s*max|promax|pmax|pmx|pm|pro|p|plus|\+|mini)?(?:\b|\s|[?!.,]|$)/i;
+
+  const agora = Date.now();
+  if (isGroup) {
+    const prevMsg = bufferUltimaMensagemParticipante.get(participantKey);
+    // Se o usuário mandou uma mensagem nos últimos 20 segundos
+    if (prevMsg && agora - prevMsg.timestamp < 20000) {
+      // Se a mensagem atual não tem modelo, mas tem intenção de compra, une com a anterior
+      if (!IPHONE_REGEX.test(textoLimpo)) {
+        textoParaAnalise = `${prevMsg.texto} ${textoLimpo}`.trim();
+      }
+    }
+    // Atualiza buffer da última mensagem deste participante
+    bufferUltimaMensagemParticipante.set(participantKey, { texto: textoLimpo, timestamp: agora });
+  }
+
+  // 1. FILTRO DE PRODUTOS EXCLUÍDOS (Não são iPhones: iPads, Apple Watch, Macbooks, fones, acessórios, caminhão, etc.)
+  const EXCLUDED_PRODUCTS = [
+    /\bipad\b/i,
+    /\bwatch\b/i,
+    /\bapple\s*watch\b/i,
+    /\bmacbook\b/i,
+    /\bmac\b/i,
+    /\bairpod[s]?\b/i,
+    /\bpencil\b/i,
+    /\bcaneta\b/i,
+    /\btv\s*box\b/i,
+    /\bjbl\b/i,
+    /\bboombox\b/i,
+    /\bcarregador\b/i,
+    /\bfonte\b/i,
+    /\baxor\b/i,
+    /\bcaminh[aã]o\b/i,
+    /\bmotoca\b/i,
+    /\broupa\b/i
+  ];
+  if (EXCLUDED_PRODUCTS.some((p) => p.test(textoParaAnalise))) {
+    return null;
+  }
+
+  // Se menciona termos de Apple Watch sem conter a palavra "iphone"
+  if (/\b(4[0-9]mm|series\s*\d|s[789]\b|s1[0-9]\b|gps|cellular)\b/i.test(textoParaAnalise) && !/iphone\b/i.test(textoParaAnalise)) {
+    return null;
+  }
+
+  // 2. FILTRO DE VENDEDORES ANUNCIANDO, RESPOSTAS OU BATE-PAPO ALEATÓRIO (Não é comprador pedindo)
+  const SELLER_OR_CHAT_PATTERNS = [
+    /^\s*tem\b/i,
+    /^\s*tenho\b/i,
+    /\beu\s+tenho\b/i,
+    /\btemos\b/i,
+    /\bvem\s+nele\b/i,
+    /\bvem\s+que\s+tem\b/i,
+    /\bpasso\s+por\b/i,
+    /\bfa[cç]o\s+a\b/i,
+    /\bt[oô]\s+vendendo\b/i,
+    /\bvendo\b/i,
+    /\b0\s*ciclos\b/i,
+    /\bnunca\s+viu\s+chave\b/i,
+    /\btela\s+ori\b/i,
+    /\btrocadinho\b/i,
+    /\btomar\s+no\b/i,
+    /\bcu\b/i,
+    /\bfdp\b/i,
+    /\bkkk/i,
+    /\bhaha/i,
+    /\bengra[cç]ado\b/i,
+    /\bcasamento\b/i,
+    /\bde\s+volta\s+no\b/i,
+    /\bdando\s+\d+\s+pro\b/i,
+    /\banos\b/i,
+    /^\s*(\d{1,2}[.,]\d{3}|\d{3,4})\s*$/
+  ];
+  if (SELLER_OR_CHAT_PATTERNS.some((p) => p.test(textoParaAnalise))) {
+    return null;
+  }
+
+  // 3. INTENÇÃO DE COMPRA DO CLIENTE / LOJISTA
+  const BUYER_INTENT_PATTERNS = [
+    /\bquem\s+tem\b/i,
+    /\balgu[eé]m\b/i,
+    /\balgm\b/i,
+    /\bpreciso\s+de\b/i,
+    /\bt[oô]\s+precisando\b/i,
+    /\bprocuro\b/i,
+    /\bprocurando\b/i,
+    /\bcompro\b/i,
+    /\bcomprando\b/i,
+    /\bqual\s+tem\b/i,
+    /\bonde\s+tem\b/i,
+    /\btem\s+a[ií]\b/i,
+    /\btem\s+aqui\b/i,
+    /\bquem\s+t[aá]\s+tendo\b/i,
+    /\bpra\s+hoje\b/i,
+    /\bpra\s+agora\b/i,
+    /\bpego\s+hoje\b/i,
+    /\bpre[cç]o\s+campe[aã]o\b/i,
+    /\bpre[cç]o\s+de\s+noia\b/i,
+    /\bmelhor\s+pre[cç]o\b/i,
+    /\bmenor\s+valor\b/i,
+    /\bquem\s+tiver\b/i,
+    /\bmanda\s+pv\b/i,
+    /\bdispon[ií]vel\b.*\?/i,
+    /\b(64|128|256|512|1tb)\s*(?:gb|gigas|g)?\s*\?+/i,
+    /\b(pro|promax|pm|pmx|plus|mini)\b.*\?+/i
+  ];
+
+  const temIntencaoCompra = BUYER_INTENT_PATTERNS.some((p) => p.test(textoParaAnalise));
+
+  // Em grupos: SÓ responde se houver intenção clara de compra! No privado aceita perguntas mais diretas
+  if (isGroup && !temIntencaoCompra) {
+    return null;
+  }
+
+  // 4. EXTRAÇÃO DO MODELO DE IPHONE
+  const modeloMatch = textoParaAnalise.match(IPHONE_REGEX);
+  if (!modeloMatch) {
+    return null;
+  }
+
+  const termoNumero = modeloMatch[1].toUpperCase();
+  const sufRaw = (modeloMatch[2] || '').toLowerCase().replace(/\s+/g, '');
+
   let variante: 'PRO_MAX' | 'PRO' | 'PLUS' | 'MINI' | 'BASE_ONLY' | 'QUALQUER' = 'QUALQUER';
   let modeloAlvoFormatado = '';
 
-  if (modeloMatch) {
-    termoNumero = modeloMatch[1].toUpperCase();
-    const sufRaw = (modeloMatch[2] || '').toLowerCase().replace(/\s+/g, '');
+  if (['pm', 'promax', 'pmax', 'pmx'].includes(sufRaw)) {
+    variante = 'PRO_MAX';
+    modeloAlvoFormatado = `iPhone ${termoNumero} Pro Max`;
+  } else if (['p', 'pro'].includes(sufRaw)) {
+    variante = 'PRO';
+    modeloAlvoFormatado = `iPhone ${termoNumero} Pro`;
+  } else if (['plus', '+', 'pl'].includes(sufRaw)) {
+    variante = 'PLUS';
+    modeloAlvoFormatado = `iPhone ${termoNumero} Plus`;
+  } else if (sufRaw === 'mini') {
+    variante = 'MINI';
+    modeloAlvoFormatado = `iPhone ${termoNumero} Mini`;
+  } else if (!sufRaw) {
+    variante = 'BASE_ONLY';
+    modeloAlvoFormatado = termoNumero === '16E' ? 'iPhone 16e' : `iPhone ${termoNumero}`;
+  }
 
-    if (['pm', 'promax', 'pmax'].includes(sufRaw)) {
-      variante = 'PRO_MAX';
-      modeloAlvoFormatado = `iPhone ${termoNumero} Pro Max`;
-    } else if (['p', 'pro'].includes(sufRaw)) {
-      variante = 'PRO';
-      modeloAlvoFormatado = `iPhone ${termoNumero} Pro`;
-    } else if (['plus', '+', 'pl'].includes(sufRaw)) {
-      variante = 'PLUS';
-      modeloAlvoFormatado = `iPhone ${termoNumero} Plus`;
-    } else if (sufRaw === 'mini') {
-      variante = 'MINI';
-      modeloAlvoFormatado = `iPhone ${termoNumero} Mini`;
-    } else if (!sufRaw) {
-      variante = 'BASE_ONLY';
-      modeloAlvoFormatado = `iPhone ${termoNumero}`;
+  // Anti-Flood em Grupos: não responder ao mesmo modelo no mesmo grupo nos últimos 30 segundos
+  if (isGroup && remoteJid) {
+    const floodKeyModelo = `${remoteJid}:${modeloAlvoFormatado}`;
+    const ultimoEnvioModelo = historicoRespostasGrupo.get(floodKeyModelo);
+    if (ultimoEnvioModelo && agora - ultimoEnvioModelo < 30000) {
+      console.log(`[Anti-Flood Grupo] Ignorado resposta para ${modeloAlvoFormatado} no grupo ${remoteJid} (enviado há menos de 30s)`);
+      return null;
+    }
+
+    const floodKeyParticipante = `${remoteJid}:${cleanSender}`;
+    const ultimoEnvioParticipante = historicoRespostasGrupo.get(floodKeyParticipante);
+    if (ultimoEnvioParticipante && agora - ultimoEnvioParticipante < 20000) {
+      console.log(`[Anti-Flood Grupo] Ignorado resposta para participante ${cleanSender} no grupo ${remoteJid} (enviado há menos de 20s)`);
+      return null;
     }
   }
 
-  // Consulta estrita por loja_id (sem fallbacks globais para evitar vazamento entre lojistas)
-  const { data: aparelhos, error } = await supabase
+  // 5. CONSULTA AO BANCO DE DADOS
+  const { data: aparelhos } = await supabase
     .from('aparelhos')
     .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
     .eq('loja_id', lojaId)
@@ -832,103 +980,108 @@ async function responderConsultaEstoqueNatural(
     return null;
   }
 
+  const numLower = termoNumero.toLowerCase();
+  const aparelhosDaGeracao = aparelhos.filter((a) => {
+    const mod = String(a.modelo || '').toLowerCase();
+    return new RegExp(`\\b${numLower}\\b`).test(mod) || mod.includes(`iphone ${numLower}`) || mod.includes(`ip ${numLower}`) || mod.startsWith(numLower);
+  });
+
   let aparelhosEncontrados: any[] = [];
-  if (termoNumero) {
-    const numLower = termoNumero.toLowerCase();
-
-    // Filtra aparelhos da geração / modelo indicado
-    const aparelhosDaGeracao = aparelhos.filter((a) => {
+  if (variante === 'PRO_MAX') {
+    aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
       const mod = String(a.modelo || '').toLowerCase();
-      return new RegExp(`\\b${numLower}\\b`).test(mod) || mod.includes(`iphone ${numLower}`) || mod.includes(`ip ${numLower}`) || mod.startsWith(numLower);
+      return mod.includes('pro max') || mod.includes('promax') || mod.includes('pmax');
+    });
+  } else if (variante === 'PRO') {
+    aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+      const mod = String(a.modelo || '').toLowerCase();
+      return (mod.includes('pro') || mod.includes(' pro ')) && !mod.includes('max') && !mod.includes('promax');
+    });
+  } else if (variante === 'PLUS') {
+    aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+      const mod = String(a.modelo || '').toLowerCase();
+      return mod.includes('plus') || mod.includes('+');
+    });
+  } else if (variante === 'MINI') {
+    aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
+      const mod = String(a.modelo || '').toLowerCase();
+      return mod.includes('mini');
+    });
+  } else if (variante === 'BASE_ONLY') {
+    const baseModels = aparelhosDaGeracao.filter((a) => {
+      const mod = String(a.modelo || '').toLowerCase();
+      return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('mini');
+    });
+    aparelhosEncontrados = baseModels.length > 0 ? baseModels : aparelhosDaGeracao;
+  } else {
+    aparelhosEncontrados = aparelhosDaGeracao;
+  }
+
+  // 6. FILTRO ESTREITO DE CAPACIDADE (Se o comprador especificou ex: "256gb" ou "128")
+  const capMatch = textoParaAnalise.match(/\b(64|128|256|512|1024|1\s*tb|1\s*tera)\s*(?:gb|gigas|g)?\b/i);
+  if (capMatch) {
+    const capAlvo = capMatch[1].toLowerCase().replace(/\s+/g, '');
+    const filtradosPorCap = aparelhosEncontrados.filter((a) => {
+      const cap = String(a.capacidade || '').toLowerCase();
+      return cap.includes(capAlvo);
     });
 
-    if (variante === 'PRO_MAX') {
-      // Somente Pro Max / ProMax / PMax
-      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
-        const mod = String(a.modelo || '').toLowerCase();
-        return mod.includes('pro max') || mod.includes('promax') || mod.includes('pmax');
-      });
-    } else if (variante === 'PRO') {
-      // Somente Pro (excluindo Pro Max)
-      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
-        const mod = String(a.modelo || '').toLowerCase();
-        return (mod.includes('pro') || mod.includes(' pro ')) && !mod.includes('max') && !mod.includes('promax');
-      });
-    } else if (variante === 'PLUS') {
-      // Somente Plus
-      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
-        const mod = String(a.modelo || '').toLowerCase();
-        return mod.includes('plus') || mod.includes('+');
-      });
-    } else if (variante === 'MINI') {
-      // Somente Mini
-      aparelhosEncontrados = aparelhosDaGeracao.filter((a) => {
-        const mod = String(a.modelo || '').toLowerCase();
-        return mod.includes('mini');
-      });
-    } else if (variante === 'BASE_ONLY') {
-      // Quando perguntou apenas o modelo base (ex: "tem 15?", "tem 11?"):
-      // Primeiro prioriza o modelo standard (sem pro, sem max, sem plus, sem mini)
-      const baseModels = aparelhosDaGeracao.filter((a) => {
-        const mod = String(a.modelo || '').toLowerCase();
-        return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('mini');
-      });
-      if (baseModels.length > 0) {
-        aparelhosEncontrados = baseModels;
-      } else {
-        // Se não tiver base, traz os outros modelos da mesma geração
-        aparelhosEncontrados = aparelhosDaGeracao;
-      }
-    } else {
-      aparelhosEncontrados = aparelhosDaGeracao;
+    if (filtradosPorCap.length > 0) {
+      aparelhosEncontrados = filtradosPorCap;
+    } else if (isGroup) {
+      // Em grupo: se o lojista pediu 256GB e NÃO temos 256GB, NÃO responde nada para não poluir o grupo!
+      return null;
     }
-  } else if (mencaoIphone) {
-    aparelhosEncontrados = aparelhos.filter((a) => String(a.modelo || '').toLowerCase().includes('iphone'));
   }
 
-  if (aparelhosEncontrados.length > 0) {
-    // Ordena por modelo normalizado
-    aparelhosEncontrados.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
-
-    let ultimoModelo = '';
-    const linhasEncontrados: string[] = [];
-
-    aparelhosEncontrados.forEach((a) => {
-      const modNorm = normalizarModelo(a.modelo);
-      if (ultimoModelo && ultimoModelo !== modNorm) {
-        linhasEncontrados.push('');
-      }
-      ultimoModelo = modNorm;
-
-      const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
-      const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-      const batVal = a.saude_bateria || a.saudeBateria;
-      const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
-      const bat = batNum ? `(${batNum}%)` : '';
-      const precoValor = a.preco_atacado || a.precoAtacado || a.preco;
-      const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-      const modCap = [modNorm, cap].filter(Boolean).join(' ');
-      const extras = [nomeCor, bat].filter(Boolean).join(' ');
-      linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
-    });
-
-    return `Tem aqui esses modelos:\n\n${linhasEncontrados.join('\n')}`;
+  // 7. CHECAGEM DE ESTOQUE
+  if (aparelhosEncontrados.length === 0) {
+    // Em grupos: SILÊNCIO TOTAL quando não tem em estoque! Zero spam.
+    if (isGroup) {
+      return null;
+    }
+    return `No momento o *${modeloAlvoFormatado}* esgotou por aqui.`;
   }
 
-  if (modeloAlvoFormatado) {
-    const outrasOpcoes = aparelhos.slice(0, 5).map((a) => {
-      const precoValor = a.preco_atacado || a.precoAtacado || a.preco;
-      const precoFinal = precoValor ? ` - R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-      const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-      const cor = a.cor && a.cor !== 'N/A' ? `- ${a.cor}` : '';
-      const extras = [cap, cor].filter(Boolean).join(' ');
-      return `• ${a.modelo} ${extras}${precoFinal}`.replace(/\s+/g, ' ').trim();
-    }).join('\n');
-
-    return `No momento o *${modeloAlvoFormatado}* esgotou. Temos esses modelos disponíveis:\n\n${outrasOpcoes}`;
+  // Atualiza cooldown de envio para este modelo e participante no grupo
+  if (isGroup && remoteJid) {
+    historicoRespostasGrupo.set(`${remoteJid}:${modeloAlvoFormatado}`, agora);
+    historicoRespostasGrupo.set(`${remoteJid}:${cleanSender}`, agora);
   }
 
-  return null;
+  // Ordena por modelo normalizado
+  aparelhosEncontrados.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
+
+  // Em grupos, limita a exibição a no máximo 6 itens para não sobrecarregar o chat
+  const aparelhosExibicao = isGroup ? aparelhosEncontrados.slice(0, 6) : aparelhosEncontrados;
+
+  let ultimoModelo = '';
+  const linhasEncontrados: string[] = [];
+
+  aparelhosExibicao.forEach((a) => {
+    const modNorm = normalizarModelo(a.modelo);
+    if (ultimoModelo && ultimoModelo !== modNorm) {
+      linhasEncontrados.push('');
+    }
+    ultimoModelo = modNorm;
+
+    const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
+    const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+    const batVal = a.saude_bateria || (a as any).saudeBateria;
+    const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+    const bat = batNum ? `(${batNum}%)` : '';
+    const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
+    const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+    const modCap = [modNorm, cap].filter(Boolean).join(' ');
+    const extras = [nomeCor, bat].filter(Boolean).join(' ');
+    linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
+  });
+
+  if (isGroup && aparelhosEncontrados.length > 6) {
+    linhasEncontrados.push(`\n_... e mais ${aparelhosEncontrados.length - 6} opções disponíveis no estoque._`);
+  }
+
+  return `Tem aqui esses modelos:\n\n${linhasEncontrados.join('\n')}`;
 }
 
 // ── POST: Processamento Principal do Webhook ──
@@ -1008,6 +1161,8 @@ export async function POST(request: Request) {
     }
 
     const isGroup = remoteJid.endsWith('@g.us');
+    const participantJid = String(key.participant || msgData.participant || key.remoteJid || '');
+    const participantPhone = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
     const senderPhone = remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : senderPhone;
@@ -1614,8 +1769,6 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
       // Em grupos: se NÃO for a Lucas Imports, apenas o próprio cliente/dono da loja pode disparar o comando !estoque
       if (isGroup && !isLucas) {
-        const participantJid = String(key.participant || msgData.participant || key.remoteJid || '');
-        const participantPhone = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
         const lojaTelefone = (loja?.telefone || '').replace(/\D/g, '');
 
         const isDono = lojaTelefone && participantPhone && (lojaTelefone.endsWith(participantPhone.slice(-8)) || participantPhone.endsWith(lojaTelefone.slice(-8)));
@@ -1713,7 +1866,15 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
     }
 
     // ── 12. CONSULTA NATURAL DE ESTOQUE (EXCLUSIVO LUCAS IMPORTS) ──
-    const respostaNatural = await responderConsultaEstoqueNatural(textContent, pushName, lojaId, instanceName, isGroup);
+    const respostaNatural = await responderConsultaEstoqueNatural(
+      textContent,
+      pushName,
+      lojaId,
+      instanceName,
+      isGroup,
+      participantPhone || senderPhone,
+      remoteJid
+    );
     if (respostaNatural) {
       await enviarMensagemWhatsApp(instanceName, targetDestination, respostaNatural);
       return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida naturalmente.' }, { status: 200 });

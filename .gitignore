@@ -37,3 +37,7 @@ next-env.d.ts
 !.vscode/extensions.json
 !.vscode/launch.json
 !.vscode/settings.json
+
+# chat dumps / test files
+test.txt
+
