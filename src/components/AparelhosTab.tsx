@@ -5,12 +5,15 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
 import { MarcarVendidoModal } from "@/components/MarcarVendidoModal";
 import { EditarVendaRegistroModal, VendaEditavelData } from "@/components/EditarVendaRegistroModal";
+import { EnviarManutencaoModal } from "@/components/EnviarManutencaoModal";
+import { RetornarManutencaoModal } from "@/components/RetornarManutencaoModal";
+import { extrairDadosManutencao, isAparelhoEmManutencao } from "@/lib/manutencao";
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
@@ -36,6 +39,9 @@ export function AparelhosTab() {
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [aparelhoParaVenda, setAparelhoParaVenda] = useState<Aparelho | null>(null);
+  const [aparelhoParaManutencao, setAparelhoParaManutencao] = useState<Aparelho | null>(null);
+  const [aparelhoParaRetorno, setAparelhoParaRetorno] = useState<Aparelho | null>(null);
+  const [filtroStatus, setFiltroStatus] = useState<'todos' | 'loja' | 'manutencao'>('todos');
   const [saidaParaEditar, setSaidaParaEditar] = useState<VendaEditavelData | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [showNovoClientePopup, setShowNovoClientePopup] = useState(false);
@@ -161,15 +167,18 @@ export function AparelhosTab() {
     };
   }, [saidas]);
 
-  // Contagens por categoria de estoque
+  // Contagens por categoria e status de estoque
   const contagens = useMemo(() => {
     const ativos = aparelhos.filter((a: any) => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+    const emManut = ativos.filter((a: any) => isAparelhoEmManutencao(a)).length;
     return {
       todos: ativos.length,
       aparelhos: ativos.filter((a: any) => !a.categoria || a.categoria === 'aparelho').length,
       perfumes: ativos.filter((a: any) => a.categoria === 'perfume').length,
       acessorios: ativos.filter((a: any) => a.categoria === 'acessorio').length,
       outros: ativos.filter((a: any) => a.categoria === 'outro').length,
+      emManutencao: emManut,
+      naLoja: ativos.length - emManut,
     };
   }, [aparelhos]);
 
@@ -182,9 +191,14 @@ export function AparelhosTab() {
         const cat = aparelho.categoria || 'aparelho';
         if (cat !== categoriaFiltro) return false;
       }
+      if (filtroStatus === 'manutencao') {
+        if (!isAparelhoEmManutencao(aparelho)) return false;
+      } else if (filtroStatus === 'loja') {
+        if (isAparelhoEmManutencao(aparelho)) return false;
+      }
       return true;
     });
-  }, [aparelhos, categoriaFiltro]);
+  }, [aparelhos, categoriaFiltro, filtroStatus]);
 
   const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) => {
     const cod = (getAparelhoCodigo(aparelho) || '').toLowerCase();
@@ -1704,6 +1718,26 @@ export function AparelhosTab() {
               >
                 <Package className="w-3.5 h-3.5" /> 📦 Outros ({contagens.outros})
               </button>
+
+              {/* Divisor Visual */}
+              <div className="h-4 w-px bg-slate-800 shrink-0 mx-1" />
+
+              {/* Filtro Específico: Com o Técnico / Manutenção */}
+              <button
+                type="button"
+                onClick={() => setFiltroStatus(filtroStatus === 'manutencao' ? 'todos' : 'manutencao')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer border",
+                  filtroStatus === 'manutencao' 
+                    ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-950/40" 
+                    : contagens.emManutencao > 0
+                      ? "bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25 animate-pulse"
+                      : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800"
+                )}
+                title="Filtrar aparelhos que estão fora da loja com o técnico para manutenção"
+              >
+                <Wrench className="w-3.5 h-3.5" /> 🛠️ Com Técnico ({contagens.emManutencao})
+              </button>
             </div>
             <div className="scroll-row no-scrollbar w-full pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
               {/* 1. Novo Aparelho */}
@@ -2052,11 +2086,18 @@ export function AparelhosTab() {
                 const precoAtacadoNum = (aparelho as any).precoAtacado;
                 const saudeBat = (aparelho as any).saude_bateria || (aparelho as any).saudeBateria;
                 const qtd = (aparelho as any).quantidade || 1;
+                const dadosManut = extrairDadosManutencao(aparelho);
+                const estaEmManutencao = dadosManut.emManutencao;
 
                 return (
                   <div
                     key={aparelho.id}
-                    className="bg-slate-900/90 hover:bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 transition-all shadow-md space-y-3.5"
+                    className={cn(
+                      "rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 transition-all shadow-md space-y-3.5",
+                      estaEmManutencao
+                        ? "bg-amber-950/20 hover:bg-amber-950/30 border-2 border-amber-500/60 shadow-amber-950/20"
+                        : "bg-slate-900/90 hover:bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40"
+                    )}
                   >
                     {/* TOPO: ID + Categoria + Condição + Data */}
                     <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
@@ -2091,11 +2132,15 @@ export function AparelhosTab() {
                           </span>
                         )}
 
-                        {aparelho.clienteId && (
+                        {estaEmManutencao ? (
+                          <Badge className="bg-amber-500 text-slate-950 font-extrabold text-[10px] gap-1 shrink-0 shadow-sm">
+                            <Wrench className="w-3 h-3" /> COM O TÉCNICO ({dadosManut.tecnicoNome || "Oficina"})
+                          </Badge>
+                        ) : aparelho.clienteId ? (
                           <Badge variant="outline" className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]">
                             MANUTENÇÃO: {aparelho.cliente}
                           </Badge>
-                        )}
+                        ) : null}
                       </div>
 
                       <span className="text-[11px] text-slate-500 shrink-0 ml-auto font-medium">
@@ -2174,6 +2219,32 @@ export function AparelhosTab() {
                           📝 {aparelho.descricao}
                         </p>
                       )}
+
+                      {/* Banner de Custódia com o Técnico */}
+                      {estaEmManutencao && (
+                        <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 text-amber-300 font-extrabold text-xs sm:text-sm">
+                              <Wrench className="w-4 h-4 text-amber-400 shrink-0" />
+                              <span>FORA DA LOJA — Em Manutenção</span>
+                            </div>
+                            <span className="text-[10px] font-bold text-amber-300 bg-amber-950/80 border border-amber-500/40 px-2.5 py-0.5 rounded-lg">
+                              Com: {dadosManut.tecnicoNome || "Técnico"}
+                            </span>
+                          </div>
+                          {dadosManut.motivo && (
+                            <p className="text-slate-200 text-xs">
+                              <strong className="text-amber-400">Serviço/Defeito:</strong> {dadosManut.motivo}
+                            </p>
+                          )}
+                          {dadosManut.dataEnvio && (
+                            <p className="text-slate-400 text-[10px]">
+                              Enviado em {new Date(dadosManut.dataEnvio).toLocaleDateString("pt-BR")}
+                              {dadosManut.previsaoRetorno ? ` • Previsão retorno: ${new Date(dadosManut.previsaoRetorno).toLocaleDateString("pt-BR")}` : ""}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* RODAPÉ DO CARD: Preços destacados + Botões de Ação Touch-Friendly */}
@@ -2202,14 +2273,35 @@ export function AparelhosTab() {
 
                       {/* Botões de Ação */}
                       <div className="flex items-center gap-1.5 justify-end flex-wrap pt-1 sm:pt-0">
-                        <button
-                          onClick={() => setAparelhoParaVenda(aparelho)}
-                          className="text-xs text-slate-950 font-extrabold flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-amber-950/30 shrink-0"
-                          title="Marcar como vendido e registrar comprador (Atacado/Varejo)"
-                        >
-                          <ShoppingBag className="h-3.5 w-3.5" />
-                          Vender
-                        </button>
+                        {estaEmManutencao ? (
+                          <button
+                            onClick={() => setAparelhoParaRetorno(aparelho)}
+                            className="text-xs text-slate-950 font-extrabold flex items-center gap-1.5 bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-950/30 shrink-0"
+                            title="Confirmar retorno do aparelho para o estoque da loja física"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Receber da Manutenção
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setAparelhoParaVenda(aparelho)}
+                              className="text-xs text-slate-950 font-extrabold flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-amber-950/30 shrink-0"
+                              title="Marcar como vendido e registrar comprador (Atacado/Varejo)"
+                            >
+                              <ShoppingBag className="h-3.5 w-3.5" />
+                              Vender
+                            </button>
+                            <button
+                              onClick={() => setAparelhoParaManutencao(aparelho)}
+                              className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-2 rounded-xl border border-amber-500/20 transition-all cursor-pointer shrink-0"
+                              title="Enviar aparelho para técnico / manutenção fora da loja"
+                            >
+                              <Wrench className="h-3.5 w-3.5" />
+                              Manutenção
+                            </button>
+                          </>
+                        )}
                         <button
                           onClick={() => handleGenerateCertificate(aparelho)}
                           className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-2 rounded-xl border border-emerald-500/20 transition-all cursor-pointer shrink-0"
@@ -3127,6 +3219,22 @@ export function AparelhosTab() {
           onSuccess={fetchAparelhos}
         />
       </ModalPortal>
+
+      {/* MODAL DE ENVIAR PARA MANUTENÇÃO */}
+      <EnviarManutencaoModal
+        isOpen={Boolean(aparelhoParaManutencao)}
+        onClose={() => setAparelhoParaManutencao(null)}
+        aparelho={aparelhoParaManutencao}
+        onSuccess={fetchAparelhos}
+      />
+
+      {/* MODAL DE RETORNAR DE MANUTENÇÃO */}
+      <RetornarManutencaoModal
+        isOpen={Boolean(aparelhoParaRetorno)}
+        onClose={() => setAparelhoParaRetorno(null)}
+        aparelho={aparelhoParaRetorno}
+        onSuccess={fetchAparelhos}
+      />
     </div>
   );
 }

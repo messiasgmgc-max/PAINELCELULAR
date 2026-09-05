@@ -1,23 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTecnicos } from '@/hooks/useTecnicos';
+import { useAparelhos } from '@/hooks/useAparelhos';
 import { Button } from '@/components/ui/button';
 import { GlassCard } from '@/components/GlassCard';
 import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
-import { X, Plus, Download, Edit2, Search, AlertCircle, Trash2, Phone, Mail, UserCheck } from 'lucide-react';
-import { Tecnico } from '@/lib/db/types';
+import { X, Plus, Download, Edit2, Search, AlertCircle, Trash2, Phone, Mail, UserCheck, Wrench, Smartphone, Check } from 'lucide-react';
+import { Tecnico, Aparelho } from '@/lib/db/types';
+import { extrairDadosManutencao } from '@/lib/manutencao';
+import { RetornarManutencaoModal } from '@/components/RetornarManutencaoModal';
+import { getAparelhoCodigo } from '@/lib/utils';
 
 import { toast } from 'sonner';
 
 export function TecnicosTab() {
   const { tecnicos, loading, error, fetchTecnicos, criarTecnico, atualizarTecnico, deletarTecnico } = useTecnicos();
+  const { aparelhos, fetchAparelhos } = useAparelhos();
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filtroTipo, setFiltroTipo] = useState<'todos' | 'tecnico' | 'vendedor'>('tecnico'); // Aba técnico por padrão
+  const [filtroTipo, setFiltroTipo] = useState<'todos' | 'tecnico' | 'vendedor'>('todos'); // Aba 'todos' por padrão
+  const [aparelhoParaRetorno, setAparelhoParaRetorno] = useState<Aparelho | null>(null);
   const [formData, setFormData] = useState({
     nome: '',
     email: '',
@@ -29,6 +35,7 @@ export function TecnicosTab() {
 
   useEffect(() => {
     fetchTecnicos();
+    fetchAparelhos();
   }, []);
 
   const tecnicosFiltrados = tecnicos.filter(t => {
@@ -42,6 +49,10 @@ export function TecnicosTab() {
 
     return matchTipo && matchBusca;
   });
+
+  const todosAparelhosEmManutencao = useMemo(() => {
+    return aparelhos.filter((a) => extrairDadosManutencao(a).emManutencao);
+  }, [aparelhos]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -157,29 +168,51 @@ export function TecnicosTab() {
       )}
 
       {/* Botões de Filtro por Aba */}
-      <div className="flex gap-2 border-b border-white/10 pb-3">
+      <div className="flex items-center gap-2 border-b border-white/10 pb-3 overflow-x-auto no-scrollbar">
+        <Button
+          variant={filtroTipo === 'todos' ? 'default' : 'outline'}
+          onClick={() => setFiltroTipo('todos')}
+          className="rounded-xl font-bold"
+        >
+          Todos ({tecnicos.length})
+        </Button>
         <Button
           variant={filtroTipo === 'tecnico' ? 'default' : 'outline'}
           onClick={() => setFiltroTipo('tecnico')}
-          className="rounded-xl"
+          className="rounded-xl font-bold"
         >
-          Técnicos
+          Técnicos ({tecnicos.filter(t => (t as any).tipo !== 'vendedor').length})
         </Button>
         <Button
           variant={filtroTipo === 'vendedor' ? 'default' : 'outline'}
           onClick={() => setFiltroTipo('vendedor')}
-          className="rounded-xl"
+          className="rounded-xl font-bold"
         >
-          Vendedores
-        </Button>
-        <Button
-          variant={filtroTipo === 'todos' ? 'default' : 'outline'}
-          onClick={() => setFiltroTipo('todos')}
-          className="rounded-xl"
-        >
-          Todos
+          Vendedores ({tecnicos.filter(t => (t as any).tipo === 'vendedor').length})
         </Button>
       </div>
+
+      {/* Banner de Aparelhos em Manutenção / Fora da Loja */}
+      {todosAparelhosEmManutencao.length > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+              <Wrench className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-extrabold text-amber-300 block text-sm">
+                🛠️ {todosAparelhosEmManutencao.length} {todosAparelhosEmManutencao.length === 1 ? 'aparelho em manutenção' : 'aparelhos em manutenção'} fora da loja
+              </span>
+              <span className="text-slate-400 text-[11px]">
+                Aparelhos sob custódia dos técnicos (não constam na contagem física da loja)
+              </span>
+            </div>
+          </div>
+          <Badge className="bg-amber-500 text-slate-950 font-bold self-start sm:self-auto shrink-0 text-[10px]">
+            FORA DA LOJA FÍSICA
+          </Badge>
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-4 mb-4">
         <div className="w-full sm:flex-1 relative">
@@ -336,66 +369,144 @@ export function TecnicosTab() {
 
       {/* Lista */}
       <div className="space-y-3">
-        {tecnicosFiltrados.map((tecnico: any) => (
-          <GlassCard key={tecnico.id} className="p-4 hover:shadow-lg transition-shadow group rounded-2xl">
-            <div className="flex justify-between items-start">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h3 className="text-lg font-semibold text-blue-600 dark:text-blue-400">{tecnico.nome}</h3>
-                  <Badge variant={tecnico.tipo === 'vendedor' ? 'default' : 'secondary'} className={tecnico.tipo === 'vendedor' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'}>
-                    {tecnico.tipo === 'vendedor' ? 'Vendedor' : 'Técnico'}
-                  </Badge>
-                  {tecnico.email ? (
-                    tecnico.status_conta === 'ativo' ? (
-                      <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px]">
-                        ✓ Login Ativo
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30 text-[10px]" title="Pode criar senha via Primeiro Acesso no Login">
-                        🔑 Acesso Liberado (Primeiro Acesso)
-                      </Badge>
-                    )
-                  ) : null}
-                  {tecnico.especialidade && (
-                    <Badge variant="outline" className="text-xs">
-                      {tecnico.especialidade}
+        {tecnicosFiltrados.map((tecnico: any) => {
+          const aparelhosDesteTecnico = todosAparelhosEmManutencao.filter((ap) => {
+            const m = extrairDadosManutencao(ap);
+            return (
+              (m.tecnicoId && m.tecnicoId === tecnico.id) ||
+              (m.tecnicoNome && m.tecnicoNome.toLowerCase().trim() === tecnico.nome.toLowerCase().trim())
+            );
+          });
+
+          return (
+            <GlassCard key={tecnico.id} className="p-4 hover:shadow-lg transition-shadow group rounded-2xl space-y-3">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <h3 className="text-lg font-semibold text-blue-600 dark:text-blue-400">{tecnico.nome}</h3>
+                    <Badge variant={tecnico.tipo === 'vendedor' ? 'default' : 'secondary'} className={tecnico.tipo === 'vendedor' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'}>
+                      {tecnico.tipo === 'vendedor' ? 'Vendedor' : 'Técnico'}
                     </Badge>
-                  )}
+                    {tecnico.email ? (
+                      tecnico.status_conta === 'ativo' ? (
+                        <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px]">
+                          ✓ Login Ativo
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30 text-[10px]" title="Pode criar senha via Primeiro Acesso no Login">
+                          🔑 Acesso Liberado (Primeiro Acesso)
+                        </Badge>
+                      )
+                    ) : null}
+                    {tecnico.especialidade && (
+                      <Badge variant="outline" className="text-xs">
+                        {tecnico.especialidade}
+                      </Badge>
+                    )}
+                    {aparelhosDesteTecnico.length > 0 && (
+                      <Badge className="bg-amber-500 text-slate-950 font-bold text-[10px] gap-1 shadow-sm">
+                        <Wrench className="w-3 h-3" />
+                        {aparelhosDesteTecnico.length} {aparelhosDesteTecnico.length === 1 ? 'aparelho em manutenção' : 'aparelhos em manutenção'}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="space-y-1 text-sm text-gray-600">
+                    {tecnico.telefone && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4" />
+                        {tecnico.telefone}
+                      </div>
+                    )}
+                    {tecnico.email && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-4 h-4" />
+                        {tecnico.email}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="space-y-1 text-sm text-gray-600">
-                  {tecnico.telefone && (
-                    <div className="flex items-center gap-2">
-                      <Phone className="w-4 h-4" />
-                      {tecnico.telefone}
-                    </div>
-                  )}
-                  {tecnico.email && (
-                    <div className="flex items-center gap-2">
-                      <Mail className="w-4 h-4" />
-                      {tecnico.email}
-                    </div>
-                  )}
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => handleEdit(tecnico)}>
+                    <Edit2 className="w-4 h-4" /> Editar
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleDelete(tecnico.id)} className="text-red-600 hover:text-red-700">
+                    <Trash2 className="w-4 h-4" /> Deletar
+                  </Button>
                 </div>
               </div>
 
-              <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button size="sm" variant="outline" onClick={() => handleEdit(tecnico)}>
-                  <Edit2 className="w-4 h-4" /> Editar
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => handleDelete(tecnico.id)} className="text-red-600 hover:text-red-700">
-                  <Trash2 className="w-4 h-4" /> Deletar
-                </Button>
-              </div>
-            </div>
-          </GlassCard>
-        ))}
+              {/* Aparelhos em Manutenção sob Custódia */}
+              {aparelhosDesteTecnico.length > 0 && (
+                <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <Wrench className="w-3.5 h-3.5 text-amber-400" />
+                      Aparelhos sob custódia deste técnico ({aparelhosDesteTecnico.length}):
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {aparelhosDesteTecnico.map((ap) => {
+                      const info = extrairDadosManutencao(ap);
+                      return (
+                        <div
+                          key={ap.id}
+                          className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-2.5 text-xs flex items-center justify-between gap-2 shadow-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-bold text-white truncate flex items-center gap-1.5">
+                              <Smartphone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              {ap.marca} {ap.modelo} <span className="text-slate-400 font-normal">({ap.capacidade || ''})</span>
+                            </p>
+                            {info.motivo && (
+                              <p className="text-[11px] text-amber-300 font-medium truncate">
+                                Defeito: {info.motivo}
+                              </p>
+                            )}
+                            {info.dataEnvio && (
+                              <p className="text-[10px] text-slate-500">
+                                Enviado em {new Date(info.dataEnvio).toLocaleDateString('pt-BR')}
+                              </p>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => setAparelhoParaRetorno(ap)}
+                            className="px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-[11px] font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1"
+                            title="Receber aparelho de volta para o estoque da loja física"
+                          >
+                            <Check className="w-3 h-3" />
+                            Receber
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </GlassCard>
+          );
+        })}
       </div>
 
       {tecnicosFiltrados.length === 0 && !showForm && (
         <GlassCard className="p-8 text-center text-gray-500 rounded-3xl">
           <p>Nenhum registro encontrado para esta categoria.</p>
         </GlassCard>
+      )}
+
+      {/* Modal de Retorno de Manutenção */}
+      {aparelhoParaRetorno && (
+        <RetornarManutencaoModal
+          isOpen={Boolean(aparelhoParaRetorno)}
+          onClose={() => setAparelhoParaRetorno(null)}
+          aparelho={aparelhoParaRetorno}
+          onSuccess={async () => {
+            await fetchAparelhos();
+          }}
+        />
       )}
     </div>
   );

@@ -48,7 +48,13 @@ export interface Aparelho {
   tipo_perfume?: string; // Para perfumes (ex: "Eau de Parfum", "Eau de Toilette", "Tester", "Decant")
   tipo_acessorio?: string; // Para acessórios (ex: "Capinha", "Película", "Cabo", "Fonte", "Fone")
   quantidade?: number; // Quantidade de unidades em estoque
-  condicao: "novo" | "seminovo" | "usado" | "danificado";
+  condicao: "novo" | "seminovo" | "usado" | "danificado" | "vendido";
+  status?: "disponivel" | "manutencao" | "vendido" | string;
+  tecnico_id?: string;
+  tecnico_nome?: string;
+  data_manutencao?: string;
+  motivo_manutencao?: string;
+  custo_manutencao?: number;
   preco: number;
   precoAtacado?: number;
   custo?: number;

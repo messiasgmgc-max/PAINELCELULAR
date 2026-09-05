@@ -604,7 +604,16 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
         if (acao === 'vendido') {
           payload = { ativo: false, condicao: 'vendido', status: 'vendido', observacoes: `Baixa automática na conferência de estoque: Marcado como Vendido em ${new Date().toLocaleDateString('pt-BR')}` };
         } else if (acao === 'manutencao') {
-          payload = { status: 'manutencao', observacoes: `Encaminhado para manutenção na conferência de estoque em ${new Date().toLocaleDateString('pt-BR')}` };
+          const dataIso = new Date().toISOString();
+          const tagManut = `[MANUTENCAO:status=com_tecnico|tecnico_nome=Oficina / Técnico Responsável|data=${dataIso}|motivo=Encaminhado na conferência de estoque]`;
+          const obsAtual = aparelho.observacoes || '';
+          payload = {
+            status: 'manutencao',
+            tecnico_nome: 'Oficina / Técnico Responsável',
+            motivo_manutencao: 'Encaminhado na conferência de estoque',
+            data_manutencao: dataIso,
+            observacoes: obsAtual ? `${obsAtual}\n${tagManut}` : tagManut,
+          };
         } else if (acao === 'atacado') {
           payload = { ativo: false, condicao: 'vendido', status: 'vendido', observacoes: `Vendido no atacado (Baixa na conferência de estoque em ${new Date().toLocaleDateString('pt-BR')})` };
         } else if (acao === 'remover') {
@@ -612,10 +621,22 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
         }
 
         if (Object.keys(payload).length > 0) {
-          const { error } = await supabase
+          let { error } = await supabase
             .from('aparelhos')
             .update(payload)
             .eq('id', aparelho.id);
+
+          if (error) {
+            delete payload.tecnico_nome;
+            delete payload.motivo_manutencao;
+            delete payload.data_manutencao;
+            delete payload.status;
+            const resFallback = await supabase
+              .from('aparelhos')
+              .update(payload)
+              .eq('id', aparelho.id);
+            error = resFallback.error;
+          }
 
           if (!error) {
             alterados += 1;
