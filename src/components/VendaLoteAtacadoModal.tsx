@@ -369,16 +369,19 @@ export function VendaLoteAtacadoModal({
           },
         ],
         loja_id: lojaId || null,
-        lojaId: lojaId || null,
       };
 
-      await supabase.from('vendas').insert([payloadVenda]);
+      const { error: errInsert } = await supabase.from('vendas').insert([payloadVenda]);
+      if (errInsert) {
+        console.error('Erro ao inserir venda em lote:', errInsert);
+        throw errInsert;
+      }
 
       await upsertComprador(compradorFinal, 'lojista');
 
       logVenda({
         clienteNome: compradorFinal,
-        valorTotal: valorTotalLote,
+        valorTotal: totais.valorTotal,
         tipoVenda: 'atacado',
         formaPagamento: metodoPgto,
         itensCount: itensSelecionados.length,
@@ -397,7 +400,7 @@ export function VendaLoteAtacadoModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col my-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col my-auto relative">
         
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
@@ -423,15 +426,15 @@ export function VendaLoteAtacadoModal({
             </div>
           </div>
 
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors">
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleFinalizarVendaLote} className="flex-1 flex flex-col min-h-0 space-y-4">
+        <form onSubmit={handleFinalizarVendaLote} className="space-y-4 flex flex-col flex-1">
           
           {/* GRID COM 2 COLUNAS: ESQUERDA (SELEÇÃO DE ESTOQUE) | DIREITA (DADOS DO COMPRADOR & RESUMO) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             
             {/* COLUNA ESQUERDA: LISTA DE APARELHOS DO ESTOQUE (7 cols) */}
             <div className="lg:col-span-7 flex flex-col space-y-2.5 min-h-0">
@@ -744,7 +747,7 @@ export function VendaLoteAtacadoModal({
               </div>
 
               {/* RESUMO FINANCEIRO DO LOTE */}
-              <div className="mt-auto p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
+              <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-xs text-slate-400 pb-1.5 border-b border-white/5">
                   <span>Itens Selecionados:</span>
                   <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 font-mono text-xs font-bold">
@@ -778,19 +781,19 @@ export function VendaLoteAtacadoModal({
 
           </div>
 
-          {/* BOTÕES DE AÇÃO INFERIORES */}
-          <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
-            <span className="text-xs text-slate-400">
+          {/* BOTÕES DE AÇÃO INFERIORES (STICKY FOOTER COM FUNDO SÓLIDO PARA NUNCA SOBREPOR) */}
+          <div className="sticky bottom-0 bg-slate-900/98 backdrop-blur-md pt-3.5 pb-1 border-t border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 -mx-4 -mb-4 px-4 sm:-mx-6 sm:-mb-6 sm:px-6 rounded-b-3xl z-20 shadow-2xl">
+            <span className="text-xs text-slate-400 font-medium text-center sm:text-left">
               {itensSelecionados.length === 0 ? 'Nenhum aparelho selecionado' : `${itensSelecionados.length} aparelho(s) prontos para baixa`}
             </span>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-end gap-2.5">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={onClose}
-                className="text-xs text-slate-400 hover:text-white"
+                className="text-xs text-slate-400 hover:text-white cursor-pointer"
               >
                 Cancelar
               </Button>
@@ -798,7 +801,7 @@ export function VendaLoteAtacadoModal({
               <Button
                 type="submit"
                 disabled={salvando || itensSelecionados.length === 0}
-                className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold text-xs gap-2 px-5 py-2.5 rounded-xl shadow-lg shadow-amber-950/40 cursor-pointer disabled:opacity-50"
+                className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold text-xs sm:text-sm gap-2 px-6 py-2.5 rounded-xl shadow-lg shadow-amber-950/40 cursor-pointer disabled:opacity-50"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 Finalizar Venda de {itensSelecionados.length} Aparelho(s)
