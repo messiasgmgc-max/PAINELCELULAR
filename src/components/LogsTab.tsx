@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +17,12 @@ import {
   Wrench, 
   Package, 
   Users, 
-  CreditCard 
+  CreditCard,
+  Sparkles,
+  Download,
+  Calendar,
+  CheckCircle2,
+  PhoneCall
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { checkIsSuperAdmin } from '@/lib/utils';
@@ -46,8 +51,10 @@ export function LogsTab() {
 
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState('todos');
+  const [periodoFiltro, setPeriodoFiltro] = useState<'hoje' | '7dias' | '30dias' | 'todos'>('todos');
   const [lojaFiltro, setLojaFiltro] = useState(isSuperAdmin ? 'todas' : (usuario?.lojaId || 'todas'));
   const [lojasMap, setLojasMap] = useState<Record<string, string>>({});
   const [lojasLista, setLojasLista] = useState<LojaSimple[]>([]);
@@ -60,6 +67,7 @@ export function LogsTab() {
       if (targetLoja && targetLoja !== 'todas') params.append('lojaId', targetLoja);
       if (tipoFiltro && tipoFiltro !== 'todos') params.append('tipo', tipoFiltro);
       if (searchTerm.trim()) params.append('termo', searchTerm.trim());
+      params.append('limit', '200');
 
       const res = await fetch(`/api/logs?${params.toString()}`);
       const data = await res.json();
@@ -71,6 +79,31 @@ export function LogsTab() {
       setLoading(false);
     }
   }, [isSuperAdmin, lojaFiltro, tipoFiltro, searchTerm, usuario?.lojaId]);
+
+  // Função para sincronizar todo o histórico existente (vendas, estoque, OS, garantias)
+  const handleSincronizarHistorico = async () => {
+    setSyncing(true);
+    const toastId = toast.loading('Sincronizando histórico de atividades da loja...');
+    try {
+      const targetLoja = isSuperAdmin ? lojaFiltro : (usuario?.lojaId || 'todas');
+      const res = await fetch('/api/logs/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lojaId: targetLoja })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(data.mensagem || 'Histórico sincronizado com sucesso!', { id: toastId });
+        await fetchLogs();
+      } else {
+        toast.error('Erro ao sincronizar: ' + (data.error || 'Falha na resposta'), { id: toastId });
+      }
+    } catch (err: any) {
+      toast.error('Erro ao sincronizar histórico.', { id: toastId });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Carrega mapeamento de lojas para exibição amigável
   useEffect(() => {
@@ -95,108 +128,241 @@ export function LogsTab() {
     fetchLogs();
   }, [fetchLogs]);
 
+  // Se a tabela tiver menos de 3 logs, sugere e auto-sincroniza uma vez
+  useEffect(() => {
+    if (!loading && logs.length > 0 && logs.length <= 2) {
+      handleSincronizarHistorico();
+    }
+  }, [logs.length, loading]);
+
+  // Filtragem local por período
+  const logsFiltrados = useMemo(() => {
+    if (periodoFiltro === 'todos') return logs;
+    const agora = new Date();
+
+    return logs.filter((log) => {
+      const dataLog = new Date(log.created_at);
+      const diffMs = agora.getTime() - dataLog.getTime();
+      const diffHoras = diffMs / (1000 * 60 * 60);
+
+      if (periodoFiltro === 'hoje') {
+        return diffHoras <= 24;
+      }
+      if (periodoFiltro === '7dias') {
+        return diffHoras <= 24 * 7;
+      }
+      if (periodoFiltro === '30dias') {
+        return diffHoras <= 24 * 30;
+      }
+      return true;
+    });
+  }, [logs, periodoFiltro]);
+
+  // Métricas rápidas
+  const metricas = useMemo(() => {
+    const total = logs.length;
+    const vendas = logs.filter(l => l.tipo_evento === 'venda').length;
+    const estoque = logs.filter(l => l.tipo_evento === 'estoque').length;
+    const os = logs.filter(l => l.tipo_evento === 'os').length;
+    const acessos = logs.filter(l => l.tipo_evento === 'login').length;
+    return { total, vendas, estoque, os, acessos };
+  }, [logs]);
+
   const getTipoBadge = (tipo: string) => {
     switch (tipo.toLowerCase()) {
       case 'login':
-        return <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 gap-1"><User className="w-3 h-3" /> Acesso / Login</Badge>;
+        return <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 gap-1"><User className="w-3 h-3" /> Login / Acesso</Badge>;
       case 'venda':
         return <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 gap-1"><ShoppingBag className="w-3 h-3" /> Venda</Badge>;
       case 'os':
         return <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 gap-1"><Wrench className="w-3 h-3" /> Ordem de Serviço</Badge>;
       case 'estoque':
         return <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 gap-1"><Package className="w-3 h-3" /> Estoque</Badge>;
+      case 'garantia':
+        return <Badge className="bg-teal-500/20 text-teal-300 border-teal-500/30 gap-1"><ShieldCheck className="w-3 h-3" /> Garantia</Badge>;
+      case 'cliente':
+        return <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 gap-1"><PhoneCall className="w-3 h-3" /> Cliente</Badge>;
       case 'equipe':
-        return <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 gap-1"><Users className="w-3 h-3" /> Equipe</Badge>;
+        return <Badge className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30 gap-1"><Users className="w-3 h-3" /> Equipe</Badge>;
       case 'plano':
-        return <Badge className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30 gap-1"><CreditCard className="w-3 h-3" /> Plano</Badge>;
+        return <Badge className="bg-rose-500/20 text-rose-300 border-rose-500/30 gap-1"><CreditCard className="w-3 h-3" /> Mensalidade / Plano</Badge>;
       default:
         return <Badge className="bg-slate-500/20 text-slate-300 border-slate-500/30 gap-1"><ShieldCheck className="w-3 h-3" /> Sistema</Badge>;
     }
   };
 
+  // Limpa as tags técnicas de ref para exibição limpa ao usuário
+  const formatarDetalhes = (detalhes: string | null) => {
+    if (!detalhes) return '-';
+    return detalhes.replace(/\[ref:[a-zA-Z0-9_\-]+\]/g, '').trim();
+  };
+
   return (
     <GlassCard className="rounded-3xl p-5 sm:p-6 space-y-6">
+      {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-white/10">
         <div>
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <FileText className="w-5 h-5 text-indigo-400" /> Logs & Auditoria de Atividades
           </h3>
-          <p className="text-xs text-slate-400">
-            Acompanhe em tempo real quem acessou, modificou estoque, registrou vendas ou alterou cadastros.
+          <p className="text-xs text-slate-400 mt-0.5">
+            Rastreamento completo em tempo real de quem acessou, modificou estoque, registrou vendas ou alterou cadastros.
           </p>
         </div>
 
-        <Button
-          onClick={fetchLogs}
-          variant="outline"
-          size="sm"
-          disabled={loading}
-          className="border-white/15 hover:bg-white/10 text-slate-200 gap-2 shrink-0 rounded-xl"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Atualizar Logs
-        </Button>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <Button
+            onClick={handleSincronizarHistorico}
+            variant="outline"
+            size="sm"
+            disabled={syncing}
+            className="border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 gap-1.5 rounded-xl text-xs"
+            title="Importa e consolida histórico de vendas e estoque passados para os logs"
+          >
+            <Sparkles className={`w-3.5 h-3.5 text-indigo-400 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Sincronizando...' : 'Sincronizar Histórico'}
+          </Button>
+
+          <Button
+            onClick={fetchLogs}
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            className="border-white/15 hover:bg-white/10 text-slate-200 gap-1.5 rounded-xl text-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
-      {/* Barra de Filtros */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Buscar por ação, usuário ou detalhes..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-glass pl-9 w-full text-sm py-2"
-          />
+      {/* Cards de Métricas / KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+        <div className="bg-slate-900/60 border border-white/10 rounded-2xl p-3">
+          <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
+            <FileText className="w-3.5 h-3.5 text-indigo-400" /> Total Registros
+          </div>
+          <p className="text-lg font-bold text-white">{metricas.total}</p>
         </div>
 
-        <div>
-          <select
-            value={tipoFiltro}
-            onChange={(e) => setTipoFiltro(e.target.value)}
-            className="input-glass w-full text-sm py-2 px-3"
-          >
-            <option value="todos">Todos os Eventos</option>
-            <option value="login">🔑 Acessos & Logins</option>
-            <option value="venda">💰 Vendas</option>
-            <option value="os">🔧 Ordens de Serviço</option>
-            <option value="estoque">📦 Estoque & Aparelhos</option>
-            <option value="equipe">👥 Equipe & Usuários</option>
-            <option value="plano">💳 Planos & Pagamentos</option>
-            <option value="info">⚙️ Geral / Sistema</option>
-          </select>
+        <div className="bg-slate-900/60 border border-emerald-500/20 rounded-2xl p-3">
+          <div className="flex items-center gap-2 text-emerald-400 text-xs mb-1">
+            <ShoppingBag className="w-3.5 h-3.5" /> Vendas
+          </div>
+          <p className="text-lg font-bold text-white">{metricas.vendas}</p>
         </div>
 
-        {isSuperAdmin && (
+        <div className="bg-slate-900/60 border border-purple-500/20 rounded-2xl p-3">
+          <div className="flex items-center gap-2 text-purple-400 text-xs mb-1">
+            <Package className="w-3.5 h-3.5" /> Estoque
+          </div>
+          <p className="text-lg font-bold text-white">{metricas.estoque}</p>
+        </div>
+
+        <div className="bg-slate-900/60 border border-amber-500/20 rounded-2xl p-3">
+          <div className="flex items-center gap-2 text-amber-400 text-xs mb-1">
+            <Wrench className="w-3.5 h-3.5" /> Ordens Serv.
+          </div>
+          <p className="text-lg font-bold text-white">{metricas.os}</p>
+        </div>
+
+        <div className="col-span-2 sm:col-span-1 bg-slate-900/60 border border-blue-500/20 rounded-2xl p-3">
+          <div className="flex items-center gap-2 text-blue-400 text-xs mb-1">
+            <User className="w-3.5 h-3.5" /> Acessos
+          </div>
+          <p className="text-lg font-bold text-white">{metricas.acessos}</p>
+        </div>
+      </div>
+
+      {/* Barra de Filtros e Período */}
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Buscar por ação, cliente, IMEI ou usuário..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="input-glass pl-9 w-full text-xs sm:text-sm py-2"
+            />
+          </div>
+
           <div>
             <select
-              value={lojaFiltro}
-              onChange={(e) => setLojaFiltro(e.target.value)}
-              className="input-glass w-full text-sm py-2 px-3"
+              value={tipoFiltro}
+              onChange={(e) => setTipoFiltro(e.target.value)}
+              className="input-glass w-full text-xs sm:text-sm py-2 px-3"
             >
-              <option value="todas">Todas as Lojas (Visão Global)</option>
-              {lojasLista.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.nome}
-                </option>
-              ))}
+              <option value="todos">Todos os Eventos</option>
+              <option value="venda">💰 Vendas (Varejo & Atacado)</option>
+              <option value="estoque">📦 Estoque (Entradas & Saídas)</option>
+              <option value="os">🔧 Ordens de Serviço</option>
+              <option value="garantia">🛡️ Garantias Emitidas</option>
+              <option value="login">🔑 Acessos & Logins</option>
+              <option value="cliente">👥 Cadastros de Clientes</option>
+              <option value="equipe">👤 Equipe & Usuários</option>
+              <option value="plano">💳 Planos & Pagamentos</option>
             </select>
           </div>
-        )}
+
+          {isSuperAdmin && (
+            <div>
+              <select
+                value={lojaFiltro}
+                onChange={(e) => setLojaFiltro(e.target.value)}
+                className="input-glass w-full text-xs sm:text-sm py-2 px-3"
+              >
+                <option value="todas">Todas as Lojas (Visão Global)</option>
+                {lojasLista.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Chips de Período */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <span className="text-slate-400 font-medium text-[11px] mr-1">Período:</span>
+          {(['hoje', '7dias', '30dias', 'todos'] as const).map((p) => {
+            const labels = {
+              hoje: 'Últimas 24h',
+              '7dias': 'Últimos 7 dias',
+              '30dias': 'Últimos 30 dias',
+              todos: 'Todo o Histórico'
+            };
+            const active = periodoFiltro === p;
+            return (
+              <button
+                key={p}
+                onClick={() => setPeriodoFiltro(p)}
+                className={`px-3 py-1 rounded-xl font-medium transition cursor-pointer ${
+                  active 
+                    ? 'bg-indigo-600 text-white shadow-sm' 
+                    : 'bg-slate-900/60 hover:bg-slate-800 text-slate-300 border border-white/10'
+                }`}
+              >
+                {labels[p]}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Tabela de Logs */}
       <div className="overflow-x-auto scrollbar-soft border border-white/10 rounded-2xl">
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="bg-slate-900/80 text-slate-300 border-b border-white/10">
+            <tr className="bg-slate-900/90 text-slate-300 border-b border-white/10">
               <th className="py-3 px-4">Data / Hora</th>
               {isSuperAdmin && <th className="py-3 px-3">Loja</th>}
-              <th className="py-3 px-3">Usuário</th>
+              <th className="py-3 px-3">Responsável</th>
               <th className="py-3 px-3">Tipo</th>
-              <th className="py-3 px-3">Ação Realizada</th>
-              <th className="py-3 px-4">Detalhes</th>
+              <th className="py-3 px-3">Ação</th>
+              <th className="py-3 px-4">Detalhes da Operação</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 text-slate-200">
@@ -205,20 +371,24 @@ export function LogsTab() {
                 <td colSpan={isSuperAdmin ? 6 : 5} className="py-8 text-center text-slate-400">
                   <div className="flex items-center justify-center gap-2">
                     <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
-                    Carregando histórico de logs...
+                    Carregando atividades gravadas...
                   </div>
                 </td>
               </tr>
-            ) : logs.length === 0 ? (
+            ) : logsFiltrados.length === 0 ? (
               <tr>
-                <td colSpan={isSuperAdmin ? 6 : 5} className="py-8 text-center text-slate-400">
-                  Nenhum log encontrado para os filtros selecionados.
+                <td colSpan={isSuperAdmin ? 6 : 5} className="py-10 text-center text-slate-400">
+                  <p className="font-semibold text-slate-300">Nenhum evento encontrado para os filtros selecionados.</p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Clique em &quot;Sincronizar Histórico&quot; no topo para carregar todas as vendas, aparelhos e OSs anteriores.
+                  </p>
                 </td>
               </tr>
             ) : (
-              logs.map((log) => {
+              logsFiltrados.map((log) => {
                 const dataFormatada = new Date(log.created_at).toLocaleString('pt-BR');
                 const nomeLoja = log.loja_id ? (lojasMap[log.loja_id] || 'Loja Registrada') : 'Global / Sistema';
+                const inicial = (log.usuario_nome || 'S')[0]?.toUpperCase();
 
                 return (
                   <tr key={log.id} className="hover:bg-white/5 transition">
@@ -237,19 +407,26 @@ export function LogsTab() {
                       </td>
                     )}
                     <td className="py-3 px-3">
-                      <div>
-                        <p className="font-bold text-white text-xs">{log.usuario_nome || 'Usuário do Sistema'}</p>
-                        <p className="text-[10px] text-slate-400 truncate max-w-[150px]">{log.usuario_email || 'E-mail não informado'}</p>
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center justify-center text-[10px] font-bold shrink-0">
+                          {inicial}
+                        </div>
+                        <div>
+                          <p className="font-bold text-white text-xs leading-none">{log.usuario_nome || 'Sistema'}</p>
+                          {log.usuario_email && (
+                            <p className="text-[10px] text-slate-400 truncate max-w-[130px] leading-tight mt-0.5">{log.usuario_email}</p>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-3">
                       {getTipoBadge(log.tipo_evento)}
                     </td>
-                    <td className="py-3 px-3 font-semibold text-indigo-300">
+                    <td className="py-3 px-3 font-semibold text-indigo-300 whitespace-nowrap">
                       {log.acao}
                     </td>
                     <td className="py-3 px-4 text-slate-300 text-[11px]">
-                      {log.detalhes || '-'}
+                      {formatarDetalhes(log.detalhes)}
                     </td>
                   </tr>
                 );
@@ -261,3 +438,4 @@ export function LogsTab() {
     </GlassCard>
   );
 }
+

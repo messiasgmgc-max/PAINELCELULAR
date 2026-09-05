@@ -6,7 +6,7 @@ import {
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
   ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes, Layers, Repeat
 } from 'lucide-react';
-import { cn, checkIsSuperAdmin } from '@/lib/utils';
+import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useTabOrder } from '@/hooks/useTabOrder';
 
@@ -90,8 +90,13 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
       list.push({ id: 'superadmin', label: 'Super Admin', icon: <Lock className="w-5 h-5 text-red-500" /> });
     }
 
+    // Se for vendedor/operador, oculta abas de gestão administrativa
+    if (checkIsVendedor(usuario)) {
+      return list.filter(t => !['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(t.id));
+    }
+
     return list;
-  }, [tabOrder, isSuperAdmin]);
+  }, [tabOrder, isSuperAdmin, usuario]);
 
   const mobileDockTabs: Tab[] = [{ id: 'menu', label: 'Menu', icon: <Menu className="w-5 h-5" /> }, ...tabsToRender];
 

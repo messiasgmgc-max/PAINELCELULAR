@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { SessaoUsuario } from '@/lib/db/types';
+import { logAuth } from '@/lib/logger';
 
 interface AuthContextType {
   usuario: SessaoUsuario | null;
@@ -144,7 +145,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         const usuarioMontado = await montarUsuario(session);
         setUsuario(usuarioMontado);
+        if (event === 'SIGNED_IN' && usuarioMontado) {
+          logAuth(usuarioMontado, 'Login');
+        }
       } else if (event === 'SIGNED_OUT') {
+        if (usuario) {
+          logAuth(usuario, 'Logout');
+        }
         document.cookie = `sessao_usuario=; path=/; max-age=0;`;
         try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
         setUsuario(null);

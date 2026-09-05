@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   CreditCard, 
   CheckCircle2, 
@@ -15,7 +15,11 @@ import {
   X,
   Building2,
   Calendar,
-  DollarSign
+  DollarSign,
+  QrCode,
+  Zap,
+  Loader2,
+  Sparkles
 } from 'lucide-react';
 import { useStorePlan } from '@/hooks/useStorePlan';
 import { Button } from '@/components/ui/button';
@@ -34,6 +38,29 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
   const [observacao, setObservacao] = useState('');
   const [enviando, setEnviando] = useState(false);
 
+  // Estados para o PIX Automático Dinâmico
+  const [gerandoPix, setGerandoPix] = useState(false);
+  const [pixDinamico, setPixDinamico] = useState<{
+    paymentId: string;
+    qrCode?: string;
+    qrCodeBase64?: string;
+    chavePix?: string;
+    modo: 'mercadopago' | 'chave_pix';
+    ticketUrl?: string;
+  } | null>(null);
+  const [pixCopiado, setPixCopiado] = useState(false);
+  const [pagamentoAprovadoAuto, setPagamentoAprovadoAuto] = useState(false);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Limpa intervalo ao fechar ou desmontar
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, []);
+
   if (!isOpen) return null;
 
   const handleCopyPix = () => {
@@ -41,6 +68,70 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     setCopied(true);
     toast.success('Chave Pix copiada com sucesso!');
     setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleCopyPixDinamico = () => {
+    const textoParaCopiar = pixDinamico?.qrCode || pixDinamico?.chavePix || planData.chavePixCobranca;
+    navigator.clipboard.writeText(textoParaCopiar);
+    setPixCopiado(true);
+    toast.success('Código Pix Copia e Cola copiado com sucesso!');
+    setTimeout(() => setPixCopiado(false), 2500);
+  };
+
+  // Gerar PIX Dinâmico com QR Code e Cobrança Automática
+  const handleGerarPixDinamico = async () => {
+    if (!planData.lojaId) {
+      toast.error('Loja não identificada');
+      return;
+    }
+
+    try {
+      setGerandoPix(true);
+      setPagamentoAprovadoAuto(false);
+
+      const res = await fetch('/api/planos/gerar-pix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lojaId: planData.lojaId,
+          valor: planData.valorMensalidade,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao gerar PIX');
+
+      setPixDinamico(data);
+      toast.success('QR Code Pix gerado! Faça o pagamento para liberação imediata.');
+
+      // Inicia polling automático a cada 4 segundos para detectar aprovação
+      if (pollingRef.current) clearInterval(pollingRef.current);
+
+      pollingRef.current = setInterval(async () => {
+        try {
+          const checkRes = await fetch(`/api/planos/verificar-pix?paymentId=${data.paymentId}&lojaId=${planData.lojaId}`);
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            if (checkData.approved) {
+              if (pollingRef.current) clearInterval(pollingRef.current);
+              setPagamentoAprovadoAuto(true);
+              toast.success('🎉 Pagamento confirmado com sucesso! Sua loja já está liberada!', {
+                duration: 6000,
+              });
+              await refetchPlan();
+            }
+          }
+        } catch (pollErr) {
+          console.error('Erro na checagem do PIX:', pollErr);
+        }
+      }, 4000);
+
+    } catch (err: any) {
+      console.error('Erro ao gerar PIX dinâmico:', err);
+      toast.error(err.message || 'Erro ao gerar cobrança PIX');
+    } finally {
+      setGerandoPix(false);
+    }
   };
 
   const handleUploadComprovante = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,20 +170,20 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     switch (planData.planoStatus) {
       case 'ativo':
         return (
-          <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs px-3 py-1 flex items-center gap-1.5">
+          <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
             <CheckCircle2 className="w-4 h-4" /> Plano Ativo
           </Badge>
         );
       case 'pendente':
         return (
-          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs px-3 py-1 flex items-center gap-1.5">
+          <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
             <Clock className="w-4 h-4" /> Pagamento Pendente
           </Badge>
         );
       case 'vencido':
       case 'bloqueado':
         return (
-          <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs px-3 py-1 flex items-center gap-1.5">
+          <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
             <XCircle className="w-4 h-4" /> Assinatura Suspensa / Bloqueada
           </Badge>
         );
@@ -154,23 +245,120 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
             </div>
             <div className="flex flex-col items-start sm:items-end gap-2">
               {getStatusBadge()}
-              {planData.solicitacaoStatus === 'pendente_aprovacao' && (
+              {pagamentoAprovadoAuto ? (
+                <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30 font-bold flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" /> Liberado Automaticamente via PIX!
+                </span>
+              ) : planData.solicitacaoStatus === 'pendente_aprovacao' ? (
                 <span className="text-[11px] text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20 font-medium">
                   ⏳ Solicitação em análise pelo Super Admin
                 </span>
-              )}
+              ) : null}
             </div>
           </div>
 
-          {/* Dados Pix para Pagamento */}
+          {/* SEÇÃO: PAGAMENTO AUTOMÁTICO VIA PIX */}
+          <div className="bg-gradient-to-br from-emerald-950/40 to-slate-950/60 rounded-2xl border border-emerald-500/30 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
+                <Zap className="w-4 h-4 text-emerald-400" /> Pagamento PIX Instantâneo com Liberação Automática
+              </div>
+              <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px]">
+                Aprovação 24/7 em segundos
+              </Badge>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Pague via QR Code ou Copia e Cola. O sistema reconhece o pagamento na hora e renova sua assinatura automaticamente, sem precisar aguardar aprovação manual!
+            </p>
+
+            {!pixDinamico ? (
+              <Button
+                type="button"
+                onClick={handleGerarPixDinamico}
+                disabled={gerandoPix}
+                className="w-full h-11 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-600/20 gap-2 cursor-pointer"
+              >
+                {gerandoPix ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Gerando QR Code PIX...
+                  </>
+                ) : (
+                  <>
+                    <QrCode className="w-4 h-4" /> Gerar QR Code PIX para Pagamento
+                  </>
+                )}
+              </Button>
+            ) : (
+              <div className="space-y-4 bg-slate-900/90 border border-slate-800 p-4 rounded-xl">
+                {pagamentoAprovadoAuto ? (
+                  <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-center space-y-2">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+                    <h3 className="font-bold text-white text-base">Pagamento Confirmado!</h3>
+                    <p className="text-xs text-emerald-300">Sua loja já está ativa e seu acesso foi prorrogado por mais 30 dias.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
+                      {/* QR Code */}
+                      {pixDinamico.qrCodeBase64 ? (
+                        <div className="bg-white p-2.5 rounded-xl shrink-0 shadow-lg">
+                          <img 
+                            src={`data:image/png;base64,${pixDinamico.qrCodeBase64}`} 
+                            alt="QR Code Pix" 
+                            className="w-40 h-40 object-contain"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-40 h-40 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-center p-3 text-xs text-slate-400">
+                          <QrCode className="w-10 h-10 text-emerald-400 mb-1 opacity-70" />
+                        </div>
+                      )}
+
+                      {/* Dados Copia e Cola */}
+                      <div className="space-y-2 flex-1 w-full">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400 font-semibold">Valor da Mensalidade:</span>
+                          <span className="text-emerald-400 font-bold font-mono text-sm">
+                            R$ {planData.valorMensalidade.toFixed(2).replace('.', ',')}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Abra o app do seu banco, escolha <b>Pix Copia e Cola</b> ou aponte a câmera para o QR Code ao lado.
+                        </p>
+                        
+                        <Button
+                          type="button"
+                          onClick={handleCopyPixDinamico}
+                          className="w-full gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                        >
+                          {pixCopiado ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                          {pixCopiado ? 'Código Pix Copiado!' : 'Copiar Código Pix (Copia e Cola)'}
+                        </Button>
+
+                        <div className="flex items-center justify-center gap-2 pt-2 text-[11px] text-amber-400">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Aguardando confirmação bancária em tempo real...</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Dados Pix Estático (Fallback) */}
           <div className="bg-slate-950/40 rounded-2xl border border-slate-800 p-5 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" /> Dados para Pagamento Pix
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
+                <ShieldCheck className="w-4 h-4 text-slate-400" /> Ou Pague Diretamente na Chave Oficial
+              </div>
             </div>
             
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="w-full sm:w-auto truncate">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Chave Pix Oficial</p>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Chave Pix Cadastrada</p>
                 <p className="text-sm font-mono font-bold text-emerald-400 truncate">{planData.chavePixCobranca}</p>
               </div>
               <Button
@@ -186,14 +374,14 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
             </div>
           </div>
 
-          {/* Formulário de Envio de Comprovante */}
+          {/* Formulário de Envio de Comprovante Manual (opcional) */}
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                <Upload className="w-4 h-4 text-blue-400" /> Confirmar Pagamento & Solicitar Liberação
+                <Upload className="w-4 h-4 text-blue-400" /> Enviar Comprovante para Conferência Manual (Opcional)
               </h4>
               <p className="text-xs text-slate-400">
-                Anexe o comprovante Pix abaixo para o Super Admin analisar e liberar o acesso imediatamente.
+                Caso tenha feito transferência manual por outra chave, anexe o comprovante para análise do Super Admin.
               </p>
             </div>
 
@@ -224,7 +412,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                 <textarea
                   value={observacao}
                   onChange={(e) => setObservacao(e.target.value)}
-                  placeholder="Ex: Pagamento referente ao mês de Agosto feito via conta titular João..."
+                  placeholder="Ex: Pagamento referente ao mês feito via conta titular João..."
                   className="w-full h-28 bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 resize-none"
                 />
               </div>
@@ -240,7 +428,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
               ) : (
                 <Send className="w-4 h-4" />
               )}
-              Enviar Comprovante e Solicitar Liberação
+              Enviar Comprovante para Aprovação Manual
             </Button>
           </form>
         </div>

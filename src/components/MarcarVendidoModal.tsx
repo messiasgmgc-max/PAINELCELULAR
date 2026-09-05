@@ -23,6 +23,8 @@ import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
+import { useAuth } from '@/hooks/useAuth';
+import { logVenda, logEstoque } from '@/lib/logger';
 
 interface MarcarVendidoModalProps {
   isOpen: boolean;
@@ -59,6 +61,7 @@ export function MarcarVendidoModal({
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [dadosPendente, setDadosPendente] = useState(false);
+  const { usuario } = useAuth();
 
   // Hook de compradores frequentes (banco de dados)
   const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
@@ -213,6 +216,24 @@ export function MarcarVendidoModal({
 
       // Salva no banco de dados para autocomplete futuro
       await upsertComprador(compradorFinal, tipoVenda === 'atacado' ? 'lojista' : 'cliente');
+
+      // Grava logs de auditoria
+      logVenda({
+        clienteNome: compradorFinal,
+        valorTotal: valorNumerico,
+        tipoVenda,
+        formaPagamento: metodoPgto,
+        itensCount: 1,
+      }, usuario, lojaId);
+
+      logEstoque({
+        id: aparelho.id,
+        modelo: aparelho.modelo,
+        imei: aparelho.imei,
+        status: statusDestino,
+        precoVenda: valorNumerico,
+        comprador: compradorFinal,
+      }, tipoVenda === 'manutencao' ? 'Envio para Manutenção' : 'Saída de Estoque / Venda', usuario, lojaId);
 
       toast.success(`🎉 Venda de ${aparelho.modelo} registrada com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
       await onSuccess();

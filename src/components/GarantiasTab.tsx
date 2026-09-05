@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Shield, AlertTriangle } from 'lucide-react';
 import { Garantia, Venda } from '@/lib/db/types';
 import { VendaSearchCombobox, EnrichedVendaData } from '@/components/VendaSearchCombobox';
+import { logGarantia } from '@/lib/logger';
 
 export function GarantiasTab() {
   const { usuario } = useAuth();
@@ -236,6 +237,11 @@ export function GarantiasTab() {
         await atualizarGarantia(editingId, formData);
       } else {
         await criarGarantia({ ...formData, ativo: true });
+        logGarantia({
+          clienteNome: formData.clienteNome,
+          aparelhoDescricao: formData.aparelhoDescricao,
+          diasGarantia: formData.diasGarantia,
+        }, usuario, usuario?.lojaId);
       }
       resetForm();
     } catch (err) {

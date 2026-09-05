@@ -10,6 +10,7 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { TrendingUp, Users, Zap, Package, DollarSign, Target, Calendar, ShoppingBag, Wrench } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
+import { canViewFinancials } from '@/lib/utils';
 
 export function DashboardTab() {
   const { usuario } = useAuth();
@@ -237,15 +238,26 @@ export function DashboardTab() {
           <p className="text-xs text-muted-foreground">OS + Vendas</p>
         </GlassCard>
 
-        {/* Lucro Geral */}
-        <GlassCard className="space-y-2" hoverEffect={true}>
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">Lucro Líquido</p>
-            <TrendingUp className="w-5 h-5 text-green-600" />
-          </div>
-          <p className="text-2xl font-bold text-green-600 dark:text-green-400">R$ {kpis.totalLucro.toFixed(2).replace('.', ',')}</p>
-          <p className="text-xs text-muted-foreground">Margem Global: {kpis.margemLucro}%</p>
-        </GlassCard>
+        {/* Lucro Geral (Apenas Administradores) ou Metas (Vendedores) */}
+        {canViewFinancials(usuario) ? (
+          <GlassCard className="space-y-2" hoverEffect={true}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Lucro Líquido</p>
+              <TrendingUp className="w-5 h-5 text-green-600" />
+            </div>
+            <p className="text-2xl font-bold text-green-600 dark:text-green-400">R$ {kpis.totalLucro.toFixed(2).replace('.', ',')}</p>
+            <p className="text-xs text-muted-foreground">Margem Global: {kpis.margemLucro}%</p>
+          </GlassCard>
+        ) : (
+          <GlassCard className="space-y-2" hoverEffect={true}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">Volume de Vendas</p>
+              <Target className="w-5 h-5 text-emerald-500" />
+            </div>
+            <p className="text-2xl font-bold text-emerald-400">{kpis.vendasCount} aparelhos</p>
+            <p className="text-xs text-muted-foreground">Vendas realizadas no período</p>
+          </GlassCard>
+        )}
 
         {/* Serviços (OS) */}
         <GlassCard className="space-y-2" hoverEffect={true}>
@@ -255,7 +267,11 @@ export function DashboardTab() {
           </div>
           <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">R$ {kpis.osReceita.toFixed(2).replace('.', ',')}</p>
           <div className="flex justify-between text-xs text-muted-foreground font-medium">
-            <span>Lucro: R$ {kpis.osLucro.toFixed(2)}</span>
+            {canViewFinancials(usuario) ? (
+              <span>Lucro: R$ {kpis.osLucro.toFixed(2)}</span>
+            ) : (
+              <span>{kpis.osCount} OS no total</span>
+            )}
             <span>{kpis.osEntregue} / {kpis.osCount} Entregues</span>
           </div>
         </GlassCard>
@@ -268,7 +284,11 @@ export function DashboardTab() {
           </div>
           <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">R$ {kpis.vendasReceita.toFixed(2).replace('.', ',')}</p>
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Lucro: R$ {kpis.vendasLucro.toFixed(2)}</span>
+            {canViewFinancials(usuario) ? (
+              <span>Lucro: R$ {kpis.vendasLucro.toFixed(2)}</span>
+            ) : (
+              <span>Produtos & Aparelhos</span>
+            )}
             <span>{kpis.vendasCount} Vendas</span>
           </div>
         </GlassCard>
@@ -302,22 +322,26 @@ export function DashboardTab() {
                 dot={false}
                 strokeWidth={2}
               />
-              <Line
-                type="monotone"
-                dataKey="lucroOS"
-                stroke="#10B981"
-                name="Lucro OS"
-                dot={false}
-                strokeWidth={2}
-              />
-              <Line
-                type="monotone"
-                dataKey="lucroVendas"
-                stroke="#8B5CF6"
-                name="Lucro Vendas"
-                dot={false}
-                strokeWidth={2}
-              />
+              {canViewFinancials(usuario) && (
+                <>
+                  <Line
+                    type="monotone"
+                    dataKey="lucroOS"
+                    stroke="#10B981"
+                    name="Lucro OS"
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="lucroVendas"
+                    stroke="#8B5CF6"
+                    name="Lucro Vendas"
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                </>
+              )}
             </LineChart>
           </ResponsiveContainer>
         </GlassCard>

@@ -19,7 +19,7 @@ import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
-import { getAparelhoCodigo, cn } from "@/lib/utils";
+import { getAparelhoCodigo, cn, canViewFinancials } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -2251,7 +2251,7 @@ export function AparelhosTab() {
                     <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       {/* Preços */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        {custoNum > 0 && (
+                        {canViewFinancials(usuario) && custoNum > 0 && (
                           <div className="text-xs text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-slate-800">
                             <span className="text-[10px] text-slate-500 block leading-none">Custo</span>
                             <span className="font-semibold text-slate-300">R$ {custoNum.toFixed(2).replace(".", ",")}</span>
@@ -2666,19 +2666,21 @@ export function AparelhosTab() {
                 )}
 
                 {/* VALORES: CUSTO, ATACADO E VENDA VAREJO (COMUM A TODOS) */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-white/5">
-                  <div>
-                    <label className="text-[10px] font-bold text-blue-400 uppercase block mb-1">Custo (R$)</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      name="custo"
-                      placeholder="R$ 0,00"
-                      value={formatarPreco(formData.custo)}
-                      onChange={handleCustoChange}
-                      className="input-glass w-full"
-                    />
-                  </div>
+                <div className={`grid grid-cols-1 ${canViewFinancials(usuario) ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-3 pt-1 border-t border-white/5`}>
+                  {canViewFinancials(usuario) && (
+                    <div>
+                      <label className="text-[10px] font-bold text-blue-400 uppercase block mb-1">Custo (R$)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        name="custo"
+                        placeholder="R$ 0,00"
+                        value={formatarPreco(formData.custo)}
+                        onChange={handleCustoChange}
+                        className="input-glass w-full"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Preço Atacado (R$)</label>
                     <input
@@ -3120,7 +3122,7 @@ export function AparelhosTab() {
                             Detalhe: <span className="text-slate-400">{item.motivoSaida}</span>
                           </p>
 
-                          {item.custo !== undefined && (
+                          {canViewFinancials(usuario) && item.custo !== undefined && (
                             <p className="text-xs text-slate-400 mt-0.5">
                               Custo Cadastrado: <strong className="text-slate-200">R$ {(item.custo || 0).toFixed(2).replace('.', ',')}</strong>
                             </p>
@@ -3131,28 +3133,30 @@ export function AparelhosTab() {
                           <p className="text-xs text-slate-400">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
                           <div className="flex items-center gap-2 justify-end">
                             <Badge variant="outline">{item.condicao}</Badge>
-                            <button
-                              onClick={() => {
-                                setSaidaParaEditar({
-                                  aparelhoId: item.id,
-                                  data: item.dataSaida || item.dataCadastro,
-                                  comprador: item.cliente || '',
-                                  modelo: item.modelo,
-                                  marca: item.marca,
-                                  cor: item.cor,
-                                  capacidade: item.capacidade,
-                                  imei: item.imei,
-                                  codigo: getAparelhoCodigo(item),
-                                  valorVenda: item.preco || 0,
-                                  custo: item.custo || 0,
-                                  observacoes: item.observacoes || '',
-                                });
-                              }}
-                              className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-1 rounded-lg border border-blue-500/20 transition-colors cursor-pointer"
-                              title="Editar custo ou dados da saída"
-                            >
-                              <Edit2 className="w-3 h-3" /> Editar Custo
-                            </button>
+                            {canViewFinancials(usuario) && (
+                              <button
+                                onClick={() => {
+                                  setSaidaParaEditar({
+                                    aparelhoId: item.id,
+                                    data: item.dataSaida || item.dataCadastro,
+                                    comprador: item.cliente || '',
+                                    modelo: item.modelo,
+                                    marca: item.marca,
+                                    cor: item.cor,
+                                    capacidade: item.capacidade,
+                                    imei: item.imei,
+                                    codigo: getAparelhoCodigo(item),
+                                    valorVenda: item.preco || 0,
+                                    custo: item.custo || 0,
+                                    observacoes: item.observacoes || '',
+                                  });
+                                }}
+                                className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-1 rounded-lg border border-blue-500/20 transition-colors cursor-pointer"
+                                title="Editar custo ou dados da saída"
+                              >
+                                <Edit2 className="w-3 h-3" /> Editar Custo
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>

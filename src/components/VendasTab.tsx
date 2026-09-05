@@ -27,6 +27,7 @@ import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
 import { cn, getAparelhoCodigo } from '@/lib/utils';
 import { toast } from 'sonner';
+import { registrarLog } from '@/lib/logger';
 import { generateReciboA4Html } from '@/lib/reciboA4';
 import {
   exportDataset,
@@ -1477,36 +1478,60 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja mandar essa venda pro quinto dos infernos? (Os aparelhos voltarão pro estoque)')) {
+    if (window.confirm('Tem certeza que deseja cancelar e excluir esta venda? (Os aparelhos voltarão ao estoque ativo)')) {
       try {
-        // 1. Pega os dados da venda pra não perder o rastro dos celulares
+        // 1. Pega os dados da venda para recuperar os aparelhos
         const { data: venda, error: erroBusca } = await supabase
           .from('vendas')
-          .select('itens')
+          .select('*, itens')
           .eq('id', id)
           .single();
 
         if (erroBusca) throw erroBusca;
 
-        // 2. Passa a faca na venda
+        // 2. Exclui a venda da tabela vendas
         const { error: erroDelete } = await supabase.from('vendas').delete().eq('id', id);
         if (erroDelete) throw erroDelete;
 
-        // 3. O Milagre da Ressurreição (Devolve pro estoque)
+        // 3. Devolve os aparelhos ao estoque com status disponível e observações limpas
         if (venda?.itens && venda.itens.length > 0) {
           const aparelhosIds = venda.itens.map((item: any) => item.aparelhoId).filter(Boolean);
           
           if (aparelhosIds.length > 0) {
-            const { error: erroEstoque } = await supabase
+            const { data: aparsToClean } = await supabase
               .from('aparelhos')
-              .update({ ativo: true, condicao: 'seminovo' }) // Botei seminovo, ajusta se precisar
+              .select('id, observacoes')
               .in('id', aparelhosIds);
-              
-            if (erroEstoque) console.error('Erro ao voltar pro estoque:', erroEstoque);
+
+            for (const apar of aparsToClean || []) {
+              const obsLimpa = String(apar.observacoes || '')
+                .replace(/BAIXA_ESTOQUE:[^\n|]+(?:\|\s*)?/gi, '')
+                .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
+                .trim();
+
+              await supabase
+                .from('aparelhos')
+                .update({ 
+                  ativo: true, 
+                  condicao: 'seminovo', 
+                  status: 'disponivel', 
+                  cliente: null,
+                  observacoes: obsLimpa || null 
+                })
+                .eq('id', apar.id);
+            }
           }
         }
 
-        toast.success('Venda excluída e estoque recuperado com sucesso.');
+        // 4. Registra auditoria
+        await registrarLog({
+          lojaId: usuario?.lojaId || (usuario as any)?.loja_id,
+          tipoEvento: 'venda',
+          acao: 'Venda Cancelada / Excluída',
+          detalhes: `Venda #${id.slice(-6).toUpperCase()} (${venda?.clienteNome || 'Cliente'}) no valor de R$ ${venda?.valor || 0} cancelada e aparelhos devolvidos ao estoque.`,
+        });
+
+        toast.success('Venda excluída e aparelhos devolvidos ao estoque com sucesso.');
         await carregarVendas();
       } catch (error: any) {
         console.error('Erro ao excluir venda:', error);
@@ -1685,15 +1710,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     return 'Cancelado';
   };
 
+  // Helper robusto para identificar se a venda é do canal Atacado / Lojista
+  const isAtacadoVenda = (venda: any): boolean => {
+    if (!venda) return false;
+    const tipoEntrega = String(venda.tipoEntrega || '').toLowerCase();
+    const desc = String(venda.descricao || '').toLowerCase();
+    const canal = String(venda.canal || venda.tipo_venda || venda.tipoVenda || '').toLowerCase();
+    return tipoEntrega.includes('atacado') || desc.includes('atacado') || canal.includes('atacado');
+  };
+
   // Helper robusto para identificar vendas com dados de cliente pendentes ou genéricos ("Comum", "Consumidor", etc.)
   const verificarVendaDadosPendentes = (venda: Venda, listaClientes?: Cliente[]): boolean => {
+    // Se for uma venda de atacado, NUNCA entra na aba de dados pendentes do varejo!
+    if (isAtacadoVenda(venda)) return false;
+
     // 1. Se foi explicitamente marcada como pendente
     if ((venda as any).dados_cliente_pendente === true) return true;
-
-    // 2. Se for uma venda de atacado, não entra na aba de dados pendentes do varejo
-    const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || 
-      (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
-    if (isAtacado) return false;
 
     const nome = (venda.clienteNome || '').trim();
     if (!nome) return true;
@@ -1729,8 +1761,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const vendasFiltradas = useMemo(() => {
     const vendasBase = vendas.filter((venda) => {
       // Filtro por Canal de Venda (Varejo x Dados Pendentes x Atacado x Todos)
-      const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
-      const isPendente = verificarVendaDadosPendentes(venda, clientes);
+      const isAtacado = isAtacadoVenda(venda);
+      const isPendente = !isAtacado && verificarVendaDadosPendentes(venda, clientes);
 
       if (filtroCanal === 'varejo' && (isAtacado || isPendente)) return false;
       if (filtroCanal === 'pendentes' && !isPendente) return false;
@@ -1817,8 +1849,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     let pendentes = 0;
     let atacado = 0;
     vendas.forEach((v) => {
-      const isAtacado = (v as any).tipoEntrega === 'Atacado / Lojista' || (v.descricao && v.descricao.toLowerCase().includes('atacado'));
-      const isPendente = verificarVendaDadosPendentes(v, clientes);
+      const isAtacado = isAtacadoVenda(v);
+      const isPendente = !isAtacado && verificarVendaDadosPendentes(v, clientes);
       if (isPendente) pendentes++;
       else if (isAtacado) atacado++;
       else varejo++;
@@ -3354,8 +3386,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </thead>
                 <tbody>
                   {vendasFiltradas.map((venda) => {
-                    const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
-                    const isPendente = verificarVendaDadosPendentes(venda, clientes);
+                    const isAtacado = isAtacadoVenda(venda);
+                    const isPendente = !isAtacado && verificarVendaDadosPendentes(venda, clientes);
 
                     return (
                     <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5")}>

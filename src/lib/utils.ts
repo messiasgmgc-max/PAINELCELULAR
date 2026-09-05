@@ -25,6 +25,17 @@ export function checkIsStoreAdmin(usuario: any) {
   return checkIsSuperAdmin(usuario) || role === 'admin' || role === 'gerente';
 }
 
+export function checkIsVendedor(usuario: any): boolean {
+  if (!usuario) return true;
+  if (checkIsStoreAdmin(usuario)) return false;
+  const role = String(usuario.role || '').toLowerCase();
+  return role === 'vendedor' || role === 'operador' || role === 'atendente';
+}
+
+export function canViewFinancials(usuario: any): boolean {
+  return checkIsStoreAdmin(usuario);
+}
+
 export function getAparelhoCodigo(aparelho: any): string {
   if (!aparelho) return '';
   

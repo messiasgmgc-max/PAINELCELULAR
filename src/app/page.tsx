@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { cn, checkIsSuperAdmin } from '@/lib/utils';
+import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
@@ -77,7 +77,14 @@ export default function Home() {
       'superadmin',
     ]);
 
-    return allowedTabs.has(segment) ? segment : 'dashboard';
+    let target = allowedTabs.has(segment) ? segment : 'dashboard';
+
+    // Se o usuário for vendedor, bloqueia acesso a rotas de gestão administrativa
+    if (checkIsVendedor(usuario) && ['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(target)) {
+      return 'dashboard';
+    }
+
+    return target;
   };
 
   const tabToPath = (tabId: string) => {
@@ -87,6 +94,10 @@ export default function Home() {
   };
 
   const handleTabChange = (tabId: string) => {
+    // Vendedor não pode alternar para abas administrativas
+    if (checkIsVendedor(usuario) && ['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(tabId)) {
+      return;
+    }
     setCurrentTab(tabId);
     const nextPath = tabToPath(tabId);
     if (typeof window !== 'undefined' && nextPath !== window.location.pathname) {
@@ -171,6 +182,11 @@ export default function Home() {
 
   // Renderizar conteúdo da aba atual
   const renderCurrentTab = () => {
+    // Se for vendedor, bloqueia renderização de abas restritas
+    if (checkIsVendedor(usuario) && ['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(currentTab)) {
+      return <DashboardTab />;
+    }
+
     switch (currentTab) {
       case 'dashboard':
         return <DashboardTab />;

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
 
 export interface TabDefinition {
   id: string;
@@ -26,54 +27,42 @@ export const DEFAULT_TABS_ORDER: TabDefinition[] = [
   { id: 'configuracoes', label: 'Configurações', descricao: 'Dados da loja e preferências' },
 ];
 
-const STORAGE_KEY = 'painel_celular_tab_order_v2';
-const EVENT_KEY = 'painel_celular_tab_order_change';
+function sanitizeList(orderCandidate?: string[]): string[] {
+  const validDefaultIds = new Set(DEFAULT_TABS_ORDER.map((t) => t.id));
+  const rawList = Array.isArray(orderCandidate) ? orderCandidate : [];
+  
+  const validSaved = rawList.filter((id: string) => typeof id === 'string' && id !== 'whatsapp' && validDefaultIds.has(id));
 
-function getSanitizedOrder(): string[] {
-  if (typeof window === 'undefined') {
-    return DEFAULT_TABS_ORDER.map((t) => t.id);
-  }
+  const savedSet = new Set(validSaved);
+  DEFAULT_TABS_ORDER.forEach((t) => {
+    if (!savedSet.has(t.id)) {
+      validSaved.push(t.id);
+    }
+  });
 
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_TABS_ORDER.map((t) => t.id);
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_TABS_ORDER.map((t) => t.id);
-
-    const validDefaultIds = new Set(DEFAULT_TABS_ORDER.map((t) => t.id));
-    // Filtra IDs que não existem mais (e remove explicitamente whatsapp)
-    const validSaved = parsed.filter((id: string) => typeof id === 'string' && id !== 'whatsapp' && validDefaultIds.has(id));
-
-    // Adiciona ao fim qualquer tab que não esteja no salvo
-    const savedSet = new Set(validSaved);
-    DEFAULT_TABS_ORDER.forEach((t) => {
-      if (!savedSet.has(t.id)) {
-        validSaved.push(t.id);
-      }
-    });
-
-    return validSaved;
-  } catch (e) {
-    console.error('Erro ao ler ordem das abas do localStorage:', e);
-    return DEFAULT_TABS_ORDER.map((t) => t.id);
-  }
+  return validSaved;
 }
 
 export function useTabOrder() {
-  const [tabOrder, setTabOrder] = useState<string[]>(() => getSanitizedOrder());
+  const { config, atualizarOrdemAbas } = useStoreConfig();
+
+  const [tabOrder, setTabOrder] = useState<string[]>(() => {
+    return sanitizeList(config.ordemAbas);
+  });
+
+  // Sincroniza sempre que a ordem das abas vier do banco de dados
+  useEffect(() => {
+    if (config.ordemAbas && Array.isArray(config.ordemAbas) && config.ordemAbas.length > 0) {
+      setTabOrder(sanitizeList(config.ordemAbas));
+    }
+  }, [config.ordemAbas]);
 
   const saveOrder = useCallback((newOrder: string[]) => {
-    setTabOrder(newOrder);
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newOrder));
-        window.dispatchEvent(new CustomEvent(EVENT_KEY, { detail: newOrder }));
-      } catch (err) {
-        console.error('Erro ao salvar ordem das abas:', err);
-      }
-    }
-  }, []);
+    const sanitized = sanitizeList(newOrder);
+    setTabOrder(sanitized);
+    // Salva no banco de dados da loja
+    atualizarOrdemAbas(sanitized);
+  }, [atualizarOrdemAbas]);
 
   const moveUp = useCallback((id: string) => {
     setTabOrder((prev) => {
@@ -106,20 +95,6 @@ export function useTabOrder() {
     saveOrder(defaultIds);
   }, [saveOrder]);
 
-  useEffect(() => {
-    const handleStorageChange = () => {
-      setTabOrder(getSanitizedOrder());
-    };
-
-    window.addEventListener(EVENT_KEY, handleStorageChange);
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener(EVENT_KEY, handleStorageChange);
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
-
   return {
     tabOrder,
     allTabs: DEFAULT_TABS_ORDER,
@@ -129,3 +104,4 @@ export function useTabOrder() {
     saveOrder,
   };
 }
+

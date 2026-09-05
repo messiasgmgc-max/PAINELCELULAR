@@ -40,6 +40,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { getAparelhoCodigo, cn, parseMonetaryValue } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Aparelho } from '@/lib/db/types';
+import { registrarLog } from '@/lib/logger';
 import { EditarValoresAtacadoModal } from '@/components/EditarValoresAtacadoModal';
 import { MarcarVendidoModal } from '@/components/MarcarVendidoModal';
 import { VendaLoteAtacadoModal } from '@/components/VendaLoteAtacadoModal';
@@ -178,8 +179,12 @@ export function AtacadoTab() {
   const vendasAtacado = useMemo<VendaAtacadoItem[]>(() => {
     const lista: VendaAtacadoItem[] = [];
 
-    // Busca nas observações de baixa dos aparelhos
+    // Busca nas observações de baixa dos aparelhos (somente se estiver vendido/baixado)
     aparelhos.forEach((a: any) => {
+      // Se o aparelho estiver ativo e disponível no estoque, NUNCA pode figurar como venda concluída
+      if (a.ativo === true && a.status === 'disponivel') return;
+      if (a.status !== 'vendido' && a.condicao !== 'vendido' && a.ativo !== false) return;
+
       const obs = String(a.observacoes || '');
       
       // Regex robusto para pegar BAIXA_ESTOQUE com data ISO completa
@@ -412,13 +417,28 @@ export function AtacadoTab() {
       const isVarejo = tipoEntregaLower.includes('varejo') || (descLower.includes('varejo') && !descLower.includes('atacado'));
       if (isVarejo) return;
 
-      const isFiadoOuPendente = v.metodo === 'fiado' || v.status === 'pendente' || v.status === 'parcial';
+      const isFiado = v.metodo === 'fiado';
+      const isPendente = v.status === 'pendente' || v.status === 'parcial';
+      if (!isFiado && !isPendente) return;
+
       const cliente = (v.clienteNome || 'Lojista / Revenda').trim();
       const total = Number(v.valor || 0);
       const pago = Number(v.valorPago || 0);
-      const devedor = v.saldoDevedor !== undefined ? Number(v.saldoDevedor) : Math.max(0, total - pago);
+      
+      let devedor = 0;
+      if (v.saldoDevedor !== undefined && v.saldoDevedor !== null && Number(v.saldoDevedor) > 0) {
+        devedor = Number(v.saldoDevedor);
+      } else {
+        devedor = Math.max(0, total - pago);
+        if (devedor <= 0 && isFiado && v.status !== 'pago') {
+          devedor = total;
+        }
+        if (isFiado && pago === 0) {
+          devedor = total;
+        }
+      }
 
-      if (isFiadoOuPendente && devedor > 0.01) {
+      if (devedor > 0.01) {
         if (!mapa.has(cliente)) {
           mapa.set(cliente, {
             lojistaNome: cliente,
@@ -436,7 +456,10 @@ export function AtacadoTab() {
         entry.totalComprado += total;
         entry.totalPago += pago;
         entry.saldoDevedor += devedor;
-        entry.pedidos.push(v);
+        entry.pedidos.push({
+          ...v,
+          saldoDevedor: devedor,
+        });
       }
     });
 
@@ -444,8 +467,19 @@ export function AtacadoTab() {
     vendasAtacado.forEach(va => {
       if (va.metodoPgto === 'fiado') {
         const cliente = (va.comprador || 'Não Informado').trim();
-        const jaExiste = vendasBanco.some(vb => vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === va.aparelhoId));
-        if (!jaExiste) {
+        
+        let jaEstaNoMapa = false;
+        mapa.forEach(entry => {
+          if (entry.pedidos.some((p: any) => 
+            p.id === va.id || 
+            p.aparelhoId === va.aparelhoId || 
+            (p.itens && Array.isArray(p.itens) && p.itens.some((it: any) => it.aparelhoId === va.aparelhoId))
+          )) {
+            jaEstaNoMapa = true;
+          }
+        });
+
+        if (!jaEstaNoMapa) {
           if (!mapa.has(cliente)) {
             mapa.set(cliente, {
               lojistaNome: cliente,
@@ -463,6 +497,7 @@ export function AtacadoTab() {
           entry.saldoDevedor += va.valorVenda;
           entry.pedidos.push({
             id: va.id,
+            aparelhoId: va.aparelhoId,
             descricao: `${va.marca} ${va.modelo} (${va.capacidade || ''})`,
             valor: va.valorVenda,
             valorPago: 0,
@@ -526,19 +561,57 @@ export function AtacadoTab() {
     const toastId = toast.loading('Revertendo venda e reativando aparelho...');
 
     try {
-      const { error } = await supabase
+      // 1. Limpa as observações de baixa no aparelho e reativa no estoque disponível
+      const { data: aparAtual } = await supabase
+        .from('aparelhos')
+        .select('observacoes')
+        .eq('id', venda.aparelhoId)
+        .maybeSingle();
+
+      const obsAtual = String(aparAtual?.observacoes || venda.observacoes || '');
+      const obsLimpa = obsAtual
+        .replace(/BAIXA_ESTOQUE:[^\n|]+(?:\|\s*)?/gi, '')
+        .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
+        .trim();
+
+      const { error: errApar } = await supabase
         .from('aparelhos')
         .update({
           ativo: true,
           condicao: 'seminovo',
           status: 'disponivel',
+          cliente: null,
+          observacoes: obsLimpa || null,
         })
         .eq('id', venda.aparelhoId);
 
-      if (error) throw error;
+      if (errApar) throw errApar;
+
+      // 2. Localiza e exclui a venda correspondente da tabela 'vendas'
+      const { data: vendasRelacionadas } = await supabase
+        .from('vendas')
+        .select('id, itens');
+
+      const vendaParaDeletar = vendasRelacionadas?.find(vb => 
+        (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
+        (vb as any).aparelhoId === venda.aparelhoId
+      );
+
+      if (vendaParaDeletar?.id) {
+        await supabase.from('vendas').delete().eq('id', vendaParaDeletar.id);
+      }
+
+      // 3. Registra auditoria
+      await registrarLog({
+        lojaId: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipoEvento: 'estoque',
+        acao: 'Venda de Atacado Revertida',
+        detalhes: `Venda do aparelho ${venda.modelo} para ${venda.comprador} (R$ ${venda.valorVenda}) cancelada e devolvida ao estoque ativo.`,
+      });
 
       toast.success(`⚡ Venda cancelada! ${venda.modelo} retornou ao estoque ativo.`, { id: toastId });
       await fetchAparelhos();
+      await fetchVendasBanco();
     } catch (err: any) {
       console.error('Erro ao reverter venda:', err);
       toast.error(`Erro ao reverter: ${err.message || 'Falha no banco'}`, { id: toastId });

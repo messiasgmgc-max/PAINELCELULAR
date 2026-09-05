@@ -26,6 +26,8 @@ import { Aparelho } from '@/lib/db/types';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
+import { useAuth } from '@/hooks/useAuth';
+import { logVenda } from '@/lib/logger';
 
 interface VendaLoteAtacadoModalProps {
   isOpen: boolean;
@@ -64,7 +66,8 @@ export function VendaLoteAtacadoModal({
   const [dataVenda, setDataVenda] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
-  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [showScannerModal, setShowScannerModal] = useState(abrirScannerInicial);
+  const { usuario } = useAuth();
 
   const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
   
@@ -372,6 +375,14 @@ export function VendaLoteAtacadoModal({
       await supabase.from('vendas').insert([payloadVenda]);
 
       await upsertComprador(compradorFinal, 'lojista');
+
+      logVenda({
+        clienteNome: compradorFinal,
+        valorTotal: valorTotalLote,
+        tipoVenda: 'atacado',
+        formaPagamento: metodoPgto,
+        itensCount: itensSelecionados.length,
+      }, usuario, lojaId);
 
       toast.success(`🎉 Lote de ${itensSelecionados.length} aparelhos vendido com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
       await onSuccess();

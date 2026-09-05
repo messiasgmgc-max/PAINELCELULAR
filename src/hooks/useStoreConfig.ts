@@ -14,6 +14,10 @@ export interface StoreConfig {
   emailLoja: string;
   garantiaDias: number;
   chavePix: string;
+  corTema: string;
+  ordemAbas: string[];
+  mpAccessToken: string;
+  mpPublicKey: string;
 }
 
 const DEFAULT_CONFIG: StoreConfig = {
@@ -27,6 +31,10 @@ const DEFAULT_CONFIG: StoreConfig = {
   emailLoja: 'contato@loja.com',
   garantiaDias: 90,
   chavePix: '',
+  corTema: 'padrao',
+  ordemAbas: [],
+  mpAccessToken: '',
+  mpPublicKey: '',
 };
 
 export function useStoreConfig(providedLojaId?: string | null) {
@@ -122,6 +130,10 @@ export function useStoreConfig(providedLojaId?: string | null) {
           emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
           garantiaDias: Number(lojaDb.garantia_dias || lojaDb.dias_garantia || DEFAULT_CONFIG.garantiaDias),
           chavePix: lojaDb.chave_pix || lojaDb.pix || lojaDb.chave_pix_cobranca || lojaDb.chavePix || DEFAULT_CONFIG.chavePix,
+          corTema: lojaDb.cor_tema || DEFAULT_CONFIG.corTema,
+          ordemAbas: Array.isArray(lojaDb.ordem_abas) ? lojaDb.ordem_abas : [],
+          mpAccessToken: lojaDb.mp_access_token || '',
+          mpPublicKey: lojaDb.mp_public_key || '',
         };
         setConfig(configDb);
         return;
@@ -192,6 +204,18 @@ export function useStoreConfig(providedLojaId?: string | null) {
         updatePayload.garantia_dias = novaConfig.garantiaDias;
         updatePayload.dias_garantia = novaConfig.garantiaDias;
       }
+      if (novaConfig.corTema !== undefined) {
+        updatePayload.cor_tema = novaConfig.corTema;
+      }
+      if (novaConfig.ordemAbas !== undefined) {
+        updatePayload.ordem_abas = novaConfig.ordemAbas;
+      }
+      if (novaConfig.mpAccessToken !== undefined) {
+        updatePayload.mp_access_token = novaConfig.mpAccessToken;
+      }
+      if (novaConfig.mpPublicKey !== undefined) {
+        updatePayload.mp_public_key = novaConfig.mpPublicKey;
+      }
 
       if (targetId) {
         const { error } = await supabase
@@ -260,6 +284,14 @@ export function useStoreConfig(providedLojaId?: string | null) {
     setConfig(DEFAULT_CONFIG);
   };
 
+  const atualizarCorTema = (corTema: string) => {
+    salvarConfig({ corTema });
+  };
+
+  const atualizarOrdemAbas = (ordemAbas: string[]) => {
+    salvarConfig({ ordemAbas });
+  };
+
   return {
     config,
     isLoading,
@@ -270,6 +302,8 @@ export function useStoreConfig(providedLojaId?: string | null) {
     atualizarLogoLoja,
     atualizarAssinaturaLoja,
     atualizarDadosEmpresa,
+    atualizarCorTema,
+    atualizarOrdemAbas,
     removerLogo,
     removerAssinatura,
     resetarConfig,
