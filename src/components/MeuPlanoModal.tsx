@@ -137,31 +137,37 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
       if (!res.ok) throw new Error(data.error || 'Falha ao gerar PIX');
 
       setPixDinamico(data);
-      toast.success('QR Code Pix gerado! Faça o pagamento para liberação imediata.');
+      if (data.modo === 'mercadopago') {
+        toast.success('QR Code Pix gerado via Mercado Pago! Pague pelo seu app bancário.');
+      } else {
+        toast.success(data.mensagem || 'Chave PIX gerada com sucesso! Anexe o comprovante após o pagamento.');
+      }
       refetchHistorico();
 
-      // Inicia polling automático a cada 4 segundos para detectar aprovação
+      // Inicia polling automático a cada 4 segundos APENAS se for Mercado Pago dinâmico real
       if (pollingRef.current) clearInterval(pollingRef.current);
 
-      pollingRef.current = setInterval(async () => {
-        try {
-          const checkRes = await fetch(`/api/planos/verificar-pix?paymentId=${data.paymentId}&lojaId=${planData.lojaId}`);
-          if (checkRes.ok) {
-            const checkData = await checkRes.json();
-            if (checkData.approved) {
-              if (pollingRef.current) clearInterval(pollingRef.current);
-              setPagamentoAprovadoAuto(true);
-              toast.success('🎉 Pagamento confirmado com sucesso! Sua loja já está liberada!', {
-                duration: 6000,
-              });
-              await refetchPlan();
-              await refetchHistorico();
+      if (data.modo === 'mercadopago' && data.paymentId && /^\d+$/.test(String(data.paymentId))) {
+        pollingRef.current = setInterval(async () => {
+          try {
+            const checkRes = await fetch(`/api/planos/verificar-pix?paymentId=${data.paymentId}&lojaId=${planData.lojaId}`);
+            if (checkRes.ok) {
+              const checkData = await checkRes.json();
+              if (checkData.approved) {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                setPagamentoAprovadoAuto(true);
+                toast.success('🎉 Pagamento confirmado com sucesso! Sua loja já está liberada!', {
+                  duration: 6000,
+                });
+                await refetchPlan();
+                await refetchHistorico();
+              }
             }
+          } catch (pollErr) {
+            console.error('Erro na checagem do PIX:', pollErr);
           }
-        } catch (pollErr) {
-          console.error('Erro na checagem do PIX:', pollErr);
-        }
-      }, 4000);
+        }, 4000);
+      }
 
     } catch (err: any) {
       console.error('Erro ao gerar PIX dinâmico:', err);
@@ -400,6 +406,14 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                             className="w-40 h-40 object-contain"
                           />
                         </div>
+                      ) : (pixDinamico.qrCode || pixDinamico.chavePix || planData.chavePixCobranca) ? (
+                        <div className="bg-white p-2.5 rounded-xl shrink-0 shadow-lg">
+                          <img 
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(pixDinamico.qrCode || pixDinamico.chavePix || planData.chavePixCobranca)}`} 
+                            alt="QR Code Pix" 
+                            className="w-40 h-40 object-contain"
+                          />
+                        </div>
                       ) : (
                         <div className="w-40 h-40 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-center p-3 text-xs text-slate-400">
                           <QrCode className="w-10 h-10 text-emerald-400 mb-1 opacity-70" />
@@ -427,10 +441,16 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                           {pixCopiado ? 'Código Pix Copiado!' : 'Copiar Código Pix (Copia e Cola)'}
                         </Button>
 
-                        <div className="flex items-center justify-center gap-2 pt-2 text-[11px] text-amber-400">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Aguardando confirmação bancária em tempo real...</span>
-                        </div>
+                        {pixDinamico.modo === 'mercadopago' ? (
+                          <div className="flex items-center justify-center gap-2 pt-2 text-[11px] text-amber-400">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Aguardando confirmação bancária em tempo real...</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-2 pt-2 text-[11px] text-blue-300 bg-blue-500/10 py-1.5 px-2 rounded-lg border border-blue-500/20">
+                            <span>Pagamento manual: após pagar, anexe o comprovante abaixo.</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </>

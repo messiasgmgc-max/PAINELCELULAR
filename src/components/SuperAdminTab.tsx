@@ -61,6 +61,8 @@ interface Loja {
   solicitacao_liberacao_status?: string | null;
   solicitacao_liberacao_at?: string | null;
   observacao_plano?: string | null;
+  mp_access_token?: string | null;
+  mp_public_key?: string | null;
   ativo: boolean;
   created_at: string;
 }
@@ -96,11 +98,21 @@ export default function SuperAdminTab() {
   const [chavePixGlobal, setChavePixGlobal] = useState("financeiro@phonecenter.com.br");
   const [salvandoChavePixGlobal, setSalvandoChavePixGlobal] = useState(false);
 
+  // Mercado Pago Access Token Global
+  const [mpAccessTokenGlobal, setMpAccessTokenGlobal] = useState("");
+  const [salvandoMpTokenGlobal, setSalvandoMpTokenGlobal] = useState(false);
+  const [testandoMpToken, setTestandoMpToken] = useState(false);
+  const [statusMpConexao, setStatusMpConexao] = useState<{ sucesso: boolean; mensagem: string } | null>(null);
+
   useEffect(() => {
     if (lojas.length > 0) {
       const lojaComPix = lojas.find(l => l.chave_pix_cobranca && l.chave_pix_cobranca.trim() !== "");
       if (lojaComPix?.chave_pix_cobranca) {
         setChavePixGlobal(lojaComPix.chave_pix_cobranca);
+      }
+      const lojaComMp = lojas.find(l => l.mp_access_token && l.mp_access_token.trim() !== "");
+      if (lojaComMp?.mp_access_token) {
+        setMpAccessTokenGlobal(lojaComMp.mp_access_token);
       }
     }
   }, [lojas]);
@@ -135,6 +147,77 @@ export default function SuperAdminTab() {
     }
   };
 
+  const handleTestarMercadoPago = async (tokenParaTestar?: string) => {
+    const token = (tokenParaTestar || mpAccessTokenGlobal).trim();
+    if (!token) {
+      toast.error("Informe o Access Token do Mercado Pago para testar.");
+      return;
+    }
+
+    setTestandoMpToken(true);
+    setStatusMpConexao(null);
+    try {
+      const res = await fetch("/api/admin/testar-mercadopago", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatusMpConexao({
+          sucesso: true,
+          mensagem: `Conectado! Conta: ${data.conta} (${data.email}) - País: ${data.pais}`
+        });
+        toast.success(`✅ Conexão Mercado Pago validada! Conta: ${data.conta}`);
+      } else {
+        setStatusMpConexao({
+          sucesso: false,
+          mensagem: data.error || "Token inválido ou recusado pelo Mercado Pago."
+        });
+        toast.error(`❌ Erro Mercado Pago: ${data.error || "Token recusado"}`);
+      }
+    } catch (err: any) {
+      setStatusMpConexao({
+        sucesso: false,
+        mensagem: err?.message || "Erro de conexão ao testar token."
+      });
+      toast.error(`Erro ao testar: ${err?.message || "Falha na requisição"}`);
+    } finally {
+      setTestandoMpToken(false);
+    }
+  };
+
+  const handleAplicarMpTokenParaTodasLojas = async () => {
+    const tokenLimpo = mpAccessTokenGlobal.trim();
+    if (!tokenLimpo) {
+      toast.error("Informe o Access Token do Mercado Pago.");
+      return;
+    }
+
+    if (!confirm(`Deseja salvar e aplicar este Access Token do Mercado Pago para TODAS as ${lojas.length} lojas? O PIX dinâmico passará a usar esta credencial para aprovação automática instantânea.`)) {
+      return;
+    }
+
+    setSalvandoMpTokenGlobal(true);
+    try {
+      const { error } = await supabase
+        .from("lojas")
+        .update({ mp_access_token: tokenLimpo })
+        .not("id", "is", null);
+
+      if (error) throw error;
+
+      toast.success(`🚀 Access Token do Mercado Pago salvo para todas as ${lojas.length} lojas!`);
+      await fetchDadosGlobais();
+      await handleTestarMercadoPago(tokenLimpo);
+    } catch (err: any) {
+      console.error("Erro ao salvar Access Token global:", err);
+      toast.error(`Erro ao salvar: ${err?.message || "Falha no banco"}`);
+    } finally {
+      setSalvandoMpTokenGlobal(false);
+    }
+  };
+
   // Modais de Plano
   const [editingPlanoLoja, setEditingPlanoLoja] = useState<Loja | null>(null);
   const [verComprovanteModal, setVerComprovanteModal] = useState<{ lojaNome: string; url: string; observacao?: string } | null>(null);
@@ -144,6 +227,7 @@ export default function SuperAdminTab() {
     data_vencimento: "",
     chave_pix_cobranca: "financeiro@phonecenter.com.br",
     observacao_plano: "",
+    mp_access_token: "",
   });
 
   // Sub-aba e Histórico Global de Planos & Mensalidades
@@ -602,6 +686,7 @@ export default function SuperAdminTab() {
       data_vencimento: loja.data_vencimento || "",
       chave_pix_cobranca: loja.chave_pix_cobranca || "financeiro@phonecenter.com.br",
       observacao_plano: loja.observacao_plano || "",
+      mp_access_token: loja.mp_access_token || "",
     });
   };
 
@@ -623,6 +708,7 @@ export default function SuperAdminTab() {
           data_vencimento: editPlanoForm.data_vencimento || null,
           chave_pix_cobranca: editPlanoForm.chave_pix_cobranca.trim(),
           observacao_plano: editPlanoForm.observacao_plano.trim() || null,
+          mp_access_token: editPlanoForm.mp_access_token.trim() || null,
         })
         .eq("id", editingPlanoLoja.id);
 
@@ -1368,6 +1454,76 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                     )}
                   </Button>
                 </div>
+              </div>
+
+              {/* Painel do Mercado Pago - PIX Automático em Tempo Real */}
+              <div className="p-4 bg-sky-500/10 border border-sky-500/30 rounded-2xl flex flex-col gap-3">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="w-5 h-5 text-sky-400" />
+                      <h4 className="text-sm font-bold text-white">Mercado Pago - PIX Dinâmico com Aprovação Instantânea</h4>
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      Insira o <b>Access Token de Produção</b> do Mercado Pago (ex: <span className="font-mono text-sky-300">APP_USR-...</span>) para gerar QR Codes dinâmicos e liberar mensalidades na hora sem intervenção manual.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <input
+                      type="password"
+                      placeholder="APP_USR-0000000000000000-000000-..."
+                      value={mpAccessTokenGlobal}
+                      onChange={(e) => {
+                        setMpAccessTokenGlobal(e.target.value);
+                        setStatusMpConexao(null);
+                      }}
+                      className="input-glass font-mono text-sky-300 text-xs px-3 py-2 flex-1 md:w-80"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => handleTestarMercadoPago()}
+                      disabled={testandoMpToken || !mpAccessTokenGlobal.trim()}
+                      className="bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 font-bold text-xs gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      {testandoMpToken ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Testando...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" /> Testar Conexão
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleAplicarMpTokenParaTodasLojas}
+                      disabled={salvandoMpTokenGlobal || !mpAccessTokenGlobal.trim()}
+                      className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      {salvandoMpTokenGlobal ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Salvar para TODAS as Lojas
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {statusMpConexao && (
+                  <div className={`text-xs px-3 py-2 rounded-xl flex items-center gap-2 border ${
+                    statusMpConexao.sucesso 
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-medium" 
+                      : "bg-red-500/10 border-red-500/30 text-red-400"
+                  }`}>
+                    {statusMpConexao.sucesso ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                    <span>{statusMpConexao.mensagem}</span>
+                  </div>
+                )}
               </div>
 
               {/* Barra de busca por nome ou ID */}
@@ -2320,6 +2476,20 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                   onChange={(e) => setEditPlanoForm({ ...editPlanoForm, chave_pix_cobranca: e.target.value })}
                   className="input-glass w-full text-sm font-mono text-emerald-400"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">Access Token Mercado Pago (Individual)</label>
+                <input
+                  type="password"
+                  placeholder="Deixe vazio para usar o Access Token global do sistema"
+                  value={editPlanoForm.mp_access_token}
+                  onChange={(e) => setEditPlanoForm({ ...editPlanoForm, mp_access_token: e.target.value })}
+                  className="input-glass w-full text-sm font-mono text-sky-400"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Se informado, as cobranças PIX desta loja serão geradas diretamente nesta conta específica do Mercado Pago.
+                </p>
               </div>
 
               <div>

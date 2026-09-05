@@ -22,11 +22,41 @@ export async function POST(request: Request) {
     }
 
     const valorCobranca = Number(valor || loja.valor_mensalidade || 99.90);
-    const tokenMercadoPago = loja.mp_access_token || process.env.MERCADO_PAGO_ACCESS_TOKEN;
+    
+    // 1. Tentar buscar token da própria loja
+    let tokenMercadoPago = loja.mp_access_token?.trim();
+
+    // 2. Se não tiver na própria loja, buscar de qualquer loja configurada no banco
+    if (!tokenMercadoPago) {
+      const { data: anyLojaWithMp } = await supabaseAdmin
+        .from('lojas')
+        .select('mp_access_token')
+        .not('mp_access_token', 'is', null)
+        .neq('mp_access_token', '')
+        .limit(1)
+        .maybeSingle();
+
+      if (anyLojaWithMp?.mp_access_token) {
+        tokenMercadoPago = anyLojaWithMp.mp_access_token.trim();
+      }
+    }
+
+    // 3. Se ainda não tiver, buscar do process.env
+    if (!tokenMercadoPago) {
+      tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
+    }
 
     // Se temos credencial Mercado Pago configurada, gerar PIX dinâmico na API do Mercado Pago
     if (tokenMercadoPago) {
       try {
+        const payerEmail = (email && email.includes('@')) 
+          ? email.trim() 
+          : (loja.email && loja.email.includes('@')) 
+            ? loja.email.trim() 
+            : 'cliente@painelcelular.com.br';
+
+        const payerName = (nome || loja.nome || 'Cliente').trim().slice(0, 30);
+
         const mpResponse = await fetch('https://api.mercadopago.com/v1/payments', {
           method: 'POST',
           headers: {
@@ -35,19 +65,18 @@ export async function POST(request: Request) {
             'X-Idempotency-Key': `${lojaId}-${Date.now()}`
           },
           body: JSON.stringify({
-            transaction_amount: valorCobranca,
-            description: `Mensalidade Sistema - ${loja.nome || 'Loja'}`,
+            transaction_amount: Number(valorCobranca.toFixed(2)),
+            description: `Mensalidade Sistema - ${(loja.nome || 'Loja').slice(0, 50)}`,
             payment_method_id: 'pix',
             payer: {
-              email: email || 'cliente@painelcelular.com.br',
-              first_name: nome || loja.nome || 'Assinante'
+              email: payerEmail,
+              first_name: payerName
             },
-            external_reference: lojaId,
-            date_of_expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutos de validade
+            external_reference: lojaId
           })
         });
 
-        const mpData = await mpResponse.json();
+        const mpData = await mpResponse.json().catch(() => ({}));
 
         if (mpResponse.ok && mpData.point_of_interaction?.transaction_data) {
           const txData = mpData.point_of_interaction.transaction_data;
@@ -77,14 +106,22 @@ export async function POST(request: Request) {
             valor: valorCobranca
           });
         } else {
-          console.warn('Erro retornado pela API do Mercado Pago:', mpData);
+          // Erro retornado pela API do Mercado Pago - reportar claramente para o usuário
+          const erroMp = mpData.message || mpData.cause?.[0]?.description || mpData.error || 'Credenciais ou parâmetros recusados pelo Mercado Pago';
+          console.error('Erro detalhado retornado pelo Mercado Pago:', mpData);
+          return NextResponse.json({
+            error: `Mercado Pago: ${erroMp}`
+          }, { status: 400 });
         }
       } catch (mpErr: any) {
         console.error('Falha na requisição ao Mercado Pago:', mpErr);
+        return NextResponse.json({
+          error: `Falha na conexão com Mercado Pago: ${mpErr?.message || 'Erro de rede'}`
+        }, { status: 502 });
       }
     }
 
-    // Fallback: Chave PIX estática configurada na loja ou no sistema
+    // Fallback: Chave PIX estática configurada na loja ou no sistema quando não há credencial do Mercado Pago
     const chavePix = loja.chave_pix_cobranca || 'financeiro@phonecenter.com.br';
     
     // Registra tentativa/solicitação no histórico
@@ -105,7 +142,7 @@ export async function POST(request: Request) {
       paymentId: histRecord?.id || 'manual',
       chavePix,
       valor: valorCobranca,
-      mensagem: 'Para aprovação instantânea 100% automática, configure o Access Token do Mercado Pago no painel.'
+      mensagem: 'Chave PIX manual gerada. Para liberação automática instantânea, salve o Access Token do Mercado Pago no painel Super Admin.'
     });
 
   } catch (error: any) {
