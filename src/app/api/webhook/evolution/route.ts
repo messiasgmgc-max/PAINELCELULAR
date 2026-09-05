@@ -15,8 +15,8 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Configurações do Evolution API
 const EVOLUTION_URL = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
-const DEFAULT_INSTANCE = process.env.EVOLUTION_INSTANCE_NAME || 'phonecenter';
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449';
+const DEFAULT_INSTANCE = process.env.EVOLUTION_INSTANCE_NAME || 'lucasimports';
 
 // ── GET: Endpoint de Validação & Healthcheck do Webhook ──
 export async function GET() {
@@ -92,6 +92,17 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
       .maybeSingle();
 
     if (session?.loja_id) return session.loja_id;
+
+    // Busca loja por aproximação de nome (ex: lucasimports -> Lucas Imports)
+    const { data: lojas } = await supabase.from('lojas').select('id, nome').eq('ativo', true);
+    if (lojas && lojas.length > 0) {
+      const cleanInst = instanceName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const lojaMatch = lojas.find((l) => {
+        const cleanNome = (l.nome || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return cleanNome.includes(cleanInst) || cleanInst.includes(cleanNome);
+      });
+      if (lojaMatch) return lojaMatch.id;
+    }
   }
 
   const { data: loja } = await supabase
@@ -492,7 +503,7 @@ async function responderConsultaEstoqueNatural(
 
   let query = supabase
     .from('aparelhos')
-    .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saudeBateria, condicao')
+    .select('*')
     .eq('ativo', true)
     .neq('condicao', 'vendido')
     .neq('status', 'vendido');
@@ -501,8 +512,20 @@ async function responderConsultaEstoqueNatural(
     query = query.eq('loja_id', lojaId);
   }
 
-  const { data: aparelhos, error } = await query;
-  if (error || !aparelhos || aparelhos.length === 0) {
+  let { data: aparelhos, error } = await query;
+  if ((error || !aparelhos || aparelhos.length === 0) && lojaId) {
+    const { data: fallbackAparelhos } = await supabase
+      .from('aparelhos')
+      .select('*')
+      .eq('ativo', true)
+      .neq('condicao', 'vendido')
+      .neq('status', 'vendido');
+    if (fallbackAparelhos && fallbackAparelhos.length > 0) {
+      aparelhos = fallbackAparelhos;
+    }
+  }
+
+  if (!aparelhos || aparelhos.length === 0) {
     return null;
   }
 
@@ -529,30 +552,32 @@ async function responderConsultaEstoqueNatural(
     aparelhosEncontrados = aparelhos.filter((a) => String(a.modelo || '').toLowerCase().includes('iphone'));
   }
 
-  const primeiroNome = pushName && !pushName.toLowerCase().includes('participante') && !pushName.toLowerCase().includes('amigo')
-    ? pushName.split(' ')[0]
-    : '';
-  const saudacao = primeiroNome ? `Opa ${primeiroNome}!` : 'Opa, tudo bem?';
-
   if (aparelhosEncontrados.length > 0) {
-    const itensTexto = aparelhosEncontrados.slice(0, 5).map((a) => {
-      const precoFinal = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : 'Consulte';
-      const cap = a.capacidade ? `${a.capacidade}` : '';
-      const cor = a.cor ? `(${a.cor})` : '';
-      const bat = a.saudeBateria ? `🔋 ${a.saudeBateria}%` : '';
-      return `📱 *${a.modelo}* ${cap} ${cor} - *${precoFinal}* ${bat}`.replace(/\s+/g, ' ').trim();
+    const itensTexto = aparelhosEncontrados.slice(0, 10).map((a) => {
+      const precoValor = a.precoAtacado || a.preco_atacado || a.preco;
+      const precoFinal = precoValor ? ` - R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+      const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+      const cor = a.cor && a.cor !== 'N/A' ? `${a.cor}` : '';
+      const batVal = a.saude_bateria || a.saudeBateria;
+      const bat = batVal ? `(🔋 ${String(batVal).replace(/\D/g, '')}%)` : '';
+      const extras = [cap, cor].filter(Boolean).join(' ');
+      return `📱 ${a.modelo} ${extras}${precoFinal} ${bat}`.replace(/\s+/g, ' ').trim();
     }).join('\n');
 
-    return `${saudacao} Temos sim aqui no estoque a pronta entrega! Dá uma olhada:\n\n${itensTexto}\n\nTodos os aparelhos revisados, 100% testados e com garantia! Se quiser que reserve algum pra você, só me dar um alô! 😉🚀`;
+    return `Tem aqui esses modelos:\n\n${itensTexto}`;
   }
 
   if (modeloAlvo) {
-    const outrasOpcoes = aparelhos.slice(0, 4).map((a) => {
-      const precoFinal = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : '';
-      return `• ${a.modelo} ${a.capacidade || ''} ${precoFinal ? `(${precoFinal})` : ''}`.trim();
+    const outrasOpcoes = aparelhos.slice(0, 5).map((a) => {
+      const precoValor = a.precoAtacado || a.preco_atacado || a.preco;
+      const precoFinal = precoValor ? ` - R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+      const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+      const cor = a.cor && a.cor !== 'N/A' ? `${a.cor}` : '';
+      const extras = [cap, cor].filter(Boolean).join(' ');
+      return `• ${a.modelo} ${extras}${precoFinal}`.replace(/\s+/g, ' ').trim();
     }).join('\n');
 
-    return `${saudacao} No momento o *${modeloAlvo}* esgotou aqui no estoque, mas temos essas opções disponíveis agora:\n\n${outrasOpcoes}\n\nSe você quiser, consigo encomendar o ${modeloAlvo} para você também! Quer que eu veja a previsão?`;
+    return `No momento o *${modeloAlvo}* esgotou. Temos esses modelos disponíveis:\n\n${outrasOpcoes}`;
   }
 
   return null;
