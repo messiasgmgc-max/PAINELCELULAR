@@ -700,6 +700,61 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
   return cadastradosOuAtualizados;
 }
 
+// ── AUXILIAR: Normalizar Nome de Modelo para Ordenação e Agrupamento ──
+function normalizarModelo(mod?: string | null): string {
+  return (mod || '').trim().replace(/^iphone\s*/i, 'iPhone ');
+}
+
+// ── AUXILIAR: Extrair Emoji da Cor e Nome Limpo ──
+function formatarCorEEmoji(corOriginal?: string | null): { emoji: string; nomeCor: string } {
+  if (!corOriginal || corOriginal.trim() === '' || corOriginal === 'N/A') {
+    return { emoji: '▫️', nomeCor: '' };
+  }
+
+  const texto = corOriginal.trim();
+  const lower = texto.toLowerCase();
+
+  let emoji = '';
+  if (lower.includes('preto') || lower.includes('black') || lower.includes('grafite') || lower.includes('meia-noite') || lower.includes('space gray')) {
+    emoji = '⚫';
+  } else if (lower.includes('branco') || lower.includes('white') || lower.includes('prata') || lower.includes('silver') || lower.includes('estelar')) {
+    emoji = '⚪';
+  } else if (lower.includes('azul') || lower.includes('blue') || lower.includes('sierra') || lower.includes('ultramarine') || lower.includes('ultramarino')) {
+    emoji = '🔵';
+  } else if (lower.includes('roxo') || lower.includes('purple') || lower.includes('lilas') || lower.includes('lilás')) {
+    emoji = '🟣';
+  } else if (lower.includes('dourado') || lower.includes('gold') || lower.includes('amarelo') || lower.includes('yellow')) {
+    emoji = '🟡';
+  } else if (lower.includes('verde') || lower.includes('green') || lower.includes('teal')) {
+    emoji = '🟢';
+  } else if (lower.includes('vermelho') || lower.includes('red')) {
+    emoji = '🔴';
+  } else if (lower.includes('rosa') || lower.includes('pink') || lower.includes('rose')) {
+    emoji = '🌸';
+  } else if (lower.includes('desert') || lower.includes('deserto')) {
+    emoji = '🏜️';
+  } else if (lower.includes('natural') || lower.includes('titanium') || lower.includes('titânio') || lower.includes('cinza') || lower.includes('gray')) {
+    emoji = '🔘';
+  } else if (lower.includes('laranja') || lower.includes('orange') || lower.includes('coral')) {
+    emoji = '🟠';
+  }
+
+  if (!emoji) {
+    const emojiMatch = texto.match(/^(\p{Emoji_Presentation}|\p{Extended_Pictographic})/u);
+    if (emojiMatch) {
+      emoji = emojiMatch[0];
+    } else {
+      emoji = '▫️';
+    }
+  }
+
+  const nomeCorLimpo = texto
+    .replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|\uFE0F/gu, '')
+    .trim();
+
+  return { emoji, nomeCor: nomeCorLimpo };
+}
+
 // ── AUXILIAR: Resposta Natural de Estoque / iPhone para Grupos e Privado ──
 async function responderConsultaEstoqueNatural(
   texto: string,
@@ -832,21 +887,32 @@ async function responderConsultaEstoqueNatural(
   }
 
   if (aparelhosEncontrados.length > 0) {
-    // Ordena por modelo e capacidade
-    aparelhosEncontrados.sort((a, b) => (a.modelo || '').localeCompare(b.modelo || ''));
+    // Ordena por modelo normalizado
+    aparelhosEncontrados.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
 
-    const itensTexto = aparelhosEncontrados.map((a) => {
-      const precoValor = a.preco_atacado || a.precoAtacado || a.preco;
-      const precoFinal = precoValor ? ` - R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+    let ultimoModelo = '';
+    const linhasEncontrados: string[] = [];
+
+    aparelhosEncontrados.forEach((a) => {
+      const modNorm = normalizarModelo(a.modelo);
+      if (ultimoModelo && ultimoModelo !== modNorm) {
+        linhasEncontrados.push('');
+      }
+      ultimoModelo = modNorm;
+
+      const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
       const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-      const cor = a.cor && a.cor !== 'N/A' ? `- ${a.cor}` : '';
       const batVal = a.saude_bateria || a.saudeBateria;
-      const bat = batVal ? `(🔋 ${String(batVal).replace(/\D/g, '')}%)` : '';
-      const modCap = [a.modelo, cap].filter(Boolean).join(' ');
-      return `📱 ${modCap} ${cor} ${bat} ${precoFinal}`.replace(/\s+/g, ' ').trim();
-    }).join('\n');
+      const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+      const bat = batNum ? `(${batNum}%)` : '';
+      const precoValor = a.preco_atacado || a.precoAtacado || a.preco;
+      const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+      const modCap = [modNorm, cap].filter(Boolean).join(' ');
+      const extras = [nomeCor, bat].filter(Boolean).join(' ');
+      linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
+    });
 
-    return `Tem aqui esses modelos:\n\n${itensTexto}`;
+    return `Tem aqui esses modelos:\n\n${linhasEncontrados.join('\n')}`;
   }
 
   if (modeloAlvoFormatado) {
@@ -1571,41 +1637,51 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
       if (!aparelhos || aparelhos.length === 0) {
         const nomeLoja = (loja?.nome || 'PHONE CENTER').trim();
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `📱 *ESTOQUE - ${nomeLoja}*\n\nNenhum aparelho disponível em estoque no momento.`);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `📋 *ESTOQUE - ${nomeLoja}*\n\nNenhum aparelho disponível em estoque no momento.`);
         return NextResponse.json({ status: 'ok', message: 'Estoque vazio.' }, { status: 200 });
       }
 
-      // Ordena por modelo e capacidade
-      aparelhos.sort((a, b) => (a.modelo || '').localeCompare(b.modelo || ''));
+      // Ordena por modelo normalizado
+      aparelhos.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
 
-      const itens = aparelhos.map((a) => {
+      let ultimoModelo = '';
+      const linhasEstoque: string[] = [];
+
+      aparelhos.forEach((a) => {
+        const modNorm = normalizarModelo(a.modelo);
+        if (ultimoModelo && ultimoModelo !== modNorm) {
+          linhasEstoque.push('');
+        }
+        ultimoModelo = modNorm;
+
+        const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
         const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-        const cor = a.cor && a.cor !== 'N/A' ? `${a.cor}` : '';
-        const batVal = a.saude_bateria || a.saudeBateria;
-        const bat = batVal ? `(🔋 ${String(batVal).replace(/\D/g, '')}%)` : '';
-        const modCap = [a.modelo, cap].filter(Boolean).join(' ');
-        const extras = [cor, bat].filter(Boolean).join(' ');
+        const batVal = a.saude_bateria || (a as any).saudeBateria;
+        const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+        const bat = batNum ? `(${batNum}%)` : '';
+        const modCap = [modNorm, cap].filter(Boolean).join(' ');
+        const extras = [nomeCor, bat].filter(Boolean).join(' ');
 
         if (isCompleto) {
           const cod = a.codigo || (a.imei ? `...${String(a.imei).slice(-4)}` : `#${String(a.id).slice(0, 4)}`);
-          const precoAtacadoVal = a.preco_atacado || a.precoAtacado || a.preco;
+          const precoAtacadoVal = a.preco_atacado || (a as any).precoAtacado || a.preco;
           const atacadoFmt = precoAtacadoVal ? `R$ ${Number(precoAtacadoVal).toFixed(2).replace('.', ',')}` : 'Consulte';
-          return `📱 ${modCap}${extras ? ` - ${extras}` : ''} | Cód: ${cod} | Atacado: ${atacadoFmt}`.replace(/\s+/g, ' ').trim();
+          linhasEstoque.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} | Cód: ${cod} | Atacado: ${atacadoFmt}`.replace(/\s+/g, ' ').trim());
         } else {
-          return `📱 ${modCap}${extras ? ` - ${extras}` : ''}`.replace(/\s+/g, ' ').trim();
+          linhasEstoque.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''}`.replace(/\s+/g, ' ').trim());
         }
       });
 
       const nomeExibicao = (loja?.nome || 'PHONE CENTER').trim().toUpperCase();
       const cabecalho = isCompleto
         ? `📋 *ESTOQUE COMPLETO (ATACADO) - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`
-        : `📱 *ESTOQUE DISPONÍVEL - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`;
+        : `📋 *ESTOQUE DISPONÍVEL - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`;
 
       const rodape = isCompleto
         ? `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`
         : `\n\n💡 _Para ver códigos e preços de atacado envie:_ *!estoque completo*`;
 
-      const mensagemEstoque = cabecalho + itens.join('\n') + rodape;
+      const mensagemEstoque = cabecalho + linhasEstoque.join('\n') + rodape;
       await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemEstoque);
       return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens).` }, { status: 200 });
     }
