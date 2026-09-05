@@ -32,14 +32,15 @@ export async function GET() {
 }
 
 // ── AUXILIAR: Enviar Mensagem via Evolution API ──
-async function enviarMensagemWhatsApp(instanceName: string, number: string, text: string) {
+async function enviarMensagemWhatsApp(instanceName: string, destination: string, text: string) {
   if (!EVOLUTION_URL || !EVOLUTION_API_KEY) {
     console.warn('⚠️ EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados no .env.local');
     return false;
   }
 
-  const cleanNumber = number.replace(/\D/g, '');
-  if (!cleanNumber) return false;
+  const isGroup = destination.endsWith('@g.us');
+  const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
+  if (!cleanDestination) return false;
 
   const targetInstance = instanceName || DEFAULT_INSTANCE;
   const endpoint = `${EVOLUTION_URL}/message/sendText/${targetInstance}`;
@@ -52,7 +53,7 @@ async function enviarMensagemWhatsApp(instanceName: string, number: string, text
         apikey: EVOLUTION_API_KEY,
       },
       body: JSON.stringify({
-        number: cleanNumber,
+        number: cleanDestination,
         text,
         options: {
           delay: 1200,
@@ -67,7 +68,7 @@ async function enviarMensagemWhatsApp(instanceName: string, number: string, text
       return false;
     }
 
-    console.log(`✅ Mensagem enviada com sucesso para ${cleanNumber} via instância "${targetInstance}"`);
+    console.log(`✅ Mensagem enviada com sucesso para ${cleanDestination} via instância "${targetInstance}"`);
     return true;
   } catch (err: any) {
     console.error('❌ Falha na requisição para Evolution API:', err?.message || err);
@@ -221,6 +222,111 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
   return cadastradosOuAtualizados;
 }
 
+// ── AUXILIAR: Resposta Natural de Estoque / iPhone para Grupos e Privado ──
+async function responderConsultaEstoqueNatural(
+  texto: string,
+  pushName: string,
+  lojaId: string | null
+): Promise<string | null> {
+  const textoLimpo = texto.toLowerCase().trim();
+
+  // Detecta se a mensagem é uma pergunta de disponibilidade ou menção a aparelhos
+  const termosPergunta = [
+    'tem', 'alguem tem', 'alguém tem', 'vcs tem', 'voces tem', 'vocês tem', 'ta tendo', 'tá tendo',
+    'disponivel', 'disponível', 'estoque', 'qual valor', 'quanto ta', 'quanto tá', 'quanto custa',
+    'preco', 'preço', 'procurando', 'procuro', 'preciso de', 'tem ai', 'tem aí', 'vende'
+  ];
+
+  const mencaoIphone = /iphone|\bip\s*\d|\b1[1-7]\s*(?:pro|promax|pro max|mini|plus)?\b|\bxr\b|\bxs\b|\bse\b/i.test(textoLimpo);
+  const temPergunta = termosPergunta.some((termo) => textoLimpo.includes(termo));
+
+  // Se não mencionar celular/iPhone nem fizer pergunta de estoque, não interfere no grupo
+  if (!mencaoIphone && !temPergunta) {
+    return null;
+  }
+
+  // Identifica o modelo específico buscado (ex: iPhone 11, 12, 13, 14 Pro, 15 Pro Max...)
+  const modeloMatch = textoLimpo.match(/(?:iphone\s*)?(1[1-7]|[78x]|xr|xs|se)(?:\s*(pro\s*max|promax|pro|mini|plus))?/i);
+  let modeloAlvo = '';
+  let termoNumero = '';
+  if (modeloMatch) {
+    termoNumero = modeloMatch[1].toUpperCase();
+    const suf = modeloMatch[2] ? modeloMatch[2].toUpperCase().replace(/\s+/g, ' ') : '';
+    modeloAlvo = `iPhone ${termoNumero}${suf ? ' ' + suf : ''}`.trim();
+  }
+
+  // Busca aparelhos ativos e não vendidos no estoque
+  let query = supabase
+    .from('aparelhos')
+    .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saudeBateria, condicao')
+    .eq('ativo', true)
+    .neq('condicao', 'vendido')
+    .neq('status', 'vendido');
+
+  if (lojaId) {
+    query = query.eq('loja_id', lojaId);
+  }
+
+  const { data: aparelhos, error } = await query;
+  if (error || !aparelhos || aparelhos.length === 0) {
+    return null;
+  }
+
+  // Filtra pelo modelo específico se foi identificado
+  let aparelhosEncontrados: any[] = [];
+  if (termoNumero) {
+    aparelhosEncontrados = aparelhos.filter((a) => {
+      const mod = String(a.modelo || '').toLowerCase();
+      const matchNum = new RegExp(`\\b${termoNumero.toLowerCase()}\\b`).test(mod) || mod.includes(termoNumero.toLowerCase());
+      if (modeloAlvo.includes('PRO MAX') || modeloAlvo.includes('PROMAX')) {
+        return matchNum && (mod.includes('pro max') || mod.includes('promax'));
+      }
+      if (modeloAlvo.includes('PRO')) {
+        return matchNum && mod.includes('pro') && !mod.includes('max');
+      }
+      if (modeloAlvo.includes('MINI')) {
+        return matchNum && mod.includes('mini');
+      }
+      if (modeloAlvo.includes('PLUS')) {
+        return matchNum && mod.includes('plus');
+      }
+      return matchNum;
+    });
+  } else if (mencaoIphone) {
+    aparelhosEncontrados = aparelhos.filter((a) => String(a.modelo || '').toLowerCase().includes('iphone'));
+  }
+
+  const primeiroNome = pushName && !pushName.toLowerCase().includes('participante') && !pushName.toLowerCase().includes('amigo')
+    ? pushName.split(' ')[0]
+    : '';
+  const saudacao = primeiroNome ? `Opa ${primeiroNome}!` : 'Opa, tudo bem?';
+
+  // Se encontrou aparelhos em estoque:
+  if (aparelhosEncontrados.length > 0) {
+    const itensTexto = aparelhosEncontrados.slice(0, 5).map((a) => {
+      const precoFinal = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : 'Consulte';
+      const cap = a.capacidade ? `${a.capacidade}` : '';
+      const cor = a.cor ? `(${a.cor})` : '';
+      const bat = a.saudeBateria ? `🔋 ${a.saudeBateria}%` : '';
+      return `📱 *${a.modelo}* ${cap} ${cor} - *${precoFinal}* ${bat}`.replace(/\s+/g, ' ').trim();
+    }).join('\n');
+
+    return `${saudacao} Temos sim aqui no estoque a pronta entrega! Dá uma olhada:\n\n${itensTexto}\n\nTodos os aparelhos revisados, 100% testados e com garantia! Se quiser que reserve algum pra você, só me dar um alô! 😉🚀`;
+  }
+
+  // Se perguntou por um modelo específico mas não tem no momento:
+  if (modeloAlvo) {
+    const outrasOpcoes = aparelhos.slice(0, 4).map((a) => {
+      const precoFinal = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : '';
+      return `• ${a.modelo} ${a.capacidade || ''} ${precoFinal ? `(${precoFinal})` : ''}`.trim();
+    }).join('\n');
+
+    return `${saudacao} No momento o *${modeloAlvo}* esgotou aqui no estoque, mas temos essas opções disponíveis agora:\n\n${outrasOpcoes}\n\nSe você quiser, consigo encomendar o ${modeloAlvo} para você também! Quer que eu veja a previsão?`;
+  }
+
+  return null;
+}
+
 // ── POST: Processamento Principal do Webhook ──
 export async function POST(request: Request) {
   try {
@@ -293,12 +399,14 @@ export async function POST(request: Request) {
     const remoteJid = String(key.remoteJid || '');
 
     // Ignora chamadas de status broadcast ou mensagens enviadas pelo próprio bot (fromMe)
-    if (key.fromMe || remoteJid.includes('status@broadcast') || remoteJid.endsWith('@g.us')) {
-      return NextResponse.json({ status: 'ok', message: 'Mensagem de grupo/sistema ignorada.' }, { status: 200 });
+    if (key.fromMe || remoteJid.includes('status@broadcast')) {
+      return NextResponse.json({ status: 'ok', message: 'Mensagem própria ou broadcast ignorada.' }, { status: 200 });
     }
 
+    const isGroup = remoteJid.endsWith('@g.us');
     const senderPhone = remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
-    const pushName = msgData.pushName || msgData.verifiedBizName || senderPhone;
+    const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
+    const targetDestination = isGroup ? remoteJid : senderPhone;
 
     // Extrai o texto da mensagem
     const messageContent = msgData.message || {};
@@ -314,20 +422,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'ok', message: 'Mensagem sem texto.' }, { status: 200 });
     }
 
-    console.log(`📩 Mensagem recebida de ${pushName} (${senderPhone}): "${textContent.slice(0, 60)}..."`);
+    console.log(`📩 Mensagem recebida de ${pushName} (${isGroup ? 'Grupo ' + remoteJid : senderPhone}): "${textContent.slice(0, 60)}..."`);
 
     // 4. Salva log no Supabase (`whatsapp_logs`)
     if (lojaId) {
       await supabase.from('whatsapp_logs').insert({
         loja_id: lojaId,
-        contato: `${pushName} (${senderPhone})`,
+        contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
         mensagem: textContent,
         created_at: new Date().toISOString(),
       });
     }
 
-    // 5. Verifica se é uma Lista de Preços de Fornecedor
-    const isListaPrecos = textContent.includes('📲') || textContent.includes('📱') || /iPhone\s*\d+/i.test(textContent);
+    // 5. Verifica se é uma Lista de Preços de Fornecedor (apenas em mensagens longas / formato tabela)
+    const isListaPrecos = !isGroup && (textContent.includes('📲') || textContent.includes('📱') || (textContent.split('\n').length > 4 && /iPhone\s*\d+/i.test(textContent)));
 
     if (isListaPrecos && lojaId) {
       const lines = textContent.split('\n');
@@ -335,15 +443,22 @@ export async function POST(request: Request) {
 
       if (totalProcessados > 0) {
         const respostaLista = `🚀 *Phone Center Auto-Bot*\n\nRecebemos sua lista! Processamos *${totalProcessados} modelos* e atualizamos o estoque da loja automaticamente.\n\nObrigado! ✅`;
-        await enviarMensagemWhatsApp(instanceName, senderPhone, respostaLista);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, respostaLista);
         return NextResponse.json({ status: 'ok', message: `Lista processada: ${totalProcessados} modelos.` }, { status: 200 });
       }
     }
 
-    // 6. Resposta Inteligente / Consultas do Sistema (!estoque, !ajuda, consultas)
+    // 6. Resposta Natural sobre iPhones e Estoque no Grupo ou Privado
+    const respostaNatural = await responderConsultaEstoqueNatural(textContent, pushName, lojaId);
+    if (respostaNatural) {
+      await enviarMensagemWhatsApp(instanceName, targetDestination, respostaNatural);
+      return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida naturalmente.' }, { status: 200 });
+    }
+
+    // 7. Resposta por Comandos do Sistema (!estoque, !ajuda, consultas)
     const lowerText = textContent.toLowerCase().trim();
 
-    if (lowerText.startsWith('!estoque') || lowerText.includes('estoque') || lowerText.includes('aparelhos disponiveis')) {
+    if (lowerText.startsWith('!estoque') || lowerText === 'estoque' || lowerText === 'cardapio' || lowerText === 'tabela') {
       if (lojaId) {
         const { data: aparelhos } = await supabase
           .from('aparelhos')
@@ -359,23 +474,23 @@ export async function POST(request: Request) {
             respostaEstoque += `• *${a.marca} ${a.modelo}* (${a.capacidade || 'N/A'}) - ${a.cor || 'Padrão'} [${a.condicao?.toUpperCase()}] - ${precoFmt}\n`;
           });
           respostaEstoque += `\nPara mais detalhes ou compras, fale com nossa equipe! 💬`;
-          await enviarMensagemWhatsApp(instanceName, senderPhone, respostaEstoque);
+          await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEstoque);
           return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida.' }, { status: 200 });
         }
       }
     }
 
     if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
-      const menuAjuda = `📱 *PHONE CENTER BOT - COMANDOS*\n\n• *!estoque* - Consulta os aparelhos disponíveis no estoque\n• Envie uma *lista de preços* para cadastrar aparelhos automaticamente\n• Fale normalmente para tirar dúvidas com nossa IA de suporte!`;
-      await enviarMensagemWhatsApp(instanceName, senderPhone, menuAjuda);
+      const menuAjuda = `📱 *PHONE CENTER BOT - COMANDOS*\n\n• *!estoque* - Consulta os aparelhos disponíveis no estoque\n• Pergunte sobre qualquer modelo (ex: *"tem iphone 13?"*) e eu respondo na hora!\n• Envie uma *lista de preços* para cadastrar aparelhos automaticamente`;
+      await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
     }
 
-    // 7. Processamento de Comandos IA Gemini / Groq (se plano configurado)
+    // 8. Processamento de Comandos IA Gemini / Groq (se plano configurado)
     const geminiPlan = parseGeminiPlan(textContent);
     if (geminiPlan) {
       const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
-      await enviarMensagemWhatsApp(instanceName, senderPhone, textResposta);
+      await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
       return NextResponse.json({ status: 'ok', message: 'Comando IA executado.' }, { status: 200 });
     }
 
