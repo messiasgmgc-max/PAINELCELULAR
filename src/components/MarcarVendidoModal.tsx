@@ -110,8 +110,10 @@ export function MarcarVendidoModal({
     e.preventDefault();
     if (!aparelho) return;
 
-    if (!comprador.trim() && (tipoVenda === 'atacado' || tipoVenda === 'varejo')) {
-      toast.error('Informe o nome do comprador/lojista (ex: "Junior" ou "Cliente Final").');
+    const isVendaRapida = tipoVenda === 'varejo' && dadosPendente;
+
+    if (!comprador.trim() && !isVendaRapida) {
+      toast.error(tipoVenda === 'atacado' ? 'Informe o nome do comprador/lojista (ex: "Junior").' : 'Informe o nome do cliente.');
       return;
     }
 
@@ -119,7 +121,7 @@ export function MarcarVendidoModal({
     const toastId = toast.loading('Registrando saída/venda do aparelho...');
 
     try {
-      const compradorFinal = comprador.trim() || (tipoVenda === 'atacado' ? 'Lojista / Revenda' : 'Venda Varejo');
+      const compradorFinal = comprador.trim() || (tipoVenda === 'atacado' ? 'Lojista / Revenda' : 'Cliente Balcão');
       const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
       const isFiado = metodoPgto === 'fiado';
       const dataVencIso = (isFiado && dataVencimento) ? new Date(dataVencimento + 'T12:00:00').toISOString() : undefined;
@@ -146,7 +148,13 @@ export function MarcarVendidoModal({
 
       if (errAparelho) throw errAparelho;
 
-      const isDadosPendente = tipoVenda === 'varejo' && (dadosPendente || !comprador.trim() || comprador.toLowerCase().includes('cliente final') || comprador.toLowerCase().includes('pendente'));
+      const isDadosPendente = tipoVenda === 'varejo' && (
+        dadosPendente || 
+        !comprador.trim() || 
+        comprador.toLowerCase().includes('cliente final') || 
+        comprador.toLowerCase().includes('cliente balcão') || 
+        comprador.toLowerCase().includes('pendente')
+      );
 
       // 2. Insere registro na tabela 'vendas' para alimentar relatórios e gráficos
       const payloadVenda: any = {
@@ -214,13 +222,15 @@ export function MarcarVendidoModal({
         }
       }
 
-      // Salva no banco de dados para autocomplete futuro
-      await upsertComprador(compradorFinal, tipoVenda === 'atacado' ? 'lojista' : 'cliente');
+      // Salva no banco de dados para autocomplete futuro apenas se for nome preenchido e não genérico
+      if (comprador.trim() && !['cliente balcão', 'cliente final', 'venda varejo', 'lojista / revenda', 'pendente'].includes(comprador.trim().toLowerCase())) {
+        await upsertComprador(compradorFinal, tipoVenda === 'atacado' ? 'lojista' : 'cliente');
+      }
 
-      // Grava logs de auditoria
+      // Grava logs de auditoria com os valores numéricos e status corretos
       logVenda({
         clienteNome: compradorFinal,
-        valorTotal: valorNumerico,
+        valorTotal: valorVendaNum,
         tipoVenda,
         formaPagamento: metodoPgto,
         itensCount: 1,
@@ -229,9 +239,10 @@ export function MarcarVendidoModal({
       logEstoque({
         id: aparelho.id,
         modelo: aparelho.modelo,
+        marca: aparelho.marca,
         imei: aparelho.imei,
-        status: statusDestino,
-        precoVenda: valorNumerico,
+        status: tipoVenda === 'manutencao' ? 'manutencao' : 'vendido',
+        precoVenda: valorVendaNum,
         comprador: compradorFinal,
       }, tipoVenda === 'manutencao' ? 'Envio para Manutenção' : 'Saída de Estoque / Venda', usuario, lojaId);
 
@@ -325,7 +336,15 @@ export function MarcarVendidoModal({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-300">
-                {tipoVenda === 'atacado' ? 'Nome do Lojista / Comprador *' : 'Nome do Cliente / Comprador *'}
+                {tipoVenda === 'atacado' ? (
+                  'Nome do Lojista / Comprador *'
+                ) : dadosPendente ? (
+                  <span className="flex items-center gap-1.5 text-amber-400">
+                    <Sparkles className="w-3.5 h-3.5" /> Nome do Cliente (Opcional - Venda Rápida)
+                  </span>
+                ) : (
+                  'Nome do Cliente / Comprador *'
+                )}
               </label>
               <span className="text-[10px] text-cyan-400 font-medium">💡 Busca inteligente salva no banco</span>
             </div>
@@ -336,19 +355,37 @@ export function MarcarVendidoModal({
               compradores={compradores}
               onBuscar={(termo) => buscarCompradores(termo, tipoVenda === 'atacado' ? 'lojista' : undefined)}
               tipo={tipoVenda === 'atacado' ? 'lojista' : 'todos'}
-              placeholder={tipoVenda === 'atacado' ? 'Buscar lojista ou digitar novo (ex: Junior, Tech Cell...)' : 'Buscar cliente ou digitar novo nome...'}
-              required={!dadosPendente}
+              placeholder={
+                tipoVenda === 'atacado'
+                  ? 'Buscar lojista ou digitar novo (ex: Junior, Tech Cell...)'
+                  : dadosPendente
+                  ? 'Opcional (se vazio, registra como "Cliente Balcão")'
+                  : 'Buscar cliente ou digitar novo nome...'
+              }
+              required={tipoVenda === 'atacado' || (tipoVenda === 'varejo' && !dadosPendente)}
             />
 
             {tipoVenda === 'varejo' && (
-              <label className="flex items-center gap-2 pt-1 text-xs text-amber-300 font-medium cursor-pointer">
+              <label className={cn(
+                "flex items-center gap-2.5 p-2 rounded-xl border text-xs font-medium cursor-pointer transition-all mt-1",
+                dadosPendente 
+                  ? "bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm" 
+                  : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-300"
+              )}>
                 <input
                   type="checkbox"
                   checked={dadosPendente}
                   onChange={(e) => setDadosPendente(e.target.checked)}
-                  className="rounded border-slate-700 text-amber-500 focus:ring-amber-500"
+                  className="w-4 h-4 rounded border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer shrink-0"
                 />
-                <span>⚠️ Venda rápida (completar dados do cliente para notinha depois na aba Vendas)</span>
+                <div className="flex flex-col leading-tight">
+                  <span className="font-bold text-amber-300 flex items-center gap-1">
+                    ⚡ Venda Rápida de Balcão
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Não exige nome da cliente agora. Registra como "Cliente Balcão" e permite emitir recibo ou preencher dados depois.
+                  </span>
+                </div>
               </label>
             )}
           </div>
