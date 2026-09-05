@@ -261,7 +261,7 @@ export function AtacadoTab() {
           let metodoPgto = matchPgto ? matchPgto[1].toLowerCase() : 'pix';
 
           if (vendaCorrespondente && vendaCorrespondente.metodo) {
-            metodoPgto = vendaCorrespondente.metodo.toLowerCase();
+            metodoPgto = String(vendaCorrespondente.metodo).toLowerCase();
           }
 
           const margem = custo > 0 ? (lucro / custo) * 100 : 100;
@@ -296,7 +296,8 @@ export function AtacadoTab() {
   const vendasFiltradas = useMemo(() => {
     return vendasAtacado.filter((v) => {
       // Filtro por Comprador
-      if (compradorFiltro !== 'todos' && v.comprador.toLowerCase() !== compradorFiltro.toLowerCase()) {
+      const compStr = (v.comprador || '').toLowerCase();
+      if (compradorFiltro !== 'todos' && compStr !== compradorFiltro.toLowerCase()) {
         return false;
       }
 
@@ -304,13 +305,13 @@ export function AtacadoTab() {
       if (periodoFiltro === 'mes') {
         const dataVenda = new Date(v.data);
         const agora = new Date();
-        if (dataVenda.getMonth() !== agora.getMonth() || dataVenda.getFullYear() !== agora.getFullYear()) {
+        if (isNaN(dataVenda.getTime()) || dataVenda.getMonth() !== agora.getMonth() || dataVenda.getFullYear() !== agora.getFullYear()) {
           return false;
         }
       } else if (periodoFiltro === 'ano') {
         const dataVenda = new Date(v.data);
         const agora = new Date();
-        if (dataVenda.getFullYear() !== agora.getFullYear()) {
+        if (isNaN(dataVenda.getTime()) || dataVenda.getFullYear() !== agora.getFullYear()) {
           return false;
         }
       }
@@ -318,8 +319,8 @@ export function AtacadoTab() {
       // Filtro por Busca de Texto
       if (busca.trim()) {
         const t = busca.toLowerCase().trim();
-        const mod = v.modelo.toLowerCase();
-        const comp = v.comprador.toLowerCase();
+        const mod = (v.modelo || '').toLowerCase();
+        const comp = compStr;
         const ime = (v.imei || '').toLowerCase();
         const cod = (v.codigo || '').toLowerCase();
         return mod.includes(t) || comp.includes(t) || ime.includes(t) || cod.includes(t);
@@ -442,7 +443,7 @@ export function AtacadoTab() {
     // 2. Processa também baixas de aparelhos marcadas como fiado
     vendasAtacado.forEach(va => {
       if (va.metodoPgto === 'fiado') {
-        const cliente = va.comprador.trim();
+        const cliente = (va.comprador || 'Não Informado').trim();
         const jaExiste = vendasBanco.some(vb => vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === va.aparelhoId));
         if (!jaExiste) {
           if (!mapa.has(cliente)) {
@@ -853,7 +854,7 @@ export function AtacadoTab() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
                   {rankingCompradores.slice(0, 6).map((comp, idx) => {
-                    const isSelected = compradorFiltro.toLowerCase() === comp.nome.toLowerCase();
+                    const isSelected = (compradorFiltro || '').toLowerCase() === (comp?.nome || '').toLowerCase();
 
                     return (
                       <div

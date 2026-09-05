@@ -12,7 +12,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
@@ -26,7 +25,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
-import { getAparelhoCodigo } from '@/lib/utils';
+import { cn, getAparelhoCodigo } from '@/lib/utils';
 import { toast } from 'sonner';
 import { generateReciboA4Html } from '@/lib/reciboA4';
 import {
@@ -42,14 +41,6 @@ type VendasTabProps = {
   isSidebarCollapsed?: boolean;
   setSidebarCollapsed?: (collapsed: boolean) => void;
 };
-
-interface VendasPorPeriodo {
-  periodo: string;
-  total: number;
-  custo: number;
-  lucro: number;
-  quantidade: number;
-}
 
 type PosPagamentoState = {
   metodo: Venda['metodo'];
@@ -287,7 +278,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const { tecnicos, fetchTecnicos } = useTecnicos();
 
   const [vendas, setVendas] = useState<Venda[]>([]);
-  const [vendasPorPeriodo, setVendasPorPeriodo] = useState<VendasPorPeriodo[]>([]);
   const [filtroCanal, setFiltroCanal] = useState<'varejo' | 'pendentes' | 'atacado' | 'todos'>('varejo');
   const [showVincularVendidoModal, setShowVincularVendidoModal] = useState(false);
   const [filtroBusca, setFiltroBusca] = useState('');
@@ -299,7 +289,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [ordenarPor, setOrdenarPor] = useState<'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo'>('data');
   const [direcaoOrdenacao, setDirecaoOrdenacao] = useState<'asc' | 'desc'>('desc');
   const [mostrarFiltrosAvancados, setMostrarFiltrosAvancados] = useState(false);
-  const [showSalesDashboard, setShowSalesDashboard] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
   const [closingPOS, setClosingPOS] = useState(false);
@@ -424,6 +413,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showReenviarNotinhaPrompt, setShowReenviarNotinhaPrompt] = useState(false);
+  const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');
   const [processingAiText, setProcessingAiText] = useState(false);
   const [showDadosFaltantesModal, setShowDadosFaltantesModal] = useState(false);
@@ -763,9 +753,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       nextParams.delete('modal');
     }
 
-    if (!showSalesDashboard) nextParams.set('dashboard', '0');
-    else nextParams.delete('dashboard');
-
     const currentQuery = searchParams.toString();
     let actionParam: string | null = null;
 
@@ -785,9 +772,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       actionParam = 'editar-venda';
     }
 
-    if (showSalesDashboard) {
-      panelParam = 'metricas';
-    } else if (mostrarFiltrosAvancados) {
+    if (mostrarFiltrosAvancados) {
       panelParam = 'filtros-avancados';
     }
 
@@ -823,7 +808,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     showNovoCliente,
     showPOS,
     showImportarPedidoModal,
-    showSalesDashboard,
   ]);
 
   const carregarVendas = async () => {
@@ -850,7 +834,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
         if (resFallback.data) {
           setVendas(resFallback.data);
-          calcularVendasPorPeriodo(resFallback.data);
           return;
         }
         throw error;
@@ -858,40 +841,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       const vendasData = data || [];
       setVendas(vendasData);
-      calcularVendasPorPeriodo(vendasData);
     } catch (error) {
       console.error('Erro ao carregar vendas:', error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const calcularVendasPorPeriodo = (vendas: Venda[]) => {
-    const mapa: { [key: string]: VendasPorPeriodo } = {};
-
-    vendas.forEach(venda => {
-      if (venda.dataPagamento) {
-        const data = new Date(venda.dataPagamento);
-        const mes = data.toLocaleDateString('pt-BR', { month: '2-digit', year: 'numeric' });
-
-        if (!mapa[mes]) {
-          mapa[mes] = {
-            periodo: mes,
-            total: 0,
-            custo: 0,
-            lucro: 0,
-            quantidade: 0,
-          };
-        }
-
-        mapa[mes].total += venda.valor;
-        mapa[mes].custo += venda.custo;
-        mapa[mes].lucro += venda.lucro;
-        mapa[mes].quantidade += 1;
-      }
-    });
-
-    setVendasPorPeriodo(Object.values(mapa).reverse());
   };
 
   const aplicarVendaAI = async (parsedData: any) => {
@@ -1788,8 +1742,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
     const statusRank: Record<Venda['status'], number> = {
       pago: 0,
-      pendente: 1,
-      cancelado: 2
+      parcial: 1,
+      pendente: 2,
+      cancelado: 3
     };
 
     const sorted = [...vendasBase].sort((a, b) => {
@@ -1800,7 +1755,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         const timeB = new Date((b as any).created_at || b.dataPagamento).getTime();
         comparison = timeA - timeB;
       } else if (ordenarPor === 'cliente') {
-        comparison = a.clienteNome.localeCompare(b.clienteNome, 'pt-BR');
+        comparison = (a.clienteNome || '').localeCompare(b.clienteNome || '', 'pt-BR');
       } else if (ordenarPor === 'valor') {
         comparison = a.valor - b.valor;
       } else if (ordenarPor === 'lucro') {
@@ -1808,7 +1763,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       } else if (ordenarPor === 'status') {
         comparison = statusRank[a.status] - statusRank[b.status];
       } else if (ordenarPor === 'metodo') {
-        comparison = metodoLabel(a.metodo).localeCompare(metodoLabel(b.metodo), 'pt-BR');
+        comparison = (metodoLabel(a.metodo) || '').localeCompare(metodoLabel(b.metodo) || '', 'pt-BR');
       }
 
       return direcaoOrdenacao === 'asc' ? comparison : -comparison;
@@ -1831,27 +1786,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     });
     return { varejo, pendentes, atacado, total: vendas.length };
   }, [vendas]);
-
-  const resumoVendas = {
-    totalVendido: vendasFiltradas.reduce((sum, v) => sum + v.valor, 0),
-    totalCusto: vendasFiltradas.reduce((sum, v) => sum + v.custo, 0),
-    totalLucro: vendasFiltradas.reduce((sum, v) => sum + v.lucro, 0),
-    quantidade: vendasFiltradas.length,
-    vendPago: vendasFiltradas.filter(v => v.status === 'pago').length,
-    vendPendente: vendasFiltradas.filter(v => v.status === 'pendente').length,
-  };
-
-  const metodosPagamento = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'boleto'];
-
-  const dadosPizza = metodosPagamento.map(metodo => ({
-    name: metodo === 'cartao_credito' ? 'Cartão Crédito' : 
-          metodo === 'cartao_debito' ? 'Cartão Débito' : 
-          metodo === 'dinheiro' ? 'Dinheiro' :
-          metodo === 'pix' ? 'PIX' : 'Boleto',
-    value: vendasFiltradas.filter(v => v.metodo === metodo).reduce((sum, v) => sum + v.valor, 0),
-  })).filter(d => d.value > 0);
-
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
 
   const handleNovoClienteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3182,139 +3116,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             )}
           </div>,
           document.body
-        )}
-
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setShowSalesDashboard((prev) => !prev)}
-            className="w-full sm:w-auto"
-          >
-            {showSalesDashboard ? 'Ocultar Painel' : 'Mostrar Painel'}
-          </Button>
-        </div>
-
-        {showSalesDashboard && (
-          <>
-        {/* Cards de Resumo */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <GlassCard hoverEffect={true} className="rounded-3xl">
-            <div className="flex flex-row items-center justify-between pb-2">
-              <h3 className="text-xs sm:text-sm font-medium">Total Vendido</h3>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div>
-              <div className="text-xl sm:text-2xl font-bold">
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(resumoVendas.totalVendido)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">{resumoVendas.quantidade} vendas</p>
-            </div>
-          </GlassCard>
-
-          <GlassCard hoverEffect={true} className="rounded-3xl">
-            <div className="flex flex-row items-center justify-between pb-2">
-              <h3 className="text-xs sm:text-sm font-medium">Lucro Total</h3>
-              <TrendingUp className="h-4 w-4 text-green-600" />
-            </div>
-            <div>
-              <div className="text-xl sm:text-2xl font-bold text-green-600">
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(resumoVendas.totalLucro)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {resumoVendas.totalVendido > 0 ? ((resumoVendas.totalLucro / resumoVendas.totalVendido) * 100).toFixed(1) : 0}% de margem
-              </p>
-            </div>
-          </GlassCard>
-
-          <GlassCard hoverEffect={true} className="rounded-3xl">
-            <div className="flex flex-row items-center justify-between pb-2">
-              <h3 className="text-xs sm:text-sm font-medium">Pagas</h3>
-              <Badge variant="default" className="text-xs">{resumoVendas.vendPago}</Badge>
-            </div>
-            <div>
-              <div className="text-2xl font-bold">{resumoVendas.vendPago}</div>
-              <p className="text-xs text-muted-foreground mt-1">Confirmadas</p>
-            </div>
-          </GlassCard>
-
-          <GlassCard hoverEffect={true} className="rounded-3xl">
-            <div className="flex flex-row items-center justify-between pb-2">
-              <h3 className="text-xs sm:text-sm font-medium">Pendentes</h3>
-              <Badge variant="secondary" className="text-xs">{resumoVendas.vendPendente}</Badge>
-            </div>
-            <div>
-              <div className="text-2xl font-bold">{resumoVendas.vendPendente}</div>
-              <p className="text-xs text-muted-foreground mt-1">À receber</p>
-            </div>
-          </GlassCard>
-        </div>
-
-        {/* Gráficos */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-          {/* Gráfico de Vendas por Período */}
-          <GlassCard className="rounded-3xl">
-            <div className="pb-4 border-b border-white/10 mb-4">
-              <h3 className="text-base sm:text-lg font-bold">Vendas por Período</h3>
-              <p className="text-xs sm:text-sm text-muted-foreground">Últimos 12 meses</p>
-            </div>
-            <div>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={vendasPorPeriodo}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                  <XAxis dataKey="periodo" tick={{ fontSize: 12 }} stroke="rgba(150,150,150,0.5)" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="rgba(150,150,150,0.5)" />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                    formatter={(value: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((value || 0))} 
-                  />
-                  <Legend />
-                  <Line type="monotone" dataKey="total" stroke="#3b82f6" name="Vendido" strokeWidth={3} dot={{r: 4}} />
-                  <Line type="monotone" dataKey="lucro" stroke="#10b981" name="Lucro" strokeWidth={3} dot={{r: 4}} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </GlassCard>
-
-          {/* Gráfico de Métodos de Pagamento */}
-          <GlassCard className="rounded-3xl">
-            <div className="pb-4 border-b border-white/10 mb-4">
-              <h3 className="text-base sm:text-lg font-bold">Métodos de Pagamento</h3>
-              <p className="text-xs sm:text-sm text-muted-foreground">Distribuição por método</p>
-            </div>
-            <div>
-              {dadosPizza.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={dadosPizza}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={(entry) => `${(entry.value / resumoVendas.totalVendido * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {COLORS.map((color, index) => (
-                        <Cell key={`cell-${index}`} fill={color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                       contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                       formatter={(value: any) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((value || 0))} 
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                  Sem dados de pagamento
-                </div>
-              )}
-            </div>
-          </GlassCard>
-        </div>
-          </>
         )}
 
         {/* Tabela de Vendas e Filtros Integrados */}

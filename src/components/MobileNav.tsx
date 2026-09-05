@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { useTabOrder } from '@/hooks/useTabOrder';
 
 interface Tab {
   id: string;
@@ -30,7 +31,6 @@ const TABS: Tab[] = [
   { id: 'agendamentos', label: 'Agenda', icon: <Calendar className="w-5 h-5" /> },
   { id: 'garantias', label: 'Garantias', icon: <Shield className="w-5 h-5" /> },
   { id: 'logs', label: 'Logs & Auditoria', icon: <FileText className="w-5 h-5" /> },
-  { id: 'whatsapp', label: 'WhatsApp', icon: <MessageCircle className="w-5 h-5" /> },
   { id: 'configuracoes', label: 'Configurações', icon: <Settings className="w-5 h-5" /> },
 ];
 
@@ -46,6 +46,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
   const [scrolled, setScrolled] = useState(false);
   const [hasModalOpen, setHasModalOpen] = useState(false);
   const { usuario } = useAuth();
+  const { tabOrder } = useTabOrder();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -68,10 +69,29 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
   }, []);
 
   const isSuperAdmin = checkIsSuperAdmin(usuario);
-  
-  const tabsToRender = isSuperAdmin 
-    ? [...TABS, { id: 'superadmin', label: 'Super Admin', icon: <Lock className="w-5 h-5 text-red-500" /> }]
-    : TABS;
+
+  const tabsToRender = useMemo(() => {
+    const map = new Map(TABS.map((t) => [t.id, t]));
+    const list: Tab[] = [];
+
+    tabOrder.forEach((id) => {
+      const tab = map.get(id);
+      if (tab) list.push(tab);
+    });
+
+    // Garante que qualquer aba definida seja incluída se não estiver em tabOrder
+    TABS.forEach((t) => {
+      if (!list.some((it) => it.id === t.id)) {
+        list.push(t);
+      }
+    });
+
+    if (isSuperAdmin) {
+      list.push({ id: 'superadmin', label: 'Super Admin', icon: <Lock className="w-5 h-5 text-red-500" /> });
+    }
+
+    return list;
+  }, [tabOrder, isSuperAdmin]);
 
   const mobileDockTabs: Tab[] = [{ id: 'menu', label: 'Menu', icon: <Menu className="w-5 h-5" /> }, ...tabsToRender];
 

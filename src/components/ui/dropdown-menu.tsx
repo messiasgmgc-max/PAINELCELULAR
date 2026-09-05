@@ -8,7 +8,60 @@ import { cn } from "@/lib/utils"
 
 const DropdownMenu = DropdownMenuPrimitive.Root
 
-const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
+const DropdownMenuTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Trigger>
+>(({ className, onPointerDown, onPointerMove, onPointerUp, ...props }, ref) => {
+  const touchData = React.useRef<{ x: number; y: number; time: number; swipedDown: boolean } | null>(null);
+
+  const triggerToggle = (el: HTMLElement) => {
+    if (!el) return;
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  };
+
+  return (
+    <DropdownMenuPrimitive.Trigger
+      ref={ref}
+      className={className}
+      onPointerDown={(e) => {
+        if (e.pointerType === 'touch') {
+          // No mobile/touch, previne o Radix de abrir imediatamente no mero toque de rolagem
+          e.preventDefault();
+          touchData.current = { x: e.clientX, y: e.clientY, time: Date.now(), swipedDown: false };
+        }
+        onPointerDown?.(e);
+      }}
+      onPointerMove={(e) => {
+        if (e.pointerType === 'touch' && touchData.current) {
+          const deltaY = e.clientY - touchData.current.y;
+          const deltaX = Math.abs(e.clientX - touchData.current.x);
+          // Gesto intencional de deslizar para baixo (direção para baixo na tela)
+          if (deltaY > 35 && deltaX < 25 && !touchData.current.swipedDown) {
+            touchData.current.swipedDown = true;
+            triggerToggle(e.currentTarget as HTMLElement);
+          }
+        }
+        onPointerMove?.(e);
+      }}
+      onPointerUp={(e) => {
+        if (e.pointerType === 'touch' && touchData.current) {
+          const deltaX = Math.abs(e.clientX - touchData.current.x);
+          const deltaY = Math.abs(e.clientY - touchData.current.y);
+          const elapsed = Date.now() - touchData.current.time;
+
+          // Se foi um toque limpo (sem rolagem e clique rápido < 500ms)
+          if (!touchData.current.swipedDown && deltaX < 12 && deltaY < 12 && elapsed < 500) {
+            triggerToggle(e.currentTarget as HTMLElement);
+          }
+          touchData.current = null;
+        }
+        onPointerUp?.(e);
+      }}
+      {...props}
+    />
+  );
+});
+DropdownMenuTrigger.displayName = DropdownMenuPrimitive.Trigger.displayName;
 
 const DropdownMenuGroup = DropdownMenuPrimitive.Group
 

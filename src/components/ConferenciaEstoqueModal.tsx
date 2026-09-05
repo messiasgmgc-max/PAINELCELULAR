@@ -377,27 +377,55 @@ export function ConferenciaEstoqueModal({
     });
   }, [aparelhosEstoque, buscaManual]);
 
-  // Agrupa e ordena modelos do mais ANTIGO para o mais NOVO
+function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: string } {
+  if (!nome || !nome.trim()) return { chave: 'outros', exibicao: 'Outros' };
+
+  // Remove marca Apple se estiver no início, espaços extras e caracteres invisíveis (\u00A0)
+  const limpo = nome
+    .replace(/^Apple\s+/i, '')
+    .replace(/[\u00A0\s]+/g, ' ')
+    .trim();
+
+  const chave = limpo.toLowerCase();
+
+  // Padronização estética do nome para exibição unificada
+  let exibicao = limpo;
+  if (/^iphone\b/i.test(limpo)) {
+    const resto = limpo.replace(/^iphone\s*/i, '').trim();
+    exibicao = resto ? `iPhone ${resto}` : 'iPhone';
+  } else if (/^ipad\b/i.test(limpo)) {
+    const resto = limpo.replace(/^ipad\s*/i, '').trim();
+    exibicao = resto ? `iPad ${resto}` : 'iPad';
+  } else {
+    exibicao = limpo.charAt(0).toUpperCase() + limpo.slice(1);
+  }
+
+  return { chave, exibicao };
+}
+
+  // Agrupa e ordena modelos do mais ANTIGO para o mais NOVO (com chave canônica)
   const gruposModelosOrdenados = useMemo(() => {
-    const map: Record<string, AparelhoAuditoria[]> = {};
+    const map: Record<string, { exibicao: string; itens: AparelhoAuditoria[] }> = {};
     aparelhosFiltradosManual.forEach((a) => {
-      const modeloKey = a.modelo ? a.modelo.replace(/^Apple\s+/i, '').trim() : 'Outros';
-      if (!map[modeloKey]) map[modeloKey] = [];
-      map[modeloKey].push(a);
+      const { chave, exibicao } = normalizarNomeModelo(a.modelo);
+      if (!map[chave]) {
+        map[chave] = { exibicao, itens: [] };
+      }
+      map[chave].itens.push(a);
     });
 
-    const entries = Object.entries(map).sort(([modA], [modB]) => {
-      return sortModelosCronologico(modA, modB, ordemModelos);
+    const entries = Object.values(map).sort((gA, gB) => {
+      return sortModelosCronologico(gA.exibicao, gB.exibicao, ordemModelos);
     });
 
-    return entries.map(([modelo, itens]) => {
+    return entries.map(({ exibicao, itens }) => {
       const itensOrdenados = [...itens].sort((a, b) => {
         const capNumA = parseInt(String(a.capacidade || '').replace(/\D/g, ''), 10) || 0;
         const capNumB = parseInt(String(b.capacidade || '').replace(/\D/g, ''), 10) || 0;
         if (capNumA !== capNumB) return capNumA - capNumB;
         return (a.cor || '').localeCompare(b.cor || '', 'pt-BR');
       });
-      return { modelo, itens: itensOrdenados };
+      return { modelo: exibicao, itens: itensOrdenados };
     });
   }, [aparelhosFiltradosManual, ordemModelos]);
 

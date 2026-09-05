@@ -6,13 +6,14 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck } from 'lucide-react';
+import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck, LayoutGrid, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
 import { useColorTheme, ColorTheme } from '@/components/ThemeProvider';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { useMotoboys } from '@/hooks/useMotoboys';
+import { useTabOrder } from '@/hooks/useTabOrder';
 import { toast } from 'sonner';
 
 interface Configuracao {
@@ -29,6 +30,7 @@ export function ConfiguracoesTab() {
   const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja, atualizarDadosEmpresa, removerLogo, removerAssinatura } = useStoreConfig(usuario?.lojaId);
   const { colorTheme, setColorTheme } = useColorTheme();
   const { motoboys, cadastrarMotoboy, excluirMotoboy } = useMotoboys(usuario?.lojaId);
+  const { tabOrder, allTabs, moveUp, moveDown, resetOrder } = useTabOrder();
 
   const [novoMotoboyNome, setNovoMotoboyNome] = useState('');
   const [novoMotoboyTel, setNovoMotoboyTel] = useState('');
@@ -365,7 +367,7 @@ export function ConfiguracoesTab() {
 
         {/* Tabs */}
         <Tabs defaultValue="empresa" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-2 h-auto bg-white/10 dark:bg-white/5 backdrop-blur-xl border border-white/10 p-1.5 rounded-[2rem] mb-6">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 h-auto bg-white/10 dark:bg-white/5 backdrop-blur-xl border border-white/10 p-1.5 rounded-[2rem] mb-6">
             <TabsTrigger value="empresa" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Empresa
             </TabsTrigger>
@@ -377,6 +379,9 @@ export function ConfiguracoesTab() {
             </TabsTrigger>
             <TabsTrigger value="dados" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Dados
+            </TabsTrigger>
+            <TabsTrigger value="abas" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
+              Ordem das Abas
             </TabsTrigger>
           </TabsList>
 
@@ -1203,6 +1208,92 @@ export function ConfiguracoesTab() {
                       Exportar para CSV
                     </Button>
                   </div>
+                </div>
+              </GlassCard>
+            </div>
+          </TabsContent>
+
+          {/* Personalização da Ordem das Abas */}
+          <TabsContent value="abas">
+            <div className="space-y-4 sm:space-y-6">
+              <GlassCard className="rounded-3xl p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold flex items-center gap-2 text-slate-100">
+                      <LayoutGrid className="w-5 h-5 text-blue-400" />
+                      Personalizar Ordem do Menu e Abas
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-400 mt-1">
+                      Altere a sequência das abas no menu lateral e na barra de navegação móvel de acordo com sua preferência.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      resetOrder();
+                      toast.success('Ordem das abas restaurada para o padrão original!');
+                    }}
+                    className="gap-2 rounded-xl text-xs border-slate-700 text-slate-300 hover:text-white"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Restaurar Padrão
+                  </Button>
+                </div>
+
+                <div className="space-y-2 pt-4">
+                  {tabOrder.map((tabId, index) => {
+                    const tabDef = allTabs.find((t) => t.id === tabId);
+                    if (!tabDef) return null;
+                    const isFirst = index === 0;
+                    const isLast = index === tabOrder.length - 1;
+
+                    return (
+                      <div
+                        key={tabId}
+                        className="flex items-center justify-between p-3 sm:p-4 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition-all"
+                      >
+                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-xs font-mono font-bold text-blue-400 shrink-0">
+                            {index + 1}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm text-white truncate">{tabDef.label}</h4>
+                            <p className="text-[11px] text-slate-400 truncate">{tabDef.descricao}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={isFirst}
+                            onClick={() => {
+                              moveUp(tabId);
+                              toast.success(`"${tabDef.label}" movida para cima!`);
+                            }}
+                            className="h-8 w-8 rounded-xl border-slate-800 bg-slate-950/80 text-slate-300 hover:text-white disabled:opacity-30 cursor-pointer"
+                            title="Mover para cima"
+                          >
+                            <ArrowUp className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            disabled={isLast}
+                            onClick={() => {
+                              moveDown(tabId);
+                              toast.success(`"${tabDef.label}" movida para baixo!`);
+                            }}
+                            className="h-8 w-8 rounded-xl border-slate-800 bg-slate-950/80 text-slate-300 hover:text-white disabled:opacity-30 cursor-pointer"
+                            title="Mover para baixo"
+                          >
+                            <ArrowDown className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </GlassCard>
             </div>

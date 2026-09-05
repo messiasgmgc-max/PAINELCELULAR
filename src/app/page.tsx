@@ -73,7 +73,6 @@ export default function Home() {
       'agendamentos',
       'garantias',
       'logs',
-      'whatsapp',
       'configuracoes',
       'superadmin',
     ]);
@@ -136,7 +135,6 @@ export default function Home() {
       'configuracoes': 'configuracoes',
       'superadmin': 'superadmin',
       'logs': 'logs',
-      'whatsapp': 'whatsapp',
     };
 
     const targetTab = tabMap[tabId] || tabId;
@@ -203,7 +201,7 @@ export default function Home() {
       case 'calculadora-upgrade':
         return <CalculadoraUpgradeTab />;
       case 'whatsapp':
-        return <WhatsappTab />;
+        return <DashboardTab />;
       case 'configuracoes':
         return <ConfiguracoesTab />;
       case 'superadmin':

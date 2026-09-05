@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 
 export function PwaInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
   const [isStandalone, setIsStandalone] = useState<boolean>(false);
   const [isIos, setIsIos] = useState<boolean>(false);
   const [showModal, setShowModal] = useState<boolean>(false);
@@ -17,8 +18,12 @@ export function PwaInstallPrompt() {
       (window.navigator as any).standalone === true;
     setIsStandalone(isStandaloneApp);
 
-    // Detectar dispositivo iOS / Safari
+    // Detectar dispositivo móvel (Android / iOS)
     const userAgent = window.navigator.userAgent.toLowerCase();
+    const mobileDevice = /android|iphone|ipad|ipod|mobile/i.test(userAgent);
+    setIsMobile(mobileDevice);
+
+    // Detectar dispositivo iOS / Safari
     const iosDevice = /iphone|ipad|ipod/.test(userAgent);
     setIsIos(iosDevice);
 
@@ -49,7 +54,8 @@ export function PwaInstallPrompt() {
     }
   };
 
-  if (isStandalone || dismissed) {
+  // NUNCA exibir no desktop / PC, nem se já estiver instalado em modo standalone ou fechado
+  if (!isMobile || isStandalone || dismissed) {
     return null;
   }
 
@@ -62,8 +68,8 @@ export function PwaInstallPrompt() {
 
   return (
     <>
-      {/* Botão / Banner Flutuante no Canto Inferior Esquerdo */}
-      <div className="fixed bottom-20 left-4 z-[990] hidden md:flex items-center gap-3 p-3 bg-indigo-600/90 hover:bg-indigo-600 text-white rounded-2xl shadow-2xl backdrop-blur-md border border-white/20 animate-in fade-in slide-in-from-bottom-5 duration-300">
+      {/* Botão / Banner Flutuante no Canto Inferior - APENAS no Mobile (md:hidden) */}
+      <div className="fixed bottom-20 left-4 right-4 md:hidden z-[990] flex items-center justify-between gap-3 p-3 bg-indigo-600/95 hover:bg-indigo-600 text-white rounded-2xl shadow-2xl backdrop-blur-md border border-white/20 animate-in fade-in slide-in-from-bottom-5 duration-300">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
             <Smartphone className="w-5 h-5 text-white" />
