@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWhatsAppText, parseGeminiPlan } from './commandExecutor';
+import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 
 // Instancia cliente do Supabase com Service Role Key para bypass de RLS no backend
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -22,7 +23,7 @@ export async function GET() {
   return NextResponse.json(
     {
       status: 'online',
-      service: 'Phone Center Evolution Webhook Engine',
+      service: 'Phone Center Evolution Webhook Engine + IA Vision OCR',
       timestamp: new Date().toISOString(),
       evolution_url: EVOLUTION_URL ? 'Configurado' : 'Pendente',
       instance: DEFAULT_INSTANCE,
@@ -56,7 +57,7 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
         number: cleanDestination,
         text,
         options: {
-          delay: 1200,
+          delay: 800,
           presence: 'composing',
         },
       }),
@@ -78,13 +79,11 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
 
 // ── AUXILIAR: Resolver ID da Loja ──
 async function resolverLojaId(instanceName?: string): Promise<string | null> {
-  // 1. Se a instância é no formato "loja-{uuid}"
   if (instanceName && instanceName.startsWith('loja-')) {
     const extractedId = instanceName.replace('loja-', '').trim();
     if (extractedId.length >= 30) return extractedId;
   }
 
-  // 2. Busca na tabela whatsapp_sessions por session_name ou loja_id
   if (instanceName) {
     const { data: session } = await supabase
       .from('whatsapp_sessions')
@@ -95,7 +94,6 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
     if (session?.loja_id) return session.loja_id;
   }
 
-  // 3. Fallback: pega a primeira loja ativa cadastrada
   const { data: loja } = await supabase
     .from('lojas')
     .select('id')
@@ -105,6 +103,247 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
     .maybeSingle();
 
   return loja?.id || null;
+}
+
+// ── AUXILIAR: Buscar Base64 de Mídia na Evolution API caso não venha no webhook ──
+async function buscarMidiaBase64Evolution(
+  instanceName: string,
+  messageId: string,
+  messageObj: any
+): Promise<{ base64: string; mimetype: string } | null> {
+  if (!EVOLUTION_URL || !EVOLUTION_API_KEY) return null;
+  const targetInstance = instanceName || DEFAULT_INSTANCE;
+
+  // 1. Tenta POST /chat/findMediaBase64/${targetInstance}
+  try {
+    const res = await fetch(`${EVOLUTION_URL}/chat/findMediaBase64/${targetInstance}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        message: {
+          key: { id: messageId },
+        },
+        convertToMp4: false,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const b64 = data.base64 || data.data?.base64 || data.media;
+      if (b64 && typeof b64 === 'string') {
+        return {
+          base64: b64,
+          mimetype: data.mimetype || 'image/jpeg',
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Falha ao buscar media via /chat/findMediaBase64:', err);
+  }
+
+  // 2. Tenta POST /chat/getBase64FromMediaMessage/${targetInstance}
+  try {
+    const res2 = await fetch(`${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${targetInstance}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        message: messageObj,
+        convertToMp4: false,
+      }),
+    });
+
+    if (res2.ok) {
+      const data2 = await res2.json();
+      const b64_2 = data2.base64 || data2.data?.base64 || data2.media;
+      if (b64_2 && typeof b64_2 === 'string') {
+        return {
+          base64: b64_2,
+          mimetype: data2.mimetype || 'image/jpeg',
+        };
+      }
+    }
+  } catch (err2) {
+    console.warn('⚠️ Falha ao buscar media via /chat/getBase64FromMediaMessage:', err2);
+  }
+
+  return null;
+}
+
+// ── AUXILIAR: Processar e Comparar Resultado do OCR de Etiqueta com Supabase ──
+async function processarResultadoVisionEtiqueta(
+  vision: VisionEtiquetaResult,
+  lojaId: string | null,
+  pushName: string
+): Promise<string> {
+  // 1. Se for comprovante de pagamento bancário (Pix/TED)
+  if (vision.tipo_documento === 'comprovante_pagamento' || (vision.amount && !vision.imei && !vision.modelo)) {
+    const valorFmt = vision.amount ? `R$ ${Number(vision.amount).toFixed(2).replace('.', ',')}` : 'Não identificado';
+    const mod = vision.modality || 'Pix / Transferência';
+    const tx = vision.machine_serial || 'N/A';
+    const pessoa = vision.pagador_ou_recebedor ? `\n👤 *Envolvido:* ${vision.pagador_ou_recebedor}` : '';
+
+    return `🧾 *COMPROVANTE BANCÁRIO IDENTIFICADO COM IA!*
+
+💰 *Valor:* *${valorFmt}*
+💳 *Modalidade:* ${mod}${pessoa}
+🆔 *Autenticação/TXID:* \`${tx}\`
+
+✅ *Comprovante lido com sucesso!*
+💡 *Dica:* Para dar baixa em dívida de lojista, utilize:
+\`!abater [Nome do Lojista] ${vision.amount || ''}\``.trim();
+  }
+
+  // 2. Se for etiqueta de aparelho celular
+  const imei = vision.imei ? String(vision.imei).replace(/\D/g, '') : null;
+  const codigoEtiqueta = vision.codigo_etiqueta ? String(vision.codigo_etiqueta).trim() : null;
+  const modeloLido = vision.modelo ? String(vision.modelo).trim() : null;
+  const capacidadeLida = vision.capacidade ? String(vision.capacidade).trim() : null;
+  const corLida = vision.cor ? String(vision.cor).trim() : null;
+  const bateriaLida = vision.saude_bateria ? Number(vision.saude_bateria) : null;
+  const precoLido = vision.preco ? Number(vision.preco) : null;
+
+  let aparelhoEncontrado: any = null;
+
+  // Busca 1: Por IMEI no Supabase (exato ou que termine com os dígitos)
+  if (imei && imei.length >= 4) {
+    let qImei = supabase.from('aparelhos').select('*');
+    if (lojaId) qImei = qImei.eq('loja_id', lojaId);
+
+    const { data: porImei } = await qImei.or(`imei.eq.${imei},imei.ilike.%${imei}%`).limit(1);
+    if (porImei && porImei.length > 0) {
+      aparelhoEncontrado = porImei[0];
+    }
+  }
+
+  // Busca 2: Por Código da Etiqueta / Código Único
+  if (!aparelhoEncontrado && codigoEtiqueta) {
+    let qCod = supabase.from('aparelhos').select('*');
+    if (lojaId) qCod = qCod.eq('loja_id', lojaId);
+
+    const { data: porCod } = await qCod.or(`codigo.eq.${codigoEtiqueta},codigoUnico.eq.${codigoEtiqueta},id.eq.${codigoEtiqueta}`).limit(1);
+    if (porCod && porCod.length > 0) {
+      aparelhoEncontrado = porCod[0];
+    }
+  }
+
+  // Busca 3: Por Modelo + Capacidade (se houver correspondência única em estoque)
+  if (!aparelhoEncontrado && modeloLido) {
+    let qMod = supabase.from('aparelhos').select('*').ilike('modelo', `%${modeloLido}%`);
+    if (lojaId) qMod = qMod.eq('loja_id', lojaId);
+    if (capacidadeLida) qMod = qMod.ilike('capacidade', `%${capacidadeLida}%`);
+
+    const { data: porMod } = await qMod.eq('ativo', true).neq('status', 'vendido').limit(2);
+    if (porMod && porMod.length === 1) {
+      aparelhoEncontrado = porMod[0];
+    }
+  }
+
+  // ── CASO A: Aparelho LOCALIZADO no Banco de Dados ──
+  if (aparelhoEncontrado) {
+    const isVendido =
+      aparelhoEncontrado.condicao === 'vendido' ||
+      aparelhoEncontrado.status === 'vendido' ||
+      aparelhoEncontrado.ativo === false;
+
+    // Se já foi vendido, busca histórico na tabela 'vendas'
+    if (isVendido) {
+      let qVenda = supabase.from('vendas').select('*');
+      if (lojaId) qVenda = qVenda.eq('loja_id', lojaId);
+
+      const { data: vendas } = await qVenda
+        .or(`aparelho_id.eq.${aparelhoEncontrado.id},imei.eq.${aparelhoEncontrado.imei || imei}`)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const venda = vendas?.[0];
+      const dataVendaFmt = venda?.dataPagamento || venda?.created_at || aparelhoEncontrado.dataVenda || 'Data recente';
+      const comprador = venda?.clienteNome || aparelhoEncontrado.comprador || 'Cliente';
+      const valorVendaFmt = (venda?.valor || aparelhoEncontrado.precoVenda)
+        ? `R$ ${Number(venda?.valor || aparelhoEncontrado.precoVenda).toFixed(2).replace('.', ',')}`
+        : 'Valor não informado';
+
+      return `⚠️ *ALERTA DE SEGURANÇA: APARELHO JÁ CONSTA COMO VENDIDO!*
+
+📱 *Aparelho:* ${aparelhoEncontrado.marca || ''} ${aparelhoEncontrado.modelo} (${aparelhoEncontrado.capacidade || 'N/A'})
+🎨 *Cor:* ${aparelhoEncontrado.cor || 'Padrão'}
+🔢 *IMEI:* \`${aparelhoEncontrado.imei || imei || 'Não registrado'}\`
+🏷️ *Código:* \`${aparelhoEncontrado.codigo || aparelhoEncontrado.id.slice(0, 8)}\`
+
+📋 *Histórico da Saída:*
+• *Status:* 🔴 *VENDIDO / BAIXADO*
+• *Comprador:* ${comprador}
+• *Valor da Venda:* ${valorVendaFmt}
+• *Data de Venda:* ${dataVendaFmt}
+
+⚠️ *Atenção:* Este aparelho já saiu do estoque oficial. Não o comercialize novamente sem antes reativá-lo!`.trim();
+    }
+
+    // Aparelho ATIVO e DISPONÍVEL em estoque!
+    // Comparação de dados:
+    let comparativoBateria = '';
+    const batSistema = parseInt(String(aparelhoEncontrado.saudeBateria || aparelhoEncontrado.saude_bateria || '0').replace(/\D/g, ''), 10);
+    if (bateriaLida && batSistema > 0) {
+      if (bateriaLida === batSistema) {
+        comparativoBateria = `🔋 *Saúde Bateria:* ${batSistema}% ✅ *(confere com sistema)*`;
+      } else {
+        comparativoBateria = `🔋 *Saúde Bateria:* ${bateriaLida}% na etiqueta *(sistema marca ${batSistema}% ⚠️)*`;
+      }
+    } else if (batSistema > 0) {
+      comparativoBateria = `🔋 *Saúde Bateria:* ${batSistema}% (no sistema)`;
+    } else if (bateriaLida) {
+      comparativoBateria = `🔋 *Saúde Bateria:* ${bateriaLida}% (lida na etiqueta)`;
+    }
+
+    const precoVarejo = aparelhoEncontrado.preco ? `R$ ${Number(aparelhoEncontrado.preco).toFixed(2).replace('.', ',')}` : 'Consulte';
+    const precoAtacado = (aparelhoEncontrado.precoAtacado || aparelhoEncontrado.preco_atacado)
+      ? `R$ ${Number(aparelhoEncontrado.precoAtacado || aparelhoEncontrado.preco_atacado).toFixed(2).replace('.', ',')}`
+      : 'Não definido';
+
+    const identificadorAcao = aparelhoEncontrado.imei || aparelhoEncontrado.codigo || aparelhoEncontrado.id;
+
+    return `🏷️ *ETIQUETA IDENTIFICADA COM SUCESSO!*
+
+📱 *${aparelhoEncontrado.marca || ''} ${aparelhoEncontrado.modelo}* (${aparelhoEncontrado.capacidade || capacidadeLida || 'N/A'})
+🎨 *Cor:* ${aparelhoEncontrado.cor || corLida || 'Padrão'}
+🔢 *IMEI:* \`${aparelhoEncontrado.imei || imei || 'N/A'}\`
+🏷️ *Código Sistema:* \`${aparelhoEncontrado.codigo || aparelhoEncontrado.id.slice(0, 8)}\`
+${comparativoBateria ? comparativoBateria + '\n' : ''}
+📦 *Status:* 🟢 *DISPONÍVEL EM ESTOQUE*
+💵 *Preço Varejo:* ${precoVarejo}
+🤝 *Preço Atacado:* ${precoAtacado}
+
+⚡ *Ações Rápidas via WhatsApp:*
+• *Vender aparelho:* Digite \`!vender ${identificadorAcao} [valor] [nome]\`
+• *Alterar preço:* Digite \`!preco ${identificadorAcao} [novo_valor]\``.trim();
+  }
+
+  // ── CASO B: Aparelho NÃO ENCONTRADO no banco de dados ──
+  const precoSugerido = precoLido ? `R$ ${precoLido.toFixed(2).replace('.', ',')}` : 'Não informado';
+  const capFmt = capacidadeLida || '128GB';
+  const modFmt = modeloLido || 'Smartphone';
+  const imeiFmt = imei || 'SEM-IMEI';
+
+  return `🔍 *APARELHO NÃO ENCONTRADO NO ESTOQUE*
+
+🤖 *Dados lidos da etiqueta com IA:*
+• *Modelo:* ${modFmt}
+• *Capacidade:* ${capFmt}
+• *Cor:* ${corLida || 'Padrão'}
+• *IMEI:* \`${imei || 'Não identificado'}\`
+• *Bateria:* ${bateriaLida ? bateriaLida + '%' : 'Não informada'}
+• *Preço na Etiqueta:* ${precoSugerido}
+• *Código da Etiqueta:* ${codigoEtiqueta || 'N/A'}
+
+📥 *Deseja dar entrada desse aparelho no sistema?*
+Basta responder:
+\`!cadastrar ${modFmt} ${capFmt} ${imeiFmt} ${precoLido || ''}\`
+e eu cadastro no estoque da loja instantaneamente!`.trim();
 }
 
 // ── AUXILIAR: Processar Lista de Preços de Fornecedor ──
@@ -185,7 +424,6 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
 
     const [modelName, capacity, cor] = modelKey.split('|');
 
-    // Atualiza ou insere na tabela aparelhos
     const { data: existentes } = await supabase
       .from('aparelhos')
       .select('id')
@@ -230,7 +468,6 @@ async function responderConsultaEstoqueNatural(
 ): Promise<string | null> {
   const textoLimpo = texto.toLowerCase().trim();
 
-  // Detecta se a mensagem é uma pergunta de disponibilidade ou menção a aparelhos
   const termosPergunta = [
     'tem', 'alguem tem', 'alguém tem', 'vcs tem', 'voces tem', 'vocês tem', 'ta tendo', 'tá tendo',
     'disponivel', 'disponível', 'estoque', 'qual valor', 'quanto ta', 'quanto tá', 'quanto custa',
@@ -240,12 +477,10 @@ async function responderConsultaEstoqueNatural(
   const mencaoIphone = /iphone|\bip\s*\d|\b1[1-7]\s*(?:pro|promax|pro max|mini|plus)?\b|\bxr\b|\bxs\b|\bse\b/i.test(textoLimpo);
   const temPergunta = termosPergunta.some((termo) => textoLimpo.includes(termo));
 
-  // Se não mencionar celular/iPhone nem fizer pergunta de estoque, não interfere no grupo
   if (!mencaoIphone && !temPergunta) {
     return null;
   }
 
-  // Identifica o modelo específico buscado (ex: iPhone 11, 12, 13, 14 Pro, 15 Pro Max...)
   const modeloMatch = textoLimpo.match(/(?:iphone\s*)?(1[1-7]|[78x]|xr|xs|se)(?:\s*(pro\s*max|promax|pro|mini|plus))?/i);
   let modeloAlvo = '';
   let termoNumero = '';
@@ -255,7 +490,6 @@ async function responderConsultaEstoqueNatural(
     modeloAlvo = `iPhone ${termoNumero}${suf ? ' ' + suf : ''}`.trim();
   }
 
-  // Busca aparelhos ativos e não vendidos no estoque
   let query = supabase
     .from('aparelhos')
     .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saudeBateria, condicao')
@@ -272,7 +506,6 @@ async function responderConsultaEstoqueNatural(
     return null;
   }
 
-  // Filtra pelo modelo específico se foi identificado
   let aparelhosEncontrados: any[] = [];
   if (termoNumero) {
     aparelhosEncontrados = aparelhos.filter((a) => {
@@ -301,7 +534,6 @@ async function responderConsultaEstoqueNatural(
     : '';
   const saudacao = primeiroNome ? `Opa ${primeiroNome}!` : 'Opa, tudo bem?';
 
-  // Se encontrou aparelhos em estoque:
   if (aparelhosEncontrados.length > 0) {
     const itensTexto = aparelhosEncontrados.slice(0, 5).map((a) => {
       const precoFinal = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : 'Consulte';
@@ -314,7 +546,6 @@ async function responderConsultaEstoqueNatural(
     return `${saudacao} Temos sim aqui no estoque a pronta entrega! Dá uma olhada:\n\n${itensTexto}\n\nTodos os aparelhos revisados, 100% testados e com garantia! Se quiser que reserve algum pra você, só me dar um alô! 😉🚀`;
   }
 
-  // Se perguntou por um modelo específico mas não tem no momento:
   if (modeloAlvo) {
     const outrasOpcoes = aparelhos.slice(0, 4).map((a) => {
       const precoFinal = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : '';
@@ -408,8 +639,82 @@ export async function POST(request: Request) {
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : senderPhone;
 
-    // Extrai o texto da mensagem
     const messageContent = msgData.message || {};
+
+    // ── 3.1. RECONHECIMENTO DE IMAGEM / ETIQUETA COM IA VISION OCR ──
+    const hasImage = Boolean(
+      messageContent.imageMessage ||
+      msgData.imageMessage ||
+      msgData.messageType === 'imageMessage' ||
+      payload.data?.messageType === 'imageMessage'
+    );
+
+    if (hasImage) {
+      console.log(`📸 Imagem recebida de ${pushName} (${targetDestination}). Iniciando OCR Vision...`);
+
+      let rawBase64 =
+        msgData.base64 ||
+        msgData.message?.base64 ||
+        payload.data?.base64 ||
+        payload.data?.message?.base64 ||
+        messageContent.imageMessage?.base64 ||
+        '';
+
+      let mimeType = messageContent.imageMessage?.mimetype || 'image/jpeg';
+
+      // Se não veio base64 direto no payload, busca na Evolution API
+      if (!rawBase64 && key.id) {
+        console.log(`📥 Buscando mídia base64 na Evolution API para a mensagem ${key.id}...`);
+        const mediaResult = await buscarMidiaBase64Evolution(instanceName, key.id, msgData);
+        if (mediaResult) {
+          rawBase64 = mediaResult.base64;
+          mimeType = mediaResult.mimetype || mimeType;
+        }
+      }
+
+      if (rawBase64) {
+        // Envia mensagem imediata informando processamento
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '🔍 *Analisando foto com IA Vision...* Só um instante! ⏳');
+
+        try {
+          const visionData = await processImageVision(rawBase64, mimeType);
+
+          if (visionData) {
+            console.log('🤖 Resultado do OCR Vision:', JSON.stringify(visionData));
+            const respostaEtiqueta = await processarResultadoVisionEtiqueta(visionData, lojaId, pushName);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEtiqueta);
+
+            if (lojaId) {
+              await supabase.from('whatsapp_logs').insert({
+                loja_id: lojaId,
+                contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                mensagem: `[FOTO/OCR] Lidos: ${visionData.modelo || visionData.tipo_documento} (IMEI: ${visionData.imei || '-'})`,
+                created_at: new Date().toISOString(),
+              });
+            }
+
+            return NextResponse.json({ status: 'ok', message: 'Foto processada com sucesso via IA Vision.' }, { status: 200 });
+          } else {
+            await enviarMensagemWhatsApp(
+              instanceName,
+              targetDestination,
+              '⚠️ Não consegui extrair as informações da foto. Certifique-se de que a etiqueta está focada e com boa iluminação!'
+            );
+            return NextResponse.json({ status: 'ok', message: 'Falha na leitura da imagem.' }, { status: 200 });
+          }
+        } catch (visionErr: any) {
+          console.error('❌ Erro no processamento de visão OCR:', visionErr);
+          await enviarMensagemWhatsApp(
+            instanceName,
+            targetDestination,
+            '⚠️ Ocorreu uma instabilidade momentânea ao ler a foto. Por favor, tente enviar novamente!'
+          );
+          return NextResponse.json({ error: visionErr.message }, { status: 500 });
+        }
+      }
+    }
+
+    // ── 3.2. EXTRAÇÃO E TRATAMENTO DE TEXTO ──
     const textContent =
       messageContent.conversation ||
       messageContent.extendedTextMessage?.text ||
@@ -419,7 +724,7 @@ export async function POST(request: Request) {
       '';
 
     if (!textContent || textContent.trim() === '') {
-      return NextResponse.json({ status: 'ok', message: 'Mensagem sem texto.' }, { status: 200 });
+      return NextResponse.json({ status: 'ok', message: 'Mensagem sem conteúdo textual.' }, { status: 200 });
     }
 
     console.log(`📩 Mensagem recebida de ${pushName} (${isGroup ? 'Grupo ' + remoteJid : senderPhone}): "${textContent.slice(0, 60)}..."`);
@@ -434,8 +739,255 @@ export async function POST(request: Request) {
       });
     }
 
-    // 5. Verifica se é uma Lista de Preços de Fornecedor (apenas em mensagens longas / formato tabela)
-    const isListaPrecos = !isGroup && (textContent.includes('📲') || textContent.includes('📱') || (textContent.split('\n').length > 4 && /iPhone\s*\d+/i.test(textContent)));
+    const lowerText = textContent.toLowerCase().trim();
+
+    // ── 5. COMANDO: !vender [identificador] [valor] [comprador?] ──
+    if (lowerText.startsWith('!vender')) {
+      const partes = textContent.trim().split(/\s+/);
+      if (partes.length < 3) {
+        const msgErro = `⚠️ *Formato de venda incompleto!*\nUse: *!vender [IMEI ou ID] [Valor] [Nome do Cliente (opcional)]*\nExemplo: *!vender 356829104829102 2800 Lucas*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgErro);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const termoBusca = partes[1].trim();
+      const valorNum = parseFloat(partes[2].replace(/[^\d.,]/g, '').replace(',', '.'));
+      const compradorNome = partes.slice(3).join(' ').trim() || pushName || 'Cliente WhatsApp';
+
+      if (isNaN(valorNum) || valorNum <= 0) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ Valor numérico inválido: "${partes[2]}". Digite um valor válido.`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      let qApar = supabase.from('aparelhos').select('*');
+      if (lojaId) qApar = qApar.eq('loja_id', lojaId);
+
+      const { data: aparelhos } = await qApar
+        .or(`imei.eq.${termoBusca},imei.ilike.%${termoBusca}%,codigo.eq.${termoBusca},id.eq.${termoBusca}`)
+        .limit(1);
+
+      const aparelho = aparelhos?.[0];
+
+      if (!aparelho) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Não encontrei nenhum aparelho com o código ou IMEI "${termoBusca}". Verifique se o identificador está correto!`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      if (aparelho.status === 'vendido' || aparelho.condicao === 'vendido' || aparelho.ativo === false) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ O aparelho *${aparelho.modelo}* (IMEI: ${aparelho.imei}) já consta como vendido no sistema!`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      // 1. Atualiza o aparelho para vendido
+      await supabase.from('aparelhos').update({
+        condicao: 'vendido',
+        status: 'vendido',
+        ativo: false,
+        comprador: compradorNome,
+        precoVenda: valorNum,
+        dataVenda: new Date().toISOString(),
+      }).eq('id', aparelho.id);
+
+      // 2. Insere na tabela 'vendas'
+      const custoNum = Number(aparelho.custo || aparelho.precoCusto || 0);
+      const lucroNum = valorNum - custoNum;
+      const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
+
+      await supabase.from('vendas').insert({
+        loja_id: lojaId || null,
+        lojaId: lojaId || null,
+        clienteNome: compradorNome,
+        vendedor: `WhatsApp (${pushName})`,
+        tipoEntrega: 'Varejo',
+        valor: valorNum,
+        custo: custoNum,
+        lucro: lucroNum,
+        percentualLucro: parseFloat(margemPercent),
+        status: 'pago',
+        metodo: 'pix',
+        dataPagamento: new Date().toISOString(),
+        descricao: `Venda via WhatsApp OCR - ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''})`,
+        itens: [
+          {
+            id: Date.now().toString(),
+            aparelhoId: aparelho.id,
+            descricao: `${aparelho.marca} ${aparelho.modelo} - ${aparelho.capacidade || ''} (IMEI: ${aparelho.imei || termoBusca})`,
+            quantidade: 1,
+            valorInterno: custoNum,
+            valorExibir: valorNum,
+            desconto: 0,
+            total: valorNum,
+          },
+        ],
+      });
+
+      // 3. Log de auditoria
+      try {
+        await supabase.from('logs_sistema').insert({
+          loja_id: lojaId || null,
+          tipo_evento: 'venda',
+          acao: `Venda WhatsApp: ${aparelho.modelo}`,
+          detalhes: `Aparelho ${aparelho.modelo} (IMEI ${aparelho.imei}) vendido para ${compradorNome} por R$ ${valorNum.toFixed(2)}`,
+          created_at: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.warn('Falha silenciosa ao registrar log_sistema:', logErr);
+      }
+
+      const respVenda = `🎉 *VENDA REGISTRADA COM SUCESSO!*
+
+📱 *Aparelho:* ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || 'N/A'})
+🔢 *IMEI:* \`${aparelho.imei || termoBusca}\`
+👤 *Comprador:* ${compradorNome}
+💰 *Valor Final:* R$ ${valorNum.toFixed(2).replace('.', ',')}
+📦 *Status:* Baixado do estoque oficial!
+
+Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, respVenda);
+      return NextResponse.json({ status: 'ok', message: 'Venda registrada via WhatsApp.' }, { status: 200 });
+    }
+
+    // ── 6. COMANDO: !cadastrar [modelo] [capacidade] [imei] [preco] ──
+    if (lowerText.startsWith('!cadastrar')) {
+      const partes = textContent.trim().split(/\s+/);
+      if (partes.length < 3) {
+        const msgErro = `⚠️ *Formato de cadastro incompleto!*\nUse: *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]*\nExemplo: *!cadastrar iPhone 13 128GB 356829104829102 2800*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgErro);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      let precoCad = 0;
+      const ultimo = partes[partes.length - 1].replace(/[^\d.,]/g, '').replace(',', '.');
+      if (!isNaN(parseFloat(ultimo))) {
+        precoCad = parseFloat(ultimo);
+        partes.pop();
+      }
+
+      let imeiCad = '';
+      const penultimo = partes[partes.length - 1].replace(/\D/g, '');
+      if (penultimo.length >= 8) {
+        imeiCad = penultimo;
+        partes.pop();
+      }
+
+      let capCad = '128GB';
+      const antepenultimo = partes[partes.length - 1];
+      if (/^\d+\s*(?:gb|tb)$/i.test(antepenultimo)) {
+        capCad = antepenultimo.toUpperCase();
+        partes.pop();
+      }
+
+      const modeloCad = partes.slice(1).join(' ').trim() || 'iPhone';
+
+      const novoAparelho = {
+        loja_id: lojaId || null,
+        marca: modeloCad.toUpperCase().includes('IPHONE') ? 'Apple' : 'Smartphone',
+        modelo: modeloCad,
+        capacidade: capCad,
+        imei: imeiCad || null,
+        preco: precoCad > 0 ? precoCad : 0,
+        condicao: 'seminovo',
+        status: 'disponivel',
+        ativo: true,
+        dataCadastro: new Date().toISOString(),
+        observacoes: `Cadastrado via WhatsApp IA (${pushName})`,
+      };
+
+      const { data: inserido, error: errCad } = await supabase.from('aparelhos').insert(novoAparelho).select().single();
+
+      if (errCad) {
+        console.error('❌ Erro ao cadastrar aparelho via WhatsApp:', errCad);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Erro ao cadastrar aparelho: ${errCad.message}`);
+        return NextResponse.json({ status: 'error' }, { status: 500 });
+      }
+
+      try {
+        await supabase.from('logs_sistema').insert({
+          loja_id: lojaId || null,
+          tipo_evento: 'estoque',
+          acao: `Entrada via WhatsApp: ${modeloCad}`,
+          detalhes: `Aparelho ${modeloCad} (${capCad}) cadastrado por ${pushName}`,
+          created_at: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.warn('Falha silenciosa no log_sistema:', logErr);
+      }
+
+      const respCad = `✅ *NOVO APARELHO CADASTRADO NO ESTOQUE!*
+
+📱 *Modelo:* ${modeloCad}
+💾 *Capacidade:* ${capCad}
+🔢 *IMEI:* \`${imeiCad || 'Não informado'}\`
+💵 *Preço de Venda:* ${precoCad > 0 ? `R$ ${precoCad.toFixed(2).replace('.', ',')}` : 'A definir'}
+📦 *Status:* 🟢 Disponível para venda
+
+ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, respCad);
+      return NextResponse.json({ status: 'ok', message: 'Aparelho cadastrado com sucesso.' }, { status: 200 });
+    }
+
+    // ── 7. COMANDO: !preco [identificador] [novo_valor] ──
+    if (lowerText.startsWith('!preco') || lowerText.startsWith('!preço')) {
+      const partes = textContent.trim().split(/\s+/);
+      if (partes.length < 3) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ Use: *!preco [IMEI ou Código] [Novo Valor]*\nExemplo: *!preco 356829104829102 2750*`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const ident = partes[1].trim();
+      const novoValor = parseFloat(partes[2].replace(/[^\d.,]/g, '').replace(',', '.'));
+
+      if (isNaN(novoValor) || novoValor <= 0) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ Valor numérico inválido: "${partes[2]}".`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      let qP = supabase.from('aparelhos').select('*');
+      if (lojaId) qP = qP.eq('loja_id', lojaId);
+
+      const { data: apars } = await qP
+        .or(`imei.eq.${ident},imei.ilike.%${ident}%,codigo.eq.${ident},id.eq.${ident}`)
+        .limit(1);
+
+      const apar = apars?.[0];
+
+      if (!apar) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Aparelho não encontrado para o identificador "${ident}".`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      await supabase.from('aparelhos').update({ preco: novoValor }).eq('id', apar.id);
+
+      try {
+        await supabase.from('logs_sistema').insert({
+          loja_id: lojaId || null,
+          tipo_evento: 'estoque',
+          acao: `Preço alterado: ${apar.modelo}`,
+          detalhes: `Preço de ${apar.modelo} alterado de R$ ${apar.preco} para R$ ${novoValor} via WhatsApp`,
+          created_at: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.warn('Falha silenciosa no log_sistema:', logErr);
+      }
+
+      const respPreco = `✅ *PREÇO ATUALIZADO COM SUCESSO!*
+
+📱 *Aparelho:* ${apar.modelo} (${apar.capacidade || ''})
+💵 *Novo Preço de Varejo:* R$ ${novoValor.toFixed(2).replace('.', ',')}
+🔢 *IMEI:* \`${apar.imei || ident}\``;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, respPreco);
+      return NextResponse.json({ status: 'ok', message: 'Preço atualizado via WhatsApp.' }, { status: 200 });
+    }
+
+    // ── 8. LISTA DE PREÇOS DE FORNECEDOR ──
+    const isListaPrecos =
+      !isGroup &&
+      (textContent.includes('📲') ||
+        textContent.includes('📱') ||
+        (textContent.split('\n').length > 4 && /iPhone\s*\d+/i.test(textContent)));
 
     if (isListaPrecos && lojaId) {
       const lines = textContent.split('\n');
@@ -448,16 +1000,14 @@ export async function POST(request: Request) {
       }
     }
 
-    // 6. Resposta Natural sobre iPhones e Estoque no Grupo ou Privado
+    // ── 9. CONSULTA NATURAL DE ESTOQUE (GRUPOS E PRIVADO) ──
     const respostaNatural = await responderConsultaEstoqueNatural(textContent, pushName, lojaId);
     if (respostaNatural) {
       await enviarMensagemWhatsApp(instanceName, targetDestination, respostaNatural);
       return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida naturalmente.' }, { status: 200 });
     }
 
-    // 7. Resposta por Comandos do Sistema (!estoque, !ajuda, consultas)
-    const lowerText = textContent.toLowerCase().trim();
-
+    // ── 10. COMANDOS BÁSICOS (!estoque, !ajuda, !menu) ──
     if (lowerText.startsWith('!estoque') || lowerText === 'estoque' || lowerText === 'cardapio' || lowerText === 'tabela') {
       if (lojaId) {
         const { data: aparelhos } = await supabase
@@ -465,13 +1015,15 @@ export async function POST(request: Request) {
           .select('marca, modelo, capacidade, cor, preco, condicao')
           .eq('loja_id', lojaId)
           .eq('ativo', true)
+          .neq('status', 'vendido')
+          .neq('condicao', 'vendido')
           .limit(10);
 
         if (aparelhos && aparelhos.length > 0) {
           let respostaEstoque = `📱 *ESTOQUE DISPONÍVEL - PHONE CENTER*\n\n`;
           aparelhos.forEach((a) => {
-            const precoFmt = a.preco ? `R$ ${Number(a.preco).toFixed(2)}` : 'Consulte';
-            respostaEstoque += `• *${a.marca} ${a.modelo}* (${a.capacidade || 'N/A'}) - ${a.cor || 'Padrão'} [${a.condicao?.toUpperCase()}] - ${precoFmt}\n`;
+            const precoFmt = a.preco ? `R$ ${Number(a.preco).toFixed(2).replace('.', ',')}` : 'Consulte';
+            respostaEstoque += `• *${a.marca} ${a.modelo}* (${a.capacidade || 'N/A'}) - ${a.cor || 'Padrão'} - ${precoFmt}\n`;
           });
           respostaEstoque += `\nPara mais detalhes ou compras, fale com nossa equipe! 💬`;
           await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEstoque);
@@ -481,12 +1033,25 @@ export async function POST(request: Request) {
     }
 
     if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
-      const menuAjuda = `📱 *PHONE CENTER BOT - COMANDOS*\n\n• *!estoque* - Consulta os aparelhos disponíveis no estoque\n• Pergunte sobre qualquer modelo (ex: *"tem iphone 13?"*) e eu respondo na hora!\n• Envie uma *lista de preços* para cadastrar aparelhos automaticamente`;
+      const menuAjuda = `📱 *PHONE CENTER BOT - INTELIGÊNCIA ARTIFICIAL*
+
+📸 *Reconhecimento Visual de Etiquetas (OCR):*
+• Envie uma foto da etiqueta/caixa do aparelho! Eu reconheço o modelo, capacidade, IMEI, bateria e verifico o estoque na hora.
+
+⚡ *Comandos Operacionais Rápidos:*
+• *!estoque* - Consulta aparelhos disponíveis
+• *!vender [IMEI/ID] [Valor] [Nome]* - Registra venda e baixa do estoque
+• *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Dá entrada em novo aparelho
+• *!preco [IMEI/ID] [Novo Valor]* - Atualiza preço no sistema
+
+💬 *Atendimento Inteligente:*
+• Pergunte qualquer coisa sobre aparelhos (ex: *"tem iphone 13?"*) e eu respondo na hora!`;
+
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
     }
 
-    // 8. Processamento de Comandos IA Gemini / Groq (se plano configurado)
+    // ── 11. COMANDOS ESTRUTURADOS GEMINI PLAN ──
     const geminiPlan = parseGeminiPlan(textContent);
     if (geminiPlan) {
       const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
@@ -494,7 +1059,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'ok', message: 'Comando IA executado.' }, { status: 200 });
     }
 
-    // Retorna OK para a Evolution API
     return NextResponse.json({ status: 'ok', message: 'Webhook processado com sucesso.' }, { status: 200 });
   } catch (error: any) {
     console.error('❌ Erro crítico no Webhook Evolution API:', error);
