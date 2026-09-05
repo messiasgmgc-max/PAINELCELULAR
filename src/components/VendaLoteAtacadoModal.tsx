@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, getAparelhoCodigo } from '@/lib/utils';
+import { cn, getAparelhoCodigo, obterDataHoraVenda } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
@@ -282,7 +282,7 @@ export function VendaLoteAtacadoModal({
 
     try {
       const compradorFinal = comprador.trim();
-      const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
+      const dataIso = obterDataHoraVenda(dataVenda);
       const valorEntradaNum = parseFloat(valorEntrada.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
       const isFiado = metodoPgto === 'fiado';
       const statusFinal = isFiado ? (valorEntradaNum > 0 ? 'parcial' : 'pendente') : 'pago';

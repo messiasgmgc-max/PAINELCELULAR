@@ -188,3 +188,165 @@ export function sortModelosCronologico(modeloA: string, modeloB: string, ordem: 
 
   return modeloA.localeCompare(modeloB, 'pt-BR');
 }
+
+/**
+ * Retorna uma data em formato ISO garantindo o horário exato da confirmação da operação.
+ * Se a data fornecida for hoje (ou não fornecida), assume o exato momento atual.
+ * Se for fornecida uma data diferente (retroativa), combina aquela data com o horário atual.
+ */
+export function obterDataHoraVenda(dataStr?: string): string {
+  const agora = new Date();
+  if (!dataStr) return agora.toISOString();
+
+  // Se já tiver formato completo com hora (ex: ISO com 'T' e ':')
+  if (dataStr.includes('T') && dataStr.includes(':')) {
+    // Se for o antigo T12:00:00 ou T15:00:00 padrão de calendário
+    if (dataStr.includes('T12:00:00') || dataStr.includes('T15:00:00')) {
+      const parteData = dataStr.split('T')[0];
+      const hoje = agora.toISOString().split('T')[0];
+      if (parteData === hoje) {
+        return agora.toISOString();
+      }
+      const [ano, mes, dia] = parteData.split('-').map(Number);
+      if (ano && mes && dia) {
+        const d = new Date(ano, mes - 1, dia, agora.getHours(), agora.getMinutes(), agora.getSeconds());
+        return d.toISOString();
+      }
+    }
+    return dataStr;
+  }
+
+  const hojeFormatado = agora.toISOString().split('T')[0];
+  if (dataStr === hojeFormatado) {
+    return agora.toISOString();
+  }
+
+  const [ano, mes, dia] = dataStr.split('-').map(Number);
+  if (ano && mes && dia) {
+    const dataComHora = new Date(ano, mes - 1, dia, agora.getHours(), agora.getMinutes(), agora.getSeconds());
+    return dataComHora.toISOString();
+  }
+
+  return agora.toISOString();
+}
+
+/**
+ * Retorna a Data de exibição mais precisa de uma venda.
+ * Se houver created_at, utiliza. Se a dataPagamento for o antigo 12:00:00,
+ * tenta recuperar o horário real a partir do timestamp do primeiro item.
+ */
+export function getVendaDataExibicao(venda: any): Date {
+  if (venda.created_at) {
+    const d = new Date(venda.created_at);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  const dataPag = venda.dataPagamento ? new Date(venda.dataPagamento) : null;
+  const isMeioDiaPadrao = dataPag && (
+    (dataPag.getUTCHours() === 12 && dataPag.getUTCMinutes() === 0 && dataPag.getUTCSeconds() === 0) ||
+    (dataPag.getUTCHours() === 15 && dataPag.getUTCMinutes() === 0 && dataPag.getUTCSeconds() === 0)
+  );
+
+  // Se a data for exatamente meio-dia (hardcode antigo de calendário),
+  // e o primeiro item da venda tiver um timestamp numérico (Date.now()), usa o momento real
+  if (isMeioDiaPadrao || !dataPag || isNaN(dataPag.getTime())) {
+    const primeiroItemId = venda.itens?.[0]?.id;
+    if (primeiroItemId && /^\d{12,14}$/.test(String(primeiroItemId))) {
+      const ts = Number(primeiroItemId);
+      const dItem = new Date(ts);
+      if (dItem.getFullYear() >= 2024 && dItem.getFullYear() <= 2030) {
+        return dItem;
+      }
+    }
+  }
+
+  if (dataPag && !isNaN(dataPag.getTime())) {
+    return dataPag;
+  }
+
+  return new Date();
+}
+
+export interface AparelhoVendaInfo {
+  nomeAparelho: string;
+  imei?: string;
+  totalItens: number;
+  outrosItensCount: number;
+}
+
+/**
+ * Extrai o nome do aparelho e o IMEI correspondente de uma venda de forma robusta,
+ * consultando a lista de aparelhos, os itens da venda e a descrição.
+ */
+export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = []): AparelhoVendaInfo {
+  const itens = venda.itens && Array.isArray(venda.itens) ? venda.itens : [];
+  const totalItens = itens.length;
+
+  let nomeAparelho = '';
+  let imei = '';
+
+  // 1. Tenta extrair do primeiro item de itens
+  if (itens.length > 0) {
+    const primeiro = itens[0];
+
+    // Tenta pelo aparelhoId vinculado no cadastro de aparelhos
+    if (primeiro.aparelhoId && Array.isArray(listaAparelhos) && listaAparelhos.length > 0) {
+      const ap = listaAparelhos.find((a: any) => a.id === primeiro.aparelhoId);
+      if (ap) {
+        nomeAparelho = [ap.marca, ap.modelo, ap.capacidade, ap.cor].filter(Boolean).join(' ');
+        imei = ap.imei || '';
+      }
+    }
+
+    // Se ainda não tem nome ou imei, extrai de primeiro.descricao
+    if (primeiro.descricao) {
+      const desc = String(primeiro.descricao).trim();
+
+      if (!imei) {
+        const matchImeiDesc = desc.match(/\((?:IMEI\/ID|IMEI|ID):\s*([^\)]+)\)/i) ||
+                              desc.match(/IMEI:\s*(\S+)/i) ||
+                              desc.match(/\b\d{14,16}\b/);
+        if (matchImeiDesc) {
+          imei = matchImeiDesc[1] || matchImeiDesc[0];
+        }
+      }
+
+      if (!nomeAparelho) {
+        nomeAparelho = desc
+          .replace(/\((?:IMEI\/ID|IMEI|ID):[^\)]+\)/gi, '')
+          .replace(/IMEI:\s*\S+/gi, '')
+          .replace(/-\s*$/, '')
+          .trim();
+      }
+    }
+  }
+
+  // 2. Se ainda não achou, tenta extrair de venda.descricao
+  if (!nomeAparelho && venda.descricao) {
+    const descVenda = String(venda.descricao).trim();
+    if (!imei) {
+      const matchImei = descVenda.match(/\((?:IMEI\/ID|IMEI|ID):\s*([^\)]+)\)/i) ||
+                        descVenda.match(/IMEI:\s*(\S+)/i) ||
+                        descVenda.match(/\b\d{14,16}\b/);
+      if (matchImei) imei = matchImei[1] || matchImei[0];
+    }
+    nomeAparelho = descVenda
+      .replace(/^Venda (?:VAREJO|ATACADO|PDV)\s*-\s*/i, '')
+      .replace(/\((?:IMEI\/ID|IMEI|ID):[^\)]+\)/gi, '')
+      .replace(/-\s*$/, '')
+      .trim();
+  }
+
+  // 3. Fallback genérico se não tiver descrição
+  if (!nomeAparelho) {
+    nomeAparelho = totalItens > 0 ? `${totalItens} ${totalItens === 1 ? 'item' : 'itens'}` : 'Venda de Balcão';
+  }
+
+  return {
+    nomeAparelho,
+    imei: imei ? String(imei).trim() : undefined,
+    totalItens,
+    outrosItensCount: Math.max(0, totalItens - 1)
+  };
+}
+

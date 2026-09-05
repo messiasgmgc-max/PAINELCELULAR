@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, parseMonetaryValue } from '@/lib/utils';
+import { cn, parseMonetaryValue, obterDataHoraVenda } from '@/lib/utils';
 import { AbatimentoFiado } from '@/lib/db/types';
 
 interface BaixaFiadoModalProps {
@@ -94,7 +94,7 @@ export function BaixaFiadoModal({
 
     try {
       let valorRestanteParaAbater = valorNum;
-      const dataIso = new Date(dataPagamento + 'T12:00:00').toISOString();
+      const dataIso = obterDataHoraVenda(dataPagamento);
 
       // Ordena as vendas em aberto da mais antiga para a mais recente
       const vendasOrdenadas = [...vendasEmAberto].sort((a, b) => 

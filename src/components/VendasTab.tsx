@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
@@ -25,7 +25,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
-import { cn, getAparelhoCodigo } from '@/lib/utils';
+import { cn, getAparelhoCodigo, obterDataHoraVenda, getVendaDataExibicao, extrairAparelhoEImeiDaVenda } from '@/lib/utils';
 import { toast } from 'sonner';
 import { registrarLog } from '@/lib/logger';
 import { generateReciboA4Html } from '@/lib/reciboA4';
@@ -1007,16 +1007,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         observacao: parsedData.observacoes || (parsedData.aparelho?.imei ? `IMEI: ${parsedData.aparelho.imei}` : '')
       };
 
-      const dataPagamentoIso = (() => {
-        if (!parsedData.dataVenda) return new Date().toISOString();
-        try {
-          const str = String(parsedData.dataVenda);
-          const d = new Date(str.includes('T') ? str : `${str}T12:00:00`);
-          return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-        } catch (e) {
-          return new Date().toISOString();
-        }
-      })();
+      const dataPagamentoIso = obterDataHoraVenda(parsedData.dataVenda);
 
       const lucroVenda = valorVenda - custoVenda;
       const percentualLucro = valorVenda > 0 ? (lucroVenda / valorVenda) * 100 : 0;
@@ -1189,16 +1180,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const metodoPrincipal = posPagamento.pagamentos[0]?.metodo || posPagamento.metodo;
       const statusFinal = pagamentosTotal >= valorFinal ? posPagamento.status : 'pendente';
 
-      const dataPagamentoFinalIso = (() => {
-        if (!posDados.dataVenda) return new Date().toISOString();
-        try {
-          const str = String(posDados.dataVenda);
-          const d = new Date(str.includes('T') ? str : `${str}T12:00:00`);
-          return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-        } catch (e) {
-          return new Date().toISOString();
-        }
-      })();
+      const dataPagamentoFinalIso = obterDataHoraVenda(posDados.dataVenda);
 
       const vendaDados = {
         clienteId: posDados.clienteId || null,
@@ -1823,8 +1805,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       let comparison = 0;
 
       if (ordenarPor === 'data') {
-        const timeA = new Date((a as any).created_at || a.dataPagamento).getTime();
-        const timeB = new Date((b as any).created_at || b.dataPagamento).getTime();
+        const timeA = getVendaDataExibicao(a).getTime();
+        const timeB = getVendaDataExibicao(b).getTime();
         comparison = timeA - timeB;
       } else if (ordenarPor === 'cliente') {
         comparison = (a.clienteNome || '').localeCompare(b.clienteNome || '', 'pt-BR');
@@ -3393,7 +3375,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5")}>
                       <td className="py-3 px-2 font-mono text-xs text-blue-400 font-bold">#{venda.id ? venda.id.slice(-6).toUpperCase() : 'N/A'}</td>
                       <td className="py-3 px-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap">
-                        {new Date((venda as any).created_at || venda.dataPagamento).toLocaleString('pt-BR', {
+                        {getVendaDataExibicao(venda).toLocaleString('pt-BR', {
                           day: '2-digit',
                           month: '2-digit',
                           year: 'numeric',
@@ -3443,8 +3425,57 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                             </button>
                           )}
                         </div>
+                        {/* Exibição compacta do aparelho e IMEI em telas móveis */}
+                        <div className="sm:hidden mt-1 flex flex-col gap-0.5 text-[11px]">
+                          {(() => {
+                            const apInfo = extrairAparelhoEImeiDaVenda(venda, aparelhos);
+                            return (
+                              <>
+                                <span className="truncate max-w-[170px] font-semibold text-slate-300" title={apInfo.nomeAparelho}>
+                                  {apInfo.nomeAparelho}
+                                </span>
+                                {apInfo.imei && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-cyan-400">
+                                    <Smartphone className="w-2.5 h-2.5" /> IMEI: {apInfo.imei.length > 8 ? `...${apInfo.imei.slice(-6)}` : apInfo.imei}
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
                       </td>
-                      <td className="py-3 px-2 hidden sm:table-cell text-muted-foreground">{venda.itens && venda.itens.length > 0 ? `${venda.itens.length} itens` : venda.descricao}</td>
+                      <td className="py-3 px-2 hidden sm:table-cell">
+                        {(() => {
+                          const apInfo = extrairAparelhoEImeiDaVenda(venda, aparelhos);
+                          return (
+                            <div className="flex flex-col gap-1 max-w-[280px]">
+                              <span className="font-semibold text-slate-200 text-xs truncate leading-snug" title={apInfo.nomeAparelho}>
+                                {apInfo.nomeAparelho}
+                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {apInfo.imei ? (
+                                  <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-xs"
+                                    title={`IMEI Completo: ${apInfo.imei}`}
+                                  >
+                                    <Smartphone className="w-2.5 h-2.5 shrink-0 text-cyan-400" />
+                                    <span>IMEI: {apInfo.imei.length > 8 ? `...${apInfo.imei.slice(-6)}` : apInfo.imei}</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 italic">
+                                    Sem IMEI
+                                  </span>
+                                )}
+                                {apInfo.outrosItensCount > 0 && (
+                                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-slate-800 text-slate-400 border-slate-700">
+                                    +{apInfo.outrosItensCount} {apInfo.outrosItensCount === 1 ? 'outro' : 'outros'}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="py-3 px-2 text-right font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</td>
                       <td className="py-3 px-2 text-right hidden sm:table-cell text-green-600 font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.lucro)}</td>
                       <td className="py-3 px-2 hidden sm:table-cell text-xs">{metodoLabel(venda.metodo)}</td>

@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
+import { cn, getAparelhoCodigo, parseMonetaryValue, obterDataHoraVenda } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
@@ -122,9 +122,9 @@ export function MarcarVendidoModal({
 
     try {
       const compradorFinal = comprador.trim() || (tipoVenda === 'atacado' ? 'Lojista / Revenda' : 'Cliente Balcão');
-      const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
+      const dataIso = obterDataHoraVenda(dataVenda);
       const isFiado = metodoPgto === 'fiado';
-      const dataVencIso = (isFiado && dataVencimento) ? new Date(dataVencimento + 'T12:00:00').toISOString() : undefined;
+      const dataVencIso = (isFiado && dataVencimento) ? obterDataHoraVenda(dataVencimento) : undefined;
 
       // Monta tag estruturada de baixa no estoque
       const obsBaixa = [

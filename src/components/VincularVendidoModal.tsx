@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, getAparelhoCodigo } from '@/lib/utils';
+import { cn, getAparelhoCodigo, obterDataHoraVenda } from '@/lib/utils';
 import { Aparelho, Cliente } from '@/lib/db/types';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
@@ -114,7 +114,7 @@ export function VincularVendidoModal({
       const valorNum = parseFloat(valorVenda.replace(/[^\d,.]/g, '').replace(',', '.')) || 0;
       const custoNum = aparelhoSelecionado.custo || 0;
       const lucroNum = valorNum - custoNum;
-      const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
+      const dataIso = obterDataHoraVenda(dataVenda);
 
       // 1. Atualiza cliente na tabela de aparelhos
       await supabase

@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
+import { cn, getAparelhoCodigo, parseMonetaryValue, obterDataHoraVenda } from '@/lib/utils';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
 
@@ -117,7 +117,7 @@ export function EditarVendaRegistroModal({
 
     try {
       const compradorFinal = comprador.trim() || 'Comprador / Lojista';
-      const dataIso = new Date(dataVenda + 'T12:00:00').toISOString();
+      const dataIso = obterDataHoraVenda(dataVenda);
 
       // 1. Se tem aparelhoId vinculado, atualiza o aparelho na tabela 'aparelhos'
       if (venda.aparelhoId) {
