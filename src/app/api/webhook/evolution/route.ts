@@ -14,9 +14,25 @@ const supabaseServiceKey =
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Configurações do Evolution API
-const EVOLUTION_URL = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449';
-const DEFAULT_INSTANCE = process.env.EVOLUTION_INSTANCE_NAME || 'lucasimports';
+function getCleanEvolutionUrl(): string {
+  let url = (process.env.EVOLUTION_API_URL || 'http://13.140.36.50:8080').trim().replace(/\/+$/, '');
+  if (!url) return 'http://13.140.36.50:8080';
+  
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = `http://${url}`;
+  }
+  
+  // Se informou o IP da VPS mas esqueceu da porta 8080, anexa a porta 8080
+  if (url === 'http://13.140.36.50' || url === 'https://13.140.36.50') {
+    url = 'http://13.140.36.50:8080';
+  }
+  
+  return url;
+}
+
+const EVOLUTION_URL = getCleanEvolutionUrl();
+const EVOLUTION_API_KEY = (process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449').trim();
+const DEFAULT_INSTANCE = (process.env.EVOLUTION_INSTANCE_NAME || 'lucasimports').trim();
 
 // ── GET: Endpoint de Validação & Healthcheck do Webhook ──
 export async function GET() {
