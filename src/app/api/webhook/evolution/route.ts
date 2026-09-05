@@ -323,15 +323,26 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
     }
   }
 
-  const { data: loja } = await supabase
-    .from('lojas')
-    .select('id')
-    .eq('ativo', true)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  return null;
+}
 
-  return loja?.id || null;
+// ── AUXILIAR: Verificar se a loja é a Lucas Imports ──
+async function verificarSeLojaLucasImports(lojaId: string | null, instanceName: string): Promise<boolean> {
+  const cleanInst = (instanceName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (cleanInst.includes('lucasimports')) return true;
+
+  if (lojaId) {
+    const { data: loja } = await supabase
+      .from('lojas')
+      .select('nome')
+      .eq('id', lojaId)
+      .maybeSingle();
+
+    const cleanNome = (loja?.nome || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanNome.includes('lucasimports')) return true;
+  }
+
+  return false;
 }
 
 // ── AUXILIAR: Buscar Base64 de Mídia na Evolution API caso não venha no webhook ──
@@ -693,8 +704,23 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
 async function responderConsultaEstoqueNatural(
   texto: string,
   pushName: string,
-  lojaId: string | null
+  lojaId: string | null,
+  instanceName: string,
+  isGroup: boolean
 ): Promise<string | null> {
+  // 1. Exceção de Negócio: A escuta e resposta automática a conversas em grupos ("tem tal modelo? Responde: Tem aqui...")
+  // é uma funcionalidade EXCLUSIVA da Lucas Imports.
+  // Lojistas e clientes comuns da plataforma NÃO têm essa escuta automática ativada em grupos para não banalizar o bot
+  // e evitar misturar estoques. Eles utilizam os comandos normais no privado ou o comando explícito !estoque.
+  const isLucas = await verificarSeLojaLucasImports(lojaId, instanceName);
+  if (!isLucas) {
+    return null;
+  }
+
+  if (!lojaId) {
+    return null;
+  }
+
   const textoLimpo = texto.toLowerCase().trim();
 
   const termosPergunta = [
@@ -738,29 +764,14 @@ async function responderConsultaEstoqueNatural(
     }
   }
 
-  let query = supabase
+  // Consulta estrita por loja_id (sem fallbacks globais para evitar vazamento entre lojistas)
+  const { data: aparelhos, error } = await supabase
     .from('aparelhos')
     .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+    .eq('loja_id', lojaId)
     .eq('ativo', true)
     .neq('condicao', 'vendido')
     .neq('status', 'vendido');
-
-  if (lojaId) {
-    query = query.eq('loja_id', lojaId);
-  }
-
-  let { data: aparelhos, error } = await query;
-  if ((error || !aparelhos || aparelhos.length === 0) && lojaId) {
-    const { data: fallbackAparelhos } = await supabase
-      .from('aparelhos')
-      .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
-      .eq('ativo', true)
-      .neq('condicao', 'vendido')
-      .neq('status', 'vendido');
-    if (fallbackAparelhos && fallbackAparelhos.length > 0) {
-      aparelhos = fallbackAparelhos;
-    }
-  }
 
   if (!aparelhos || aparelhos.length === 0) {
     return null;
@@ -1527,33 +1538,40 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
       const isCompleto = lowerText.includes('completo') || lowerText.includes('atacado') || lowerText.includes('detalhe');
 
-      let query = supabase
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('*')
+        .eq('id', resolvedLojaId)
+        .maybeSingle();
+
+      const isLucas = await verificarSeLojaLucasImports(resolvedLojaId, instanceName);
+
+      // Em grupos: se NÃO for a Lucas Imports, apenas o próprio cliente/dono da loja pode disparar o comando !estoque
+      if (isGroup && !isLucas) {
+        const participantJid = String(key.participant || msgData.participant || key.remoteJid || '');
+        const participantPhone = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
+        const lojaTelefone = (loja?.telefone || '').replace(/\D/g, '');
+
+        const isDono = lojaTelefone && participantPhone && (lojaTelefone.endsWith(participantPhone.slice(-8)) || participantPhone.endsWith(lojaTelefone.slice(-8)));
+
+        if (!isDono && lojaTelefone && lojaTelefone !== 'Não informado') {
+          console.log(`[Segurança Multi-Tenant] Comando !estoque em grupo ignorado: ${participantPhone} não é o dono da loja ${loja?.nome}.`);
+          return NextResponse.json({ status: 'ok', message: 'Comando em grupo restrito ao dono da loja.' }, { status: 200 });
+        }
+      }
+
+      // Consulta estritamente os aparelhos DESTA LOJA (zero fallbacks para outras lojas!)
+      const { data: aparelhos } = await supabase
         .from('aparelhos')
         .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+        .eq('loja_id', resolvedLojaId)
         .eq('ativo', true)
         .neq('status', 'vendido')
         .neq('condicao', 'vendido');
 
-      if (resolvedLojaId) {
-        query = query.eq('loja_id', resolvedLojaId);
-      }
-
-      let { data: aparelhos } = await query;
-
-      if ((!aparelhos || aparelhos.length === 0) && resolvedLojaId) {
-        const { data: fallback } = await supabase
-          .from('aparelhos')
-          .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
-          .eq('ativo', true)
-          .neq('status', 'vendido')
-          .neq('condicao', 'vendido');
-        if (fallback && fallback.length > 0) {
-          aparelhos = fallback;
-        }
-      }
-
       if (!aparelhos || aparelhos.length === 0) {
-        await enviarMensagemWhatsApp(instanceName, targetDestination, '📱 *ESTOQUE PHONE CENTER*\n\nNenhum aparelho disponível em estoque no momento.');
+        const nomeLoja = (loja?.nome || 'PHONE CENTER').trim();
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `📱 *ESTOQUE - ${nomeLoja}*\n\nNenhum aparelho disponível em estoque no momento.`);
         return NextResponse.json({ status: 'ok', message: 'Estoque vazio.' }, { status: 200 });
       }
 
@@ -1578,9 +1596,10 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         }
       });
 
+      const nomeExibicao = (loja?.nome || 'PHONE CENTER').trim().toUpperCase();
       const cabecalho = isCompleto
-        ? `📋 *ESTOQUE COMPLETO (ATACADO) - PHONE CENTER*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`
-        : `📱 *ESTOQUE DISPONÍVEL - PHONE CENTER*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`;
+        ? `📋 *ESTOQUE COMPLETO (ATACADO) - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`
+        : `📱 *ESTOQUE DISPONÍVEL - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`;
 
       const rodape = isCompleto
         ? `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`
@@ -1617,8 +1636,8 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
     }
 
-    // ── 12. CONSULTA NATURAL DE ESTOQUE (GRUPOS E PRIVADO) ──
-    const respostaNatural = await responderConsultaEstoqueNatural(textContent, pushName, lojaId);
+    // ── 12. CONSULTA NATURAL DE ESTOQUE (EXCLUSIVO LUCAS IMPORTS) ──
+    const respostaNatural = await responderConsultaEstoqueNatural(textContent, pushName, lojaId, instanceName, isGroup);
     if (respostaNatural) {
       await enviarMensagemWhatsApp(instanceName, targetDestination, respostaNatural);
       return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida naturalmente.' }, { status: 200 });
