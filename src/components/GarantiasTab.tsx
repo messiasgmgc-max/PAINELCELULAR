@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useGarantias } from '@/hooks/useGarantias';
+import { useClientes } from '@/hooks/useClientes';
+import { useAparelhos } from '@/hooks/useAparelhos';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
@@ -10,10 +12,13 @@ import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, Calendar, Shield, AlertTriangle } from 'lucide-react';
 import { Garantia, Venda } from '@/lib/db/types';
+import { VendaSearchCombobox, EnrichedVendaData } from '@/components/VendaSearchCombobox';
 
 export function GarantiasTab() {
   const { usuario } = useAuth();
   const { garantias, loading, error, fetchGarantias, criarGarantia, atualizarGarantia, deletarGarantia } = useGarantias();
+  const { clientes, fetchClientes } = useClientes();
+  const { aparelhos, fetchAparelhos } = useAparelhos();
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -71,18 +76,31 @@ export function GarantiasTab() {
   };
 
   const carregarVendasProcessadas = async () => {
-    if (!usuario?.lojaId) return;
     setLoadingVendas(true);
     try {
-      const { data, error } = await supabase
+      const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
+      let query = supabase
         .from('vendas')
         .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .eq('status', 'pago')
+        .neq('status', 'cancelado')
         .order('dataPagamento', { ascending: false });
 
-      if (error) throw error;
-      setVendasProcessadas(data || []);
+      if (targetLojaId) {
+        query = query.or(`loja_id.eq.${targetLojaId},loja_id.is.null`);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('Erro com filtro loja_id em vendas:', error);
+        const resFallback = await supabase
+          .from('vendas')
+          .select('*')
+          .neq('status', 'cancelado')
+          .order('dataPagamento', { ascending: false });
+        setVendasProcessadas(resFallback.data || []);
+      } else {
+        setVendasProcessadas(data || []);
+      }
     } catch (err) {
       console.error('Erro ao carregar vendas processadas:', err);
       setVendasProcessadas([]);
@@ -107,6 +125,8 @@ export function GarantiasTab() {
   useEffect(() => {
     fetchGarantias();
     carregarVendasProcessadas();
+    fetchClientes();
+    fetchAparelhos();
   }, [usuario?.lojaId]);
 
   const garantiasVigentes = useMemo(() => {
@@ -140,24 +160,34 @@ export function GarantiasTab() {
     }));
   };
 
-  const handleVendaChange = (vendaId: string) => {
-    const venda = vendasProcessadas.find((v) => v.id === vendaId);
-    if (venda) {
-      const dataInicio = venda.dataPagamento?.includes('T')
-        ? venda.dataPagamento.split('T')[0]
-        : venda.dataPagamento;
+  const handleSelectVenda = (venda: Venda, enriched: EnrichedVendaData) => {
+    const dataInicio = venda.dataPagamento?.includes('T')
+      ? venda.dataPagamento.split('T')[0]
+      : (venda.dataPagamento || new Date().toISOString().split('T')[0]);
 
-      setFormData(prev => ({
-        ...prev,
-        osId: venda.id,
-        osNumero: getVendaNumero(venda),
-        clienteId: venda.clienteId || '',
-        clienteNome: venda.clienteNome,
-        aparelhoDescricao: getDescricaoVenda(venda),
-        dataInicio,
-        diasGarantia: parseDiasGarantia(venda.garantia)
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      osId: venda.id,
+      osNumero: getVendaNumero(venda),
+      clienteId: venda.clienteId || enriched.cliente?.id || '',
+      clienteNome: enriched.clienteNome,
+      aparelhoDescricao: enriched.aparelhoFormatado,
+      dataInicio,
+      diasGarantia: enriched.diasGarantia || parseDiasGarantia(venda.garantia)
+    }));
+  };
+
+  const handleClearSelection = () => {
+    setFormData(prev => ({
+      ...prev,
+      osId: '',
+      osNumero: 0,
+      clienteId: '',
+      clienteNome: '',
+      aparelhoDescricao: '',
+      dataInicio: '',
+      diasGarantia: 90
+    }));
   };
 
   const handleAddHistorico = () => {
@@ -190,13 +220,14 @@ export function GarantiasTab() {
     if (!editingId) {
       const venda = vendasProcessadas.find((v) => v.id === formData.osId);
       if (!venda) {
-        alert('Selecione uma venda processada para registrar a garantia.');
+        alert('Selecione uma venda na barra de busca para emitir a garantia.');
         return;
       }
 
       if (getDiasRestantesVenda(venda) < 0) {
-        alert('Essa venda está fora do prazo de garantia e não pode ser registrada.');
-        return;
+        if (!confirm('Esta venda foi realizada há mais de 90 dias. Deseja emitir o termo de garantia mesmo assim?')) {
+          return;
+        }
       }
     }
 
@@ -380,32 +411,29 @@ export function GarantiasTab() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-300 block mb-1">Venda Elegível *</label>
-                    <select
-                      name="osId"
-                      value={formData.osId}
-                      onChange={(e) => handleVendaChange(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:border-cyan-500 outline-none transition-all cursor-pointer"
-                      required
-                    >
-                      <option value="">
-                        {loadingVendas ? 'Carregando vendas...' : 'Selecionar venda paga dentro do prazo'}
-                      </option>
-                      {vendasElegiveis.map(venda => (
-                        <option key={venda.id} value={venda.id}>
-                          {venda.clienteNome} - {new Date(venda.dataPagamento).toLocaleDateString('pt-BR')} ({parseDiasGarantia(venda.garantia)} dias)
-                        </option>
-                      ))}
-                    </select>
-                    {!loadingVendas && vendasElegiveis.length === 0 && (
-                      <p className="text-[11px] text-amber-400 mt-1">
-                        ⚠️ Nenhuma venda disponível sem garantia ativa.
-                      </p>
-                    )}
-                  </div>
+                {/* BARRA DE PESQUISA COMPLETA DE VENDAS (IMEI, DADOS PESSOAIS, NOME, DATA) */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    Venda Elegível (Buscar por IMEI, Nome, Telefone, CPF, Modelo ou Data) *
+                  </label>
+                  <VendaSearchCombobox
+                    vendas={vendasProcessadas}
+                    clientes={clientes}
+                    aparelhos={aparelhos}
+                    vendasComGarantia={vendasComGarantia}
+                    selectedVendaId={formData.osId}
+                    onSelectVenda={handleSelectVenda}
+                    onClearSelection={handleClearSelection}
+                    loading={loadingVendas}
+                  />
+                  {!loadingVendas && vendasProcessadas.length === 0 && (
+                    <p className="text-[11px] text-amber-400 mt-1">
+                      ⚠️ Nenhuma venda registrada encontrada no sistema.
+                    </p>
+                  )}
+                </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   <div>
                     <label className="text-xs font-semibold text-slate-300 block mb-1">Data de Início da Cobertura *</label>
                     <input
@@ -417,9 +445,7 @@ export function GarantiasTab() {
                       required
                     />
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   <div>
                     <label className="text-xs font-semibold text-slate-300 block mb-1">Prazo de Cobertura (Dias) *</label>
                     <input
@@ -431,26 +457,28 @@ export function GarantiasTab() {
                       required
                     />
                   </div>
+                </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   <div>
                     <label className="text-xs font-semibold text-slate-300 block mb-1">Cliente Vinculado</label>
                     <input
                       type="text"
-                      value={formData.clienteNome || 'Selecione uma venda'}
+                      value={formData.clienteNome || 'Selecione uma venda na busca acima'}
                       readOnly
-                      className="w-full bg-slate-950/60 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-400 outline-none"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-300 outline-none"
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Aparelho Vinculado</label>
-                  <input
-                    type="text"
-                    value={formData.aparelhoDescricao || 'Selecione uma venda'}
-                    readOnly
-                    className="w-full bg-slate-950/60 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-400 outline-none"
-                  />
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">Aparelho & IMEI Vinculados</label>
+                    <input
+                      type="text"
+                      value={formData.aparelhoDescricao || 'Selecione uma venda na busca acima'}
+                      readOnly
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-300 outline-none"
+                    />
+                  </div>
                 </div>
 
                 <div>
