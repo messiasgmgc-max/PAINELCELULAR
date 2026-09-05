@@ -70,17 +70,41 @@ export function useStorePlan() {
         return;
       }
 
-      // Calcular dias para vencer
+      // Calcular dias para vencer considerando fim do dia local
       let diasParaVencer = 30;
+      let isVencidoPorData = false;
+
       if (loja.data_vencimento) {
-        const venc = new Date(loja.data_vencimento);
-        const hoje = new Date();
-        const diffTime = venc.getTime() - hoje.getTime();
-        diasParaVencer = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const parts = String(loja.data_vencimento).split('T')[0].split('-');
+        if (parts.length === 3) {
+          const year = parseInt(parts[0], 10);
+          const month = parseInt(parts[1], 10) - 1;
+          const day = parseInt(parts[2], 10);
+          const venc = new Date(year, month, day, 23, 59, 59, 999);
+          const diffTime = venc.getTime() - Date.now();
+          diasParaVencer = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          isVencidoPorData = diffTime < 0;
+        }
       }
 
-      const status = (loja.plano_status || 'ativo').toLowerCase() as StorePlanData['planoStatus'];
-      const isBloqueado = status === 'bloqueado' || status === 'vencido' || (diasParaVencer < 0 && status !== 'ativo');
+      const rawStatus = (loja.plano_status || 'ativo').toLowerCase();
+      let status: StorePlanData['planoStatus'] = 'ativo';
+      if (!loja.ativo || rawStatus === 'bloqueado') {
+        status = 'bloqueado';
+      } else if (rawStatus === 'vencido' || isVencidoPorData) {
+        status = 'vencido';
+      } else if (rawStatus === 'pendente') {
+        status = 'pendente';
+      } else {
+        status = 'ativo';
+      }
+
+      const isBloqueado = status === 'bloqueado' || status === 'vencido';
+
+      // Sincroniza no banco se constava como ativo mas a data já venceu
+      if (isVencidoPorData && loja.plano_status === 'ativo') {
+        supabase.from('lojas').update({ plano_status: 'vencido' }).eq('id', loja.id).then();
+      }
 
       setPlanData({
         lojaId: loja.id,
@@ -103,9 +127,39 @@ export function useStorePlan() {
     }
   }, [usuario?.lojaId]);
 
+  const [historicoPagamentos, setHistoricoPagamentos] = useState<any[]>([]);
+  const [loadingHistorico, setLoadingHistorico] = useState(false);
+
+  const fetchHistorico = useCallback(async () => {
+    const targetLojaId = planData.lojaId || usuario?.lojaId;
+    if (!targetLojaId) return;
+
+    try {
+      setLoadingHistorico(true);
+      const { data, error } = await supabase
+        .from('historico_pagamentos_planos')
+        .select('*')
+        .eq('loja_id', targetLojaId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setHistoricoPagamentos(data || []);
+    } catch (err) {
+      console.error('Erro ao buscar histórico de pagamentos:', err);
+    } finally {
+      setLoadingHistorico(false);
+    }
+  }, [planData.lojaId, usuario?.lojaId]);
+
   useEffect(() => {
     fetchPlanData();
   }, [fetchPlanData]);
+
+  useEffect(() => {
+    if (planData.lojaId) {
+      fetchHistorico();
+    }
+  }, [planData.lojaId, fetchHistorico]);
 
   // Solicitar liberação / Enviar comprovante
   const enviarSolicitacaoLiberacao = async (comprovanteBase64?: string, observacao?: string) => {
@@ -139,9 +193,11 @@ export function useStorePlan() {
         status: 'pendente_aprovacao',
         comprovante_url: comprovanteBase64 || null,
         observacao: observacao || 'Solicitação de liberação enviada pelo lojista',
+        forma_pagamento: 'comprovante_pix',
       });
 
       await fetchPlanData();
+      await fetchHistorico();
       return true;
     } catch (err: any) {
       console.error('Erro ao enviar solicitação de liberação:', err);
@@ -153,6 +209,9 @@ export function useStorePlan() {
     planData,
     loading,
     refetchPlan: fetchPlanData,
+    historicoPagamentos,
+    loadingHistorico,
+    refetchHistorico: fetchHistorico,
     enviarSolicitacaoLiberacao,
   };
 }

@@ -45,12 +45,13 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
   const getPlanBadge = () => {
     switch (planData.planoStatus) {
       case 'ativo':
-        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">Ativo</Badge>;
+        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">🟢 Ativo</Badge>;
       case 'pendente':
-        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px]">Pendente</Badge>;
+        return <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px]">⏳ Pendente</Badge>;
       case 'vencido':
+        return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px]">⚠️ Vencido</Badge>;
       case 'bloqueado':
-        return <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[10px]">Bloqueado</Badge>;
+        return <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[10px]">🔴 Bloqueado</Badge>;
       default:
         return null;
     }
@@ -81,6 +82,12 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
           <div className="flex items-center gap-1 mt-1 text-[10px] text-blue-400 font-semibold">
             <Building2 className="w-3 h-3" /> {planData.nomeLoja}
           </div>
+          {planData.planoStatus === 'vencido' && (
+            <div className="text-[10px] text-orange-400 font-semibold mt-1.5 flex items-center gap-1 bg-orange-500/10 px-2 py-0.5 rounded-lg border border-orange-500/20">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              <span>Plano vencido</span>
+            </div>
+          )}
         </DropdownMenuLabel>
 
         <DropdownMenuSeparator className="bg-slate-800 my-1" />

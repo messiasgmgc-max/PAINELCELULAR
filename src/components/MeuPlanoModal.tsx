@@ -32,11 +32,21 @@ interface MeuPlanoModalProps {
 }
 
 export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
-  const { planData, loading, enviarSolicitacaoLiberacao, refetchPlan } = useStorePlan();
+  const { 
+    planData, 
+    loading, 
+    enviarSolicitacaoLiberacao, 
+    refetchPlan,
+    historicoPagamentos,
+    loadingHistorico,
+    refetchHistorico
+  } = useStorePlan();
   const [copied, setCopied] = useState(false);
   const [comprovante, setComprovante] = useState<string | null>(null);
   const [observacao, setObservacao] = useState('');
   const [enviando, setEnviando] = useState(false);
+  const [activeModalTab, setActiveModalTab] = useState<'pagamento' | 'historico'>('pagamento');
+  const [comprovanteModalUrl, setComprovanteModalUrl] = useState<string | null>(null);
 
   // Estados para o PIX Automático Dinâmico
   const [gerandoPix, setGerandoPix] = useState(false);
@@ -62,6 +72,31 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
   }, []);
 
   if (!isOpen) return null;
+
+  const formatarData = (dateStr?: string | null) => {
+    if (!dateStr) return 'Não definido';
+    const parts = String(dateStr).split('T')[0].split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return dateStr;
+  };
+
+  const formatarDataHora = (dateStr?: string | null) => {
+    if (!dateStr) return '-';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateStr;
+    }
+  };
 
   const handleCopyPix = () => {
     navigator.clipboard.writeText(planData.chavePixCobranca);
@@ -103,6 +138,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
 
       setPixDinamico(data);
       toast.success('QR Code Pix gerado! Faça o pagamento para liberação imediata.');
+      refetchHistorico();
 
       // Inicia polling automático a cada 4 segundos para detectar aprovação
       if (pollingRef.current) clearInterval(pollingRef.current);
@@ -119,6 +155,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                 duration: 6000,
               });
               await refetchPlan();
+              await refetchHistorico();
             }
           }
         } catch (pollErr) {
@@ -159,6 +196,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
       setComprovante(null);
       setObservacao('');
       refetchPlan();
+      refetchHistorico();
     } catch (err: any) {
       toast.error(err?.message || 'Erro ao enviar comprovante.');
     } finally {
@@ -181,10 +219,15 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
           </Badge>
         );
       case 'vencido':
+        return (
+          <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
+            <AlertTriangle className="w-4 h-4" /> Assinatura Vencida
+          </Badge>
+        );
       case 'bloqueado':
         return (
           <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
-            <XCircle className="w-4 h-4" /> Assinatura Suspensa / Bloqueada
+            <XCircle className="w-4 h-4" /> Assinatura Bloqueada
           </Badge>
         );
       default:
@@ -225,7 +268,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
         </div>
 
         {/* Conteúdo */}
-        <div className="p-6 overflow-y-auto space-y-6 scrollbar-soft">
+        <div className="p-6 overflow-y-auto space-y-5 scrollbar-soft">
           
           {/* Card Status da Loja */}
           <div className="bg-slate-950/60 rounded-2xl border border-slate-800 p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -238,9 +281,24 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                 <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Mensalidade: <span className="font-bold text-emerald-400">R$ {planData.valorMensalidade.toFixed(2).replace('.', ',')} / mês</span>
               </p>
               {planData.dataVencimento && (
-                <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400" /> Vencimento: <span className="font-bold text-slate-200">{new Date(planData.dataVencimento).toLocaleDateString('pt-BR')}</span>
-                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                    <Calendar className={`w-3.5 h-3.5 ${planData.planoStatus === 'vencido' ? 'text-red-400' : 'text-amber-400'}`} /> 
+                    Vencimento: <span className={`font-bold ${planData.planoStatus === 'vencido' ? 'text-red-400' : 'text-slate-200'}`}>
+                      {formatarData(planData.dataVencimento)}
+                    </span>
+                  </p>
+                  {planData.planoStatus === 'vencido' && (
+                    <span className="text-[10px] bg-red-500/20 text-red-400 font-bold px-2 py-0.5 rounded-full border border-red-500/30">
+                      Vencido ({planData.diasParaVencer <= 0 ? `há ${Math.abs(planData.diasParaVencer)} dia(s)` : 'Hoje'})
+                    </span>
+                  )}
+                  {planData.planoStatus === 'ativo' && planData.diasParaVencer >= 0 && (
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      {planData.diasParaVencer} dias restantes
+                    </span>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex flex-col items-start sm:items-end gap-2">
@@ -257,7 +315,40 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
             </div>
           </div>
 
-          {/* SEÇÃO: PAGAMENTO AUTOMÁTICO VIA PIX */}
+          {/* Abas Internas: Renovação PIX / Histórico */}
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+            <button
+              type="button"
+              onClick={() => setActiveModalTab('pagamento')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeModalTab === 'pagamento'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                  : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              Pagar / Renovar Assinatura
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveModalTab('historico');
+                refetchHistorico();
+              }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                activeModalTab === 'historico'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                  : 'bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 text-purple-400" />
+              Histórico de Pagamentos ({historicoPagamentos.length})
+            </button>
+          </div>
+
+          {activeModalTab === 'pagamento' ? (
+            <>
+              {/* SEÇÃO: PAGAMENTO AUTOMÁTICO VIA PIX */}
           <div className="bg-gradient-to-br from-emerald-950/40 to-slate-950/60 rounded-2xl border border-emerald-500/30 p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
@@ -418,21 +509,189 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
               </div>
             </div>
 
-            <Button
-              type="submit"
-              disabled={enviando}
-              className="w-full h-11 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-500/20 gap-2 cursor-pointer"
-            >
-              {enviando ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              Enviar Comprovante para Aprovação Manual
-            </Button>
-          </form>
-        </div>
+              <Button
+                type="submit"
+                disabled={enviando}
+                className="w-full h-11 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-500/20 gap-2 cursor-pointer"
+              >
+                {enviando ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                Enviar Comprovante para Aprovação Manual
+              </Button>
+            </form>
+          </>
+        ) : (
+          /* ABA: HISTÓRICO DE PAGAMENTOS */
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-purple-400" /> Histórico de Mensalidades & Transações
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Acompanhe todos os pagamentos realizados, cobranças em aberto e confirmações de renovação.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={refetchHistorico}
+                disabled={loadingHistorico}
+                className="gap-1.5 text-xs border-slate-700 bg-slate-800/60 hover:bg-slate-800 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingHistorico ? 'animate-spin' : ''}`} />
+                Atualizar
+              </Button>
+            </div>
+
+            {loadingHistorico ? (
+              <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+                <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
+                <span className="text-xs">Carregando histórico financeiro...</span>
+              </div>
+            ) : historicoPagamentos.length === 0 ? (
+              <div className="py-12 text-center bg-slate-950/40 rounded-2xl border border-slate-800 p-6 space-y-2">
+                <CreditCard className="w-8 h-8 text-slate-500 mx-auto" />
+                <p className="text-sm font-semibold text-slate-300">Nenhum pagamento registrado ainda</p>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Assim que gerar cobranças PIX ou enviar comprovantes, eles ficarão listados aqui com status e data.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-[450px] overflow-y-auto pr-1 scrollbar-soft">
+                {historicoPagamentos.map((pag) => {
+                  const status = pag.status || 'pendente';
+                  const isMercadoPago = !!pag.mp_payment_id;
+                  const temComprovante = !!pag.comprovante_url;
+
+                  return (
+                    <div
+                      key={pag.id}
+                      className="bg-slate-950/60 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4 transition space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-base font-bold text-white font-mono">
+                              R$ {Number(pag.valor || planData.valorMensalidade).toFixed(2).replace('.', ',')}
+                            </span>
+                            {status === 'aprovado' && (
+                              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px] font-bold">
+                                ✓ Confirmado / Ativo
+                              </Badge>
+                            )}
+                            {status === 'pendente' && (
+                              <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] font-bold">
+                                ⏳ Aguardando Pagamento
+                              </Badge>
+                            )}
+                            {status === 'pendente_aprovacao' && (
+                              <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 text-[10px] font-bold">
+                                📩 Comprovante em Análise
+                              </Badge>
+                            )}
+                            {status === 'rejeitado' && (
+                              <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[10px] font-bold">
+                                ✕ Rejeitado
+                              </Badge>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-slate-400 flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-slate-500" />
+                            {formatarDataHora(pag.data_pagamento || pag.created_at)}
+                          </p>
+                        </div>
+
+                        {/* Origem / Método */}
+                        <div className="text-right shrink-0">
+                          {isMercadoPago ? (
+                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 block">
+                              PIX Mercado Pago #{pag.mp_payment_id}
+                            </span>
+                          ) : temComprovante ? (
+                            <span className="text-[10px] font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 block">
+                              Comprovante Manual
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded block">
+                              PIX Chave Direta
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {pag.observacao && (
+                        <p className="text-xs text-slate-400 bg-slate-900/90 rounded-lg p-2 border border-slate-800/80">
+                          {pag.observacao}
+                        </p>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-xs">
+                        {temComprovante ? (
+                          <button
+                            type="button"
+                            onClick={() => setComprovanteModalUrl(pag.comprovante_url)}
+                            className="text-xs text-blue-400 hover:text-blue-300 font-semibold underline flex items-center gap-1 cursor-pointer"
+                          >
+                            📎 Ver Comprovante Anexado
+                          </button>
+                        ) : (
+                          <div />
+                        )}
+
+                        {status === 'pendente' && pag.qr_code && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(pag.qr_code);
+                              toast.success('Código PIX Copiado!');
+                            }}
+                            className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" /> Copiar Código PIX
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
-  );
+
+    {/* Modal de Visualização de Comprovante */}
+    {comprovanteModalUrl && (
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-bold text-white">Comprovante de Pagamento</h4>
+            <button
+              onClick={() => setComprovanteModalUrl(null)}
+              className="p-1 text-slate-400 hover:text-white rounded cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="max-h-[70vh] overflow-auto rounded-xl border border-slate-800 bg-black/40 p-2 flex items-center justify-center">
+            <img src={comprovanteModalUrl} alt="Comprovante" className="max-w-full h-auto object-contain rounded" />
+          </div>
+          <Button
+            onClick={() => setComprovanteModalUrl(null)}
+            className="w-full bg-slate-800 hover:bg-slate-700 text-white text-xs cursor-pointer"
+          >
+            Fechar Visualização
+          </Button>
+        </div>
+      </div>
+    )}
+  </div>
+);
 }

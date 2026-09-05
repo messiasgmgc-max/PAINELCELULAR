@@ -91,20 +91,28 @@ export async function GET(request: Request) {
       }
     }
 
-    // Consulta no banco de dados se a liberação foi aprovada manualmente
-    const { data: hist } = await supabaseAdmin
+    // Consulta no banco de dados se a cobrança foi aprovada no histórico
+    let histQuery = supabaseAdmin
       .from('historico_pagamentos_planos')
       .select('status')
-      .eq('loja_id', lojaId)
+      .eq('loja_id', lojaId);
+
+    if (paymentId && /^\d+$/.test(paymentId)) {
+      histQuery = histQuery.eq('mp_payment_id', paymentId);
+    } else if (paymentId && paymentId !== 'undefined' && paymentId !== 'null') {
+      histQuery = histQuery.eq('id', paymentId);
+    }
+
+    const { data: hist } = await histQuery
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    const isAprovado = hist?.status === 'aprovado' || loja.plano_status === 'ativo';
+    const isAprovado = hist?.status === 'aprovado';
 
     return NextResponse.json({
       approved: isAprovado,
-      status: hist?.status || loja.plano_status || 'pendente'
+      status: hist?.status || 'pendente'
     });
 
   } catch (error: any) {
