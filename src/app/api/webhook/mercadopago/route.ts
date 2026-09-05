@@ -92,8 +92,8 @@ export async function POST(request: Request) {
 
       // 4. Gravar log de auditoria
       await registrarLog({
-        lojaId,
-        tipoEvento: 'plano',
+        loja_id: lojaId,
+        tipo_evento: 'plano',
         acao: 'Mensalidade Paga via Webhook PIX',
         detalhes: `Pagamento de R$ ${mpPayment.transaction_amount} confirmado automaticamente via Webhook. Novo vencimento: ${novoVencimento}`
       });

@@ -66,8 +66,8 @@ export async function GET(request: Request) {
 
             // Registra log do sistema
             await registrarLog({
-              lojaId,
-              tipoEvento: 'plano',
+              loja_id: lojaId,
+              tipo_evento: 'plano',
               acao: 'Mensalidade Paga via PIX',
               detalhes: `Assinatura liberada automaticamente! Novo vencimento: ${novoVencimento} (MP ID: ${paymentId})`
             });
