@@ -121,11 +121,23 @@ export function EditarVendaRegistroModal({
 
       // 1. Se tem aparelhoId vinculado, atualiza o aparelho na tabela 'aparelhos'
       if (venda.aparelhoId) {
+        const { data: aparAtual } = await supabase
+          .from('aparelhos')
+          .select('observacoes')
+          .eq('id', venda.aparelhoId)
+          .maybeSingle();
+
+        const obsBase = String(aparAtual?.observacoes || '')
+          .replace(/BAIXA_ESTOQUE:[^\n|]+(?:\|\s*)?/gi, '')
+          .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
+          .trim();
+
         const obsBaixa = [
           `BAIXA_ESTOQUE:${dataIso}:Venda ${tipoVenda.toUpperCase()} para ${compradorFinal} por R$ ${valorVendaNum.toFixed(2)} | Custo: R$ ${custoNum.toFixed(2)} | Lucro: R$ ${lucroNum.toFixed(2)} | Pgto: ${metodoPgto}`,
           observacoes ? `Obs: ${observacoes.trim()}` : '',
           venda.codigo ? `ID: ${venda.codigo}` : '',
-          venda.imei ? `IMEI: ${venda.imei}` : ''
+          venda.imei ? `IMEI: ${venda.imei}` : '',
+          obsBase ? `Obs: ${obsBase}` : ''
         ].filter(Boolean).join(' | ');
 
         const { error: errAparelho } = await supabase
@@ -141,13 +153,49 @@ export function EditarVendaRegistroModal({
       }
 
       // 2. Se tem vendaId ou id correspondente na tabela 'vendas', atualiza a venda
-      const idParaVenda = venda.vendaId || (venda.id && !venda.id.startsWith('venda_') ? venda.id : null);
+      const isValidUUID = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      let idParaVenda = isValidUUID(venda.vendaId) ? venda.vendaId : (isValidUUID(venda.id) ? venda.id : null);
       const dataVencIso = dataVencimento ? new Date(dataVencimento + 'T12:00:00').toISOString() : null;
-      
+
+      // Se não tem UUID direto, busca na tabela 'vendas' pelo aparelhoId
+      if (!idParaVenda && venda.aparelhoId) {
+        const { data: vendasExistentes } = await supabase
+          .from('vendas')
+          .select('id, itens, valorPago, saldoDevedor, status')
+          .limit(200);
+
+        const vendaEncontrada = vendasExistentes?.find((v: any) => 
+          (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
+          (v as any).aparelhoId === venda.aparelhoId
+        );
+
+        if (vendaEncontrada && isValidUUID(vendaEncontrada.id)) {
+          idParaVenda = vendaEncontrada.id;
+          if (venda.valorPago === undefined) {
+            venda.valorPago = vendaEncontrada.valorPago;
+          }
+        }
+      }
+
       if (idParaVenda) {
+        // Recalcula o saldo devedor e status para que baixas de fiado fiquem milimétricas
+        const valorPagoAtual = Number(venda.valorPago || 0);
+        let novoSaldoDevedor = 0;
+        let novoStatus = 'pago';
+
+        if (metodoPgto === 'fiado' || venda.metodo === 'fiado' || venda.status === 'pendente' || venda.status === 'parcial') {
+          novoSaldoDevedor = Math.max(0, valorVendaNum - valorPagoAtual);
+          novoStatus = novoSaldoDevedor <= 0.01 ? 'pago' : (valorPagoAtual > 0 ? 'parcial' : 'pendente');
+        } else {
+          novoSaldoDevedor = 0;
+          novoStatus = 'pago';
+        }
+
         const payloadVendaUpdate: any = {
           clienteNome: compradorFinal,
           valor: valorVendaNum,
+          saldoDevedor: novoSaldoDevedor,
+          status: novoStatus,
           custo: custoNum,
           lucro: lucroNum,
           percentualLucro: parseFloat(margemPercent) || 0,
@@ -159,41 +207,25 @@ export function EditarVendaRegistroModal({
           dados_cliente_pendente: false,
         };
 
+        if (venda.itens && Array.isArray(venda.itens) && venda.itens.length > 0) {
+          payloadVendaUpdate.itens = venda.itens.map((it: any, idx: number) => {
+            if (idx === 0) {
+              return {
+                ...it,
+                total: valorVendaNum,
+                valorExibir: valorVendaNum,
+              };
+            }
+            return it;
+          });
+        }
+
         const { error: errVenda } = await supabase
           .from('vendas')
           .update(payloadVendaUpdate)
           .eq('id', idParaVenda);
 
         if (errVenda) console.error('Erro ao atualizar registro de venda:', errVenda);
-      } else if (venda.aparelhoId) {
-        // Tenta encontrar a venda vinculada por aparelhoId no json de itens
-        const { data: vendasExistentes } = await supabase
-          .from('vendas')
-          .select('id, itens')
-          .limit(200);
-
-        if (vendasExistentes) {
-          const vendaEncontrada = vendasExistentes.find(v => 
-            v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)
-          );
-
-          if (vendaEncontrada) {
-            await supabase
-              .from('vendas')
-              .update({
-                clienteNome: compradorFinal,
-                valor: valorVendaNum,
-                custo: custoNum,
-                lucro: lucroNum,
-                percentualLucro: parseFloat(margemPercent) || 0,
-                dataPagamento: dataIso,
-                dataVencimento: dataVencIso,
-                metodo: metodoPgto,
-                dados_cliente_pendente: false,
-              })
-              .eq('id', vendaEncontrada.id);
-          }
-        }
       }
 
       await upsertComprador(compradorFinal, tipoVenda.toLowerCase().includes('atacado') ? 'lojista' : 'cliente');

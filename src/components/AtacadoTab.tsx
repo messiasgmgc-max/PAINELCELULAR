@@ -245,21 +245,34 @@ export function AtacadoTab() {
 
           // Extrai valor da venda
           const matchValor = textoDetalhe.match(/por\s+R\$\s*([\d.,]+)/i) || obs.match(/por\s+R\$\s*([\d.,]+)/i);
-          const valorVenda = matchValor 
+          let valorVenda = matchValor 
             ? parseMonetaryValue(matchValor[1])
             : ((a as any).precoAtacado || (a as any).preco_atacado || a.preco || 0);
 
+          // Se existe registro na tabela 'vendas', ELE É A FONTE DA VERDADE (especialmente após edições)
+          if (vendaCorrespondente && Number(vendaCorrespondente.valor) > 0) {
+            valorVenda = Number(vendaCorrespondente.valor);
+          }
+
           // Extrai custo
           const matchCusto = textoDetalhe.match(/Custo:\s*R\$\s*([\d.,]+)/i) || obs.match(/Custo:\s*R\$\s*([\d.,]+)/i);
-          const custo = matchCusto 
+          let custo = matchCusto 
             ? parseMonetaryValue(matchCusto[1])
             : (a.custo || 0);
 
+          if (vendaCorrespondente && vendaCorrespondente.custo !== undefined && vendaCorrespondente.custo !== null) {
+            custo = Number(vendaCorrespondente.custo);
+          }
+
           // Extrai lucro
           const matchLucro = textoDetalhe.match(/Lucro:\s*R\$\s*([\d.,]+)/i) || obs.match(/Lucro:\s*R\$\s*([\d.,]+)/i);
-          const lucro = matchLucro 
+          let lucro = matchLucro 
             ? parseMonetaryValue(matchLucro[1])
             : (valorVenda - custo);
+
+          if (vendaCorrespondente && vendaCorrespondente.lucro !== undefined && vendaCorrespondente.lucro !== null) {
+            lucro = Number(vendaCorrespondente.lucro);
+          }
 
           // Extrai forma de pagamento
           const matchPgto = textoDetalhe.match(/Pgto:\s*([A-Za-z0-9_]+)/i) || obs.match(/Pgto:\s*([A-Za-z0-9_]+)/i);
@@ -270,9 +283,10 @@ export function AtacadoTab() {
           }
 
           const margem = custo > 0 ? (lucro / custo) * 100 : 100;
+          const finalId = vendaCorrespondente?.id || a.id;
 
           lista.push({
-            id: `venda_${a.id}`,
+            id: finalId,
             aparelhoId: a.id,
             data: dataIso,
             comprador: compradorNome,
@@ -287,6 +301,9 @@ export function AtacadoTab() {
             lucro,
             margem,
             metodoPgto,
+            status: vendaCorrespondente?.status,
+            valorPago: vendaCorrespondente?.valorPago,
+            saldoDevedor: vendaCorrespondente?.saldoDevedor,
             observacoes: a.observacoes,
             raw: a,
           });
@@ -463,11 +480,21 @@ export function AtacadoTab() {
       }
     });
 
-    // 2. Processa também baixas de aparelhos marcadas como fiado
+    // 2. Processa baixas de aparelhos marcadas como fiado que NÃO existam na tabela 'vendas'
     vendasAtacado.forEach(va => {
       if (va.metodoPgto === 'fiado') {
         const cliente = (va.comprador || 'Não Informado').trim();
         
+        // Se este aparelho já possui registro na tabela 'vendas', vendasBanco é a autoridade máxima!
+        const jaNoBanco = vendasBanco.some(vb => 
+          vb.id === va.id || 
+          vb.aparelhoId === va.aparelhoId || 
+          (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === va.aparelhoId))
+        );
+        if (jaNoBanco) {
+          return; // A tabela vendas é a autoridade máxima. Se já está quitada lá, não reabre fiado!
+        }
+
         let jaEstaNoMapa = false;
         mapa.forEach(entry => {
           if (entry.pedidos.some((p: any) => 
@@ -730,54 +757,57 @@ export function AtacadoTab() {
             </div>
           </div>
 
-          {/* BOTÕES DE AÇÃO RÁPIDA */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* BOTÕES DE AÇÃO RÁPIDA (RESPONSIVOS) */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
             <Button
               onClick={() => {
                 setAbrirScannerAtacado(false);
                 setShowNovaVendaModal(true);
               }}
-              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-amber-950/30 flex items-center gap-2 border border-amber-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
+              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold rounded-2xl px-4 text-xs sm:text-sm shadow-md shadow-amber-950/30 flex items-center justify-center gap-2 border border-amber-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-11 sm:h-10 cursor-pointer w-full sm:w-auto"
             >
               <Plus className="w-4 h-4" />
               Nova Venda Atacado
             </Button>
 
-            <Button
-              onClick={() => {
-                setAbrirScannerAtacado(true);
-                setShowNovaVendaModal(true);
-              }}
-              className="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-cyan-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer shadow-sm"
-              title="Bipar aparelhos no atacado via Câmera ou Leitor de Código de Barras USB"
-            >
-              <Camera className="w-4 h-4 text-cyan-400" />
-              Bipar Venda
-            </Button>
+            <div className="grid grid-cols-2 sm:flex items-center gap-2">
+              <Button
+                onClick={() => {
+                  setAbrirScannerAtacado(true);
+                  setShowNovaVendaModal(true);
+                }}
+                className="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-cyan-500/30 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer shadow-sm"
+                title="Bipar aparelhos no atacado via Câmera ou Leitor de Código de Barras USB"
+              >
+                <Camera className="w-4 h-4 text-cyan-400" />
+                Bipar Venda
+              </Button>
 
-            <Button
-              onClick={() => setShowAtacadoModal(true)}
-              className="bg-slate-800/90 hover:bg-slate-700/90 text-amber-300 hover:text-amber-200 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 shadow-sm cursor-pointer"
-            >
-              <Tag className="w-4 h-4 text-amber-400" />
-              Preços de Atacado
-            </Button>
+              <Button
+                onClick={() => setShowAtacadoModal(true)}
+                className="bg-slate-800/90 hover:bg-slate-700/90 text-amber-300 hover:text-amber-200 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-slate-700/80 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 shadow-sm cursor-pointer"
+              >
+                <Tag className="w-4 h-4 text-amber-400" />
+                Preços Atacado
+              </Button>
 
-            <Button
-              onClick={handleExportWhatsAppAtacado}
-              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-emerald-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
-            >
-              <MessageCircle className="w-4 h-4 text-emerald-400" />
-              Lista WhatsApp
-            </Button>
+              <Button
+                onClick={handleExportWhatsAppAtacado}
+                className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-emerald-500/30 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer"
+              >
+                <MessageCircle className="w-4 h-4 text-emerald-400" />
+                Lista Zap
+              </Button>
 
-            <Button
-              onClick={handleExportCSVVendas}
-              className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 font-semibold rounded-xl px-3 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
-              title="Exportar CSV de Vendas de Atacado"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            </Button>
+              <Button
+                onClick={handleExportCSVVendas}
+                className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-slate-700/80 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer"
+                title="Exportar CSV de Vendas de Atacado"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                CSV
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -1204,21 +1234,106 @@ export function AtacadoTab() {
               </div>
 
               {/* Campo de Busca */}
-              <div className="relative">
+              <div className="relative w-full sm:w-auto flex-1 sm:flex-initial">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Buscar modelo, lojista, IMEI..."
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-amber-500 w-44 sm:w-56"
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-amber-500 w-full sm:w-56"
                 />
               </div>
             </div>
           </div>
 
-          {/* TABELA DE VENDAS */}
-          <div className="overflow-x-auto">
+          {/* VISUALIZAÇÃO MOBILE (CARDS TOUCH-FRIENDLY) */}
+          <div className="md:hidden space-y-3">
+            {vendasFiltradas.length === 0 ? (
+              <div className="py-8 text-center text-slate-500 text-xs">
+                Nenhuma venda de atacado encontrada para este filtro.
+              </div>
+            ) : (
+              vendasFiltradas.map((v) => (
+                <div 
+                  key={v.id} 
+                  className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm relative"
+                >
+                  {/* Linha 1: Comprador + Data + Forma de Pgto */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                      <span className="font-bold text-xs text-white truncate">{v.comprador}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant="outline" className={cn("text-[10px] uppercase font-mono", v.metodoPgto === 'fiado' ? "bg-rose-500/20 border-rose-500/30 text-rose-300" : "bg-slate-900 border-slate-800 text-slate-300")}>
+                        {v.metodoPgto}
+                      </Badge>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {formatarDataSegura(v.data)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Linha 2: Modelo + Especificações */}
+                  <div className="bg-slate-900/60 rounded-xl p-2.5 border border-white/5 space-y-0.5">
+                    <div className="font-bold text-xs text-white">{v.modelo}</div>
+                    <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                      <span>{v.capacidade} · {v.cor}</span>
+                      <span>ID: {v.codigo || v.imei || '-'}</span>
+                    </div>
+                  </div>
+
+                  {/* Linha 3: Financeiro (Valor Venda, Custo, Lucro) */}
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 text-center">
+                    <div className="bg-slate-900/40 rounded-lg p-1.5 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block">Venda</span>
+                      <span className="text-xs font-bold font-mono text-white">
+                        R$ {v.valorVenda.toFixed(0)}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/40 rounded-lg p-1.5 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block">Custo</span>
+                      <span className="text-xs font-bold font-mono text-slate-400">
+                        R$ {v.custo.toFixed(0)}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/40 rounded-lg p-1.5 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block">Lucro</span>
+                      <span className={cn("text-xs font-bold font-mono", v.lucro >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                        R$ {v.lucro.toFixed(0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Linha 4: Ações Rápidas (Botões Grandes e Confortáveis) */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+                    <button
+                      onClick={() => setVendaParaEditar(v)}
+                      className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-xl py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
+                    >
+                      <Edit2 className="w-3.5 h-3.5 text-blue-400" />
+                      Editar Dados
+                    </button>
+
+                    <button
+                      onClick={() => handleReverterVenda(v)}
+                      className="bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
+                      title="Devolver ao estoque ativo"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                      Estornar
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* TABELA DE VENDAS (DESKTOP) */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">

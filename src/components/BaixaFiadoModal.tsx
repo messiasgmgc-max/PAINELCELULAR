@@ -129,17 +129,89 @@ export function BaixaFiadoModal({
           ? venda.historicoAbatimentos 
           : [];
 
-        const { error } = await supabase
-          .from('vendas')
-          .update({
-            valorPago: novoPago,
-            saldoDevedor: novoSaldoDevedor,
-            status: novoStatus,
-            historicoAbatimentos: [...historicoExistente, novoLog],
-          })
-          .eq('id', venda.id);
+        // Validação robusta de UUID para evitar erro de syntax no PostgreSQL
+        const isValidUUID = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        let targetVendaId: string | null = null;
 
-        if (error) throw error;
+        if (isValidUUID(venda.id)) {
+          targetVendaId = venda.id;
+        } else if (isValidUUID(venda.vendaId)) {
+          targetVendaId = venda.vendaId;
+        } else if (venda.aparelhoId) {
+          // Tenta localizar a venda pelo aparelhoId vinculado
+          const { data: vendasExistentes } = await supabase
+            .from('vendas')
+            .select('id, itens');
+          
+          const encontrada = vendasExistentes?.find((vb: any) => 
+            (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
+            (vb as any).aparelhoId === venda.aparelhoId
+          );
+
+          if (encontrada && isValidUUID(encontrada.id)) {
+            targetVendaId = encontrada.id;
+          }
+        }
+
+        if (targetVendaId) {
+          const { error } = await supabase
+            .from('vendas')
+            .update({
+              valorPago: novoPago,
+              saldoDevedor: novoSaldoDevedor,
+              status: novoStatus,
+              historicoAbatimentos: [...historicoExistente, novoLog],
+            })
+            .eq('id', targetVendaId);
+
+          if (error) throw error;
+        } else {
+          // Se não encontrou venda física cadastrada, cria o registro correspondente para manter integridade
+          const { error: errInsert } = await supabase
+            .from('vendas')
+            .insert([{
+              clienteNome: lojistaNome,
+              valor: totalVenda,
+              valorPago: novoPago,
+              saldoDevedor: novoSaldoDevedor,
+              status: novoStatus,
+              metodo: 'fiado',
+              tipoEntrega: 'Atacado / Lojista',
+              descricao: `Venda ATACADO - ${venda.descricao || 'Aparelho'}`,
+              loja_id: lojaId || null,
+              dataPagamento: dataIso,
+              historicoAbatimentos: [novoLog],
+              itens: venda.aparelhoId ? [{
+                id: String(Date.now()),
+                total: totalVenda,
+                descricao: venda.descricao || 'Aparelho de Atacado',
+                aparelhoId: venda.aparelhoId,
+                quantidade: 1,
+              }] : [],
+            }]);
+
+          if (errInsert) console.warn('Aviso ao criar registro de venda faltante:', errInsert);
+        }
+
+        // Se o aparelho estiver vinculado, atualiza as observações da baixa no aparelho
+        if (venda.aparelhoId) {
+          const { data: apar } = await supabase
+            .from('aparelhos')
+            .select('observacoes')
+            .eq('id', venda.aparelhoId)
+            .maybeSingle();
+
+          if (apar) {
+            let obsApar = String(apar.observacoes || '');
+            if (novoStatus === 'pago') {
+              obsApar = obsApar.replace(/Pgto:\s*fiado(?:\s*\([^)]*\))?/gi, `Pgto: fiado (quitado)`);
+            }
+            await supabase
+              .from('aparelhos')
+              .update({ observacoes: obsApar })
+              .eq('id', venda.aparelhoId);
+          }
+        }
 
         valorRestanteParaAbater -= abatimentoNestaVenda;
       }
@@ -157,7 +229,7 @@ export function BaixaFiadoModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-white my-auto shrink-0 relative">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 text-white my-auto shrink-0 relative max-h-[92vh] overflow-y-auto">
         
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
