@@ -19,7 +19,8 @@ import {
   QrCode,
   Zap,
   Loader2,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { useStorePlan } from '@/hooks/useStorePlan';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,17 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     loadingHistorico,
     refetchHistorico
   } = useStorePlan();
+
+  // Cálculo de valor proporcional caso queira pagar antes do vencimento
+  const diasRestantes = planData.diasParaVencer || 0;
+  const isRenovacaoAntecipada = diasRestantes > 0 && diasRestantes < 30 && planData.planoStatus === 'ativo';
+  const diasParaCompletar = isRenovacaoAntecipada ? (30 - diasRestantes) : 30;
+  const valorMensalBase = planData.valorMensalidade || 99.90;
+  const valorDiaria = valorMensalBase / 30;
+  const valorCobrancaFinal = isRenovacaoAntecipada 
+    ? Math.max(1.00, Number((diasParaCompletar * valorDiaria).toFixed(2)))
+    : valorMensalBase;
+
   const [copied, setCopied] = useState(false);
   const [comprovante, setComprovante] = useState<string | null>(null);
   const [observacao, setObservacao] = useState('');
@@ -86,15 +98,15 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     if (!dateStr) return '-';
     try {
       const d = new Date(dateStr);
-      return d.toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      if (isNaN(d.getTime())) return String(dateStr);
+      const dia = String(d.getDate()).padStart(2, '0');
+      const mes = String(d.getMonth() + 1).padStart(2, '0');
+      const ano = d.getFullYear();
+      const hora = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      return `${dia}/${mes}/${ano} às ${hora}:${min}`;
     } catch {
-      return dateStr;
+      return String(dateStr);
     }
   };
 
@@ -129,7 +141,8 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lojaId: planData.lojaId,
-          valor: planData.valorMensalidade,
+          valor: valorCobrancaFinal,
+          email: planData.nomeLoja,
         }),
       });
 
@@ -138,7 +151,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
 
       setPixDinamico(data);
       if (data.modo === 'mercadopago') {
-        toast.success('QR Code Pix gerado via Mercado Pago! Pague pelo seu app bancário.');
+        toast.success(`QR Code Pix gerado (R$ ${valorCobrancaFinal.toFixed(2).replace('.', ',')})! Pague pelo seu app bancário.`);
       } else {
         toast.success(data.mensagem || 'Chave PIX gerada com sucesso! Anexe o comprovante após o pagamento.');
       }
@@ -156,11 +169,15 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
               if (checkData.approved) {
                 if (pollingRef.current) clearInterval(pollingRef.current);
                 setPagamentoAprovadoAuto(true);
-                toast.success('🎉 Pagamento confirmado com sucesso! Sua loja já está liberada!', {
-                  duration: 6000,
+                toast.success('🎉 Pagamento confirmado! Atualizando validade do seu plano...', {
+                  duration: 4000,
                 });
                 await refetchPlan();
                 await refetchHistorico();
+                // Força o refresh da página após 1.8 segundos para atualizar todo o cabeçalho e contadores
+                setTimeout(() => {
+                  window.location.reload();
+                }, 1800);
               }
             }
           } catch (pollErr) {
@@ -369,6 +386,20 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
               Pague via QR Code ou Copia e Cola. O sistema reconhece o pagamento na hora e renova sua assinatura automaticamente, sem precisar aguardar aprovação manual!
             </p>
 
+            {isRenovacaoAntecipada && (
+              <div className="bg-sky-500/10 border border-sky-500/30 rounded-xl p-3 text-xs space-y-1">
+                <div className="flex items-center justify-between font-bold">
+                  <span className="text-sky-300">Renovação Parcial Inteligente:</span>
+                  <span className="text-emerald-400 font-mono text-sm">
+                    R$ {valorCobrancaFinal.toFixed(2).replace('.', ',')}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Você ainda tem <b>{diasRestantes} dias</b> de validade. Você paga somente <b>{diasParaCompletar} dias</b> (R$ {valorDiaria.toFixed(2).replace('.', ',')}/dia) para estender sua validade para <b>30 dias a partir de hoje</b>!
+                </p>
+              </div>
+            )}
+
             {!pixDinamico ? (
               <Button
                 type="button"
@@ -382,7 +413,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                   </>
                 ) : (
                   <>
-                    <QrCode className="w-4 h-4" /> Gerar QR Code PIX para Pagamento
+                    <QrCode className="w-4 h-4" /> Gerar QR Code PIX (R$ {valorCobrancaFinal.toFixed(2).replace('.', ',')})
                   </>
                 )}
               </Button>
@@ -423,9 +454,9 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                       {/* Dados Copia e Cola */}
                       <div className="space-y-2 flex-1 w-full">
                         <div className="flex items-center justify-between text-xs">
-                          <span className="text-slate-400 font-semibold">Valor da Mensalidade:</span>
+                          <span className="text-slate-400 font-semibold">{isRenovacaoAntecipada ? 'Valor Proporcional:' : 'Valor da Mensalidade:'}</span>
                           <span className="text-emerald-400 font-bold font-mono text-sm">
-                            R$ {planData.valorMensalidade.toFixed(2).replace('.', ',')}
+                            R$ {valorCobrancaFinal.toFixed(2).replace('.', ',')}
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-400">

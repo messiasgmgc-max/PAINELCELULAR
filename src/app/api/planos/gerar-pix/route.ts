@@ -21,7 +21,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Loja não encontrada' }, { status: 404 });
     }
 
-    const valorCobranca = Number(valor || loja.valor_mensalidade || 99.90);
+    // Calcular dias restantes e se é renovação antecipada proporcional
+    let diasRestantes = 0;
+    if (loja.data_vencimento) {
+      const parts = String(loja.data_vencimento).split('T')[0].split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const venc = new Date(year, month, day, 23, 59, 59, 999);
+        const diffTime = venc.getTime() - Date.now();
+        diasRestantes = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    const valorMensalBase = Number(loja.valor_mensalidade || 99.90);
+    const valorDiaria = valorMensalBase / 30;
+
+    let valorCalculado = valorMensalBase;
+    let diasCobrados = 30;
+    let isProporcional = false;
+
+    // Se ainda restam dias (ex: 10 dias) e o plano está ativo, cobra somente os dias para completar 30 dias (ex: 20 dias)
+    if (diasRestantes > 0 && diasRestantes < 30 && (loja.plano_status === 'ativo' || !loja.plano_status)) {
+      diasCobrados = 30 - diasRestantes;
+      valorCalculado = Math.max(1.00, Number((diasCobrados * valorDiaria).toFixed(2)));
+      isProporcional = true;
+    }
+
+    const valorCobranca = valor ? Number(Number(valor).toFixed(2)) : valorCalculado;
     
     // 1. Tentar buscar token da própria loja
     let tokenMercadoPago = loja.mp_access_token?.trim();
@@ -57,6 +85,10 @@ export async function POST(request: Request) {
 
         const payerName = (nome || loja.nome || 'Cliente').trim().slice(0, 30);
 
+        const descricaoCobranca = isProporcional
+          ? `Renovação Parcial (${diasCobrados} dias) - ${(loja.nome || 'Loja').slice(0, 30)}`
+          : `Mensalidade Sistema - ${(loja.nome || 'Loja').slice(0, 30)}`;
+
         const mpResponse = await fetch('https://api.mercadopago.com/v1/payments', {
           method: 'POST',
           headers: {
@@ -66,7 +98,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             transaction_amount: Number(valorCobranca.toFixed(2)),
-            description: `Mensalidade Sistema - ${(loja.nome || 'Loja').slice(0, 50)}`,
+            description: descricaoCobranca,
             payment_method_id: 'pix',
             payer: {
               email: payerEmail,
@@ -85,6 +117,10 @@ export async function POST(request: Request) {
           const qrCodeBase64 = txData.qr_code_base64;
           const ticketUrl = txData.ticket_url;
 
+          const obsHistorico = isProporcional
+            ? `PIX Mercado Pago gerado (ID: ${paymentId}) - Renovação Proporcional de ${diasCobrados} dias (restavam ${diasRestantes} dias)`
+            : `PIX Mercado Pago gerado (ID: ${paymentId})`;
+
           // Grava no histórico de pagamentos
           await supabaseAdmin.from('historico_pagamentos_planos').insert({
             loja_id: lojaId,
@@ -93,7 +129,7 @@ export async function POST(request: Request) {
             mp_payment_id: paymentId,
             qr_code: qrCode,
             qr_code_base64: qrCodeBase64,
-            observacao: `PIX Mercado Pago gerado (ID: ${paymentId})`
+            observacao: obsHistorico
           });
 
           return NextResponse.json({
@@ -103,7 +139,10 @@ export async function POST(request: Request) {
             qrCode,
             qrCodeBase64,
             ticketUrl,
-            valor: valorCobranca
+            valor: valorCobranca,
+            diasCobrados,
+            diasRestantes,
+            isProporcional
           });
         } else {
           // Erro retornado pela API do Mercado Pago - reportar claramente para o usuário

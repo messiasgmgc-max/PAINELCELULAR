@@ -66,9 +66,7 @@ export async function POST(request: Request) {
         .eq('id', lojaId)
         .maybeSingle();
 
-      const dataAtualVenc = lojaAtual?.data_vencimento ? new Date(lojaAtual.data_vencimento) : new Date();
-      const baseDate = dataAtualVenc > new Date() ? dataAtualVenc : new Date();
-      const novoVencimento = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const novoVencimento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       // 2. Liberar loja e renovar plano
       await supabaseAdmin

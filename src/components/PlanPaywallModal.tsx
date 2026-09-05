@@ -114,6 +114,9 @@ export function PlanPaywallModal() {
                   duration: 6000
                 });
                 await refetchPlan();
+                setTimeout(() => {
+                  window.location.reload();
+                }, 1800);
               }
             }
           } catch (pollErr) {

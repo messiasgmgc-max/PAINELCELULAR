@@ -60,10 +60,8 @@ export async function GET(request: Request) {
           const status = mpPayment.status;
 
           if (status === 'approved') {
-            // Pagamento APROVADO! Atualizar plano da loja e histórico
-            const dataAtualVenc = loja.data_vencimento ? new Date(loja.data_vencimento) : new Date();
-            const baseDate = dataAtualVenc > new Date() ? dataAtualVenc : new Date();
-            const novoVencimento = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            // Pagamento APROVADO! O vencimento completa 30 dias a partir do pagamento
+            const novoVencimento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
             await supabaseAdmin
               .from('lojas')
