@@ -1685,12 +1685,52 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     return 'Cancelado';
   };
 
+  // Helper robusto para identificar vendas com dados de cliente pendentes ou genéricos ("Comum", "Consumidor", etc.)
+  const verificarVendaDadosPendentes = (venda: Venda, listaClientes?: Cliente[]): boolean => {
+    // 1. Se foi explicitamente marcada como pendente
+    if ((venda as any).dados_cliente_pendente === true) return true;
+
+    // 2. Se for uma venda de atacado, não entra na aba de dados pendentes do varejo
+    const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || 
+      (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
+    if (isAtacado) return false;
+
+    const nome = (venda.clienteNome || '').trim();
+    if (!nome) return true;
+
+    // 3. Nomes genéricos de clientes/balcão que foram vendidos sem dados reais completos
+    const padraoGenerico = /^(comum|cliente comum|consumidor|cliente consumidor|final|cliente final|balc[aã]o|cliente balc[aã]o|pendente|n[aã]o informado|sem nome|desconhecido|an[oô]nimo)$/i;
+    if (padraoGenerico.test(nome) || /(comum|balc[aã]o|pendente|consumidor)/i.test(nome)) {
+      return true;
+    }
+
+    // 4. Se não tem clienteId vinculado, precisa de cadastro real
+    if (!venda.clienteId) {
+      return true;
+    }
+
+    // 5. Se tem cliente vinculado, verificar se o cadastro do cliente tem dados reais ou se é apenas um placeholder
+    if (listaClientes && listaClientes.length > 0) {
+      const cli = listaClientes.find((c) => c.id === venda.clienteId || c.nome?.toLowerCase() === nome.toLowerCase());
+      if (cli) {
+        if (padraoGenerico.test((cli.nome || '').trim()) || /(comum|balc[aã]o|pendente|consumidor)/i.test(cli.nome || '')) {
+          return true;
+        }
+        const tel = (cli.telefone || '').replace(/\D/g, '');
+        if (!tel || tel.length < 8) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
   const vendasFiltradas = useMemo(() => {
     const vendasBase = vendas.filter((venda) => {
       // Filtro por Canal de Venda (Varejo x Dados Pendentes x Atacado x Todos)
       const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
-      const isPendente = (venda as any).dados_cliente_pendente === true || 
-        (!venda.clienteId && (!venda.clienteNome || venda.clienteNome.toLowerCase().includes('cliente final') || venda.clienteNome.toLowerCase().includes('pendente')));
+      const isPendente = verificarVendaDadosPendentes(venda, clientes);
 
       if (filtroCanal === 'varejo' && (isAtacado || isPendente)) return false;
       if (filtroCanal === 'pendentes' && !isPendente) return false;
@@ -1778,14 +1818,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     let atacado = 0;
     vendas.forEach((v) => {
       const isAtacado = (v as any).tipoEntrega === 'Atacado / Lojista' || (v.descricao && v.descricao.toLowerCase().includes('atacado'));
-      const isPendente = (v as any).dados_cliente_pendente === true || 
-        (!v.clienteId && (!v.clienteNome || v.clienteNome.toLowerCase().includes('cliente final') || v.clienteNome.toLowerCase().includes('pendente')));
+      const isPendente = verificarVendaDadosPendentes(v, clientes);
       if (isPendente) pendentes++;
       else if (isAtacado) atacado++;
       else varejo++;
     });
     return { varejo, pendentes, atacado, total: vendas.length };
-  }, [vendas]);
+  }, [vendas, clientes]);
 
   const handleNovoClienteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3316,8 +3355,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 <tbody>
                   {vendasFiltradas.map((venda) => {
                     const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
-                    const isPendente = (venda as any).dados_cliente_pendente === true || 
-                      (!venda.clienteId && (!venda.clienteNome || venda.clienteNome.toLowerCase().includes('cliente final') || venda.clienteNome.toLowerCase().includes('pendente')));
+                    const isPendente = verificarVendaDadosPendentes(venda, clientes);
 
                     return (
                     <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5")}>
