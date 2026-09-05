@@ -17,6 +17,7 @@ import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printe
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
+import { VincularVendidoModal } from '@/components/VincularVendidoModal';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -104,6 +105,7 @@ function ProdutoCombobox({
 }) {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [buscarVendidosSemCliente, setBuscarVendidosSemCliente] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -123,8 +125,10 @@ function ProdutoCombobox({
     }
   }, [open]);
 
-  const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
-  const selecionado = disponiveis.find(a => a.id === value);
+  const disponiveis = buscarVendidosSemCliente
+    ? aparelhos.filter(a => a.ativo !== false || a.condicao === 'vendido' || (a as any).status === 'vendido')
+    : aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+  const selecionado = aparelhos.find(a => a.id === value);
 
   const filtrados = disponiveis.filter(a => {
     if (!searchTerm.trim()) return true;
@@ -178,21 +182,32 @@ function ProdutoCombobox({
 
       {open && (
         <div className="absolute left-0 top-full mt-1.5 w-full min-w-[340px] sm:min-w-[500px] md:min-w-[620px] bg-slate-900/98 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-[9999] overflow-hidden flex flex-col max-h-84 animate-in fade-in slide-in-from-top-1 duration-150">
-          <div className="p-2.5 border-b border-white/10 bg-black/40 flex items-center gap-2">
-            <Search className="w-4 h-4 text-emerald-400 shrink-0 ml-1" />
-            <input
-              ref={inputRef}
-              type="text"
-              className="bg-transparent border-none outline-none text-xs w-full text-white placeholder-slate-400 font-mono"
-              placeholder="Digite o ID (ex: 8665041), IMEI (ex: 9551984) ou Modelo..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            {searchTerm && (
-              <button type="button" onClick={() => setSearchTerm('')} className="p-1 text-slate-400 hover:text-white">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+          <div className="p-2.5 border-b border-white/10 bg-black/40 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-emerald-400 shrink-0 ml-1" />
+              <input
+                ref={inputRef}
+                type="text"
+                className="bg-transparent border-none outline-none text-xs w-full text-white placeholder-slate-400 font-mono"
+                placeholder="Digite o ID (ex: 8665041), IMEI (ex: 9551984) ou Modelo..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              {searchTerm && (
+                <button type="button" onClick={() => setSearchTerm('')} className="p-1 text-slate-400 hover:text-white">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <label className="flex items-center gap-1.5 px-1 pt-1 text-[11px] text-amber-300 font-bold cursor-pointer border-t border-white/5">
+              <input
+                type="checkbox"
+                checked={buscarVendidosSemCliente}
+                onChange={(e) => setBuscarVendidosSemCliente(e.target.checked)}
+                className="rounded border-amber-500 text-amber-500 focus:ring-amber-500"
+              />
+              <span>🔗 Buscar também aparelhos já baixados/vendidos sem cliente vinculado</span>
+            </label>
           </div>
 
           <div className="overflow-y-auto divide-y divide-white/5 text-xs font-mono flex-1 max-h-64">
@@ -205,6 +220,7 @@ function ProdutoCombobox({
                 const imei = a.imei || a.numeroSerie || '';
                 const isSelected = a.id === value;
                 const cod = getAparelhoCodigo(a);
+                const jaBaixado = a.condicao === 'vendido' || (a as any).status === 'vendido' || a.ativo === false;
                 return (
                   <div
                     key={a.id}
@@ -225,6 +241,11 @@ function ProdutoCombobox({
                         {imei && (
                           <span className="font-bold text-emerald-400 bg-emerald-950/90 px-2 py-0.5 rounded border border-emerald-500/40 text-[11px]">
                             IMEI: {imei}
+                          </span>
+                        )}
+                        {jaBaixado && (
+                          <span className="font-bold text-amber-300 bg-amber-950/90 px-1.5 py-0.5 rounded border border-amber-500/40 text-[10px]">
+                            ⚠️ Já Baixado
                           </span>
                         )}
                         <span className="font-bold text-white text-xs">
@@ -267,6 +288,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [vendasPorPeriodo, setVendasPorPeriodo] = useState<VendasPorPeriodo[]>([]);
+  const [filtroCanal, setFiltroCanal] = useState<'varejo' | 'pendentes' | 'atacado' | 'todos'>('varejo');
+  const [showVincularVendidoModal, setShowVincularVendidoModal] = useState(false);
   const [filtroBusca, setFiltroBusca] = useState('');
   const [filtroStatus, setFiltroStatus] = useState<string>('');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('');
@@ -1710,6 +1733,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const vendasFiltradas = useMemo(() => {
     const vendasBase = vendas.filter((venda) => {
+      // Filtro por Canal de Venda (Varejo x Dados Pendentes x Atacado x Todos)
+      const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
+      const isPendente = (venda as any).dados_cliente_pendente === true || 
+        (!venda.clienteId && (!venda.clienteNome || venda.clienteNome.toLowerCase().includes('cliente final') || venda.clienteNome.toLowerCase().includes('pendente')));
+
+      if (filtroCanal === 'varejo' && (isAtacado || isPendente)) return false;
+      if (filtroCanal === 'pendentes' && !isPendente) return false;
+      if (filtroCanal === 'atacado' && !isAtacado) return false;
+
       const cliente = venda.clienteNome || '';
       const vendedor = venda.vendedor || '';
       const busca = filtroBusca.trim().toLowerCase();
@@ -1783,7 +1815,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     });
 
     return sorted;
-  }, [vendas, filtroBusca, filtroStatus, filtroMetodo, filtroVendedor, filtroDataInicio, filtroDataFim, ordenarPor, direcaoOrdenacao, clientes, aparelhos]);
+  }, [vendas, filtroCanal, filtroBusca, filtroStatus, filtroMetodo, filtroVendedor, filtroDataInicio, filtroDataFim, ordenarPor, direcaoOrdenacao, clientes, aparelhos]);
+
+  const contagemCanais = useMemo(() => {
+    let varejo = 0;
+    let pendentes = 0;
+    let atacado = 0;
+    vendas.forEach((v) => {
+      const isAtacado = (v as any).tipoEntrega === 'Atacado / Lojista' || (v.descricao && v.descricao.toLowerCase().includes('atacado'));
+      const isPendente = (v as any).dados_cliente_pendente === true || 
+        (!v.clienteId && (!v.clienteNome || v.clienteNome.toLowerCase().includes('cliente final') || v.clienteNome.toLowerCase().includes('pendente')));
+      if (isPendente) pendentes++;
+      else if (isAtacado) atacado++;
+      else varejo++;
+    });
+    return { varejo, pendentes, atacado, total: vendas.length };
+  }, [vendas]);
 
   const resumoVendas = {
     totalVendido: vendasFiltradas.reduce((sum, v) => sum + v.valor, 0),
@@ -2425,9 +2472,18 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 openPOSModal();
                 if (editingId) setEditingId(null);
               }}
-              className="btn-ios h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
+              className="btn-ios h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap cursor-pointer"
             >
               + Nova Venda
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowVincularVendidoModal(true)}
+              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-bold gap-1.5 cursor-pointer"
+              title="Vincular aparelho já baixado do estoque a um cliente para gerar notinha"
+            >
+              <Repeat className="h-4 w-4 text-amber-400" />
+              Vincular Já Vendido
             </Button>
             <Button
               type="button"
@@ -3307,6 +3363,38 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               </div>
             </div>
 
+            {/* SUB-ABAS DE CANAIS DE VENDA */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl w-full sm:w-fit flex-wrap">
+              {[
+                { id: 'varejo', label: '📱 Varejo', count: contagemCanais.varejo, color: 'text-emerald-400' },
+                { id: 'pendentes', label: '⚠️ Dados Pendentes', count: contagemCanais.pendentes, color: 'text-amber-400', isAlert: true },
+                { id: 'atacado', label: '📦 Atacado (Lojistas)', count: contagemCanais.atacado, color: 'text-cyan-400' },
+                { id: 'todos', label: '📋 Todas as Vendas', count: contagemCanais.total, color: 'text-slate-300' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setFiltroCanal(tab.id as any)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer",
+                    filtroCanal === tab.id
+                      ? "bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-950/40"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                  )}
+                >
+                  <span>{tab.label}</span>
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded-full text-[10px] font-black",
+                    filtroCanal === tab.id
+                      ? "bg-slate-950/20 text-slate-950"
+                      : tab.isAlert && tab.count > 0 ? "bg-amber-500/20 text-amber-300 animate-pulse" : "bg-slate-800 text-slate-400"
+                  )}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
             {/* Linha Principal de Filtros Rápidos */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               <div className="relative lg:col-span-2">
@@ -3414,7 +3502,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   <tr className="text-xs sm:text-sm text-left">
                     <th className="py-3 px-2">ID</th>
                     <th className="py-3 px-2 hidden md:table-cell">Data & Horário</th>
-                    <th className="py-3 px-2">Cliente</th>
+                    <th className="py-3 px-2">Canal</th>
+                    <th className="py-3 px-2">Cliente / Lojista</th>
                     <th className="text-left py-3 px-2 hidden sm:table-cell">Aparelho</th>
                     <th className="text-right py-3 px-2">Valor</th>
                     <th className="text-right py-3 px-2 hidden sm:table-cell">Lucro</th>
@@ -3424,8 +3513,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   </tr>
                 </thead>
                 <tbody>
-                  {vendasFiltradas.map((venda) => (
-                    <tr key={venda.id} className="border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors">
+                  {vendasFiltradas.map((venda) => {
+                    const isAtacado = (venda as any).tipoEntrega === 'Atacado / Lojista' || (venda.descricao && venda.descricao.toLowerCase().includes('atacado'));
+                    const isPendente = (venda as any).dados_cliente_pendente === true || 
+                      (!venda.clienteId && (!venda.clienteNome || venda.clienteNome.toLowerCase().includes('cliente final') || venda.clienteNome.toLowerCase().includes('pendente')));
+
+                    return (
+                    <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5")}>
                       <td className="py-3 px-2 font-mono text-xs text-blue-400 font-bold">#{venda.id ? venda.id.slice(-6).toUpperCase() : 'N/A'}</td>
                       <td className="py-3 px-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap">
                         {new Date((venda as any).created_at || venda.dataPagamento).toLocaleString('pt-BR', {
@@ -3436,7 +3530,49 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           minute: '2-digit'
                         })}
                       </td>
-                      <td className="py-3 px-2 font-medium">{venda.clienteNome}</td>
+                      <td className="py-3 px-2">
+                        <div className="flex items-center gap-1">
+                          {isAtacado ? (
+                            <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px] font-bold">
+                              Atacado
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-bold">
+                              Varejo
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-2 font-medium">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={isPendente ? "text-amber-300 font-bold" : ""}>{venda.clienteNome}</span>
+                          {isPendente && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const itemPrincipal = venda.itens?.[0];
+                                setVendaRegistroParaEditar({
+                                  id: venda.id,
+                                  vendaId: venda.id,
+                                  aparelhoId: itemPrincipal?.aparelhoId,
+                                  data: venda.dataPagamento || (venda as any).data || new Date().toISOString(),
+                                  comprador: venda.clienteNome || '',
+                                  modelo: itemPrincipal?.descricao || venda.descricao || 'Item Venda',
+                                  valorVenda: venda.valor || 0,
+                                  custo: venda.custo || 0,
+                                  metodoPgto: venda.metodo || 'pix',
+                                  tipoVenda: (venda as any).tipoEntrega || 'Varejo',
+                                  observacoes: venda.descricao || '',
+                                });
+                              }}
+                              className="text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/40 cursor-pointer flex items-center gap-1 shadow-sm"
+                              title="Completar dados do cliente para emitir a notinha"
+                            >
+                              <Edit className="w-3 h-3" /> Completar Notinha
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-3 px-2 hidden sm:table-cell text-muted-foreground">{venda.itens && venda.itens.length > 0 ? `${venda.itens.length} itens` : venda.descricao}</td>
                       <td className="py-3 px-2 text-right font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</td>
                       <td className="py-3 px-2 text-right hidden sm:table-cell text-green-600 font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.lucro)}</td>
@@ -3513,7 +3649,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
                 </tbody>
               </table>
               {loading && vendas.length === 0 && (
@@ -4102,6 +4239,24 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           onSuccess={async () => {
             await carregarVendas();
             await fetchAparelhos();
+          }}
+        />
+      </ModalPortal>
+
+      {/* Modal de Vincular Aparelho Já Vendido */}
+      <ModalPortal>
+        <VincularVendidoModal
+          isOpen={showVincularVendidoModal}
+          onClose={() => setShowVincularVendidoModal(false)}
+          aparelhos={aparelhos}
+          clientes={clientes}
+          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          onSuccess={async () => {
+            await carregarVendas();
+            await fetchAparelhos();
+          }}
+          onEmitirNotinha={(venda) => {
+            handleGerarReciboA4(venda);
           }}
         />
       </ModalPortal>

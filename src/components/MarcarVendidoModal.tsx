@@ -21,6 +21,8 @@ import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
+import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
+import { useCompradores } from '@/hooks/useCompradores';
 
 interface MarcarVendidoModalProps {
   isOpen: boolean;
@@ -56,17 +58,10 @@ export function MarcarVendidoModal({
   const [dataVencimento, setDataVencimento] = useState<string>('');
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
-  const [compradoresRecentes, setCompradoresRecentes] = useState<string[]>([]);
+  const [dadosPendente, setDadosPendente] = useState(false);
 
-  // Carrega compradores recentes do localStorage
-  useEffect(() => {
-    try {
-      const salvas = localStorage.getItem('painel_celular_compradores_recentes');
-      if (salvas) {
-        setCompradoresRecentes(JSON.parse(salvas));
-      }
-    } catch (e) {}
-  }, []);
+  // Hook de compradores frequentes (banco de dados)
+  const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
 
   // Preenche dados padrão ao abrir para um aparelho
   useEffect(() => {
@@ -108,16 +103,6 @@ export function MarcarVendidoModal({
 
   if (!isOpen || !aparelho) return null;
 
-  const salvarCompradorRecente = (nome: string) => {
-    if (!nome || nome.trim().length < 2) return;
-    const limpo = nome.trim();
-    try {
-      const atualizados = [limpo, ...compradoresRecentes.filter(c => c.toLowerCase() !== limpo.toLowerCase())].slice(0, 8);
-      setCompradoresRecentes(atualizados);
-      localStorage.setItem('painel_celular_compradores_recentes', JSON.stringify(atualizados));
-    } catch (e) {}
-  };
-
   const handleConfirmarVenda = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aparelho) return;
@@ -158,6 +143,8 @@ export function MarcarVendidoModal({
 
       if (errAparelho) throw errAparelho;
 
+      const isDadosPendente = tipoVenda === 'varejo' && (dadosPendente || !comprador.trim() || comprador.toLowerCase().includes('cliente final') || comprador.toLowerCase().includes('pendente'));
+
       // 2. Insere registro na tabela 'vendas' para alimentar relatórios e gráficos
       const payloadVenda: any = {
         clienteNome: compradorFinal,
@@ -177,6 +164,7 @@ export function MarcarVendidoModal({
         descricao: `Venda ${tipoVenda.toUpperCase()} - ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''})`,
         garantia: tipoVenda === 'atacado' ? 'Garantia de Atacado (Teste)' : '90 dias',
         descontoTotal: 0,
+        dados_cliente_pendente: isDadosPendente,
         itens: [
           {
             id: Date.now().toString(),
@@ -223,7 +211,8 @@ export function MarcarVendidoModal({
         }
       }
 
-      salvarCompradorRecente(compradorFinal);
+      // Salva no banco de dados para autocomplete futuro
+      await upsertComprador(compradorFinal, tipoVenda === 'atacado' ? 'lojista' : 'cliente');
 
       toast.success(`🎉 Venda de ${aparelho.modelo} registrada com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
       await onSuccess();
@@ -317,33 +306,29 @@ export function MarcarVendidoModal({
               <label className="text-xs font-bold text-slate-300">
                 {tipoVenda === 'atacado' ? 'Nome do Lojista / Comprador *' : 'Nome do Cliente / Comprador *'}
               </label>
-              <span className="text-[10px] text-slate-400">Ex: "Junior", "Tech Cell"</span>
+              <span className="text-[10px] text-cyan-400 font-medium">💡 Busca inteligente salva no banco</span>
             </div>
 
-            <input
-              type="text"
-              placeholder={tipoVenda === 'atacado' ? 'Digite o nome do lojista (ex: Junior)' : 'Digite o nome do cliente'}
+            <CompradorAutocomplete
               value={comprador}
-              onChange={(e) => setComprador(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder:text-slate-500 focus:border-emerald-500 outline-none"
-              required
+              onChange={setComprador}
+              compradores={compradores}
+              onBuscar={(termo) => buscarCompradores(termo, tipoVenda === 'atacado' ? 'lojista' : undefined)}
+              tipo={tipoVenda === 'atacado' ? 'lojista' : 'todos'}
+              placeholder={tipoVenda === 'atacado' ? 'Buscar lojista ou digitar novo (ex: Junior, Tech Cell...)' : 'Buscar cliente ou digitar novo nome...'}
+              required={!dadosPendente}
             />
 
-            {/* CHIPS DE COMPRADORES RECENTES */}
-            {compradoresRecentes.length > 0 && (
-              <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                <span className="text-[10px] text-slate-500">Recentes:</span>
-                {compradoresRecentes.map((rec) => (
-                  <button
-                    key={rec}
-                    type="button"
-                    onClick={() => setComprador(rec)}
-                    className="text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-0.5 rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                  >
-                    {rec}
-                  </button>
-                ))}
-              </div>
+            {tipoVenda === 'varejo' && (
+              <label className="flex items-center gap-2 pt-1 text-xs text-amber-300 font-medium cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={dadosPendente}
+                  onChange={(e) => setDadosPendente(e.target.checked)}
+                  className="rounded border-slate-700 text-amber-500 focus:ring-amber-500"
+                />
+                <span>⚠️ Venda rápida (completar dados do cliente para notinha depois na aba Vendas)</span>
+              </label>
             )}
           </div>
 

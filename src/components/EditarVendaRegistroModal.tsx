@@ -19,6 +19,8 @@ import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { cn, getAparelhoCodigo, parseMonetaryValue } from '@/lib/utils';
+import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
+import { useCompradores } from '@/hooks/useCompradores';
 
 export interface VendaEditavelData {
   id?: string;
@@ -74,6 +76,8 @@ export function EditarVendaRegistroModal({
   const [tipoVenda, setTipoVenda] = useState('Atacado');
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
+
+  const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
 
   // Preenche dados ao abrir
   useEffect(() => {
@@ -152,6 +156,7 @@ export function EditarVendaRegistroModal({
           metodo: metodoPgto,
           tipoEntrega: tipoVenda,
           descricao: `Venda ${tipoVenda.toUpperCase()} - ${venda.modelo || ''} para ${compradorFinal}`,
+          dados_cliente_pendente: false,
         };
 
         const { error: errVenda } = await supabase
@@ -184,11 +189,14 @@ export function EditarVendaRegistroModal({
                 dataPagamento: dataIso,
                 dataVencimento: dataVencIso,
                 metodo: metodoPgto,
+                dados_cliente_pendente: false,
               })
               .eq('id', vendaEncontrada.id);
           }
         }
       }
+
+      await upsertComprador(compradorFinal, tipoVenda.toLowerCase().includes('atacado') ? 'lojista' : 'cliente');
 
       toast.success('✅ Registro de venda e custos atualizados com sucesso!', { id: toastId });
       await onSuccess();
@@ -244,16 +252,20 @@ export function EditarVendaRegistroModal({
           
           {/* COMPRADOR / LOJISTA */}
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-amber-400" />
-              Comprador / Lojista / Cliente *
-            </label>
-            <input
-              type="text"
-              placeholder="Ex: Junior, Tech Imports..."
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-amber-400" />
+                Comprador / Lojista / Cliente *
+              </label>
+              <span className="text-[10px] text-cyan-400 font-medium">💡 Busca inteligente salva no banco</span>
+            </div>
+            <CompradorAutocomplete
               value={comprador}
-              onChange={(e) => setComprador(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-bold placeholder:text-slate-500 focus:border-amber-500 outline-none"
+              onChange={setComprador}
+              compradores={compradores}
+              onBuscar={(termo) => buscarCompradores(termo, tipoVenda.toLowerCase().includes('atacado') ? 'lojista' : undefined)}
+              tipo={tipoVenda.toLowerCase().includes('atacado') ? 'lojista' : 'todos'}
+              placeholder="Buscar ou digitar nome..."
               required
             />
           </div>

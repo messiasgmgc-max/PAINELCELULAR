@@ -24,6 +24,8 @@ import { toast } from 'sonner';
 import { cn, getAparelhoCodigo } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
+import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
+import { useCompradores } from '@/hooks/useCompradores';
 
 interface VendaLoteAtacadoModalProps {
   isOpen: boolean;
@@ -63,20 +65,11 @@ export function VendaLoteAtacadoModal({
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [showScannerModal, setShowScannerModal] = useState(false);
-  const [compradoresRecentes, setCompradoresRecentes] = useState<string[]>([]);
+
+  const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
   
   const keyBufferRef = useRef<string>('');
   const keyTimeoutRef = useRef<any>(null);
-
-  // Carrega compradores recentes do localStorage
-  useEffect(() => {
-    try {
-      const salvas = localStorage.getItem('painel_celular_compradores_recentes');
-      if (salvas) {
-        setCompradoresRecentes(JSON.parse(salvas));
-      }
-    } catch (e) {}
-  }, []);
 
   // Reseta ao abrir/fechar
   useEffect(() => {
@@ -267,16 +260,6 @@ export function VendaLoteAtacadoModal({
 
   if (!isOpen) return null;
 
-  const salvarCompradorRecente = (nome: string) => {
-    if (!nome || nome.trim().length < 2) return;
-    const limpo = nome.trim();
-    try {
-      const atualizados = [limpo, ...compradoresRecentes.filter(c => c.toLowerCase() !== limpo.toLowerCase())].slice(0, 8);
-      setCompradoresRecentes(atualizados);
-      localStorage.setItem('painel_celular_compradores_recentes', JSON.stringify(atualizados));
-    } catch (e) {}
-  };
-
   // Finalizar a venda do lote inteiro
   const handleFinalizarVendaLote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -388,7 +371,7 @@ export function VendaLoteAtacadoModal({
 
       await supabase.from('vendas').insert([payloadVenda]);
 
-      salvarCompradorRecente(compradorFinal);
+      await upsertComprador(compradorFinal, 'lojista');
 
       toast.success(`🎉 Lote de ${itensSelecionados.length} aparelhos vendido com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
       await onSuccess();
@@ -612,34 +595,18 @@ export function VendaLoteAtacadoModal({
                     <User className="w-3.5 h-3.5 text-amber-400" />
                     Lojista / Comprador *
                   </label>
-                  <span className="text-[10px] text-slate-400">Ex: "Junior"</span>
+                  <span className="text-[10px] text-amber-400 font-medium">💡 Busca inteligente salva no banco</span>
                 </div>
 
-                <input
-                  type="text"
-                  placeholder="Nome do lojista (ex: Junior)"
+                <CompradorAutocomplete
                   value={comprador}
-                  onChange={(e) => setComprador(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-amber-500 outline-none font-bold"
+                  onChange={setComprador}
+                  compradores={compradores}
+                  onBuscar={(termo) => buscarCompradores(termo, 'lojista')}
+                  tipo="lojista"
+                  placeholder="Buscar lojista ou digitar novo (ex: Junior, Tech Cell...)"
                   required
                 />
-
-                {/* Chips de compradores recentes */}
-                {compradoresRecentes.length > 0 && (
-                  <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                    <span className="text-[9px] text-slate-500">Recentes:</span>
-                    {compradoresRecentes.slice(0, 5).map((rec) => (
-                      <button
-                        key={rec}
-                        type="button"
-                        onClick={() => setComprador(rec)}
-                        className="text-[9px] font-bold bg-slate-800 hover:bg-slate-700 text-cyan-300 px-1.5 py-0.5 rounded border border-slate-700 transition-colors cursor-pointer"
-                      >
-                        {rec}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
 
               {/* LISTA DOS ITENS SELECIONADOS NO PEDIDO */}
