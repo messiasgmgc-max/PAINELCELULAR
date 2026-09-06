@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Boxes, 
   Package, 
@@ -24,16 +24,36 @@ import {
   Smartphone,
   Tag,
   ChevronRight,
+  ChevronDown,
   ShieldCheck,
   ShoppingBag,
   Edit2,
   Camera,
-  FileText
+  FileText,
+  Bot,
+  Clock,
+  Send,
+  Settings,
+  UserPlus,
+  ExternalLink,
+  AlertTriangle,
+  Check,
+  Copy,
+  Phone,
+  RefreshCw
 } from 'lucide-react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ModalPortal } from '@/components/ModalPortal';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
@@ -48,6 +68,7 @@ import { VendaLoteAtacadoModal } from '@/components/VendaLoteAtacadoModal';
 import { EditarVendaRegistroModal } from '@/components/EditarVendaRegistroModal';
 import { BaixaFiadoModal } from '@/components/BaixaFiadoModal';
 import { ExtratoFiadoLojistaModal } from '@/components/ExtratoFiadoLojistaModal';
+import { NovoClienteAtacadoModal } from '@/components/NovoClienteAtacadoModal';
 
 interface VendaAtacadoItem {
   id: string;
@@ -73,12 +94,59 @@ interface VendaAtacadoItem {
   raw?: any;
 }
 
-// Formatador seguro de data que jamais retorna "Invalid Date"
+interface ClienteAtacado {
+  id: string;
+  loja_id: string;
+  nome: string;
+  telefone?: string;
+  whatsapp?: string;
+  limite_credito?: number;
+  saldo_devedor?: number;
+  cpf_cnpj?: string;
+  cidade?: string;
+  observacoes?: string;
+  chave_pix?: string;
+  ativo?: boolean;
+  ultimo_disparo_cobranca?: string;
+  created_at?: string;
+}
+
+interface ConfigAtacadoBot {
+  ativo: boolean;
+  horario_disparo: string;
+  dias_semana: number[];
+  dias_carencia: number;
+  mensagem_template: string;
+  enviar_somente_dias_uteis: boolean;
+  notificar_dono: boolean;
+  chave_pix?: string;
+}
+
+const DEFAULT_CONFIG_BOT: ConfigAtacadoBot = {
+  ativo: true,
+  horario_disparo: '10:00',
+  dias_semana: [1, 2, 3, 4, 5],
+  dias_carencia: 1,
+  mensagem_template: `Olá {nome}! Tudo bem? Passando para lembrar sobre os pagamentos pendentes das suas retiradas de atacado na {nome_loja}.\n\n*Saldo em aberto: {valor}*\n\nChave Pix para quitação: {chave_pix}\n\nSe já realizou a transferência, por favor nos envie o comprovante!`,
+  enviar_somente_dias_uteis: true,
+  notificar_dono: true,
+  chave_pix: '',
+};
+
+const DIAS_SEMANA_OPCOES = [
+  { valor: 0, label: 'Dom', nome: 'Domingo' },
+  { valor: 1, label: 'Seg', nome: 'Segunda' },
+  { valor: 2, label: 'Ter', nome: 'Terça' },
+  { valor: 3, label: 'Qua', nome: 'Quarta' },
+  { valor: 4, label: 'Qui', nome: 'Quinta' },
+  { valor: 5, label: 'Sex', nome: 'Sexta' },
+  { valor: 6, label: 'Sáb', nome: 'Sábado' },
+];
+
 function formatarDataSegura(dataStr: any): string {
   if (!dataStr) return new Date().toLocaleDateString('pt-BR');
   
   let str = String(dataStr).trim();
-  // Se veio com hora parcial truncada (ex: "2026-09-01T12")
   if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(str)) {
     str += ':00:00';
   } else if (/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/.test(str)) {
@@ -90,35 +158,17 @@ function formatarDataSegura(dataStr: any): string {
     return d.toLocaleDateString('pt-BR');
   }
 
-  // Tenta extrair YYYY-MM-DD
   const matchYmd = str.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (matchYmd) {
     return `${matchYmd[3]}/${matchYmd[2]}/${matchYmd[1]}`;
   }
 
-  // Tenta extrair DD/MM/YYYY
   const matchDmy = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (matchDmy) {
     return `${matchDmy[1]}/${matchDmy[2]}/${matchDmy[3]}`;
   }
 
   return new Date().toLocaleDateString('pt-BR');
-}
-
-function parseTimestampSeguro(dataStr: any): number {
-  if (!dataStr) return 0;
-  let str = String(dataStr).trim();
-  if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(str)) str += ':00:00';
-  else if (/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/.test(str)) str += ':00';
-
-  const t = new Date(str).getTime();
-  if (!isNaN(t)) return t;
-
-  const matchYmd = str.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (matchYmd) {
-    return new Date(`${matchYmd[1]}-${matchYmd[2]}-${matchYmd[3]}T12:00:00`).getTime();
-  }
-  return 0;
 }
 
 export function AtacadoTab() {
@@ -129,7 +179,9 @@ export function AtacadoTab() {
   const [busca, setBusca] = useState('');
   const [compradorFiltro, setCompradorFiltro] = useState<string>('todos');
   const [periodoFiltro, setPeriodoFiltro] = useState<'todos' | 'mes' | 'ano'>('todos');
-  const [abaSubTab, setAbaSubTab] = useState<'metricas' | 'fiado' | 'historico'>('metricas');
+  const [abaSubTab, setAbaSubTab] = useState<'metricas' | 'fiado' | 'clientes' | 'configuracoes' | 'historico'>('metricas');
+  
+  // Modais de Vendas e Estoque
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showNovaVendaModal, setShowNovaVendaModal] = useState(false);
   const [abrirScannerAtacado, setAbrirScannerAtacado] = useState(false);
@@ -139,8 +191,21 @@ export function AtacadoTab() {
   const [lojistaParaExtrato, setLojistaParaExtrato] = useState<{ lojistaNome: string; vendasLojista: any[] } | null>(null);
   const [vendasBanco, setVendasBanco] = useState<any[]>([]);
 
+  // Clientes de Atacado & Bot
+  const [clientesAtacado, setClientesAtacado] = useState<ClienteAtacado[]>([]);
+  const [loadingClientes, setLoadingClientes] = useState(false);
+  const [clienteParaEditar, setClienteParaEditar] = useState<ClienteAtacado | null>(null);
+  const [showNovoClienteModal, setShowNovoClienteModal] = useState(false);
+  const [buscaClientes, setBuscaClientes] = useState('');
+
+  // Configurações do Bot de Cobrança
+  const [configBot, setConfigBot] = useState<ConfigAtacadoBot>(DEFAULT_CONFIG_BOT);
+  const [loadingConfigBot, setLoadingConfigBot] = useState(false);
+  const [salvandoConfigBot, setSalvandoConfigBot] = useState(false);
+  const [disparandoCobrancas, setDisparandoCobrancas] = useState(false);
+
   // Carrega vendas do Supabase para controle de fiado e histórico
-  const fetchVendasBanco = React.useCallback(async () => {
+  const fetchVendasBanco = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('vendas')
@@ -155,9 +220,124 @@ export function AtacadoTab() {
     }
   }, []);
 
+  // Carrega lista de clientes de atacado
+  const fetchClientesAtacado = useCallback(async () => {
+    setLoadingClientes(true);
+    try {
+      const res = await fetch('/api/atacado/clientes');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.clientes) {
+          setClientesAtacado(json.clientes);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao buscar clientes de atacado:', err);
+    } finally {
+      setLoadingClientes(false);
+    }
+  }, []);
+
+  // Carrega configurações do Bot
+  const fetchConfigBot = useCallback(async () => {
+    setLoadingConfigBot(true);
+    try {
+      const res = await fetch('/api/atacado/configuracoes');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.config) {
+          setConfigBot({
+            ...DEFAULT_CONFIG_BOT,
+            ...json.config,
+            chave_pix: json.config.chave_pix || config.chavePix || '',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao carregar configurações do bot:', err);
+    } finally {
+      setLoadingConfigBot(false);
+    }
+  }, [config.chavePix]);
+
+  // Salvar configurações do Bot
+  const handleSalvarConfigBot = async () => {
+    setSalvandoConfigBot(true);
+    try {
+      const res = await fetch('/api/atacado/configuracoes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(configBot),
+      });
+
+      if (!res.ok) throw new Error('Falha ao salvar configurações.');
+
+      toast.success('Configurações do Bot de Atacado salvas com sucesso! 🤖✅');
+    } catch (err: any) {
+      console.error('Erro ao salvar config:', err);
+      toast.error(err.message || 'Erro ao salvar configurações.');
+    } finally {
+      setSalvandoConfigBot(false);
+    }
+  };
+
+  // Disparar cobranças (Simulação ou Real)
+  const handleDispararCobrancas = async (simular: boolean = false) => {
+    if (!simular && !confirm('Deseja realmente disparar mensagens de cobrança no WhatsApp para todos os lojistas devedores agora?')) {
+      return;
+    }
+
+    setDisparandoCobrancas(true);
+    const toastId = toast.loading(simular ? 'Simulando disparos do bot...' : 'Enviando cobranças via WhatsApp...');
+
+    try {
+      const res = await fetch('/api/atacado/disparar-cobrancas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ simular }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Erro ao processar disparos.');
+      }
+
+      if (simular) {
+        toast.info(`Simulação concluída: ${json.devedoresEncontrados || 0} devedor(es) analisado(s). ${json.mensagensEnviadas || 0} receberiam mensagem.`, { id: toastId });
+      } else {
+        toast.success(`Disparo finalizado! ${json.mensagensEnviadas || 0} mensagem(ns) enviada(s) com sucesso.`, { id: toastId });
+        await fetchClientesAtacado();
+        await fetchVendasBanco();
+      }
+    } catch (err: any) {
+      console.error('Erro no disparo:', err);
+      toast.error(err.message || 'Falha ao disparar cobranças.', { id: toastId });
+    } finally {
+      setDisparandoCobrancas(false);
+    }
+  };
+
+  // Excluir cliente de atacado
+  const handleExcluirCliente = async (id: string, nome: string) => {
+    if (!confirm(`Tem certeza que deseja excluir o lojista parceiro "${nome}"?`)) return;
+
+    try {
+      const res = await fetch(`/api/atacado/clientes?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Falha ao excluir.');
+
+      toast.success(`Lojista "${nome}" excluído com sucesso.`);
+      fetchClientesAtacado();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao excluir.');
+    }
+  };
+
   useEffect(() => {
     fetchVendasBanco();
-  }, [fetchVendasBanco]);
+    fetchClientesAtacado();
+    fetchConfigBot();
+  }, [fetchVendasBanco, fetchClientesAtacado, fetchConfigBot]);
 
   // ── 1. Aparelhos Ativos Disponíveis no Estoque ──
   const aparelhosEstoqueAtivo = useMemo(() => {
@@ -180,15 +360,11 @@ export function AtacadoTab() {
   const vendasAtacado = useMemo<VendaAtacadoItem[]>(() => {
     const lista: VendaAtacadoItem[] = [];
 
-    // Busca nas observações de baixa dos aparelhos (somente se estiver vendido/baixado)
     aparelhos.forEach((a: any) => {
-      // Se o aparelho estiver ativo e disponível no estoque, NUNCA pode figurar como venda concluída
       if (a.ativo === true && a.status === 'disponivel') return;
       if (a.status !== 'vendido' && a.condicao !== 'vendido' && a.ativo !== false) return;
 
       const obs = String(a.observacoes || '');
-      
-      // Regex robusto para pegar BAIXA_ESTOQUE com data ISO completa
       const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
         || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
         || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
@@ -197,156 +373,122 @@ export function AtacadoTab() {
         let dataIso = matchBaixa[1] || a.dataCadastro || new Date().toISOString();
         const textoDetalhe = matchBaixa[2] || '';
 
-        // Se dataIso for parcial (ex: "2026-09-01T12"), normaliza
-        if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataIso)) {
-          dataIso += ':00:00';
-        }
+        if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataIso)) dataIso += ':00:00';
+        else if (/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/.test(dataIso)) dataIso += ':00';
 
-        // Cross-check prévio com a tabela 'vendas' do Supabase
-        const vendaCorrespondente = vendasBanco.find(vb => 
-          (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === a.id)) ||
-          vb.aparelhoId === a.id
-        );
+        const matchTipo = textoDetalhe.match(/Venda (ATACADO|VAREJO)/i);
+        const matchComp = textoDetalhe.match(/Comprador:\s*([^|\n]+)/i);
+        const matchVal = textoDetalhe.match(/Valor:\s*R\$\s*([\d.,]+)/i);
+        const matchPgto = textoDetalhe.match(/Pgto:\s*([^|\n]+)/i);
 
-        const obsLower = obs.toLowerCase();
-        const detalheLower = textoDetalhe.toLowerCase();
+        const ehAtacado = (matchTipo && matchTipo[1].toUpperCase() === 'ATACADO') || 
+                          obs.toUpperCase().includes('ATACADO') ||
+                          (a.tipo_venda && a.tipo_venda.toUpperCase() === 'ATACADO');
 
-        // 1. Se for explicitamente VAREJO, NUNCA deve entrar na lista de atacado!
-        const isVarejo = 
-          detalheLower.includes('venda varejo') || 
-          detalheLower.includes('varejo') || 
-          obsLower.includes('venda varejo') ||
-          (vendaCorrespondente && (
-            vendaCorrespondente.tipoEntrega?.toLowerCase().includes('varejo') ||
-            vendaCorrespondente.descricao?.toLowerCase().includes('varejo')
-          ));
+        if (ehAtacado) {
+          const valorVenda = matchVal ? parseMonetaryValue(matchVal[1]) : (a.preco || 0);
+          const custo = Number(a.custo || a.precoCompra || 0);
+          const lucro = valorVenda - custo;
+          const margem = custo > 0 ? (lucro / custo) * 100 : 0;
+          const comprador = matchComp ? matchComp[1].trim() : (a.cliente || 'Lojista / Revenda');
+          const metodoPgto = matchPgto ? matchPgto[1].trim() : 'dinheiro';
 
-        if (isVarejo) {
-          return; // Pula com segurança! É saída de varejo
-        }
-
-        // 2. Se for manutenção, perda ou defeito, não é atacado
-        if (detalheLower.includes('manutencao') || detalheLower.includes('perda') || obsLower.includes('manutencao')) {
-          return;
-        }
-
-        // 3. Verifica se é verdadeiramente uma saída de atacado
-        const isAtacado = 
-          detalheLower.includes('atacado') || 
-          obsLower.includes('atacado') ||
-          (vendaCorrespondente && (
-            vendaCorrespondente.tipoEntrega?.toLowerCase().includes('atacado') ||
-            vendaCorrespondente.descricao?.toLowerCase().includes('atacado')
-          ));
-
-        if (isAtacado) {
-          // Extrai comprador
-          const matchComprador = textoDetalhe.match(/para\s+(.*?)\s+por/i) || textoDetalhe.match(/para\s+(.*?)(?:\||$)/i);
-          const compradorNome = matchComprador ? matchComprador[1].trim() : (a.cliente || 'Lojista / Revenda');
-
-          // Extrai valor da venda
-          const matchValor = textoDetalhe.match(/por\s+R\$\s*([\d.,]+)/i) || obs.match(/por\s+R\$\s*([\d.,]+)/i);
-          let valorVenda = matchValor 
-            ? parseMonetaryValue(matchValor[1])
-            : ((a as any).precoAtacado || (a as any).preco_atacado || a.preco || 0);
-
-          // Se existe registro na tabela 'vendas', ELE É A FONTE DA VERDADE (especialmente após edições)
-          if (vendaCorrespondente && Number(vendaCorrespondente.valor) > 0) {
-            valorVenda = Number(vendaCorrespondente.valor);
+          let imeiLimpo = (a.imei || '').trim();
+          if (!imeiLimpo && a.observacoes) {
+            const matchImei = a.observacoes.match(/IMEI:\s*([A-Za-z0-9]+)/i);
+            if (matchImei) imeiLimpo = matchImei[1];
           }
-
-          // Extrai custo
-          const matchCusto = textoDetalhe.match(/Custo:\s*R\$\s*([\d.,]+)/i) || obs.match(/Custo:\s*R\$\s*([\d.,]+)/i);
-          let custo = matchCusto 
-            ? parseMonetaryValue(matchCusto[1])
-            : (a.custo || 0);
-
-          if (vendaCorrespondente && vendaCorrespondente.custo !== undefined && vendaCorrespondente.custo !== null) {
-            custo = Number(vendaCorrespondente.custo);
-          }
-
-          // Extrai lucro
-          const matchLucro = textoDetalhe.match(/Lucro:\s*R\$\s*([\d.,]+)/i) || obs.match(/Lucro:\s*R\$\s*([\d.,]+)/i);
-          let lucro = matchLucro 
-            ? parseMonetaryValue(matchLucro[1])
-            : (valorVenda - custo);
-
-          if (vendaCorrespondente && vendaCorrespondente.lucro !== undefined && vendaCorrespondente.lucro !== null) {
-            lucro = Number(vendaCorrespondente.lucro);
-          }
-
-          // Extrai forma de pagamento
-          const matchPgto = textoDetalhe.match(/Pgto:\s*([A-Za-z0-9_]+)/i) || obs.match(/Pgto:\s*([A-Za-z0-9_]+)/i);
-          let metodoPgto = matchPgto ? matchPgto[1].toLowerCase() : 'pix';
-
-          if (vendaCorrespondente && vendaCorrespondente.metodo) {
-            metodoPgto = String(vendaCorrespondente.metodo).toLowerCase();
-          }
-
-          const margem = custo > 0 ? (lucro / custo) * 100 : 100;
-          const finalId = vendaCorrespondente?.id || a.id;
 
           lista.push({
-            id: finalId,
+            id: a.id,
             aparelhoId: a.id,
             data: dataIso,
-            comprador: compradorNome,
-            modelo: a.modelo || '',
+            comprador,
+            modelo: a.modelo || 'Sem Modelo',
             marca: a.marca || 'Apple',
             cor: a.cor,
             capacidade: a.capacidade,
-            imei: a.imei,
-            codigo: getAparelhoCodigo(a),
+            imei: imeiLimpo,
+            codigo: getAparelhoCodigo(a) || '',
             valorVenda,
             custo,
             lucro,
             margem,
             metodoPgto,
-            status: vendaCorrespondente?.status,
-            valorPago: vendaCorrespondente?.valorPago,
-            saldoDevedor: vendaCorrespondente?.saldoDevedor,
-            observacoes: a.observacoes,
+            status: 'concluida',
             raw: a,
           });
         }
       }
     });
 
-    return lista.sort((a, b) => parseTimestampSeguro(b.data) - parseTimestampSeguro(a.data));
+    // Mescla vendas registradas no banco que sejam de atacado
+    vendasBanco.forEach((v) => {
+      const isAtacado = (v.tipoEntrega && v.tipoEntrega.toLowerCase().includes('atacado')) ||
+                        (v.descricao && v.descricao.toLowerCase().includes('atacado')) ||
+                        (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.tipoVenda === 'atacado'));
+
+      if (isAtacado) {
+        const jaEstaNaLista = lista.some(item => 
+          item.id === v.id || 
+          item.aparelhoId === v.aparelhoId || 
+          (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.aparelhoId === item.aparelhoId))
+        );
+
+        if (!jaEstaNaLista) {
+          const valorVenda = Number(v.valor || 0);
+          const custo = Number(v.custo || 0);
+          const lucro = valorVenda - custo;
+          const margem = custo > 0 ? (lucro / custo) * 100 : 0;
+
+          lista.push({
+            id: v.id,
+            aparelhoId: v.aparelhoId,
+            data: v.dataPagamento || v.data || v.created_at || new Date().toISOString(),
+            comprador: v.clienteNome || 'Lojista / Revenda',
+            modelo: v.descricao || 'Lote de Aparelhos',
+            marca: 'Atacado',
+            valorVenda,
+            custo,
+            lucro,
+            margem,
+            metodoPgto: v.metodo || 'dinheiro',
+            status: v.status,
+            valorPago: v.valorPago,
+            saldoDevedor: v.saldoDevedor,
+            dataVencimento: v.dataVencimento,
+            raw: v,
+          });
+        }
+      }
+    });
+
+    return lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
   }, [aparelhos, vendasBanco]);
 
-  // Filtro de Vendas por Período e Busca
+  // Vendas Filtradas
   const vendasFiltradas = useMemo(() => {
     return vendasAtacado.filter((v) => {
-      // Filtro por Comprador
-      const compStr = (v.comprador || '').toLowerCase();
-      if (compradorFiltro !== 'todos' && compStr !== compradorFiltro.toLowerCase()) {
+      if (compradorFiltro !== 'todos' && v.comprador.toLowerCase() !== compradorFiltro.toLowerCase()) {
         return false;
       }
 
-      // Filtro por Período
       if (periodoFiltro === 'mes') {
-        const dataVenda = new Date(v.data);
+        const d = new Date(v.data);
         const agora = new Date();
-        if (isNaN(dataVenda.getTime()) || dataVenda.getMonth() !== agora.getMonth() || dataVenda.getFullYear() !== agora.getFullYear()) {
-          return false;
-        }
+        if (d.getMonth() !== agora.getMonth() || d.getFullYear() !== agora.getFullYear()) return false;
       } else if (periodoFiltro === 'ano') {
-        const dataVenda = new Date(v.data);
-        const agora = new Date();
-        if (isNaN(dataVenda.getTime()) || dataVenda.getFullYear() !== agora.getFullYear()) {
-          return false;
-        }
+        const d = new Date(v.data);
+        if (d.getFullYear() !== new Date().getFullYear()) return false;
       }
 
-      // Filtro por Busca de Texto
       if (busca.trim()) {
-        const t = busca.toLowerCase().trim();
-        const mod = (v.modelo || '').toLowerCase();
-        const comp = compStr;
-        const ime = (v.imei || '').toLowerCase();
-        const cod = (v.codigo || '').toLowerCase();
-        return mod.includes(t) || comp.includes(t) || ime.includes(t) || cod.includes(t);
+        const q = busca.toLowerCase();
+        const matchMod = v.modelo.toLowerCase().includes(q);
+        const matchComp = v.comprador.toLowerCase().includes(q);
+        const matchImei = (v.imei || '').toLowerCase().includes(q);
+        const matchCod = (v.codigo || '').toLowerCase().includes(q);
+        if (!matchMod && !matchComp && !matchImei && !matchCod) return false;
       }
 
       return true;
@@ -371,7 +513,7 @@ export function AtacadoTab() {
     };
   }, [vendasFiltradas]);
 
-  // ── 4. Ranking dos Principais Compradores / Lojistas ──
+  // ── 4. Ranking dos Principais Compradores ──
   const rankingCompradores = useMemo(() => {
     const map: Record<string, { nome: string; totalGasto: number; totalAparelhos: number; lucroGerado: number; ultimaCompra: string }> = {};
 
@@ -397,7 +539,7 @@ export function AtacadoTab() {
     return Object.values(map).sort((a, b) => b.totalGasto - a.totalGasto);
   }, [vendasAtacado]);
 
-  // ── 5. Ranking de Modelos Mais Vendidos no Atacado ──
+  // ── 5. Ranking de Modelos Mais Vendidos ──
   const rankingModelos = useMemo(() => {
     const map: Record<string, { modelo: string; qtd: number; faturamento: number }> = {};
 
@@ -413,7 +555,7 @@ export function AtacadoTab() {
     return Object.values(map).sort((a, b) => b.qtd - a.qtd).slice(0, 5);
   }, [vendasAtacado]);
 
-  // ── 6. Lojistas Devedores & Controle Milimétrico de Fiado ──
+  // ── 6. Lojistas Devedores & Controle de Fiado ──
   const lojistasDevedores = useMemo(() => {
     const mapa = new Map<string, {
       lojistaNome: string;
@@ -427,9 +569,7 @@ export function AtacadoTab() {
       estaEmAtraso: boolean;
     }>();
 
-    // 1. Processa vendas da tabela 'vendas'
     vendasBanco.forEach(v => {
-      // Ignora vendas explicitamente de varejo no painel de lojistas de atacado
       const tipoEntregaLower = String(v.tipoEntrega || '').toLowerCase();
       const descLower = String(v.descricao || '').toLowerCase();
       const isVarejo = tipoEntregaLower.includes('varejo') || (descLower.includes('varejo') && !descLower.includes('atacado'));
@@ -448,12 +588,8 @@ export function AtacadoTab() {
         devedor = Number(v.saldoDevedor);
       } else {
         devedor = Math.max(0, total - pago);
-        if (devedor <= 0 && isFiado && v.status !== 'pago') {
-          devedor = total;
-        }
-        if (isFiado && pago === 0) {
-          devedor = total;
-        }
+        if (devedor <= 0 && isFiado && v.status !== 'pago') devedor = total;
+        if (isFiado && pago === 0) devedor = total;
       }
 
       if (devedor > 0.01) {
@@ -481,20 +617,16 @@ export function AtacadoTab() {
       }
     });
 
-    // 2. Processa baixas de aparelhos marcadas como fiado que NÃO existam na tabela 'vendas'
     vendasAtacado.forEach(va => {
       if (va.metodoPgto === 'fiado') {
         const cliente = (va.comprador || 'Não Informado').trim();
         
-        // Se este aparelho já possui registro na tabela 'vendas', vendasBanco é a autoridade máxima!
         const jaNoBanco = vendasBanco.some(vb => 
           vb.id === va.id || 
           vb.aparelhoId === va.aparelhoId || 
           (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === va.aparelhoId))
         );
-        if (jaNoBanco) {
-          return; // A tabela vendas é a autoridade máxima. Se já está quitada lá, não reabre fiado!
-        }
+        if (jaNoBanco) return;
 
         let jaEstaNoMapa = false;
         mapa.forEach(entry => {
@@ -538,7 +670,6 @@ export function AtacadoTab() {
       }
     });
 
-    // 3. Calcula datas de vencimento e dias em atraso
     const agora = new Date();
     mapa.forEach((entry) => {
       let menorVencimento: Date | null = null;
@@ -555,9 +686,9 @@ export function AtacadoTab() {
       });
 
       if (menorVencimento) {
-        entry.dataVencimentoMaisAntiga = menorVencimento.toISOString();
-        if (menorVencimento.getTime() < agora.getTime()) {
-          const diffMs = agora.getTime() - menorVencimento.getTime();
+        entry.dataVencimentoMaisAntiga = (menorVencimento as Date).toISOString();
+        if ((menorVencimento as Date).getTime() < agora.getTime()) {
+          const diffMs = agora.getTime() - (menorVencimento as Date).getTime();
           const dias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
           entry.diasAtraso = dias;
           entry.estaEmAtraso = dias > 0;
@@ -566,7 +697,6 @@ export function AtacadoTab() {
     });
 
     return Array.from(mapa.values()).sort((a, b) => {
-      // Prioriza quem está em atraso, depois maior saldo devedor
       if (a.estaEmAtraso !== b.estaEmAtraso) {
         return a.estaEmAtraso ? -1 : 1;
       }
@@ -578,7 +708,20 @@ export function AtacadoTab() {
     return lojistasDevedores.reduce((acc, l) => acc + l.saldoDevedor, 0);
   }, [lojistasDevedores]);
 
-  // Emissão e consulta de NF-e (Modelo 55 - Atacado/PJ)
+  // Clientes Filtrados
+  const clientesFiltrados = useMemo(() => {
+    if (!buscaClientes.trim()) return clientesAtacado;
+    const q = buscaClientes.toLowerCase();
+    return clientesAtacado.filter(c => 
+      c.nome.toLowerCase().includes(q) ||
+      (c.whatsapp || '').includes(q) ||
+      (c.telefone || '').includes(q) ||
+      (c.cidade || '').toLowerCase().includes(q) ||
+      (c.cpf_cnpj || '').includes(q)
+    );
+  }, [clientesAtacado, buscaClientes]);
+
+  // Emissão NF-e
   const handleEmitirNFeAtacado = async (v: VendaAtacadoItem) => {
     try {
       toast.info('Consultando ou emitindo NF-e (Modelo 55) na SEFAZ...');
@@ -599,54 +742,36 @@ export function AtacadoTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vendaId: v.id,
-          tipo: 'nfe',
-          lojaId: usuario?.lojaId,
-          destinatario: {
-            nome: v.comprador,
-          }
-        })
+          clienteNome: v.comprador,
+          valor: v.valorVenda,
+          modelo: v.modelo,
+          imei: v.imei,
+          tipoNota: 'NFe_55',
+        }),
       });
 
-      const json = await res.json();
-      if (json.sucesso && json.status === 'autorizada') {
-        toast.success('NF-e emitida e autorizada pela SEFAZ!');
-        if (json.urlDanfe) {
-          window.open(json.urlDanfe, '_blank');
-        }
-      } else if (json.configurado === false) {
-        toast.warning('Configure os dados fiscais da loja em Configurações > Fiscal para emitir NF-e.');
-      } else if (json.status === 'processando') {
-        toast.info('NF-e enviada e em processamento na SEFAZ.');
-      } else {
-        toast.error(json.mensagem || 'Erro na autorização da NF-e.');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Erro na SEFAZ');
       }
+
+      toast.success('Solicitação de NF-e enviada com sucesso!');
     } catch (err: any) {
-      console.error('Erro ao emitir NF-e de atacado:', err);
-      toast.error('Erro ao processar NF-e.');
+      toast.error(err.message || 'Falha ao emitir NF-e.');
     }
   };
 
-  // Reverter/Cancelar Venda de Atacado (Devolve o aparelho para o estoque ativo)
+  // Reverter Venda
   const handleReverterVenda = async (venda: VendaAtacadoItem) => {
-    if (!venda.aparelhoId) return;
-
-    if (!confirm(`Deseja cancelar esta venda e devolver o ${venda.modelo} (${venda.comprador}) para o estoque ativo?`)) {
+    if (!confirm(`Tem certeza que deseja estornar a venda do aparelho ${venda.modelo}? O produto retornará ao estoque ativo como "disponível".`)) {
       return;
     }
 
-    const toastId = toast.loading('Revertendo venda e reativando aparelho...');
+    const toastId = toast.loading('Revertendo venda e restaurando estoque...');
 
     try {
-      // 1. Limpa as observações de baixa no aparelho e reativa no estoque disponível
-      const { data: aparAtual } = await supabase
-        .from('aparelhos')
-        .select('observacoes')
-        .eq('id', venda.aparelhoId)
-        .maybeSingle();
-
-      const obsAtual = String(aparAtual?.observacoes || venda.observacoes || '');
-      const obsLimpa = obsAtual
-        .replace(/BAIXA_ESTOQUE:[^\n|]+(?:\|\s*)?/gi, '')
+      const obsLimpa = String(venda.raw?.observacoes || '')
+        .replace(/BAIXA_ESTOQUE:[^\n]+(?:\n|$)/gi, '')
         .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
         .trim();
 
@@ -663,7 +788,6 @@ export function AtacadoTab() {
 
       if (errApar) throw errApar;
 
-      // 2. Localiza e exclui a venda correspondente da tabela 'vendas'
       const { data: vendasRelacionadas } = await supabase
         .from('vendas')
         .select('id, itens');
@@ -677,7 +801,6 @@ export function AtacadoTab() {
         await supabase.from('vendas').delete().eq('id', vendaParaDeletar.id);
       }
 
-      // 3. Registra auditoria
       await registrarLog({
         lojaId: usuario?.lojaId || (usuario as any)?.loja_id,
         tipoEvento: 'estoque',
@@ -694,7 +817,7 @@ export function AtacadoTab() {
     }
   };
 
-  // Exportar Lista de Atacado para o WhatsApp
+  // Exportar Lista Zap
   const handleExportWhatsAppAtacado = () => {
     const dataCurta = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     
@@ -747,7 +870,7 @@ export function AtacadoTab() {
       .catch(() => toast.error('Erro ao copiar lista.'));
   };
 
-  // Exportar CSV de Vendas
+  // Exportar CSV
   const handleExportCSVVendas = () => {
     if (vendasFiltradas.length === 0) {
       toast.error('Nenhuma venda para exportar!');
@@ -783,80 +906,148 @@ export function AtacadoTab() {
     document.body.removeChild(link);
   };
 
+  // Live preview do template de mensagem do bot
+  const previewMensagemBot = useMemo(() => {
+    const template = configBot.mensagem_template || '';
+    return template
+      .replace(/\{nome\}/gi, 'João da Silva')
+      .replace(/\{valor\}/gi, 'R$ 3.850,00')
+      .replace(/\{chave_pix\}/gi, configBot.chave_pix || config.chavePix || '12.345.678/0001-90')
+      .replace(/\{nome_loja\}/gi, config.nomeLoja || 'Phone Center')
+      .replace(/\{itens\}/gi, 'iPhone 13 128GB, iPhone 14 Pro');
+  }, [configBot.mensagem_template, configBot.chave_pix, config.chavePix, config.nomeLoja]);
+
   return (
     <div className="panel-shell space-y-5">
       
-      {/* CABEÇALHO PRINCIPAL DO ATACADO */}
-      <GlassCard className="rounded-3xl p-4 sm:p-6">
+      {/* CABEÇALHO PRINCIPAL DO ATACADO - PALETA DARK PADRÃO (AZUL / ÍNDIGO / SLATE) */}
+      <GlassCard className="rounded-3xl p-4 sm:p-6 border border-slate-800/80">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30 shadow-lg shadow-amber-950/20">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600/20 to-indigo-600/20 text-blue-400 flex items-center justify-center font-bold border border-blue-500/30 shadow-lg shadow-blue-950/20">
               <Boxes className="w-6 h-6" />
             </div>
             <div>
               <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                 Painel de Atacado & Revenda
-                <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px]">
+                <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px]">
                   B2B / Lojistas
                 </Badge>
               </h2>
               <p className="text-xs sm:text-sm text-slate-400">
-                Controle de vendas para lojistas, compradores frequentes e métricas de atacado
+                Gestão completa de lojistas parceiros, estoques em lote, fiado e bot automático de cobrança
               </p>
             </div>
           </div>
 
-          {/* BOTÕES DE AÇÃO RÁPIDA (RESPONSIVOS) */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+          {/* BOTÕES DE AÇÃO RÁPIDA (CATEGORIZADOS EM MENUS DROPDOWN PARA NÃO POLUIR) */}
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full md:w-auto">
+            {/* 1. Botão Principal: Nova Venda */}
             <Button
               onClick={() => {
                 setAbrirScannerAtacado(false);
                 setShowNovaVendaModal(true);
               }}
-              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold rounded-2xl px-4 text-xs sm:text-sm shadow-md shadow-amber-950/30 flex items-center justify-center gap-2 border border-amber-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-11 sm:h-10 cursor-pointer w-full sm:w-auto"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-2xl px-4 text-xs sm:text-sm shadow-md shadow-blue-950/30 flex items-center justify-center gap-2 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer flex-1 sm:flex-initial"
             >
               <Plus className="w-4 h-4" />
               Nova Venda Atacado
             </Button>
 
-            <div className="grid grid-cols-2 sm:flex items-center gap-2">
-              <Button
-                onClick={() => {
-                  setAbrirScannerAtacado(true);
-                  setShowNovaVendaModal(true);
-                }}
-                className="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-cyan-500/30 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer shadow-sm"
-                title="Bipar aparelhos no atacado via Câmera ou Leitor de Código de Barras USB"
-              >
-                <Camera className="w-4 h-4 text-cyan-400" />
-                Bipar Venda
-              </Button>
+            {/* 2. Botão Bipar Venda */}
+            <Button
+              onClick={() => {
+                setAbrirScannerAtacado(true);
+                setShowNovaVendaModal(true);
+              }}
+              className="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-cyan-500/30 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer shadow-sm"
+              title="Bipar aparelhos via Câmera ou Leitor de Código de Barras USB"
+            >
+              <Camera className="w-4 h-4 text-cyan-400" />
+              Bipar
+            </Button>
 
-              <Button
-                onClick={() => setShowAtacadoModal(true)}
-                className="bg-slate-800/90 hover:bg-slate-700/90 text-amber-300 hover:text-amber-200 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-slate-700/80 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 shadow-sm cursor-pointer"
-              >
-                <Tag className="w-4 h-4 text-amber-400" />
-                Preços Atacado
-              </Button>
+            {/* 3. MENU CATEGORIZADO: CATÁLOGO & LISTAS */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700 rounded-2xl px-3 text-xs sm:text-sm h-10 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Tag className="w-4 h-4 text-indigo-400" />
+                  <span>Catálogo & Listas</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 bg-slate-950 border-slate-800 text-slate-200">
+                <DropdownMenuLabel className="text-[11px] text-slate-400 font-semibold">Tabelas e Exportação</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => setShowAtacadoModal(true)}
+                  className="cursor-pointer flex items-center gap-2 hover:bg-slate-900 focus:bg-slate-900"
+                >
+                  <Tag className="w-4 h-4 text-indigo-400" />
+                  <span>Tabela de Preços Atacado</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleExportWhatsAppAtacado}
+                  className="cursor-pointer flex items-center gap-2 hover:bg-slate-900 focus:bg-slate-900"
+                >
+                  <MessageCircle className="w-4 h-4 text-emerald-400" />
+                  <span>Copiar Lista Zap (WhatsApp)</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-slate-800" />
+                <DropdownMenuItem
+                  onClick={handleExportCSVVendas}
+                  className="cursor-pointer flex items-center gap-2 hover:bg-slate-900 focus:bg-slate-900"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-blue-400" />
+                  <span>Exportar CSV de Vendas</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-              <Button
-                onClick={handleExportWhatsAppAtacado}
-                className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-emerald-500/30 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer"
-              >
-                <MessageCircle className="w-4 h-4 text-emerald-400" />
-                Lista Zap
-              </Button>
-
-              <Button
-                onClick={handleExportCSVVendas}
-                className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 font-semibold rounded-2xl px-3 text-xs sm:text-sm border border-slate-700/80 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] h-10 cursor-pointer"
-                title="Exportar CSV de Vendas de Atacado"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                CSV
-              </Button>
-            </div>
+            {/* 4. MENU CATEGORIZADO: GESTÃO & BOT */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700 rounded-2xl px-3 text-xs sm:text-sm h-10 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Bot className="w-4 h-4 text-blue-400" />
+                  <span>Gestão & Bot</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 bg-slate-950 border-slate-800 text-slate-200">
+                <DropdownMenuLabel className="text-[11px] text-slate-400 font-semibold">Clientes & Automação</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setClienteParaEditar(null);
+                    setShowNovoClienteModal(true);
+                  }}
+                  className="cursor-pointer flex items-center gap-2 hover:bg-slate-900 focus:bg-slate-900"
+                >
+                  <UserPlus className="w-4 h-4 text-emerald-400" />
+                  <span>Novo Cliente Atacado</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setAbaSubTab('configuracoes')}
+                  className="cursor-pointer flex items-center gap-2 hover:bg-slate-900 focus:bg-slate-900"
+                >
+                  <Settings className="w-4 h-4 text-blue-400" />
+                  <span>Configurações do Bot</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-slate-800" />
+                <DropdownMenuItem
+                  onClick={() => handleDispararCobrancas(false)}
+                  disabled={disparandoCobrancas}
+                  className="cursor-pointer flex items-center gap-2 text-rose-400 hover:bg-rose-950/30 focus:bg-rose-950/30"
+                >
+                  <Send className="w-4 h-4 text-rose-400" />
+                  <span>Disparar Cobranças Agora</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -895,9 +1086,9 @@ export function AtacadoTab() {
           <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 space-y-1 shadow-sm">
             <div className="flex items-center justify-between text-slate-400 text-xs">
               <span>Aparelhos Vendidos</span>
-              <ShoppingBag className="w-4 h-4 text-amber-400" />
+              <ShoppingBag className="w-4 h-4 text-indigo-400" />
             </div>
-            <div className="text-base sm:text-xl font-bold font-mono text-amber-400">
+            <div className="text-base sm:text-xl font-bold font-mono text-indigo-300">
               {kpis.totalAparelhosVendidos} <span className="text-xs font-normal text-slate-400">unid.</span>
             </div>
             <div className="text-[10px] text-slate-500">
@@ -919,7 +1110,7 @@ export function AtacadoTab() {
             </div>
           </div>
 
-          {/* Card 5: Fiado a Receber (Dívidas) */}
+          {/* Card 5: Fiado a Receber */}
           <div className="bg-slate-950/70 border border-rose-900/40 rounded-2xl p-3.5 space-y-1 shadow-sm col-span-2 lg:col-span-1">
             <div className="flex items-center justify-between text-slate-400 text-xs">
               <span className="text-rose-400 font-bold">Fiado a Receber</span>
@@ -943,7 +1134,7 @@ export function AtacadoTab() {
             className={cn(
               "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
               abaSubTab === 'metricas'
-                ? "bg-amber-500 text-slate-950 shadow-lg shadow-amber-950/40"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-950/40"
                 : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
             )}
           >
@@ -956,11 +1147,11 @@ export function AtacadoTab() {
             className={cn(
               "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
               abaSubTab === 'fiado'
-                ? "bg-rose-500 text-white shadow-lg shadow-rose-950/40"
+                ? "bg-rose-600 text-white shadow-lg shadow-rose-950/40"
                 : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
             )}
           >
-            <DollarSign className="w-4 h-4 text-rose-300" /> 💸 Fiado & Lojistas Devedores ({lojistasDevedores.length})
+            <DollarSign className="w-4 h-4 text-rose-300" /> 💸 Fiado & Devedores ({lojistasDevedores.length})
             {totalFiadoEmAberto > 0 && (
               <Badge className="bg-rose-950 text-rose-300 text-[10px] ml-1">
                 R$ {totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
@@ -970,15 +1161,41 @@ export function AtacadoTab() {
 
           <button
             type="button"
+            onClick={() => setAbaSubTab('clientes')}
+            className={cn(
+              "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
+              abaSubTab === 'clientes'
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-950/40"
+                : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
+            )}
+          >
+            <Users className="w-4 h-4" /> 👥 Clientes Atacado ({clientesAtacado.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAbaSubTab('configuracoes')}
+            className={cn(
+              "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
+              abaSubTab === 'configuracoes'
+                ? "bg-cyan-600 text-white shadow-lg shadow-cyan-950/40"
+                : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
+            )}
+          >
+            <Bot className="w-4 h-4" /> 🤖 Configurações do Bot
+          </button>
+
+          <button
+            type="button"
             onClick={() => setAbaSubTab('historico')}
             className={cn(
               "px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer",
               abaSubTab === 'historico'
-                ? "bg-blue-500 text-white shadow-lg shadow-blue-950/40"
+                ? "bg-slate-700 text-white shadow-lg shadow-slate-950/40"
                 : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
             )}
           >
-            <History className="w-4 h-4" /> 📜 Histórico Geral de Saídas ({vendasAtacado.length})
+            <History className="w-4 h-4" /> 📜 Histórico ({vendasAtacado.length})
           </button>
         </div>
       </GlassCard>
@@ -988,20 +1205,20 @@ export function AtacadoTab() {
         <div className="space-y-5 animate-in fade-in duration-200">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* RANKING DOS PRINCIPAIS COMPRADORES */}
-            <GlassCard className="lg:col-span-8 rounded-3xl p-4 sm:p-5 space-y-3">
+            <GlassCard className="lg:col-span-8 rounded-3xl p-4 sm:p-5 space-y-3 border border-slate-800/80">
               <div className="flex items-center justify-between pb-2 border-b border-white/10">
                 <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-amber-400" />
+                  <Users className="w-4 h-4 text-blue-400" />
                   <h3 className="font-bold text-sm text-white">Ranking dos Principais Compradores / Lojistas</h3>
                 </div>
-                <span className="text-[11px] text-slate-400">{rankingCompradores.length} lojistas cadastrados</span>
+                <span className="text-[11px] text-slate-400">{rankingCompradores.length} lojistas compradores</span>
               </div>
 
               {rankingCompradores.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 space-y-2">
                   <Users className="w-8 h-8 opacity-40 mx-auto" />
                   <p className="text-xs">Nenhuma venda de atacado registrada ainda.</p>
-                  <p className="text-[11px] text-slate-600">Venda produtos marcando como "Atacado" e informando o nome do comprador (ex: "Junior").</p>
+                  <p className="text-[11px] text-slate-600">Venda produtos marcando como "Atacado" e informando o nome do comprador.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
@@ -1015,7 +1232,7 @@ export function AtacadoTab() {
                         className={cn(
                           "p-3 rounded-2xl border transition-all cursor-pointer select-none relative group",
                           isSelected
-                            ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-950/30"
+                            ? "bg-blue-600/15 border-blue-500/50 shadow-md shadow-blue-950/30"
                             : "bg-slate-950/70 border-slate-800/80 hover:border-slate-700"
                         )}
                       >
@@ -1023,15 +1240,15 @@ export function AtacadoTab() {
                           <div className="flex items-center gap-2">
                             <span className={cn(
                               "w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center",
-                              idx === 0 ? "bg-amber-500 text-slate-950" :
-                              idx === 1 ? "bg-slate-300 text-slate-950" :
-                              idx === 2 ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-300"
+                              idx === 0 ? "bg-blue-600 text-white" :
+                              idx === 1 ? "bg-indigo-600 text-white" :
+                              idx === 2 ? "bg-slate-700 text-slate-200" : "bg-slate-800 text-slate-400"
                             )}>
                               {idx + 1}
                             </span>
                             <span className="font-bold text-xs text-white truncate max-w-[120px]">{comp.nome}</span>
                           </div>
-                          <Badge variant="outline" className="text-[9px] bg-slate-900 border-slate-700 text-amber-300">
+                          <Badge variant="outline" className="text-[9px] bg-slate-900 border-slate-700 text-blue-300">
                             {comp.totalAparelhos} unid.
                           </Badge>
                         </div>
@@ -1052,7 +1269,7 @@ export function AtacadoTab() {
             </GlassCard>
 
             {/* TOP MODELOS VENDIDOS NO ATACADO */}
-            <GlassCard className="lg:col-span-4 rounded-3xl p-4 sm:p-5 space-y-3">
+            <GlassCard className="lg:col-span-4 rounded-3xl p-4 sm:p-5 space-y-3 border border-slate-800/80">
               <div className="flex items-center justify-between pb-2 border-b border-white/10">
                 <div className="flex items-center gap-2">
                   <Smartphone className="w-4 h-4 text-cyan-400" />
@@ -1084,7 +1301,7 @@ export function AtacadoTab() {
         </div>
       )}
 
-      {/* CONTEÚDO 2: ABA DE FIADO & CONTAS A RECEBER DE LOJISTAS */}
+      {/* CONTEÚDO 2: ABA DE FIADO & LOJISTAS DEVEDORES */}
       {abaSubTab === 'fiado' && (
         <div className="space-y-4 animate-in fade-in duration-200">
           
@@ -1097,26 +1314,37 @@ export function AtacadoTab() {
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                    Controle Milimétrico de Fiado & Lojistas Devedores
+                    Controle Milimétrico de Fiado & Devedores
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Acompanhe exatamente o que cada lojista pegou (celulares, perfumes, acessórios) e abata pagamentos parciais
+                    Acompanhe exatamente o que cada lojista pegou e abata pagamentos parciais ou totais
                   </p>
                 </div>
               </div>
 
-              <div className="text-right shrink-0 bg-slate-950/90 p-3 rounded-2xl border border-rose-500/20">
-                <span className="text-[11px] text-slate-400 block">Total a Receber</span>
-                <span className="text-xl sm:text-2xl font-bold font-mono text-rose-400">
-                  R$ {totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={() => handleDispararCobrancas(false)}
+                  disabled={disparandoCobrancas || lojistasDevedores.length === 0}
+                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-2xl text-xs h-10 gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Cobrar via Bot Zap
+                </Button>
+
+                <div className="text-right shrink-0 bg-slate-950/90 p-3 rounded-2xl border border-rose-500/20">
+                  <span className="text-[11px] text-slate-400 block">Total a Receber</span>
+                  <span className="text-xl sm:text-2xl font-bold font-mono text-rose-400">
+                    R$ {totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
               </div>
             </div>
           </GlassCard>
 
           {/* LISTA DE CARDS POR LOJISTA DEVEDOR */}
           {lojistasDevedores.length === 0 ? (
-            <GlassCard className="rounded-3xl p-8 text-center text-slate-500 space-y-2">
+            <GlassCard className="rounded-3xl p-8 text-center text-slate-500 space-y-2 border border-slate-800">
               <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-60" />
               <h4 className="text-sm font-bold text-white">Nenhum fiado em aberto no momento! 🎉</h4>
               <p className="text-xs text-slate-400">Todos os lojistas e compradores estão 100% quitados.</p>
@@ -1126,7 +1354,6 @@ export function AtacadoTab() {
               {lojistasDevedores.map((lojista) => (
                 <GlassCard key={lojista.lojistaNome} className="rounded-3xl p-4 sm:p-5 space-y-3.5 border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-all">
                   
-                  {/* CABEÇALHO DO CARD DO LOJISTA */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2.5">
@@ -1134,7 +1361,7 @@ export function AtacadoTab() {
                           "w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm border",
                           lojista.estaEmAtraso 
                             ? "bg-red-500/20 text-red-400 border-red-500/40" 
-                            : "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                            : "bg-blue-500/20 text-blue-400 border-blue-500/30"
                         )}>
                           {lojista.lojistaNome.charAt(0).toUpperCase()}
                         </div>
@@ -1218,7 +1445,7 @@ export function AtacadoTab() {
                       })}
                       className="bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200 text-xs h-9 rounded-xl gap-1.5 cursor-pointer"
                     >
-                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> Extrato WhatsApp
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> Extrato Zap
                     </Button>
                   </div>
 
@@ -1229,15 +1456,474 @@ export function AtacadoTab() {
         </div>
       )}
 
-      {/* CONTEÚDO 3: HISTÓRICO GERAL DE VENDAS EM ATACADO (SELECIONADO OU DEFAULT) */}
+      {/* CONTEÚDO 3: ABA DE CLIENTES DE ATACADO (LOJISTAS PARCEIROS & WHATSAPP) */}
+      {abaSubTab === 'clientes' && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <GlassCard className="rounded-3xl p-4 sm:p-6 border border-slate-800/80 space-y-4">
+            
+            {/* TOPO DA ABA DE CLIENTES */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div>
+                <h3 className="font-bold text-base text-white flex items-center gap-2">
+                  <Users className="w-4 h-4 text-indigo-400" />
+                  Clientes Atacado & Lojistas Parceiros
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Cadastre o WhatsApp de cada lojista para o bot enviar listas de estoque e lembretes de cobrança automática
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Buscar nome, zap, cidade..."
+                    value={buscaClientes}
+                    onChange={(e) => setBuscaClientes(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <Button
+                  onClick={() => {
+                    setClienteParaEditar(null);
+                    setShowNovoClienteModal(true);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-3 text-xs h-9 gap-1.5 cursor-pointer shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  Novo Cliente
+                </Button>
+              </div>
+            </div>
+
+            {/* LISTAGEM DE CLIENTES */}
+            {loadingClientes ? (
+              <div className="py-12 text-center text-slate-400 flex flex-col items-center gap-2">
+                <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+                <span className="text-xs">Carregando lojistas parceiros...</span>
+              </div>
+            ) : clientesFiltrados.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 space-y-3">
+                <Users className="w-10 h-10 opacity-30 mx-auto" />
+                <p className="text-sm font-semibold text-slate-400">Nenhum cliente de atacado cadastrado.</p>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Cadastre seus parceiros com WhatsApp para ativar os disparos automáticos de cobrança e lista de estoque.
+                </p>
+                <Button
+                  onClick={() => {
+                    setClienteParaEditar(null);
+                    setShowNovoClienteModal(true);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Cadastrar Primeiro Cliente
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {clientesFiltrados.map((cliente) => {
+                  const saldo = Number(cliente.saldo_devedor || 0);
+                  const limite = Number(cliente.limite_credito || 0);
+                  const zapLimpo = (cliente.whatsapp || cliente.telefone || '').replace(/\D/g, '');
+                  const temZap = zapLimpo.length >= 10;
+                  const zapLink = temZap 
+                    ? `https://wa.me/${zapLimpo.startsWith('55') ? zapLimpo : `55${zapLimpo}`}`
+                    : null;
+
+                  return (
+                    <div 
+                      key={cliente.id} 
+                      className="bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 rounded-2xl p-4 space-y-3 transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        {/* Topo do Card */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-sm">
+                              {cliente.nome.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-sm text-white">{cliente.nome}</h4>
+                              {cliente.cidade ? (
+                                <span className="text-[11px] text-slate-400 block">{cliente.cidade}</span>
+                              ) : (
+                                <span className="text-[10px] text-slate-500 block">Lojista Parceiro</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <Badge className={cn("text-[9px]", cliente.ativo !== false ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400")}>
+                            {cliente.ativo !== false ? 'Ativo' : 'Inativo'}
+                          </Badge>
+                        </div>
+
+                        {/* Informações de Contato */}
+                        <div className="mt-3 p-2.5 bg-slate-900/60 rounded-xl space-y-1.5 border border-white/5 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 flex items-center gap-1">
+                              <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp:
+                            </span>
+                            {temZap ? (
+                              <a 
+                                href={zapLink!} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="font-mono text-emerald-400 hover:underline flex items-center gap-1 font-bold"
+                              >
+                                {cliente.whatsapp || cliente.telefone}
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            ) : (
+                              <span className="text-slate-500 italic">Não informado</span>
+                            )}
+                          </div>
+
+                          {cliente.cpf_cnpj && (
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-slate-400">CPF/CNPJ:</span>
+                              <span className="font-mono text-slate-300">{cliente.cpf_cnpj}</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-[11px] pt-1 border-t border-white/5">
+                            <span className="text-slate-400">Limite de Crédito:</span>
+                            <span className="font-mono text-blue-300 font-bold">
+                              R$ {limite.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400">Saldo Devedor:</span>
+                            <span className={cn("font-mono font-bold", saldo > 0 ? "text-rose-400" : "text-emerald-400")}>
+                              R$ {saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </div>
+
+                        {cliente.observacoes && (
+                          <p className="text-[11px] text-slate-400 italic mt-2 line-clamp-2">
+                            "{cliente.observacoes}"
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Ações do Card */}
+                      <div className="flex items-center justify-between pt-2 border-t border-white/5 gap-2">
+                        {temZap && (
+                          <a
+                            href={zapLink!}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+                            Abrir Zap
+                          </a>
+                        )}
+
+                        <div className="flex items-center gap-1 ml-auto">
+                          <button
+                            onClick={() => {
+                              setClienteParaEditar(cliente);
+                              setShowNovoClienteModal(true);
+                            }}
+                            className="p-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Editar dados"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleExcluirCliente(cliente.id, cliente.nome)}
+                            className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Excluir cliente"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </GlassCard>
+        </div>
+      )}
+
+      {/* CONTEÚDO 4: ABA DE CONFIGURAÇÕES DO BOT DE COBRANÇA */}
+      {abaSubTab === 'configuracoes' && (
+        <div className="space-y-5 animate-in fade-in duration-200">
+          <GlassCard className="rounded-3xl p-4 sm:p-6 border border-slate-800/80 space-y-6">
+            
+            {/* Cabeçalho das Configurações */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-600/20 text-cyan-400 flex items-center justify-center font-bold border border-cyan-500/30 shadow-md">
+                  <Bot className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg text-white flex items-center gap-2">
+                    Automação do Bot de Cobrança & Mensagens
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Defina horários, dias da semana e modelos de mensagem para cobrança automática de devedores no WhatsApp
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => handleDispararCobrancas(true)}
+                  disabled={disparandoCobrancas}
+                  variant="outline"
+                  className="bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800 text-xs h-9 rounded-xl gap-1.5 cursor-pointer"
+                >
+                  <Search className="w-3.5 h-3.5 text-cyan-400" />
+                  Simular Disparos
+                </Button>
+
+                <Button
+                  onClick={handleSalvarConfigBot}
+                  disabled={salvandoConfigBot}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs h-9 gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  {salvandoConfigBot ? 'Salvando...' : 'Salvar Configurações'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Grid de Configurações */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Coluna 1: Parâmetros de Disparo e Horários (7 colunas) */}
+              <div className="lg:col-span-7 space-y-4">
+                
+                {/* Ativação Principal */}
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-sm text-white">Disparo Automático do Bot</h4>
+                    <p className="text-xs text-slate-400">
+                      Quando ativado, o sistema enviará mensagens de cobrança automaticamente no horário programado
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={configBot.ativo}
+                      onChange={(e) => setConfigBot({ ...configBot, ativo: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Horário de Disparo */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                      Horário do Disparo:
+                    </label>
+                    <input
+                      type="time"
+                      value={configBot.horario_disparo}
+                      onChange={(e) => setConfigBot({ ...configBot, horario_disparo: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono font-bold text-sm rounded-xl px-3 py-2 outline-none focus:border-cyan-500"
+                    />
+                    <span className="text-[10px] text-slate-500 block">Horário de Brasília (ex: 10:00)</span>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                      Dias de Carência:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="30"
+                      value={configBot.dias_carencia}
+                      onChange={(e) => setConfigBot({ ...configBot, dias_carencia: Number(e.target.value) || 0 })}
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono font-bold text-sm rounded-xl px-3 py-2 outline-none focus:border-indigo-500"
+                    />
+                    <span className="text-[10px] text-slate-500 block">Dias após o vencimento antes de cobrar</span>
+                  </div>
+                </div>
+
+                {/* Dias da Semana para Disparo */}
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2.5">
+                  <label className="text-xs font-bold text-slate-300 block">
+                    Dias da Semana Permitidos para Envio:
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {DIAS_SEMANA_OPCOES.map((dia) => {
+                      const selecionado = configBot.dias_semana.includes(dia.valor);
+                      return (
+                        <button
+                          key={dia.valor}
+                          type="button"
+                          onClick={() => {
+                            const novos = selecionado
+                              ? configBot.dias_semana.filter(d => d !== dia.valor)
+                              : [...configBot.dias_semana, dia.valor];
+                            setConfigBot({ ...configBot, dias_semana: novos });
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                            selecionado
+                              ? "bg-blue-600 text-white shadow-md shadow-blue-950/40"
+                              : "bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800"
+                          )}
+                        >
+                          {dia.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">
+                    Recomendado: Segunda a Sexta para maior receptividade comercial
+                  </span>
+                </div>
+
+                {/* Chave Pix para Cobrança */}
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                    Chave Pix para Pagamento no Atacado:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="CNPJ, E-mail, Celular ou Chave Aleatória"
+                    value={configBot.chave_pix || ''}
+                    onChange={(e) => setConfigBot({ ...configBot, chave_pix: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-500 block">
+                    Substitui a tag &#123;chave_pix&#125; na mensagem de cobrança
+                  </span>
+                </div>
+
+                {/* Template da Mensagem */}
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-300">
+                      Modelo da Mensagem de Cobrança:
+                    </label>
+                    <span className="text-[10px] text-slate-400">Variáveis disponíveis abaixo</span>
+                  </div>
+
+                  {/* Badges para inserir variáveis no texto */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {['{nome}', '{valor}', '{chave_pix}', '{nome_loja}', '{itens}'].map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          setConfigBot({
+                            ...configBot,
+                            mensagem_template: (configBot.mensagem_template || '') + ` ${tag} `,
+                          });
+                        }}
+                        className="bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] font-mono cursor-pointer transition-colors"
+                      >
+                        + {tag}
+                      </button>
+                    ))}
+                  </div>
+
+                  <textarea
+                    rows={6}
+                    value={configBot.mensagem_template}
+                    onChange={(e) => setConfigBot({ ...configBot, mensagem_template: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-xl p-3 outline-none focus:border-blue-500 font-sans leading-relaxed"
+                  />
+                </div>
+
+              </div>
+
+              {/* Coluna 2: Prévia Visual do WhatsApp & Gatilhos Manuais (5 colunas) */}
+              <div className="lg:col-span-5 space-y-4">
+                
+                {/* Prévia do Balão de WhatsApp */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                    <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                      <MessageCircle className="w-4 h-4 text-emerald-400" />
+                      Prévia da Mensagem (WhatsApp)
+                    </span>
+                    <span className="text-[10px] text-slate-500">Exemplo real</span>
+                  </div>
+
+                  {/* Simulação do Balão */}
+                  <div className="bg-[#0b141a] rounded-2xl p-4 border border-emerald-950/40 space-y-2">
+                    <div className="bg-[#005c4b] text-white text-xs rounded-2xl rounded-tr-none p-3 shadow-sm whitespace-pre-wrap leading-relaxed font-sans">
+                      {previewMensagemBot}
+                      <span className="text-[9px] text-emerald-200/60 block text-right mt-1">
+                        {configBot.horario_disparo} ✓✓
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400">
+                    O bot formata automaticamente o nome do lojista parceiro, o valor exato devido e sua chave Pix.
+                  </p>
+                </div>
+
+                {/* Card de Disparo Manual Imediato */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-950/30 to-slate-950 border border-rose-900/30 space-y-3">
+                  <div>
+                    <h4 className="font-bold text-sm text-white flex items-center gap-1.5">
+                      <Send className="w-4 h-4 text-rose-400" />
+                      Disparo Manual Forçado
+                    </h4>
+                    <p className="text-xs text-slate-400">
+                      Deseja enviar a cobrança para todos os devedores agora mesmo sem esperar o horário programado?
+                    </p>
+                  </div>
+
+                  <div className="pt-1 flex flex-col gap-2">
+                    <Button
+                      onClick={() => handleDispararCobrancas(false)}
+                      disabled={disparandoCobrancas || lojistasDevedores.length === 0}
+                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs h-10 gap-1.5 shadow-md cursor-pointer"
+                    >
+                      <Send className="w-4 h-4" />
+                      {disparandoCobrancas ? 'Enviando...' : `Disparar para ${lojistasDevedores.length} Devedores Agora`}
+                    </Button>
+
+                    <Button
+                      onClick={() => handleDispararCobrancas(true)}
+                      disabled={disparandoCobrancas}
+                      variant="outline"
+                      className="w-full bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800 text-xs h-9 rounded-xl gap-1.5 cursor-pointer"
+                    >
+                      <Search className="w-3.5 h-3.5 text-cyan-400" />
+                      Apenas Simular (Ver quem receberia)
+                    </Button>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+          </GlassCard>
+        </div>
+      )}
+
+      {/* CONTEÚDO 5: HISTÓRICO GERAL DE VENDAS EM ATACADO */}
       {(abaSubTab === 'historico' || abaSubTab === 'metricas') && (
-        <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-4">
+        <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-4 border border-slate-800/80">
           
           {/* BARRA DE FILTROS */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
             <div>
               <h3 className="font-bold text-sm sm:text-base text-white flex items-center gap-2">
-                <History className="w-4 h-4 text-amber-400" />
+                <History className="w-4 h-4 text-blue-400" />
                 Histórico de Vendas em Atacado
               </h3>
               <p className="text-xs text-slate-400">
@@ -1251,7 +1937,7 @@ export function AtacadoTab() {
                 <select
                   value={compradorFiltro}
                   onChange={(e) => setCompradorFiltro(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none focus:border-amber-500 cursor-pointer"
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer"
                 >
                   <option value="todos">Todos os Compradores</option>
                   {rankingCompradores.map((c) => (
@@ -1264,19 +1950,19 @@ export function AtacadoTab() {
               <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-800 text-xs">
                 <button
                   onClick={() => setPeriodoFiltro('todos')}
-                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'todos' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
+                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'todos' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white")}
                 >
                   Tudo
                 </button>
                 <button
                   onClick={() => setPeriodoFiltro('mes')}
-                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'mes' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
+                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'mes' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white")}
                 >
                   Este Mês
                 </button>
                 <button
                   onClick={() => setPeriodoFiltro('ano')}
-                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'ano' ? "bg-amber-500 text-slate-950" : "text-slate-400 hover:text-white")}
+                  className={cn("px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer", periodoFiltro === 'ano' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white")}
                 >
                   Este Ano
                 </button>
@@ -1290,13 +1976,13 @@ export function AtacadoTab() {
                   placeholder="Buscar modelo, lojista, IMEI..."
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-amber-500 w-full sm:w-56"
+                  className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 w-full sm:w-56"
                 />
               </div>
             </div>
           </div>
 
-          {/* VISUALIZAÇÃO MOBILE (CARDS TOUCH-FRIENDLY) */}
+          {/* VISUALIZAÇÃO MOBILE (CARDS) */}
           <div className="md:hidden space-y-3">
             {vendasFiltradas.length === 0 ? (
               <div className="py-8 text-center text-slate-500 text-xs">
@@ -1308,10 +1994,9 @@ export function AtacadoTab() {
                   key={v.id} 
                   className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-3.5 space-y-2.5 shadow-sm relative"
                 >
-                  {/* Linha 1: Comprador + Data + Forma de Pgto */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                      <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
                       <span className="font-bold text-xs text-white truncate">{v.comprador}</span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -1324,7 +2009,6 @@ export function AtacadoTab() {
                     </div>
                   </div>
 
-                  {/* Linha 2: Modelo + Especificações */}
                   <div className="bg-slate-900/60 rounded-xl p-2.5 border border-white/5 space-y-0.5">
                     <div className="font-bold text-xs text-white">{v.modelo}</div>
                     <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between">
@@ -1333,7 +2017,6 @@ export function AtacadoTab() {
                     </div>
                   </div>
 
-                  {/* Linha 3: Financeiro (Valor Venda, Custo, Lucro) */}
                   <div className="grid grid-cols-3 gap-1.5 pt-1 text-center">
                     <div className="bg-slate-900/40 rounded-lg p-1.5 border border-white/5">
                       <span className="text-[9px] text-slate-400 block">Venda</span>
@@ -1357,22 +2040,21 @@ export function AtacadoTab() {
                     </div>
                   </div>
 
-                  {/* Linha 4: Ações Rápidas (Botões Grandes e Confortáveis) */}
                   <div className="flex items-center gap-2 pt-2 border-t border-white/5">
                     <button
                       onClick={() => setVendaParaEditar(v)}
                       className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-xl py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
                     >
                       <Edit2 className="w-3.5 h-3.5 text-blue-400" />
-                      Editar Dados
+                      Editar
                     </button>
 
                     <button
                       onClick={() => handleEmitirNFeAtacado(v)}
-                      className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-xl py-2 px-2.5 text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer active:scale-[0.98]"
+                      className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl py-2 px-2.5 text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer active:scale-[0.98]"
                       title="Emitir ou Consultar NF-e (Modelo 55)"
                     >
-                      <FileText className="w-3.5 h-3.5 text-amber-400" />
+                      <FileText className="w-3.5 h-3.5 text-indigo-400" />
                       NF-e
                     </button>
 
@@ -1421,7 +2103,7 @@ export function AtacadoTab() {
 
                       <td className="py-3 px-3 font-bold text-white whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-amber-400" />
+                          <span className="w-2 h-2 rounded-full bg-blue-400" />
                           {v.comprador}
                         </div>
                       </td>
@@ -1463,13 +2145,13 @@ export function AtacadoTab() {
                           <button
                             onClick={() => setVendaParaEditar(v)}
                             className="text-xs text-blue-400 hover:text-blue-300 font-semibold p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
-                            title="Editar data, custo, valor ou lojista"
+                            title="Editar dados"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleEmitirNFeAtacado(v)}
-                            className="text-xs text-amber-400 hover:text-amber-300 font-semibold p-1.5 rounded-lg hover:bg-amber-500/10 transition-colors"
+                            className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold p-1.5 rounded-lg hover:bg-indigo-500/10 transition-colors"
                             title="Emitir ou Consultar NF-e (Modelo 55)"
                           >
                             <FileText className="w-3.5 h-3.5" />
@@ -1477,7 +2159,7 @@ export function AtacadoTab() {
                           <button
                             onClick={() => handleReverterVenda(v)}
                             className="text-xs text-rose-400 hover:text-rose-300 font-semibold p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
-                            title="Cancelar venda e devolver aparelho ao estoque ativo"
+                            title="Cancelar venda e devolver aparelho ao estoque"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                           </button>
@@ -1493,6 +2175,19 @@ export function AtacadoTab() {
         </GlassCard>
       )}
 
+      {/* MODAL DE CADASTRO E EDIÇÃO DE CLIENTE DE ATACADO */}
+      <ModalPortal>
+        <NovoClienteAtacadoModal
+          isOpen={showNovoClienteModal}
+          onClose={() => {
+            setShowNovoClienteModal(false);
+            setClienteParaEditar(null);
+          }}
+          clienteParaEditar={clienteParaEditar}
+          onSuccess={fetchClientesAtacado}
+        />
+      </ModalPortal>
+
       {/* MODAL DE VENDA DE ATACADO EM LOTE (MÚLTIPLOS PRODUTOS) */}
       <ModalPortal>
         <VendaLoteAtacadoModal
@@ -1507,6 +2202,7 @@ export function AtacadoTab() {
           onSuccess={async () => {
             await fetchAparelhos();
             await fetchVendasBanco();
+            await fetchClientesAtacado();
           }}
         />
       </ModalPortal>
@@ -1533,7 +2229,7 @@ export function AtacadoTab() {
         />
       </ModalPortal>
 
-      {/* MODAL PARA EDITAR VENDA / REGISTRO / CUSTOS RETROATIVOS */}
+      {/* MODAL PARA EDITAR VENDA / REGISTRO */}
       <ModalPortal>
         <EditarVendaRegistroModal
           isOpen={!!vendaParaEditar}
@@ -1559,6 +2255,7 @@ export function AtacadoTab() {
           onSuccess={async () => {
             await fetchAparelhos();
             await fetchVendasBanco();
+            await fetchClientesAtacado();
           }}
         />
       </ModalPortal>
@@ -1570,7 +2267,7 @@ export function AtacadoTab() {
           onClose={() => setLojistaParaExtrato(null)}
           lojistaNome={lojistaParaExtrato?.lojistaNome || ''}
           vendasLojista={lojistaParaExtrato?.vendasLojista || []}
-          chavePix={config.chavePix || ''}
+          chavePix={configBot.chave_pix || config.chavePix || ''}
           onAbrirBaixaModal={() => {
             if (lojistaParaExtrato) {
               const devedor = lojistaParaExtrato.vendasLojista.reduce((acc, v) => acc + (Number(v.saldoDevedor !== undefined ? v.saldoDevedor : (Number(v.valor || 0) - Number(v.valorPago || 0)))), 0);
