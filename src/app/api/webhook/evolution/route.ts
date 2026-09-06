@@ -1796,11 +1796,12 @@ Você pode solicitar um teste de 3 dias grátis de qualquer plano superior no me
       /(?:quando (?:meu|o)? ?plano (?:vai )?venc|quando vence|vencimento (?:do )?plano|plano (?:vai )?venc|meu plano t[aá] ativo|quantos dias de plano|dias restantes do plano|validade do plano)/i.test(lowerText);
 
     if (ehPerguntaVencimento) {
+      const isVitalicio = usuarioResolvido?.planoStatus === 'vitalicio';
       const planoAtualFormatado = (usuarioResolvido?.planoTipo || 'entrada').toUpperCase();
-      const statusFormatado = usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo');
-      const dataVenc = usuarioResolvido?.dataVencimento ? formatarDataSegura(usuarioResolvido.dataVencimento) : 'Não definida';
+      const statusFormatado = isVitalicio ? 'Ativo (Acesso Vitalício ♾️)' : (usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo'));
+      const dataVenc = isVitalicio ? 'Permanente (Sem cobrança periódica)' : (usuarioResolvido?.dataVencimento ? formatarDataSegura(usuarioResolvido.dataVencimento) : 'Não definida');
       const dias = usuarioResolvido?.diasRestantes !== undefined ? usuarioResolvido.diasRestantes : 0;
-      const diasTexto = dias <= 0 ? '⚠️ Vencido hoje ou atrasado' : `${dias} dia(s) restante(s)`;
+      const diasTexto = isVitalicio ? '♾️ Acesso Vitalício Garantido' : (dias <= 0 ? '⚠️ Vencido hoje ou atrasado' : `${dias} dia(s) restante(s)`);
 
       const msgVencimento = `🗓️ *Status da Assinatura — ${nomeLoja}*
 
@@ -1811,7 +1812,7 @@ Olá, *${nomeUsuario}*! Seguem os detalhes da sua assinatura no Phone Center:
 • Data de Vencimento: *${dataVenc}*
 • Prazo: *${diasTexto}*
 
-${papelUsuario === 'owner' ? '💡 *Para renovar ou pagar via PIX:* envie *!plano pagar* ou acesse o menu *Meu Plano* no site para pagar no Cartão de Crédito em até 12x.' : '💡 Entre em contato com o proprietário da sua loja para renovações ou upgrades de plano.'}`;
+${isVitalicio ? '🎉 Sua loja possui acesso vitalício permanente liberado pelo Super Admin!' : (papelUsuario === 'owner' ? '💡 *Para renovar ou pagar via PIX:* envie *!plano pagar* ou acesse o menu *Meu Plano* no site para pagar no Cartão de Crédito em até 12x.' : '💡 Entre em contato com o proprietário da sua loja para renovações ou upgrades de plano.')}`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgVencimento);
       return NextResponse.json({ status: 'ok', message: 'Informações de vencimento enviadas.' }, { status: 200 });

@@ -298,6 +298,12 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     }
 
     switch (planData.planoStatus) {
+      case 'vitalicio':
+        return (
+          <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
+            <Sparkles className="w-4 h-4 text-purple-400" /> Acesso Vitalício ♾️
+          </Badge>
+        );
       case 'ativo':
         return (
           <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs px-3 py-1 flex items-center gap-1.5 font-bold">
@@ -392,7 +398,14 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
               <p className="text-xs text-slate-400 flex items-center gap-1.5">
                 <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Mensalidade: <span className="font-bold text-emerald-400">R$ {planData.valorMensalidade.toFixed(2).replace('.', ',')} / mês</span>
               </p>
-              {planData.dataVencimento && (
+              {planData.planoStatus === 'vitalicio' ? (
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-purple-300 flex items-center gap-1.5 font-semibold bg-purple-500/10 px-2.5 py-1 rounded-xl border border-purple-500/20">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    Acesso Vitalício Permanente (Isento de cobranças periódicas)
+                  </p>
+                </div>
+              ) : planData.dataVencimento ? (
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
                     <Calendar className={`w-3.5 h-3.5 ${planData.planoStatus === 'vencido' ? 'text-red-400' : 'text-amber-400'}`} /> 
@@ -416,7 +429,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                     </span>
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
             <div className="flex flex-col items-start sm:items-end gap-2">
               {getStatusBadge()}

@@ -10,7 +10,7 @@ export interface StorePlanData {
   nomeLoja: string;
   planoTipo: TipoPlano;
   periodoFaturamento: PeriodoFaturamento;
-  planoStatus: 'ativo' | 'pendente' | 'vencido' | 'bloqueado';
+  planoStatus: 'ativo' | 'vitalicio' | 'pendente' | 'vencido' | 'bloqueado';
   valorMensalidade: number;
   dataVencimento: string | null;
   planoTrialAte: string | null;
@@ -24,6 +24,7 @@ export interface StorePlanData {
   observacaoPlano: string | null;
   diasParaVencer: number;
   isBloqueado: boolean;
+  isVitalicio: boolean;
 }
 
 const DEFAULT_PLAN: StorePlanData = {
@@ -45,6 +46,7 @@ const DEFAULT_PLAN: StorePlanData = {
   observacaoPlano: null,
   diasParaVencer: 30,
   isBloqueado: false,
+  isVitalicio: false,
 };
 
 export function useStorePlan() {
@@ -87,7 +89,13 @@ export function useStorePlan() {
       let diasParaVencer = 30;
       let isVencidoPorData = false;
 
-      if (loja.data_vencimento) {
+      const rawStatus = (loja.plano_status || 'ativo').toLowerCase();
+      const isVitalicio = rawStatus === 'vitalicio';
+
+      if (isVitalicio) {
+        diasParaVencer = 99999;
+        isVencidoPorData = false;
+      } else if (loja.data_vencimento) {
         const parts = String(loja.data_vencimento).split('T')[0].split('-');
         if (parts.length === 3) {
           const year = parseInt(parts[0], 10);
@@ -100,10 +108,11 @@ export function useStorePlan() {
         }
       }
 
-      const rawStatus = (loja.plano_status || 'ativo').toLowerCase();
       let status: StorePlanData['planoStatus'] = 'ativo';
       if (!loja.ativo || rawStatus === 'bloqueado') {
         status = 'bloqueado';
+      } else if (isVitalicio) {
+        status = 'vitalicio';
       } else if (rawStatus === 'vencido' || isVencidoPorData) {
         status = 'vencido';
       } else if (rawStatus === 'pendente') {
@@ -121,8 +130,8 @@ export function useStorePlan() {
         isTrialAtivo = trialEnd > Date.now();
       }
 
-      // Sincroniza no banco se constava como ativo mas a data já venceu
-      if (isVencidoPorData && loja.plano_status === 'ativo' && !isTrialAtivo) {
+      // Sincroniza no banco se constava como ativo mas a data já venceu (e não é vitalício)
+      if (isVencidoPorData && loja.plano_status === 'ativo' && !isTrialAtivo && !isVitalicio) {
         supabase.from('lojas').update({ plano_status: 'vencido' }).eq('id', loja.id).then();
       }
 
@@ -144,11 +153,12 @@ export function useStorePlan() {
         apiKey: loja.api_key || null,
         chavePixCobranca: loja.chave_pix_cobranca || 'financeiro@phonecenter.com.br',
         comprovanteUrl: loja.comprovante_url || null,
-        solicitacaoStatus: (loja.solicitacao_liberacao_status || 'nenhuma') as StorePlanData['solicitacaoStatus'],
+        solicitacaoStatus: (loja.solicitacao_liberacao_status as any) || 'nenhuma',
         solicitacaoAt: loja.solicitacao_liberacao_at || null,
         observacaoPlano: loja.observacao_plano || null,
         diasParaVencer,
         isBloqueado,
+        isVitalicio,
       });
     } catch (err) {
       console.error('Erro ao carregar dados do plano:', err);

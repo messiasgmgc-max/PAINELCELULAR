@@ -39,6 +39,9 @@ import {
   AlertTriangle,
   Clock,
   ArrowUpRight,
+  Sparkles,
+  Gift,
+  RotateCcw,
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -53,7 +56,7 @@ interface Loja {
   logo_url?: string | null;
   assinatura_url?: string | null;
   plano?: string | null;
-  plano_status?: "ativo" | "pendente" | "vencido" | "bloqueado" | null;
+  plano_status?: "ativo" | "vitalicio" | "pendente" | "vencido" | "bloqueado" | null;
   valor_mensalidade?: number | null;
   data_vencimento?: string | null;
   chave_pix_cobranca?: string | null;
@@ -222,7 +225,7 @@ export default function SuperAdminTab() {
   const [editingPlanoLoja, setEditingPlanoLoja] = useState<Loja | null>(null);
   const [verComprovanteModal, setVerComprovanteModal] = useState<{ lojaNome: string; url: string; observacao?: string } | null>(null);
   const [editPlanoForm, setEditPlanoForm] = useState({
-    plano_status: "ativo" as "ativo" | "pendente" | "vencido" | "bloqueado",
+    plano_status: "ativo" as "ativo" | "vitalicio" | "pendente" | "vencido" | "bloqueado",
     valor_mensalidade: 99.90,
     data_vencimento: "",
     chave_pix_cobranca: "financeiro@phonecenter.com.br",
@@ -532,6 +535,111 @@ export default function SuperAdminTab() {
     }
   };
 
+  // Pular a cobrança do mês (+30 dias de isenção sem gerar custo para o lojista)
+  const handlePularCobrancaMes = async (loja: Loja, dias: number = 30) => {
+    try {
+      const isVencido = isVencidoPorData(loja.data_vencimento);
+      const baseDate = isVencido 
+        ? new Date() 
+        : (loja.data_vencimento ? new Date(loja.data_vencimento + 'T12:00:00') : new Date());
+      const novoVenc = new Date(baseDate.getTime() + dias * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const { error } = await supabase
+        .from('lojas')
+        .update({
+          plano_status: 'ativo',
+          data_vencimento: novoVenc,
+          solicitacao_liberacao_status: 'aprovado',
+          ativo: true
+        })
+        .eq('id', loja.id);
+
+      if (error) throw error;
+
+      await supabase.from('historico_pagamentos_planos').insert({
+        loja_id: loja.id,
+        valor: 0.00,
+        status: 'aprovado',
+        observacao: `Cobrança do mês pulada / Isenção concedida pelo Super Admin (+${dias} dias). Novo vencimento: ${novoVenc}`,
+        forma_pagamento: 'isencao_superadmin'
+      });
+
+      toast.success(`🎉 Cobrança do mês pulada para "${loja.nome}"! Vencimento adiado para ${formatarDataVencimento(novoVenc)}.`);
+      await fetchDadosGlobais();
+      await fetchHistoricoGlobal();
+    } catch (err: any) {
+      toast.error('Erro ao pular cobrança: ' + err.message);
+    }
+  };
+
+  // Tornar Loja Vitalícia (Acesso permanente sem cobrança periódica)
+  const handleTornarVitalicio = async (loja: Loja) => {
+    if (!window.confirm(`Tem certeza que deseja conceder acesso VITALÍCIO permanente à loja "${loja.nome}"? A loja nunca mais será cobrada.`)) {
+      return;
+    }
+
+    try {
+      const obsAtual = loja.observacao_plano || '';
+      const novaObs = obsAtual ? `${obsAtual} | Vitalício concedido pelo Super Admin` : 'Acesso Vitalício Permanente';
+
+      const { error } = await supabase
+        .from('lojas')
+        .update({
+          plano_status: 'vitalicio',
+          data_vencimento: '2099-12-31',
+          solicitacao_liberacao_status: 'aprovado',
+          observacao_plano: novaObs,
+          ativo: true
+        })
+        .eq('id', loja.id);
+
+      if (error) throw error;
+
+      await supabase.from('historico_pagamentos_planos').insert({
+        loja_id: loja.id,
+        valor: 0.00,
+        status: 'aprovado',
+        observacao: 'Acesso Vitalício Permanente ativado pelo Super Admin (vencimento 2099-12-31).',
+        forma_pagamento: 'vitalicio'
+      });
+
+      toast.success(`♾️ Loja "${loja.nome}" agora possui ACESSO VITALÍCIO permanente!`);
+      await fetchDadosGlobais();
+      await fetchHistoricoGlobal();
+    } catch (err: any) {
+      toast.error('Erro ao conceder vitalício: ' + err.message);
+    }
+  };
+
+  // Reverter acesso vitalício para cobrança mensal normal (+30 dias)
+  const handleRemoverVitalicio = async (loja: Loja) => {
+    if (!window.confirm(`Deseja remover o status vitalício de "${loja.nome}" e reativar a cobrança mensal com vencimento em 30 dias?`)) {
+      return;
+    }
+
+    try {
+      const novoVenc = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const { error } = await supabase
+        .from('lojas')
+        .update({
+          plano_status: 'ativo',
+          data_vencimento: novoVenc,
+          solicitacao_liberacao_status: 'aprovado',
+          ativo: true
+        })
+        .eq('id', loja.id);
+
+      if (error) throw error;
+
+      toast.success(`Cobrança mensal reativada para "${loja.nome}". Vencimento em ${formatarDataVencimento(novoVenc)}.`);
+      await fetchDadosGlobais();
+      await fetchHistoricoGlobal();
+    } catch (err: any) {
+      toast.error('Erro ao reverter vitalício: ' + err.message);
+    }
+  };
+
   // ── AÇÕES DE LOJAS ──
 
   const handleCriarLoja = async (e: React.FormEvent) => {
@@ -696,16 +804,18 @@ export default function SuperAdminTab() {
 
     try {
       let statusParaSalvar = editPlanoForm.plano_status;
-      if (isVencidoPorData(editPlanoForm.data_vencimento) && statusParaSalvar === 'ativo') {
+      if (statusParaSalvar !== 'vitalicio' && isVencidoPorData(editPlanoForm.data_vencimento) && statusParaSalvar === 'ativo') {
         statusParaSalvar = 'vencido';
       }
+
+      const dataVencSalvar = statusParaSalvar === 'vitalicio' ? '2099-12-31' : (editPlanoForm.data_vencimento || null);
 
       const { error } = await supabase
         .from("lojas")
         .update({
           plano_status: statusParaSalvar,
           valor_mensalidade: Number(editPlanoForm.valor_mensalidade),
-          data_vencimento: editPlanoForm.data_vencimento || null,
+          data_vencimento: dataVencSalvar,
           chave_pix_cobranca: editPlanoForm.chave_pix_cobranca.trim(),
           observacao_plano: editPlanoForm.observacao_plano.trim() || null,
           mp_access_token: editPlanoForm.mp_access_token.trim() || null,
@@ -1566,12 +1676,15 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                       </tr>
                     ) : (
                       lojasFiltradas.map((loja) => {
-                        const isVencido = isVencidoPorData(loja.data_vencimento);
-                        const diasRestantes = getDiasRestantes(loja.data_vencimento);
                         const rawStatus = (loja.plano_status || 'ativo').toLowerCase();
-                        let statusPlano: 'ativo' | 'pendente' | 'vencido' | 'bloqueado' = 'ativo';
+                        const isVitalicio = rawStatus === 'vitalicio';
+                        const isVencido = !isVitalicio && isVencidoPorData(loja.data_vencimento);
+                        const diasRestantes = getDiasRestantes(loja.data_vencimento);
+                        let statusPlano: 'ativo' | 'vitalicio' | 'pendente' | 'vencido' | 'bloqueado' = 'ativo';
                         if (!loja.ativo || rawStatus === 'bloqueado') {
                           statusPlano = 'bloqueado';
+                        } else if (isVitalicio) {
+                          statusPlano = 'vitalicio';
                         } else if (rawStatus === 'vencido' || isVencido) {
                           statusPlano = 'vencido';
                         } else if (rawStatus === 'pendente') {
@@ -1597,18 +1710,32 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                               R$ {(loja.valor_mensalidade || 99.90).toFixed(2).replace('.', ',')}
                             </td>
                             <td className="py-3.5 px-3 font-mono">
-                              <div>
-                                <span className={`text-xs font-semibold ${isVencido ? 'text-red-400 font-bold' : 'text-slate-200'}`}>
-                                  {formatarDataVencimento(loja.data_vencimento)}
-                                </span>
-                                {loja.data_vencimento && (
-                                  <p className={`text-[10px] ${isVencido ? 'text-red-400 font-bold' : diasRestantes <= 5 ? 'text-amber-400 font-semibold' : 'text-slate-400'}`}>
-                                    {isVencido ? `Vencido há ${Math.abs(diasRestantes)} dia(s)` : `${diasRestantes} dia(s) restante(s)`}
-                                  </p>
-                                )}
-                              </div>
+                              {isVitalicio ? (
+                                <div>
+                                  <span className="text-xs font-bold text-purple-300 flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3 text-purple-400" /> Permanente ♾️
+                                  </span>
+                                  <p className="text-[10px] text-purple-400/80">Sem cobrança</p>
+                                </div>
+                              ) : (
+                                <div>
+                                  <span className={`text-xs font-semibold ${isVencido ? 'text-red-400 font-bold' : 'text-slate-200'}`}>
+                                    {formatarDataVencimento(loja.data_vencimento)}
+                                  </span>
+                                  {loja.data_vencimento && (
+                                    <p className={`text-[10px] ${isVencido ? 'text-red-400 font-bold' : diasRestantes <= 5 ? 'text-amber-400 font-semibold' : 'text-slate-400'}`}>
+                                      {isVencido ? `Vencido há ${Math.abs(diasRestantes)} dia(s)` : `${diasRestantes} dia(s) restante(s)`}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="py-3.5 px-3">
+                              {statusPlano === 'vitalicio' && (
+                                <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/40 flex items-center gap-1 font-bold">
+                                  <Sparkles className="w-3 h-3 text-purple-400" /> Vitalício ♾️
+                                </Badge>
+                              )}
                               {statusPlano === 'ativo' && (
                                 <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
                                   🟢 Ativo
@@ -1652,34 +1779,70 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                               )}
                             </td>
                             <td className="py-3.5 px-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                {/* Botão de Renovação Rápida */}
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleRenovarPlano30Dias(loja)}
-                                  className="h-8 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 rounded-xl shadow-md shadow-emerald-600/20 cursor-pointer"
-                                  title="Renovar por mais 30 dias a partir do vencimento"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Renovar (+30d)
-                                </Button>
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                {isVitalicio ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleRemoverVitalicio(loja)}
+                                    className="h-8 px-2 text-xs gap-1 border-purple-500/40 text-purple-300 hover:bg-purple-500/20 rounded-xl cursor-pointer"
+                                    title="Remover status vitalício e voltar para mensalidade normal"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" /> Reverter Vitalício
+                                  </Button>
+                                ) : (
+                                  <>
+                                    {/* Botão Pular Mês (Isenção do mês / +30d) */}
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handlePularCobrancaMes(loja, 30)}
+                                      className="h-8 px-2 bg-amber-600/80 hover:bg-amber-500 text-white text-xs font-bold gap-1 rounded-xl shadow-sm cursor-pointer"
+                                      title="Pular cobrança do mês: prorroga o vencimento em +30 dias sem cobrar nada da loja"
+                                    >
+                                      <Gift className="w-3.5 h-3.5" /> Pular Mês
+                                    </Button>
 
-                                {statusPlano === 'ativo' ? (
+                                    {/* Botão Tornar Vitalício */}
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleTornarVitalicio(loja)}
+                                      className="h-8 px-2 bg-purple-700/80 hover:bg-purple-600 text-white text-xs font-bold gap-1 rounded-xl shadow-sm cursor-pointer"
+                                      title="Deixar como Vitalício (acesso permanente sem cobranças periódicas)"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5" /> Vitalício
+                                    </Button>
+
+                                    {/* Botão de Renovação Normal */}
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleRenovarPlano30Dias(loja)}
+                                      className="h-8 px-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold gap-1 rounded-xl shadow-sm cursor-pointer"
+                                      title="Renovar por mais 30 dias (registra renovação no histórico)"
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5" /> Renovar
+                                    </Button>
+                                  </>
+                                )}
+
+                                {statusPlano === 'ativo' || statusPlano === 'vitalicio' ? (
                                   <Button
                                     size="sm"
                                     variant="destructive"
                                     onClick={() => handleAlterarStatusPlano(loja.id, 'bloqueado')}
-                                    className="h-8 px-2.5 text-xs gap-1 rounded-xl cursor-pointer"
+                                    className="h-8 px-2 text-xs gap-1 rounded-xl cursor-pointer"
+                                    title="Bloquear loja"
                                   >
-                                    <XCircle className="w-3.5 h-3.5" /> Bloquear
+                                    <XCircle className="w-3.5 h-3.5" />
                                   </Button>
                                 ) : (
                                   <Button
                                     size="sm"
                                     variant="outline"
                                     onClick={() => handleAlterarStatusPlano(loja.id, 'ativo')}
-                                    className="h-8 px-2.5 text-xs gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20 rounded-xl cursor-pointer"
+                                    className="h-8 px-2 text-xs gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20 rounded-xl cursor-pointer"
+                                    title="Ativar loja"
                                   >
-                                    <CheckCircle2 className="w-3.5 h-3.5" /> Ativar
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
                                   </Button>
                                 )}
 
@@ -1687,8 +1850,8 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleOpenEditPlano(loja)}
-                                  className="h-8 px-2.5 text-xs border-white/20 hover:bg-white/10 rounded-xl cursor-pointer"
-                                  title="Editar valores e datas da loja"
+                                  className="h-8 px-2 text-xs border-white/20 hover:bg-white/10 rounded-xl cursor-pointer"
+                                  title="Editar valores, prazos e configurações da loja"
                                 >
                                   <Edit className="w-3.5 h-3.5 text-blue-400" />
                                 </Button>
@@ -2435,10 +2598,22 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                   <label className="text-xs text-slate-300 font-semibold mb-1 block">Status do Plano</label>
                   <select
                     value={editPlanoForm.plano_status}
-                    onChange={(e) => setEditPlanoForm({ ...editPlanoForm, plano_status: e.target.value as any })}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      if (val === 'vitalicio') {
+                        setEditPlanoForm({
+                          ...editPlanoForm,
+                          plano_status: 'vitalicio',
+                          data_vencimento: '2099-12-31',
+                        });
+                      } else {
+                        setEditPlanoForm({ ...editPlanoForm, plano_status: val });
+                      }
+                    }}
                     className="input-glass w-full text-sm py-2 px-3"
                   >
                     <option value="ativo">🟢 Ativo</option>
+                    <option value="vitalicio">♾️ Vitalício (Sem cobrança periódica)</option>
                     <option value="pendente">⏳ Pendente</option>
                     <option value="vencido">⚠️ Vencido</option>
                     <option value="bloqueado">🔴 Bloqueado</option>
@@ -2458,13 +2633,88 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                 </div>
               </div>
 
+              {/* Painel de Ações Rápidas de Isenção e Prazos */}
+              <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-2.5">
+                <span className="text-xs font-bold text-slate-300 block flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Ações Rápidas de Prazos & Isenções:
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const isVencido = isVencidoPorData(editPlanoForm.data_vencimento);
+                      const base = isVencido || !editPlanoForm.data_vencimento 
+                        ? new Date() 
+                        : new Date(editPlanoForm.data_vencimento + 'T12:00:00');
+                      const novaData = new Date(base.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                      setEditPlanoForm({
+                        ...editPlanoForm,
+                        plano_status: 'ativo',
+                        data_vencimento: novaData,
+                        observacao_plano: (editPlanoForm.observacao_plano ? editPlanoForm.observacao_plano + ' | ' : '') + 'Cobrança do mês pulada (+30d)'
+                      });
+                      toast.info(`Vencimento adiado para ${formatarDataVencimento(novaData)} (+30 dias)`);
+                    }}
+                    className="text-xs h-7 border-amber-500/40 text-amber-300 hover:bg-amber-500/20 cursor-pointer"
+                  >
+                    <Gift className="w-3.5 h-3.5 mr-1" /> Pular Mês (+30 dias)
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const isVencido = isVencidoPorData(editPlanoForm.data_vencimento);
+                      const base = isVencido || !editPlanoForm.data_vencimento 
+                        ? new Date() 
+                        : new Date(editPlanoForm.data_vencimento + 'T12:00:00');
+                      const novaData = new Date(base.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                      setEditPlanoForm({
+                        ...editPlanoForm,
+                        plano_status: 'ativo',
+                        data_vencimento: novaData,
+                        observacao_plano: (editPlanoForm.observacao_plano ? editPlanoForm.observacao_plano + ' | ' : '') + 'Isenção (+60d)'
+                      });
+                      toast.info(`Vencimento adiado para ${formatarDataVencimento(novaData)} (+60 dias)`);
+                    }}
+                    className="text-xs h-7 border-blue-500/40 text-blue-300 hover:bg-blue-500/20 cursor-pointer"
+                  >
+                    +60 dias
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setEditPlanoForm({
+                        ...editPlanoForm,
+                        plano_status: 'vitalicio',
+                        data_vencimento: '2099-12-31',
+                        observacao_plano: (editPlanoForm.observacao_plano ? editPlanoForm.observacao_plano + ' | ' : '') + 'Acesso Vitalício Permanente'
+                      });
+                      toast.info('Status alterado para Vitalício (sem cobranças futuras)');
+                    }}
+                    className="text-xs h-7 border-purple-500/40 text-purple-300 hover:bg-purple-500/20 font-bold cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-1 text-purple-400" /> Tornar Vitalício ♾️
+                  </Button>
+                </div>
+              </div>
+
               <div>
-                <label className="text-xs text-slate-300 font-semibold mb-1 block">Data de Vencimento</label>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">
+                  Data de Vencimento {editPlanoForm.plano_status === 'vitalicio' && '(Permanente)'}
+                </label>
                 <input
                   type="date"
+                  disabled={editPlanoForm.plano_status === 'vitalicio'}
                   value={editPlanoForm.data_vencimento}
                   onChange={(e) => setEditPlanoForm({ ...editPlanoForm, data_vencimento: e.target.value })}
-                  className="input-glass w-full text-sm"
+                  className="input-glass w-full text-sm disabled:opacity-50"
                 />
               </div>
 
