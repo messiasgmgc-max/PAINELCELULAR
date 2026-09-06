@@ -421,6 +421,10 @@ async function processarResultadoVisionEtiqueta(
   lojaId: string | null,
   pushName: string
 ): Promise<string> {
+  if (!lojaId) {
+    return "❌ Não consegui identificar sua loja para executar este comando, contate o suporte";
+  }
+
   // 1. Se for comprovante de pagamento bancário (Pix/TED)
   if (vision.tipo_documento === 'comprovante_pagamento' || (vision.amount && !vision.imei && !vision.modelo)) {
     const valorFmt = vision.amount ? `R$ ${Number(vision.amount).toFixed(2).replace('.', ',')}` : 'Não identificado';
@@ -452,8 +456,7 @@ async function processarResultadoVisionEtiqueta(
 
   // Busca 1: Por IMEI no Supabase (exato ou que termine com os dígitos)
   if (imei && imei.length >= 4) {
-    let qImei = supabase.from('aparelhos').select('*');
-    if (lojaId) qImei = qImei.eq('loja_id', lojaId);
+    const qImei = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
     const { data: porImei } = await qImei.or(`imei.eq.${imei},imei.ilike.%${imei}%`).limit(1);
     if (porImei && porImei.length > 0) {
@@ -463,8 +466,7 @@ async function processarResultadoVisionEtiqueta(
 
   // Busca 2: Por Código da Etiqueta / Código Único
   if (!aparelhoEncontrado && codigoEtiqueta) {
-    let qCod = supabase.from('aparelhos').select('*');
-    if (lojaId) qCod = qCod.eq('loja_id', lojaId);
+    const qCod = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
     const { data: porCod } = await qCod.or(`codigo.eq.${codigoEtiqueta},codigoUnico.eq.${codigoEtiqueta},id.eq.${codigoEtiqueta}`).limit(1);
     if (porCod && porCod.length > 0) {
@@ -474,8 +476,7 @@ async function processarResultadoVisionEtiqueta(
 
   // Busca 3: Por Modelo + Capacidade (se houver correspondência única em estoque)
   if (!aparelhoEncontrado && modeloLido) {
-    let qMod = supabase.from('aparelhos').select('*').ilike('modelo', `%${modeloLido}%`);
-    if (lojaId) qMod = qMod.eq('loja_id', lojaId);
+    let qMod = supabase.from('aparelhos').select('*').ilike('modelo', `%${modeloLido}%`).eq('loja_id', lojaId);
     if (capacidadeLida) qMod = qMod.ilike('capacidade', `%${capacidadeLida}%`);
 
     const { data: porMod } = await qMod.eq('ativo', true).neq('status', 'vendido').limit(2);
@@ -493,8 +494,7 @@ async function processarResultadoVisionEtiqueta(
 
     // Se já foi vendido, busca histórico na tabela 'vendas'
     if (isVendido) {
-      let qVenda = supabase.from('vendas').select('*');
-      if (lojaId) qVenda = qVenda.eq('loja_id', lojaId);
+      const qVenda = supabase.from('vendas').select('*').eq('loja_id', lojaId);
 
       const { data: vendas } = await qVenda
         .or(`aparelho_id.eq.${aparelhoEncontrado.id},imei.eq.${aparelhoEncontrado.imei || imei}`)
@@ -1271,6 +1271,11 @@ export async function POST(request: Request) {
 
     // ── 5. COMANDO: !vender [identificador] [valor] [comprador?] ──
     if (lowerText.startsWith('!vender')) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
       const partes = textContent.trim().split(/\s+/);
       if (partes.length < 3) {
         const msgErro = `⚠️ *Formato de venda incompleto!*\nUse: *!vender [IMEI ou ID] [Valor] [Nome do Cliente (opcional)]*\nExemplo: *!vender 356829104829102 2800 Lucas*`;
@@ -1287,8 +1292,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
-      let qApar = supabase.from('aparelhos').select('*');
-      if (lojaId) qApar = qApar.eq('loja_id', lojaId);
+      const qApar = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
       const { data: aparelhos } = await qApar
         .or(`imei.eq.${termoBusca},imei.ilike.%${termoBusca}%,codigo.eq.${termoBusca},id.eq.${termoBusca}`)
@@ -1322,29 +1326,43 @@ export async function POST(request: Request) {
       const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
 
       await supabase.from('vendas').insert({
-        loja_id: lojaId || null,
-        lojaId: lojaId || null,
+        loja_id: lojaId,
+        lojaId: lojaId,
         clienteNome: compradorNome,
         vendedor: `WhatsApp (${pushName})`,
         tipoEntrega: 'Varejo',
         valor: valorNum,
         custo: custoNum,
         lucro: lucroNum,
-        percentualLucro: parseFloat(margemPercent),
+        percentualLucro: parseFloat(margemPercent) || 0,
+        dataPagamento: new Date().toISOString(),
         status: 'pago',
         metodo: 'pix',
-        dataPagamento: new Date().toISOString(),
-        descricao: `Venda via WhatsApp OCR - ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''})`,
+        valorPago: valorNum,
+        saldoDevedor: 0,
+        descricao: `Venda via WhatsApp: ${aparelho.marca} ${aparelho.modelo}`,
+        garantia: '3 Meses (Garantia Legal)',
+        descontoTotal: 0,
         itens: [
           {
             id: Date.now().toString(),
             aparelhoId: aparelho.id,
-            descricao: `${aparelho.marca} ${aparelho.modelo} - ${aparelho.capacidade || ''} (IMEI: ${aparelho.imei || termoBusca})`,
+            descricao: `${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || 'N/A'}) - IMEI: ${aparelho.imei || termoBusca}`,
             quantidade: 1,
             valorInterno: custoNum,
             valorExibir: valorNum,
             desconto: 0,
+            tipoDesconto: 'R$',
             total: valorNum,
+            observacao: `Venda balcão via WhatsApp para ${compradorNome}`,
+          },
+        ],
+        pagamentos: [
+          {
+            id: Date.now().toString(),
+            metodo: 'pix',
+            valor: valorNum,
+            parcelas: 1,
           },
         ],
       });
@@ -1352,7 +1370,7 @@ export async function POST(request: Request) {
       // 3. Log de auditoria
       try {
         await supabase.from('logs_sistema').insert({
-          loja_id: lojaId || null,
+          loja_id: lojaId,
           tipo_evento: 'venda',
           acao: `Venda WhatsApp: ${aparelho.modelo}`,
           detalhes: `Aparelho ${aparelho.modelo} (IMEI ${aparelho.imei}) vendido para ${compradorNome} por R$ ${valorNum.toFixed(2)}`,
@@ -1378,6 +1396,11 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
 
     // ── 6. COMANDO: !cadastrar [modelo] [capacidade] [imei] [preco] ──
     if (lowerText.startsWith('!cadastrar')) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
       const partes = textContent.trim().split(/\s+/);
       if (partes.length < 3) {
         const msgErro = `⚠️ *Formato de cadastro incompleto!*\nUse: *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]*\nExemplo: *!cadastrar iPhone 13 128GB 356829104829102 2800*`;
@@ -1409,7 +1432,7 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
       const modeloCad = partes.slice(1).join(' ').trim() || 'iPhone';
 
       const novoAparelho = {
-        loja_id: lojaId || null,
+        loja_id: lojaId,
         marca: modeloCad.toUpperCase().includes('IPHONE') ? 'Apple' : 'Smartphone',
         modelo: modeloCad,
         capacidade: capCad,
@@ -1432,7 +1455,7 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
 
       try {
         await supabase.from('logs_sistema').insert({
-          loja_id: lojaId || null,
+          loja_id: lojaId,
           tipo_evento: 'estoque',
           acao: `Entrada via WhatsApp: ${modeloCad}`,
           detalhes: `Aparelho ${modeloCad} (${capCad}) cadastrado por ${pushName}`,
@@ -1458,6 +1481,11 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
     // ── 7. COMANDO: !preco [identificador] [novo_valor] ──
     if (lowerText.startsWith('!preco') || lowerText.startsWith('!preço')) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
       const partes = textContent.trim().split(/\s+/);
       if (partes.length < 3) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ Use: *!preco [IMEI ou Código] [Novo Valor]*\nExemplo: *!preco 356829104829102 2750*`);
@@ -1472,8 +1500,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
-      let qP = supabase.from('aparelhos').select('*');
-      if (lojaId) qP = qP.eq('loja_id', lojaId);
+      const qP = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
       const { data: apars } = await qP
         .or(`imei.eq.${ident},imei.ilike.%${ident}%,codigo.eq.${ident},id.eq.${ident}`)
@@ -1490,7 +1517,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
       try {
         await supabase.from('logs_sistema').insert({
-          loja_id: lojaId || null,
+          loja_id: lojaId,
           tipo_evento: 'estoque',
           acao: `Preço alterado: ${apar.modelo}`,
           detalhes: `Preço de ${apar.modelo} alterado de R$ ${apar.preco} para R$ ${novoValor} via WhatsApp`,
@@ -1517,7 +1544,12 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         textContent.includes('📱') ||
         (textContent.split('\n').length > 4 && /iPhone\s*\d+/i.test(textContent)));
 
-    if (isListaPrecos && lojaId) {
+    if (isListaPrecos) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
       const lines = textContent.split('\n');
       const totalProcessados = await processarListaPrecos(lines, pushName, lojaId);
 
@@ -1638,23 +1670,8 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         }
       }
 
-      // Buscar Access Token Mercado Pago
-      let tokenMercadoPago = loja.mp_access_token?.trim();
-      if (!tokenMercadoPago) {
-        const { data: anyLojaWithMp } = await supabase
-          .from('lojas')
-          .select('mp_access_token')
-          .not('mp_access_token', 'is', null)
-          .neq('mp_access_token', '')
-          .limit(1)
-          .maybeSingle();
-        if (anyLojaWithMp?.mp_access_token) {
-          tokenMercadoPago = anyLojaWithMp.mp_access_token.trim();
-        }
-      }
-      if (!tokenMercadoPago) {
-        tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
-      }
+      // Buscar Access Token Mercado Pago da plataforma (conta central do dono da plataforma)
+      const tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
 
       if (!tokenMercadoPago) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ O Mercado Pago ainda não está configurado no sistema. Contate o suporte.');
@@ -1757,6 +1774,10 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
     // ── 10. COMANDO: !estoque e !estoque completo ──
     if (lowerText.startsWith('!estoque') || lowerText === 'estoque' || lowerText === 'cardapio' || lowerText === 'tabela') {
       const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
+      if (!resolvedLojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
       const isCompleto = lowerText.includes('completo') || lowerText.includes('atacado') || lowerText.includes('detalhe');
 
       const { data: loja } = await supabase
