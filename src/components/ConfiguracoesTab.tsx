@@ -14,6 +14,7 @@ import { useColorTheme, ColorTheme } from '@/components/ThemeProvider';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { useMotoboys } from '@/hooks/useMotoboys';
 import { useTabOrder } from '@/hooks/useTabOrder';
+import { ConfiguracaoFiscalSection } from '@/components/ConfiguracaoFiscalSection';
 import { toast } from 'sonner';
 
 interface Configuracao {
@@ -367,9 +368,12 @@ export function ConfiguracoesTab() {
 
         {/* Tabs */}
         <Tabs defaultValue="empresa" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 h-auto bg-white/10 dark:bg-white/5 backdrop-blur-xl border border-white/10 p-1.5 rounded-[2rem] mb-6">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 h-auto bg-white/10 dark:bg-white/5 backdrop-blur-xl border border-white/10 p-1.5 rounded-[2rem] mb-6">
             <TabsTrigger value="empresa" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Empresa
+            </TabsTrigger>
+            <TabsTrigger value="fiscal" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
+              Fiscal (NFC-e / NF-e)
             </TabsTrigger>
             <TabsTrigger value="notificacoes" className="text-xs sm:text-sm py-3 rounded-[1.5rem] data-[state=active]:bg-white/30 dark:data-[state=active]:bg-white/10 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-lg transition-all duration-300">
               Notificações
@@ -1297,6 +1301,11 @@ export function ConfiguracoesTab() {
                 </div>
               </GlassCard>
             </div>
+          </TabsContent>
+
+          {/* Aba Fiscal (NFC-e / NF-e) */}
+          <TabsContent value="fiscal">
+            <ConfiguracaoFiscalSection lojaId={usuario?.lojaId} />
           </TabsContent>
         </Tabs>
     </div>

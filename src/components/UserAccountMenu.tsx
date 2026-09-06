@@ -12,10 +12,13 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
-  Smartphone
+  Smartphone,
+  Sparkles,
+  SlidersHorizontal
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStorePlan } from '@/hooks/useStorePlan';
+import { usePanelMode } from '@/hooks/usePanelMode';
 import { checkIsSuperAdmin } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -37,6 +40,7 @@ interface UserAccountMenuProps {
 export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentTab }: UserAccountMenuProps) {
   const { usuario, logout } = useAuth();
   const { planData } = useStorePlan();
+  const { isModoSimples, toggleModoSimples } = usePanelMode();
 
   if (!usuario) return null;
 
@@ -102,6 +106,24 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
             <span>Meu Plano & Mensalidade</span>
           </div>
           <span className="text-[10px] text-slate-400 font-mono">R$ {planData.valorMensalidade.toFixed(2).replace('.', ',')}</span>
+        </DropdownMenuItem>
+
+        {/* Alternar Modo Simples / Completo */}
+        <DropdownMenuItem 
+          onClick={toggleModoSimples}
+          className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-slate-200"
+        >
+          <div className="flex items-center gap-2">
+            {isModoSimples ? (
+              <Sparkles className="w-4 h-4 text-amber-400" />
+            ) : (
+              <SlidersHorizontal className="w-4 h-4 text-blue-400" />
+            )}
+            <span>Visualização:</span>
+          </div>
+          <Badge className={isModoSimples ? "bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px]" : "bg-purple-500/20 text-purple-300 border-purple-500/30 text-[10px]"}>
+            {isModoSimples ? "Modo Simples" : "Modo Completo"}
+          </Badge>
         </DropdownMenuItem>
 
         {/* Opção Super Admin (se permitido) */}

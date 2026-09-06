@@ -4,11 +4,21 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
-  ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes, Layers, Repeat
+  ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes, Layers, Repeat,
+  Sparkles, SlidersHorizontal
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useTabOrder } from '@/hooks/useTabOrder';
+import { usePanelMode } from '@/hooks/usePanelMode';
+
+export const ABAS_MODO_SIMPLES = new Set([
+  'dashboard',
+  'aparelhos',
+  'vendas',
+  'orders',
+  'clientes',
+]);
 
 interface Tab {
   id: string;
@@ -69,6 +79,7 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
   }, []);
 
   const isSuperAdmin = checkIsSuperAdmin(usuario);
+  const { isModoSimples, toggleModoSimples } = usePanelMode();
 
   const tabsToRender = useMemo(() => {
     const map = new Map(TABS.map((t) => [t.id, t]));
@@ -91,12 +102,18 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
     }
 
     // Se for vendedor/operador, oculta abas de gestão administrativa
+    let filtered = list;
     if (checkIsVendedor(usuario)) {
-      return list.filter(t => !['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(t.id));
+      filtered = filtered.filter(t => !['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(t.id));
     }
 
-    return list;
-  }, [tabOrder, isSuperAdmin, usuario]);
+    // "Modo Simples" como padrão: foca nas telas essenciais do dia a dia (Estoque, Vendas/PDV, OS, Clientes, Dashboard)
+    if (isModoSimples) {
+      filtered = filtered.filter(t => ABAS_MODO_SIMPLES.has(t.id) || t.id === currentTab);
+    }
+
+    return filtered;
+  }, [tabOrder, isSuperAdmin, usuario, isModoSimples, currentTab]);
 
   const mobileDockTabs: Tab[] = [{ id: 'menu', label: 'Menu', icon: <Menu className="w-5 h-5" /> }, ...tabsToRender];
 
@@ -158,8 +175,48 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
           ))}
         </nav>
 
+        {/* Toggle de Modo Simples vs Modo Completo */}
+        <div className="px-3 pb-2 pt-1 border-t border-white/10">
+          {isModoSimples ? (
+            <button
+              onClick={toggleModoSimples}
+              className={cn(
+                "w-full flex items-center justify-between p-2.5 rounded-2xl transition-all duration-300",
+                "bg-gradient-to-r from-blue-600/15 via-indigo-600/15 to-purple-600/15 hover:from-blue-600/25 hover:to-purple-600/25",
+                "border border-blue-500/30 text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 shadow-sm group cursor-pointer"
+              )}
+              title="Ativar modo completo com todas as ferramentas"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0 group-hover:rotate-12 transition-transform" />
+                {!isCollapsed && (
+                  <span className="text-xs font-bold truncate">Ver mais recursos</span>
+                )}
+              </div>
+              {!isCollapsed && (
+                <span className="text-[10px] bg-blue-500/20 text-blue-600 dark:text-blue-300 font-extrabold px-2 py-0.5 rounded-full">
+                  +10
+                </span>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={toggleModoSimples}
+              className={cn(
+                "w-full flex items-center justify-center gap-2 p-2 rounded-xl transition-all cursor-pointer",
+                "bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10",
+                "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs font-medium border border-transparent hover:border-white/10"
+              )}
+              title="Voltar para o Modo Simples (focar no essencial)"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 flex-shrink-0 text-slate-500" />
+              {!isCollapsed && <span>Modo Simples</span>}
+            </button>
+          )}
+        </div>
+
         {!isCollapsed && (
-          <div className="p-6 border-t border-white/10">
+          <div className="p-4 border-t border-white/10">
             <p className="text-[10px] text-center text-gray-400 font-medium">
               Phone Center &copy; {new Date().getFullYear()}
             </p>
@@ -263,6 +320,30 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
             </div>
             
             <div className="p-4 border-t border-white/10 space-y-2">
+              <button
+                onClick={() => {
+                  toggleModoSimples();
+                  setIsOpen(false);
+                }}
+                className={cn(
+                  "w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer",
+                  isModoSimples
+                    ? "bg-blue-600/20 border-blue-500/30 text-blue-400 hover:bg-blue-600/30"
+                    : "bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800"
+                )}
+              >
+                {isModoSimples ? (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>Ver mais recursos (+10)</span>
+                  </>
+                ) : (
+                  <>
+                    <SlidersHorizontal className="w-4 h-4 text-slate-400" />
+                    <span>Ativar Modo Simples</span>
+                  </>
+                )}
+              </button>
               <button
                 onClick={() => {
                   setIsOpen(false);

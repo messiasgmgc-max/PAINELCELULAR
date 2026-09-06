@@ -27,7 +27,8 @@ import {
   ShieldCheck,
   ShoppingBag,
   Edit2,
-  Camera
+  Camera,
+  FileText
 } from 'lucide-react';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
@@ -576,6 +577,54 @@ export function AtacadoTab() {
   const totalFiadoEmAberto = useMemo(() => {
     return lojistasDevedores.reduce((acc, l) => acc + l.saldoDevedor, 0);
   }, [lojistasDevedores]);
+
+  // Emissão e consulta de NF-e (Modelo 55 - Atacado/PJ)
+  const handleEmitirNFeAtacado = async (v: VendaAtacadoItem) => {
+    try {
+      toast.info('Consultando ou emitindo NF-e (Modelo 55) na SEFAZ...');
+      const resStatus = await fetch(`/api/fiscal/status/${v.id}`);
+      if (resStatus.ok) {
+        const statusJson = await resStatus.json();
+        if (statusJson.status === 'autorizada') {
+          toast.success(`NF-e já autorizada! Chave: ${statusJson.chaveAcesso ? statusJson.chaveAcesso.slice(-8) : ''}`);
+          if (statusJson.urlDanfe) {
+            window.open(statusJson.urlDanfe, '_blank');
+          }
+          return;
+        }
+      }
+
+      const res = await fetch('/api/fiscal/emitir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendaId: v.id,
+          tipo: 'nfe',
+          lojaId: usuario?.lojaId,
+          destinatario: {
+            nome: v.comprador,
+          }
+        })
+      });
+
+      const json = await res.json();
+      if (json.sucesso && json.status === 'autorizada') {
+        toast.success('NF-e emitida e autorizada pela SEFAZ!');
+        if (json.urlDanfe) {
+          window.open(json.urlDanfe, '_blank');
+        }
+      } else if (json.configurado === false) {
+        toast.warning('Configure os dados fiscais da loja em Configurações > Fiscal para emitir NF-e.');
+      } else if (json.status === 'processando') {
+        toast.info('NF-e enviada e em processamento na SEFAZ.');
+      } else {
+        toast.error(json.mensagem || 'Erro na autorização da NF-e.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao emitir NF-e de atacado:', err);
+      toast.error('Erro ao processar NF-e.');
+    }
+  };
 
   // Reverter/Cancelar Venda de Atacado (Devolve o aparelho para o estoque ativo)
   const handleReverterVenda = async (venda: VendaAtacadoItem) => {
@@ -1319,6 +1368,15 @@ export function AtacadoTab() {
                     </button>
 
                     <button
+                      onClick={() => handleEmitirNFeAtacado(v)}
+                      className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-xl py-2 px-2.5 text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer active:scale-[0.98]"
+                      title="Emitir ou Consultar NF-e (Modelo 55)"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-amber-400" />
+                      NF-e
+                    </button>
+
+                    <button
                       onClick={() => handleReverterVenda(v)}
                       className="bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 rounded-xl py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
                       title="Devolver ao estoque ativo"
@@ -1408,6 +1466,13 @@ export function AtacadoTab() {
                             title="Editar data, custo, valor ou lojista"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleEmitirNFeAtacado(v)}
+                            className="text-xs text-amber-400 hover:text-amber-300 font-semibold p-1.5 rounded-lg hover:bg-amber-500/10 transition-colors"
+                            title="Emitir ou Consultar NF-e (Modelo 55)"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleReverterVenda(v)}

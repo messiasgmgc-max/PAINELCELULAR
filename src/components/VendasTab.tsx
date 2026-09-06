@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
@@ -1377,6 +1377,39 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       }
 
       const foiEdicao = Boolean(editingId);
+
+      // Disparo em background da emissão fiscal NFC-e (não bloqueia venda nem PDV)
+      if (vendaSalva?.id && !foiEdicao) {
+        fetch('/api/fiscal/emitir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vendaId: vendaSalva.id,
+            tipo: 'nfce',
+            lojaId: usuario?.lojaId || (vendaSalva as any).loja_id,
+            destinatario: clienteVenda ? {
+              nome: clienteVenda.nome,
+              cpfCnpj: (clienteVenda as any).cpf || (clienteVenda as any).cnpj || '',
+              email: clienteVenda.email !== 'sem@email.com' ? clienteVenda.email : undefined
+            } : undefined
+          })
+        })
+          .then(r => r.json())
+          .then(resFiscal => {
+            if (resFiscal?.sucesso && resFiscal?.status === 'autorizada') {
+              toast.success('NFC-e autorizada pela SEFAZ!', {
+                action: resFiscal?.urlDanfe ? {
+                  label: 'Ver DANFE',
+                  onClick: () => window.open(resFiscal.urlDanfe, '_blank')
+                } : undefined
+              });
+            } else if (resFiscal?.configurado && resFiscal?.status === 'processando') {
+              toast.info('NFC-e enviada para a SEFAZ (processando)');
+            }
+          })
+          .catch(eF => console.warn('Aviso emissão fiscal PDV:', eF));
+      }
+
       await carregarVendas();
       setShowSaleCelebration(true);
       playSaleSuccessSound();
@@ -2351,6 +2384,77 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     } catch (err) {
       console.error('Erro ao gerar recibo térmico:', err);
       alert('Erro ao gerar comprovante de venda.');
+    }
+  };
+
+  const handleEmitirFiscalManual = async (venda: Venda, tipo: 'nfce' | 'nfe' = 'nfce') => {
+    try {
+      toast.info(`Enviando ${tipo.toUpperCase()} para a SEFAZ...`);
+      const clienteVenda = clientes.find(c => c.id === venda.clienteId);
+      const res = await fetch('/api/fiscal/emitir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendaId: venda.id,
+          tipo,
+          lojaId: (venda as any).loja_id || usuario?.lojaId,
+          destinatario: clienteVenda ? {
+            nome: clienteVenda.nome,
+            cpfCnpj: (clienteVenda as any).cpf || (clienteVenda as any).cnpj || '',
+            email: clienteVenda.email !== 'sem@email.com' ? clienteVenda.email : undefined
+          } : undefined
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.mensagem || 'Falha na emissão fiscal');
+      }
+
+      if (json.sucesso && json.status === 'autorizada') {
+        toast.success(`${tipo.toUpperCase()} autorizada com sucesso!`);
+        if (json.urlDanfe) {
+          window.open(json.urlDanfe, '_blank');
+        }
+      } else if (json.configurado === false) {
+        toast.warning('Configure os dados fiscais da loja em Configurações > Fiscal antes de emitir.');
+      } else if (json.status === 'processando') {
+        toast.info(`${tipo.toUpperCase()} enviada e em processamento na SEFAZ.`);
+      } else {
+        toast.error(json.mensagem || 'Erro na autorização da SEFAZ.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao emitir nota fiscal:', err);
+      toast.error(err?.message || 'Erro ao emitir nota fiscal.');
+    }
+  };
+
+  const handleConsultarFiscalManual = async (venda: Venda) => {
+    try {
+      toast.info('Consultando status fiscal na SEFAZ...');
+      const res = await fetch(`/api/fiscal/status/${venda.id}`);
+      const json = await res.json();
+
+      if (!res.ok) {
+        toast.warning(json.mensagem || 'Nenhuma nota fiscal encontrada para esta venda.');
+        return;
+      }
+
+      if (json.status === 'autorizada') {
+        toast.success(`Nota Autorizada! Chave: ${json.chaveAcesso ? json.chaveAcesso.slice(-8) : ''}`);
+        if (json.urlDanfe) {
+          window.open(json.urlDanfe, '_blank');
+        }
+      } else if (json.status === 'processando') {
+        toast.info('Nota em processamento na SEFAZ. Aguarde alguns instantes.');
+      } else if (json.status === 'erro_autorizacao') {
+        toast.error(`Erro SEFAZ: ${json.mensagem || 'Rejeição na autorização'}`);
+      } else {
+        toast.info(`Status atual: ${json.status || 'Pendente'}`);
+      }
+    } catch (err: any) {
+      console.error('Erro ao consultar nota:', err);
+      toast.error('Erro ao consultar status da nota fiscal.');
     }
   };
 
@@ -3533,6 +3637,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                               <DropdownMenuItem onClick={() => handleReenviarRecibo(venda)}>
                                 <Mail className="mr-2 h-4 w-4" />
                                 Reenviar Recibo
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
+                                <FileText className="mr-2 h-4 w-4 text-blue-400" />
+                                Emitir NFC-e (Fiscal)
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleConsultarFiscalManual(venda)}>
+                                <ShieldCheck className="mr-2 h-4 w-4 text-emerald-400" />
+                                Ver / Consultar DANFE
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => handleTrocarItem(venda)}>
