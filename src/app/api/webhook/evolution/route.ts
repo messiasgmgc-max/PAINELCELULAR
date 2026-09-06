@@ -1413,6 +1413,72 @@ export async function POST(request: Request) {
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
+      // Checagem de limite de aprovação manual da loja
+      const { data: lojaRow } = await supabase
+        .from('lojas')
+        .select('configuracoes')
+        .eq('id', lojaId)
+        .maybeSingle();
+
+      const limiteAprovacao = Number((lojaRow?.configuracoes as any)?.limite_aprovacao_manual || 0);
+
+      if (limiteAprovacao > 0 && valorNum > limiteAprovacao) {
+        try {
+          await supabase.from('acoes_pendentes_aprovacao').insert({
+            loja_id: lojaId,
+            tipo: 'venda',
+            payload: {
+              aparelho_id: aparelho.id,
+              termoBusca,
+              modelo: aparelho.modelo,
+              marca: aparelho.marca,
+              capacidade: aparelho.capacidade,
+              imei: aparelho.imei,
+              valor: valorNum,
+              compradorNome,
+              pushName,
+              authorPhone,
+              targetDestination,
+              instanceName,
+            },
+            status: 'pendente',
+            criado_por_telefone: authorPhone,
+            criado_em: new Date().toISOString(),
+          });
+        } catch (penErr) {
+          console.error('Erro ao inserir acoes_pendentes_aprovacao:', penErr);
+        }
+
+        try {
+          await supabase.from('logs_sistema').insert({
+            loja_id: lojaId,
+            tipo_evento: 'aprovacao_pendente',
+            acao: `Venda retida para aprovação: ${aparelho.modelo}`,
+            detalhes: `Venda no valor de R$ ${valorNum.toFixed(2)} acima do limite de confirmação automática (R$ ${limiteAprovacao.toFixed(2)}).`,
+            ator_telefone: authorPhone,
+            ator_papel: perm.papel,
+            valor_anterior: { status: aparelho.status, condicao: aparelho.condicao },
+            valor_novo: { status: 'pendente_aprovacao', valor: valorNum, limite: limiteAprovacao },
+            created_at: new Date().toISOString(),
+          });
+        } catch (logErr) {
+          console.warn('Falha silenciosa ao registrar log_sistema:', logErr);
+        }
+
+        const msgRetida = `⚠️ *VENDA RETIDA PARA APROVAÇÃO MANUAL*
+
+📱 *Aparelho:* ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || 'N/A'})
+🔢 *IMEI:* \`${aparelho.imei || termoBusca}\`
+💰 *Valor:* R$ ${valorNum.toFixed(2).replace('.', ',')}
+👤 *Comprador:* ${compradorNome}
+
+🔒 Este valor ultrapassa o limite de confirmação automática configurado na loja (R$ ${limiteAprovacao.toFixed(2).replace('.', ',')}).
+A venda foi enviada para validação de um administrador no painel!`;
+
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgRetida);
+        return NextResponse.json({ status: 'ok', message: 'Venda pendente de aprovação manual.' }, { status: 200 });
+      }
+
       // 1. Atualiza o aparelho para vendido
       await supabase.from('aparelhos').update({
         condicao: 'vendido',
@@ -1470,13 +1536,27 @@ export async function POST(request: Request) {
         ],
       });
 
-      // 3. Log de auditoria
+      // 3. Log de auditoria estruturado
       try {
         await supabase.from('logs_sistema').insert({
           loja_id: lojaId,
           tipo_evento: 'venda',
           acao: `Venda WhatsApp: ${aparelho.modelo}`,
           detalhes: `Aparelho ${aparelho.modelo} (IMEI ${aparelho.imei}) vendido para ${compradorNome} por R$ ${valorNum.toFixed(2)}`,
+          ator_telefone: authorPhone,
+          ator_papel: perm.papel,
+          valor_anterior: {
+            status: aparelho.status,
+            condicao: aparelho.condicao,
+            comprador: aparelho.comprador,
+            precoVenda: aparelho.precoVenda,
+          },
+          valor_novo: {
+            status: 'vendido',
+            condicao: 'vendido',
+            comprador: compradorNome,
+            precoVenda: valorNum,
+          },
           created_at: new Date().toISOString(),
         });
       } catch (logErr) {
@@ -1567,7 +1647,17 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
           loja_id: lojaId,
           tipo_evento: 'estoque',
           acao: `Entrada via WhatsApp: ${modeloCad}`,
-          detalhes: `Aparelho ${modeloCad} (${capCad}) cadastrado por ${pushName}`,
+          detalhes: `Aparelho ${modeloCad} (${capCad}) cadastrado por ${pushName} (${authorPhone})`,
+          ator_telefone: authorPhone,
+          ator_papel: perm.papel,
+          valor_anterior: null,
+          valor_novo: {
+            id: inserido?.id,
+            modelo: modeloCad,
+            capacidade: capCad,
+            imei: imeiCad,
+            preco: precoCad,
+          },
           created_at: new Date().toISOString(),
         });
       } catch (logErr) {
@@ -1635,7 +1725,11 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
           loja_id: lojaId,
           tipo_evento: 'estoque',
           acao: `Preço alterado: ${apar.modelo}`,
-          detalhes: `Preço de ${apar.modelo} alterado de R$ ${apar.preco} para R$ ${novoValor} via WhatsApp`,
+          detalhes: `Preço de ${apar.modelo} alterado de R$ ${apar.preco} para R$ ${novoValor} via WhatsApp por ${pushName} (${authorPhone})`,
+          ator_telefone: authorPhone,
+          ator_papel: perm.papel,
+          valor_anterior: { preco: apar.preco },
+          valor_novo: { preco: novoValor },
           created_at: new Date().toISOString(),
         });
       } catch (logErr) {
