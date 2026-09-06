@@ -2923,14 +2923,14 @@ Digite: *!broadcast agora*`;
     }
 
     // ── 13. COMANDOS ESTRUTURADOS GEMINI PLAN (LINGUAGEM NATURAL) ──
-    let nomeLoja: string | undefined;
+    let nomeLojaGemini: string | undefined;
     if (lojaId) {
       const { data: lojaInfo } = await supabase.from('lojas').select('nome').eq('id', lojaId).maybeSingle();
-      nomeLoja = lojaInfo?.nome;
+      nomeLojaGemini = lojaInfo?.nome;
     }
 
     const rawPlan = await gerarPlanoComGemini(textContent, {
-      nome: nomeLoja,
+      nome: nomeLojaGemini,
       lojaId: lojaId || undefined,
     });
     const geminiPlan = parseGeminiPlan(rawPlan || '');
