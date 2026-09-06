@@ -297,6 +297,224 @@ async function monitorarCicloVidaPix(params: {
 }
 
 // ── AUXILIAR: Resolver ID da Loja ──
+
+// ── AUXILIAR: Gerar Variantes de Telefone Brasileiro (DDI, DDD, 9º Dígito) ──
+function obterVariantesTelefone(rawPhone: string): string[] {
+  const digits = String(rawPhone || '').replace(/\D/g, '');
+  if (!digits) return [];
+  const variants = new Set<string>();
+  variants.add(digits);
+
+  if (digits.startsWith('55') && digits.length >= 12) {
+    const local = digits.substring(2);
+    variants.add(local);
+    const ddd = local.substring(0, 2);
+    const num = local.substring(2);
+    if (num.length === 9 && num.startsWith('9')) {
+      variants.add(`55${ddd}${num.substring(1)}`);
+      variants.add(`${ddd}${num.substring(1)}`);
+    } else if (num.length === 8) {
+      variants.add(`55${ddd}9${num}`);
+      variants.add(`${ddd}9${num}`);
+    }
+  } else if (digits.length >= 10 && digits.length <= 11) {
+    variants.add(`55${digits}`);
+    const ddd = digits.substring(0, 2);
+    const num = digits.substring(2);
+    if (num.length === 9 && num.startsWith('9')) {
+      variants.add(`55${ddd}${num.substring(1)}`);
+      variants.add(`${ddd}${num.substring(1)}`);
+    } else if (num.length === 8) {
+      variants.add(`55${ddd}9${num}`);
+      variants.add(`${ddd}9${num}`);
+    }
+  }
+
+  return Array.from(variants);
+}
+
+export interface UsuarioResolvido {
+  lojaId: string;
+  lojaNome: string;
+  usuarioNome: string;
+  papel: 'owner' | 'staff' | 'motoboy' | 'nenhum';
+  planoTipo?: string;
+  planoStatus?: string;
+  dataVencimento?: string;
+  diasRestantes?: number;
+  isTrial?: boolean;
+}
+
+// ── AUXILIAR: Resolver Loja e Usuário a partir do Telefone de Quem Enviou ──
+async function resolverLojaEUsuarioPorTelefone(
+  authorPhone: string,
+  instanceName?: string
+): Promise<UsuarioResolvido | null> {
+  const variants = obterVariantesTelefone(authorPhone);
+  if (variants.length === 0) return null;
+
+  // 1. Busca em whatsapp_permissoes (fonte prioritária de permissão no WhatsApp)
+  try {
+    const { data: perms } = await supabase
+      .from('whatsapp_permissoes')
+      .select('loja_id, telefone, nome, papel, ativo')
+      .in('telefone', variants)
+      .eq('ativo', true)
+      .limit(1);
+
+    if (perms && perms.length > 0) {
+      const p = perms[0];
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('id, nome, plano_tipo, plano_status, data_vencimento, plano_trial_ate')
+        .eq('id', p.loja_id)
+        .maybeSingle();
+
+      if (loja) {
+        let diasRestantes = 0;
+        if (loja.data_vencimento) {
+          const vDate = new Date(loja.data_vencimento);
+          const agora = new Date();
+          diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        return {
+          lojaId: loja.id,
+          lojaNome: loja.nome || 'Phone Center',
+          usuarioNome: p.nome || 'Colaborador',
+          papel: (p.papel as any) || 'staff',
+          planoTipo: loja.plano_tipo || 'entrada',
+          planoStatus: loja.plano_status || 'ativo',
+          dataVencimento: loja.data_vencimento || undefined,
+          diasRestantes,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao consultar whatsapp_permissoes:', err);
+  }
+
+  // 2. Busca na tabela lojas (dono da loja)
+  try {
+    const { data: lojas } = await supabase
+      .from('lojas')
+      .select('id, nome, telefone, dono_whatsapp, plano_tipo, plano_status, data_vencimento, plano_trial_ate')
+      .eq('ativo', true);
+
+    if (lojas && lojas.length > 0) {
+      const matchLoja = lojas.find((l) => {
+        const tel1 = (l.telefone || '').replace(/\D/g, '');
+        const tel2 = (l.dono_whatsapp || '').replace(/\D/g, '');
+        return variants.some((v) => (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) ||
+                                  (tel2 && (tel2 === v || v.endsWith(tel2) || tel2.endsWith(v))));
+      });
+
+      if (matchLoja) {
+        let diasRestantes = 0;
+        if (matchLoja.data_vencimento) {
+          const vDate = new Date(matchLoja.data_vencimento);
+          const agora = new Date();
+          diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        return {
+          lojaId: matchLoja.id,
+          lojaNome: matchLoja.nome || 'Phone Center',
+          usuarioNome: 'Proprietário',
+          papel: 'owner',
+          planoTipo: matchLoja.plano_tipo || 'entrada',
+          planoStatus: matchLoja.plano_status || 'ativo',
+          dataVencimento: matchLoja.data_vencimento || undefined,
+          diasRestantes,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao consultar lojas:', err);
+  }
+
+  // 3. Busca na tabela tecnicos (colaboradores cadastrados pelo lojista)
+  try {
+    const { data: tecs } = await supabase
+      .from('tecnicos')
+      .select('id, nome, telefone, whatsapp, cargo, loja_id, ativo')
+      .eq('ativo', true);
+
+    if (tecs && tecs.length > 0) {
+      const matchTec = tecs.find((t) => {
+        const tel1 = (t.whatsapp || '').replace(/\D/g, '');
+        const tel2 = (t.telefone || '').replace(/\D/g, '');
+        return variants.some((v) => (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) ||
+                                  (tel2 && (tel2 === v || v.endsWith(tel2) || tel2.endsWith(v))));
+      });
+
+      if (matchTec && matchTec.loja_id) {
+        const { data: loja } = await supabase
+          .from('lojas')
+          .select('id, nome, plano_tipo, plano_status, data_vencimento, plano_trial_ate')
+          .eq('id', matchTec.loja_id)
+          .maybeSingle();
+
+        if (loja) {
+          let diasRestantes = 0;
+          if (loja.data_vencimento) {
+            const vDate = new Date(loja.data_vencimento);
+            const agora = new Date();
+            diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+          }
+
+          const cleanCargo = String(matchTec.cargo || '').toLowerCase();
+          const papel: 'owner' | 'staff' | 'motoboy' =
+            ['owner', 'dono', 'admin', 'gerente'].includes(cleanCargo)
+              ? 'owner'
+              : ['motoboy', 'entregador'].includes(cleanCargo)
+              ? 'motoboy'
+              : 'staff';
+
+          return {
+            lojaId: loja.id,
+            lojaNome: loja.nome || 'Phone Center',
+            usuarioNome: matchTec.nome || 'Colaborador',
+            papel,
+            planoTipo: loja.plano_tipo || 'entrada',
+            planoStatus: loja.plano_status || 'ativo',
+            dataVencimento: loja.data_vencimento || undefined,
+            diasRestantes,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao consultar tecnicos:', err);
+  }
+
+  // 4. Fallback por instância (especialmente para grupos multi-loja)
+  if (instanceName) {
+    const lojaIdFallback = await resolverLojaId(instanceName);
+    if (lojaIdFallback) {
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('id, nome, plano_tipo, plano_status, data_vencimento')
+        .eq('id', lojaIdFallback)
+        .maybeSingle();
+
+      if (loja) {
+        return {
+          lojaId: loja.id,
+          lojaNome: loja.nome || 'Phone Center',
+          usuarioNome: 'Lojista',
+          papel: 'staff',
+          planoTipo: loja.plano_tipo || 'entrada',
+          planoStatus: loja.plano_status || 'ativo',
+          dataVencimento: loja.data_vencimento || undefined,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 async function resolverLojaId(instanceName?: string): Promise<string | null> {
   if (instanceName && instanceName.startsWith('loja-')) {
     const extractedId = instanceName.replace('loja-', '').trim();
@@ -1408,6 +1626,21 @@ export async function POST(request: Request) {
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : senderPhone;
 
+    // ── IDENTIFICAÇÃO MULTI-LOJA DO USUÁRIO PELO NÚMERO DO WHATSAPP ──
+    const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName);
+    let lojaId = usuarioResolvido?.lojaId || (await resolverLojaId(instanceName));
+    const nomeLoja = usuarioResolvido?.lojaNome || 'Phone Center';
+    const nomeUsuario = usuarioResolvido?.usuarioNome || pushName;
+    const papelUsuario = usuarioResolvido?.papel || 'staff';
+
+    // ── BLOQUEIO DE SEGURANÇA: NÚMERO NÃO CADASTRADO EM NENHUMA LOJA (CHAT PRIVADO) ──
+    if (!isGroup && !usuarioResolvido) {
+      console.warn(`🔒 [Segurança] Acesso negado para telefone não cadastrado: ${authorPhone}`);
+      const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe*.\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://phonecenter.com.br/assinar*`;
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgBloqueio);
+      return NextResponse.json({ status: 'unauthorized', message: 'Telefone não vinculado a nenhuma loja.' }, { status: 200 });
+    }
+
     const messageContent = msgData.message || {};
 
     // ── 3.1. RECONHECIMENTO DE IMAGEM / ETIQUETA COM IA VISION OCR ──
@@ -1517,6 +1750,72 @@ export async function POST(request: Request) {
     }
 
     const lowerText = textContent.toLowerCase().trim();
+
+    // ── 4.1. CONSULTA DE PLANOS DA PLATAFORMA PHONE CENTER ──
+    const ehPerguntaPlanos =
+      /quais planos temos|quais s[aã]o os planos|tabela de planos|planos do sistema|valores dos planos|como funcionam os planos|planos phone center/i.test(lowerText);
+
+    if (ehPerguntaPlanos) {
+      const planoAtualFormatado = (usuarioResolvido?.planoTipo || 'entrada').toUpperCase();
+      const statusFormatado = usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo');
+
+      const msgPlanos = `📋 *Planos Phone Center — Gestão Inteligente para Lojistas*
+
+Olá, *${nomeUsuario}*! Sua loja (*${nomeLoja}*) atualmente está no:
+⭐ *Plano ${planoAtualFormatado}* (${statusFormatado})
+
+Conheça os 3 planos disponíveis na nossa plataforma:
+
+1️⃣ *Plano Entrada* — R$ 99,90/mês (ou R$ 79,90 no anual):
+• Painel completo de estoque, vendas e produtos
+• Ordens de Serviço (OS) com garantia documentada
+• Leitor de código de barras e OCR de etiquetas com IA
+• Bot assistente no WhatsApp (!estoque, !vender, !cadastrar, !os)
+
+2️⃣ *Plano Intermediário* — R$ 189,00/mês (ou R$ 149,00 no anual) *(Mais Escolhido)*:
+• *Tudo do Entrada* +
+• Gestão milimétrica de fiado e devedores (!abater, !saldo)
+• Bot de cobrança automática com horários programados
+• Checagem de IMEI roubado / bloqueado (!checarimei)
+• Transmissão de listas de estoque para grupos (!broadcast)
+
+3️⃣ *Plano Avançado* — R$ 299,00/mês (ou R$ 239,00 no anual) *(Máxima Potência)*:
+• *Tudo do Intermediário* +
+• Escuta e busca em catálogo unificado multi-loja em grupos
+• Trilha de auditoria completa com registro de operadores
+• API REST com Token próprio para sistemas e robôs externos
+
+💡 *Deseja testar ou alterar seu plano?*
+Você pode solicitar um teste de 3 dias grátis de qualquer plano superior no menu *Meu Plano* do painel web!`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgPlanos);
+      return NextResponse.json({ status: 'ok', message: 'Tabela de planos enviada.' }, { status: 200 });
+    }
+
+    const ehPerguntaVencimento =
+      /(?:quando (?:meu|o)? ?plano (?:vai )?venc|quando vence|vencimento (?:do )?plano|plano (?:vai )?venc|meu plano t[aá] ativo|quantos dias de plano|dias restantes do plano|validade do plano)/i.test(lowerText);
+
+    if (ehPerguntaVencimento) {
+      const planoAtualFormatado = (usuarioResolvido?.planoTipo || 'entrada').toUpperCase();
+      const statusFormatado = usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo');
+      const dataVenc = usuarioResolvido?.dataVencimento ? formatarDataSegura(usuarioResolvido.dataVencimento) : 'Não definida';
+      const dias = usuarioResolvido?.diasRestantes !== undefined ? usuarioResolvido.diasRestantes : 0;
+      const diasTexto = dias <= 0 ? '⚠️ Vencido hoje ou atrasado' : `${dias} dia(s) restante(s)`;
+
+      const msgVencimento = `🗓️ *Status da Assinatura — ${nomeLoja}*
+
+Olá, *${nomeUsuario}*! Seguem os detalhes da sua assinatura no Phone Center:
+• Loja: *${nomeLoja}*
+• Plano Atual: *Plano ${planoAtualFormatado}*
+• Status: *${statusFormatado}*
+• Data de Vencimento: *${dataVenc}*
+• Prazo: *${diasTexto}*
+
+${papelUsuario === 'owner' ? '💡 *Para renovar ou pagar via PIX:* envie *!plano pagar* ou acesse o menu *Meu Plano* no site para pagar no Cartão de Crédito em até 12x.' : '💡 Entre em contato com o proprietário da sua loja para renovações ou upgrades de plano.'}`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgVencimento);
+      return NextResponse.json({ status: 'ok', message: 'Informações de vencimento enviadas.' }, { status: 200 });
+    }
 
     // ── 5. COMANDO: !vender [identificador] [valor] [comprador?] ──
     if (lowerText.startsWith('!vender')) {
@@ -2845,56 +3144,95 @@ Digite: *!broadcast agora*`;
       }
     }
 
-    // ── 14. CONVERSA NATURAL & ATENDIMENTO HUMANO VIRTUAL (PRIVADO) ──
+    // ── 14. COPILOTO OPERACIONAL INTELIGENTE DO LOJISTA (PRIVADO) ──
     if (!isGroup) {
       let modelosEstoque: string[] = [];
-      let lojaInfo: any = null;
-      if (lojaId) {
-        const { data: lj } = await supabase.from('lojas').select('id, nome, endereco, telefone').eq('id', lojaId).maybeSingle();
-        lojaInfo = lj;
+      let detalhesEstoqueFormatado = '';
+      let totalEstoque = 0;
+      let totalFiadoEmAberto = 0;
+      let totalVendasHoje = 0;
 
+      if (lojaId) {
+        // 1. Busca aparelhos detalhados do estoque
         const { data: aps } = await supabase
           .from('aparelhos')
-          .select('modelo, capacidade')
+          .select('modelo, capacidade, cor, preco, precoAtacado, saudeBateria, saude_bateria, condicao')
           .eq('loja_id', lojaId)
           .eq('ativo', true)
           .neq('status', 'vendido')
-          .limit(20);
+          .limit(30);
 
         if (aps && aps.length > 0) {
+          totalEstoque = aps.length;
           const setModelos = new Set(aps.map((a) => [a.modelo, a.capacidade].filter(Boolean).join(' ')));
           modelosEstoque = Array.from(setModelos);
+
+          detalhesEstoqueFormatado = aps.map((a) => {
+            const bat = a.saudeBateria || a.saude_bateria ? ` (Bat: ${a.saudeBateria || a.saude_bateria})` : '';
+            const preco = a.preco || a.precoAtacado ? ` - R$ ${(a.preco || a.precoAtacado).toLocaleString('pt-BR')}` : '';
+            return `• ${a.modelo} ${a.capacidade || ''} ${a.cor || ''}${bat}${preco}`;
+          }).join('\n');
+        }
+
+        // 2. Busca total de fiado em aberto
+        const { data: devedores } = await supabase
+          .from('lojistas_devedores')
+          .select('saldo_devedor')
+          .eq('loja_id', lojaId)
+          .eq('ativo', true);
+
+        if (devedores && devedores.length > 0) {
+          totalFiadoEmAberto = devedores.reduce((acc, d) => acc + Number(d.saldo_devedor || 0), 0);
+        }
+
+        // 3. Busca faturamento de vendas de hoje
+        const hojeInicio = new Date();
+        hojeInicio.setHours(0, 0, 0, 0);
+        const { data: vendasHoje } = await supabase
+          .from('vendas')
+          .select('valor')
+          .eq('loja_id', lojaId)
+          .gte('dataPagamento', hojeInicio.toISOString());
+
+        if (vendasHoje && vendasHoje.length > 0) {
+          totalVendasHoje = vendasHoje.reduce((acc, v) => acc + Number(v.valor || 0), 0);
         }
       }
 
       const respostaConversaIA = await responderConversaNaturalComGemini(textContent, {
-        nomeLoja: lojaInfo?.nome || nomeLoja || 'Phone Center',
-        enderecoLoja: lojaInfo?.endereco || undefined,
-        telefoneLoja: lojaInfo?.telefone || undefined,
-        totalEstoque: modelosEstoque.length,
+        nomeLoja,
+        nomeUsuario,
+        papelUsuario,
+        planoTipo: usuarioResolvido?.planoTipo || 'entrada',
+        planoStatus: usuarioResolvido?.planoStatus || 'ativo',
+        dataVencimento: usuarioResolvido?.dataVencimento ? formatarDataSegura(usuarioResolvido.dataVencimento) : undefined,
+        diasRestantesPlano: usuarioResolvido?.diasRestantes,
+        totalEstoque,
         modelosDisponiveis: modelosEstoque,
+        detalhesEstoqueFormatado,
+        totalFiadoEmAberto,
+        totalVendasHoje,
         isGroup: false,
       });
 
       if (respostaConversaIA) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA);
-        return NextResponse.json({ status: 'ok', message: 'Resposta conversacional enviada via IA.' }, { status: 200 });
+        return NextResponse.json({ status: 'ok', message: 'Resposta do copiloto enviada via IA.' }, { status: 200 });
       }
 
-      // Fallback humano acolhedor (caso a IA esteja offline, NUNCA expor lista robótica de comandos com !)
-      const nomeExibicao = lojaInfo?.nome || nomeLoja || 'Phone Center';
-      const fallbackHumano = `Olá! Seja muito bem-vindo(a) à *${nomeExibicao}*! 😊📱
+      // Fallback oficial do Copiloto do Lojista (caso a IA esteja momentaneamente inacessível)
+      const fallbackCopiloto = `Olá, *${nomeUsuario}*! Sou o copiloto operacional da *${nomeLoja}* no Phone Center. 📱🤖
 
-Como posso te ajudar hoje?
-✨ *Venda de iPhones:* Temos aparelhos novos lacrados e seminovos premium testados com garantia!
-🔄 *Troca / Upgrade:* Avaliamos seu iPhone usado na hora como entrada para um novo.
-🛠️ *Assistência Técnica:* Troca de telas, baterias e manutenção com Ordem de Serviço (OS) e garantia.
-💳 *Pagamentos:* Facilitamos em até 12x/18x no cartão, PIX com desconto e entrega rápida por motoboy!
+Estou à sua disposição para:
+📦 *Estoque:* Consultar aparelhos disponíveis, capacidades e valores.
+💰 *Vendas:* Registrar vendas e baixas de estoque na hora.
+🤝 *Atacado:* Acompanhar fiado, devedores e cobranças.
+📋 *Assinatura:* Consultar vencimento e detalhes do seu plano.
 
-Me conta: qual modelo ou serviço você está procurando? 😉`;
+Como posso te ajudar agora?`;
 
-      await enviarMensagemWhatsApp(instanceName, targetDestination, fallbackHumano);
-      return NextResponse.json({ status: 'ok', message: 'Fallback conversacional humano enviado.' }, { status: 200 });
+      await enviarMensagemWhatsApp(instanceName, targetDestination, fallbackCopiloto);
+      return NextResponse.json({ status: 'ok', message: 'Fallback do copiloto enviado.' }, { status: 200 });
     }
 
     return NextResponse.json({ status: 'ok', message: 'Webhook processado com sucesso.' }, { status: 200 });

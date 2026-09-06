@@ -139,11 +139,14 @@ export interface Tecnico {
   nome: string;
   email?: string;
   telefone: string;
+  whatsapp?: string;
+  cargo?: string; // 'proprietario' | 'gerente' | 'vendedor' | 'tecnico' | 'motoboy'
   cpf?: string;
   especialidade?: string; // Ex: "Tela", "Bateria", "Placa"
   dataCadastro: string;
   ativo: boolean;
   lojaId: string;
+  loja_id?: string;
 }
 
 // Tipos para agendamentos
@@ -207,6 +210,15 @@ export interface AbatimentoFiado {
   metodo: string;
   observacao?: string;
   registradoPor?: string;
+}
+
+export interface VendaPagamento {
+  id?: string;
+  metodo: string;
+  valor: number;
+  parcelas?: number;
+  taxa?: number;
+  detalhes?: any;
 }
 
 export interface Venda {

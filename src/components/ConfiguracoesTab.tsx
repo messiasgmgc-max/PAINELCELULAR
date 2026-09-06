@@ -46,8 +46,12 @@ export function ConfiguracoesTab() {
   const [cnpj, setCnpj] = useState('');
   const [garantiaDias, setGarantiaDias] = useState(90);
 
-  const { tecnicos, fetchTecnicos /*, criarTecnico, deletarTecnico (se tiver no seu hook) */ } = useTecnicos();
-  const [novoTecnico, setNovoTecnico] = useState('');
+  const { tecnicos, fetchTecnicos } = useTecnicos();
+  const [novoTecnicoNome, setNovoTecnicoNome] = useState('');
+  const [novoTecnicoWhatsapp, setNovoTecnicoWhatsapp] = useState('');
+  const [novoTecnicoEmail, setNovoTecnicoEmail] = useState('');
+  const [novoTecnicoCargo, setNovoTecnicoCargo] = useState('vendedor');
+  const [salvandoEquipe, setSalvandoEquipe] = useState(false);
   
   // Estados para loja (nome + logo)
   const [nomeLoja, setNomeLoja] = useState('');
@@ -423,79 +427,206 @@ export function ConfiguracoesTab() {
                 </div>
               </GlassCard>
 
-              {/* Gerenciamento de Equipe (Técnicos/Vendedores) */}
-              <GlassCard className="border-2 border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-800 rounded-3xl mt-4 sm:mt-6">
+              {/* Gerenciamento de Equipe & Acessos ao Robô WhatsApp */}
+              <GlassCard className="border-2 border-blue-500/30 bg-blue-950/10 dark:bg-blue-950/20 rounded-3xl mt-4 sm:mt-6 p-4 sm:p-6">
                 <div className="pb-4 border-b border-white/10 mb-4">
-                  <h3 className="text-base sm:text-lg font-bold text-blue-900 dark:text-blue-300 flex items-center gap-2">
-                    <User className="w-5 h-5" /> Equipe (Técnicos e Vendedores)
-                  </h3>
-                  <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
-                    Cadastre os colaboradores que estarão disponíveis nas vendas e ordens de serviço.
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-blue-800 dark:text-blue-300 flex items-center gap-2">
+                      <User className="w-5 h-5" /> Equipe & Acessos ao Bot do WhatsApp
+                    </h3>
+                    <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/40 text-xs w-fit">
+                      🤖 Copiloto Inteligente
+                    </Badge>
+                  </div>
+                  <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400 mt-1">
+                    Cadastre os membros da sua equipe com o <strong>WhatsApp (com DDD)</strong>. O bot identifica automaticamente quem está falando pelo número, permitindo consultas de estoque, vendas e comandos operacionais pelo WhatsApp.
                   </p>
                 </div>
                 
                 <div className="space-y-4">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={novoTecnico}
-                      onChange={(e) => setNovoTecnico(e.target.value)}
-                      placeholder="Nome do colaborador..."
-                      className="input-glass flex-1"
-                    />
-                    <Button 
-                      onClick={async () => {
-                        if (!novoTecnico.trim()) {
-                          alert('Por favor, informe o nome do colaborador.');
-                          return;
-                        }
-                        try {
-                          // Inserindo direto no Supabase na tabela de técnicos/vendedores vinculada à loja
-                          const { error } = await supabase.from('tecnicos').insert([
-                            { nome: novoTecnico.trim(), loja_id: usuario?.lojaId }
-                          ]);
-                          if (error) throw error;
-                          
-                          setNovoTecnico('');
-                          fetchTecnicos(); // Atualiza a lista na hora
-                          alert('Técnico/Vendedor cadastrado com sucesso!');
-                        } catch (err: any) {
-                          console.error('Erro ao cadastrar:', err);
-                          alert(`Erro ao cadastrar: ${err.message}`);
-                        }
-                      }} 
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      <Plus className="w-4 h-4 mr-2" /> Adicionar
-                    </Button>
+                  {/* Formulário de Cadastro */}
+                  <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      Cadastrar Novo Colaborador / Habilitar Acesso ao Bot
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1 font-medium">Nome *</label>
+                        <input
+                          type="text"
+                          value={novoTecnicoNome}
+                          onChange={(e) => setNovoTecnicoNome(e.target.value)}
+                          placeholder="Ex: Carlos Vendedor"
+                          className="input-glass w-full text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1 font-medium">WhatsApp com DDD *</label>
+                        <input
+                          type="text"
+                          value={novoTecnicoWhatsapp}
+                          onChange={(e) => setNovoTecnicoWhatsapp(e.target.value)}
+                          placeholder="Ex: 31 99999-8888"
+                          className="input-glass w-full text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1 font-medium">Função / Cargo</label>
+                        <select
+                          value={novoTecnicoCargo}
+                          onChange={(e) => setNovoTecnicoCargo(e.target.value)}
+                          className="input-glass w-full text-sm bg-slate-900 text-white"
+                        >
+                          <option value="vendedor">Vendedor</option>
+                          <option value="tecnico">Técnico</option>
+                          <option value="gerente">Gerente</option>
+                          <option value="dono">Proprietário / Dono</option>
+                          <option value="motoboy">Motoboy / Entregador</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1 font-medium">E-mail (opcional)</label>
+                        <input
+                          type="email"
+                          value={novoTecnicoEmail}
+                          onChange={(e) => setNovoTecnicoEmail(e.target.value)}
+                          placeholder="email@exemplo.com"
+                          className="input-glass w-full text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <Button
+                        disabled={salvandoEquipe}
+                        onClick={async () => {
+                          if (!novoTecnicoNome.trim()) {
+                            toast.error('Informe o nome do colaborador.');
+                            return;
+                          }
+                          const digits = novoTecnicoWhatsapp.replace(/\D/g, '');
+                          if (!digits || digits.length < 10) {
+                            toast.error('Informe um WhatsApp válido com DDD (ex: 31 99999-8888).');
+                            return;
+                          }
+
+                          setSalvandoEquipe(true);
+                          try {
+                            const res = await fetch('/api/equipe', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                loja_id: usuario?.lojaId,
+                                nome: novoTecnicoNome.trim(),
+                                telefone: novoTecnicoWhatsapp.trim(),
+                                email: novoTecnicoEmail.trim() || undefined,
+                                cargo: novoTecnicoCargo,
+                              }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok || data.error) {
+                              throw new Error(data.error || 'Erro ao cadastrar.');
+                            }
+
+                            toast.success(data.mensagem || 'Colaborador e WhatsApp vinculados com sucesso!');
+                            setNovoTecnicoNome('');
+                            setNovoTecnicoWhatsapp('');
+                            setNovoTecnicoEmail('');
+                            setNovoTecnicoCargo('vendedor');
+                            fetchTecnicos();
+                          } catch (err: any) {
+                            console.error('Erro ao cadastrar membro da equipe:', err);
+                            toast.error(err.message || 'Erro ao cadastrar.');
+                          } finally {
+                            setSalvandoEquipe(false);
+                          }
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2"
+                      >
+                        <Plus className="w-4 h-4 mr-1.5" />
+                        {salvandoEquipe ? 'Salvando...' : 'Adicionar & Vincular ao Bot'}
+                      </Button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-4">
-                    {tecnicos?.map((tec) => (
-                      <div key={tec.id} className="flex items-center justify-between bg-white/20 dark:bg-slate-800/50 border border-white/10 p-2 rounded-xl">
-                        <span className="text-sm font-medium">{tec.nome}</span>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-red-500 hover:bg-red-500/10"
-                          onClick={async () => {
-                            if (window.confirm(`Tem certeza que deseja apagar ${tec.nome}?`)) {
-                              try {
-                                const { error } = await supabase.from('tecnicos').delete().eq('id', tec.id);
-                                if (error) throw error;
-                                fetchTecnicos(); // Atualiza a lista
-                              } catch (err: any) {
-                                alert(`Erro ao excluir: ${err.message}`);
-                              }
-                            }
-                          }}
+                  {/* Lista de Membros da Equipe */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+                    {tecnicos?.map((tec: any) => {
+                      const cargoNome = tec.cargo || tec.tipo || 'Colaborador';
+                      const cargoColor = 
+                        ['dono', 'proprietario', 'admin', 'gerente'].includes(cargoNome.toLowerCase())
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          : cargoNome.toLowerCase() === 'tecnico'
+                          ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                          : cargoNome.toLowerCase() === 'motoboy'
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+
+                      const phoneDisplay = tec.whatsapp || tec.telefone || 'Sem WhatsApp';
+
+                      return (
+                        <div
+                          key={tec.id}
+                          className="flex flex-col justify-between bg-white/10 dark:bg-slate-900/60 border border-white/10 p-3.5 rounded-2xl relative group hover:border-blue-500/30 transition-colors"
                         >
-                          <X className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    ))}
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div>
+                              <span className="font-semibold text-sm text-white block">
+                                {tec.nome}
+                              </span>
+                              <Badge className={`text-[10px] uppercase font-bold mt-1 ${cargoColor}`}>
+                                {cargoNome}
+                              </Badge>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-400 hover:bg-red-500/20 hover:text-red-300"
+                              title="Excluir e revogar acesso"
+                              onClick={async () => {
+                                if (window.confirm(`Deseja realmente remover ${tec.nome} e revogar seu acesso no WhatsApp?`)) {
+                                  try {
+                                    const res = await fetch(`/api/equipe?id=${tec.id}&loja_id=${usuario?.lojaId}`, {
+                                      method: 'DELETE',
+                                    });
+                                    const data = await res.json();
+                                    if (!res.ok || data.error) throw new Error(data.error || 'Erro ao excluir');
+                                    toast.success('Colaborador removido e acesso revogado!');
+                                    fetchTecnicos();
+                                  } catch (err: any) {
+                                    toast.error(err.message || 'Erro ao excluir.');
+                                  }
+                                }
+                              }}
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </div>
+
+                          <div className="space-y-1 text-xs text-slate-300 border-t border-white/5 pt-2 mt-1">
+                            <div className="flex items-center gap-1.5 text-emerald-400 font-mono">
+                              <Smartphone className="w-3.5 h-3.5" />
+                              <span>{phoneDisplay}</span>
+                              {phoneDisplay !== 'Sem WhatsApp' && (
+                                <span className="ml-auto text-[10px] text-emerald-300/80 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                  ✓ Bot Ativo
+                                </span>
+                              )}
+                            </div>
+                            {tec.email && (
+                              <div className="text-[11px] text-slate-400 truncate">
+                                ✉️ {tec.email}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
                     {(!tecnicos || tecnicos.length === 0) && (
-                      <p className="text-sm text-muted-foreground italic">Ninguém cadastrado ainda.</p>
+                      <div className="col-span-full text-center py-6 border border-dashed border-white/10 rounded-2xl">
+                        <p className="text-sm text-muted-foreground italic">Nenhum colaborador cadastrado na equipe ainda.</p>
+                      </div>
                     )}
                   </div>
                 </div>

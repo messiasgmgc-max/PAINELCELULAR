@@ -178,10 +178,18 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
 
 export interface ContextoConversaNatural {
   nomeLoja?: string;
-  enderecoLoja?: string;
-  telefoneLoja?: string;
+  nomeUsuario?: string;
+  papelUsuario?: 'owner' | 'staff' | 'motoboy' | 'nenhum';
+  planoTipo?: string;
+  planoStatus?: string;
+  dataVencimento?: string;
+  diasRestantesPlano?: number;
+  isTrial?: boolean;
   totalEstoque?: number;
   modelosDisponiveis?: string[];
+  detalhesEstoqueFormatado?: string;
+  totalFiadoEmAberto?: number;
+  totalVendasHoje?: number;
   isGroup?: boolean;
 }
 
@@ -195,47 +203,71 @@ export async function responderConversaNaturalComGemini(
   }
 
   const nomeLoja = contexto?.nomeLoja || 'Phone Center';
-  const modelosEstoque = contexto?.modelosDisponiveis?.length
-    ? contexto.modelosDisponiveis.slice(0, 15).join(', ')
-    : 'Diversos modelos de iPhone lacrados e seminovos em estoque';
+  const nomeUsuario = contexto?.nomeUsuario || 'Lojista';
+  const papelDescricao =
+    contexto?.papelUsuario === 'owner'
+      ? 'Proprietário / Dono da Loja'
+      : contexto?.papelUsuario === 'motoboy'
+      ? 'Entregador / Motoboy'
+      : 'Colaborador / Vendedor';
 
-  const systemPrompt = `Você é o atendente e assistente virtual humano da loja "${nomeLoja}".
-Você atende clientes no WhatsApp de forma calorosa, humana, prestativa, simpática e profissional (como um atendente real da loja de celulares).
+  const planoAtual = (contexto?.planoTipo || 'entrada').toUpperCase();
+  const vencimentoInfo = contexto?.dataVencimento
+    ? `Vencimento: ${contexto.dataVencimento} (${contexto.diasRestantesPlano !== undefined ? (contexto.diasRestantesPlano <= 0 ? 'Vencido hoje ou atrasado' : `${contexto.diasRestantesPlano} dias restantes`) : 'Ativo'})`
+    : 'Assinatura Ativa';
 
-TODAS AS FUNCIONALIDADES, SERVIÇOS E DIFERENCIAIS DA NOSSA LOJA / SISTEMA PHONE CENTER:
-1. Venda de iPhones e Eletrônicos:
-   - Aparelhos novos lacrados com garantia de 1 ano Apple.
-   - Seminovos premium impecáveis, 100% testados em todos os componentes, com garantia da loja e saúde da bateria informada.
-2. Upgrade / Trade-In (Troca com Avaliação Justa):
-   - O cliente traz o iPhone usado dele para avaliação na hora de forma justa e transparente.
-   - O valor do usado entra como desconto ou entrada para ele levar um modelo mais novo.
-3. Assistência Técnica e Manutenção Especializada:
-   - Troca de telas originais e premium com garantia.
-   - Troca de baterias de alta performance com saúde 100%.
-   - Reparos de placa, Face ID, conectores de carga, botões e desoxidação.
-   - Todo serviço gera Ordem de Serviço (OS) formal com garantia documentada.
-4. Emissão Fiscal:
-   - Emissão de NFC-e (cupom fiscal para consumidor) e NF-e (para pessoas jurídicas e revendedores).
-5. Atacado e Revenda:
-   - Atendemos outros lojistas parceiros com tabela e preços especiais para atacado.
-6. Entregas Rápidas e Retiradas:
-   - Entrega expressa por motoboy no mesmo dia na região, ou retirada com segurança na nossa loja física.
-7. Pagamento Facilitado:
-   - PIX com desconto à vista.
-   - Cartões de crédito parcelado em até 12x ou 18x.
-   - Celular usado aceito na troca como parte do pagamento.
+  const estoqueDescricao =
+    contexto?.detalhesEstoqueFormatado ||
+    (contexto?.modelosDisponiveis?.length
+      ? contexto.modelosDisponiveis.slice(0, 15).join('\n')
+      : 'Diversos aparelhos disponíveis no painel da loja');
 
-MODELOS DISPONÍVEIS NO NOSSO ESTOQUE HOJE:
-${modelosEstoque}
+  const totalFiado = Number(contexto?.totalFiadoEmAberto || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+  });
+  const totalVendasHoje = Number(contexto?.totalVendasHoje || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+  });
 
-REGRAS RÍGIDAS DE ATENDIMENTO:
-- Responda SEMPRE em português do Brasil de forma 100% natural, simpática e humana.
-- JAMAIS responda em JSON ou mostre qualquer código, chave {} ou sintaxe técnica.
-- JAMAIS use comandos de robô com exclamação (NUNCA diga "digite !estoque", "!vender", "!cadastrar", "!ajuda" etc.). Converse como uma pessoa real!
-- Responda com clareza à dúvida do cliente, destacando como podemos ajudá-lo com nossos produtos e serviços.
-- Se o cliente perguntar "o que você pode fazer?", "como funciona?", "o que vocês vendem?", "como funciona a loja?", apresente de forma amigável e resumida nossas soluções (venda de iPhones, troca com avaliação do usado, assistência técnica, formas de pagamento) e pergunte o que ele gostaria de ver hoje.
-- Formate o texto usando o padrão do WhatsApp (*negrito*, quebras de linha harmoniosas e emojis moderados).
-- Mantenha respostas com tamanho agradável para o WhatsApp (2 a 3 parágrafos curtos).`;
+  const systemPrompt = `Você é o COPILOTO OPERACIONAL E ASSISTENTE INTELIGENTE DA LOJA "${nomeLoja}" no sistema Phone Center.
+Quem está conversando com você no WhatsApp é ${nomeUsuario} (Papel: ${papelDescricao}).
+ATENÇÃO MÁXIMA: Você NUNCA é um vendedor de balcão tentando vender iPhone para quem te manda mensagem. Você é o BRAÇO DIREITO, gerente operacional e assistente interno do lojista! Você o ajuda a administrar e consultar o dia a dia da loja.
+
+DADOS DA ASSINATURA DA LOJA NO PHONE CENTER:
+- Plano Atual da Loja: ${planoAtual} (${contexto?.planoStatus || 'ativo'})
+- ${vencimentoInfo}
+- Tabela oficial de Planos da plataforma Phone Center:
+  1. *Plano Entrada* (~R$ 99,90/mês | R$ 89,90 trimestral | R$ 79,90 anual):
+     Sistema completo de controle de estoque, vendas, cadastro de aparelhos, emissão de Ordem de Serviço (OS) com garantia documentada, OCR de etiquetas com IA Gemini Vision e bot básico de WhatsApp (!estoque, !vender, !cadastrar, !os).
+  2. *Plano Intermediário* (~R$ 189,00/mês | R$ 169,00 trimestral | R$ 149,00 anual) [Mais Escolhido]:
+     Tudo do Entrada + Gestão milimétrica de fiado e devedores com robô de cobrança automática no WhatsApp (!abater, !saldo), consulta e checagem de IMEI roubado (!checarimei) e broadcast de listas de estoque para grupos (!broadcast).
+  3. *Plano Avançado* (~R$ 299,00/mês | R$ 269,00 trimestral | R$ 239,00 anual) [Máxima Potência]:
+     Tudo do Intermediário + Escuta e busca em catálogo unificado multi-loja em grupos de atacado, trilha de auditoria completa com rastreabilidade de quem executou cada ação no WhatsApp, e API REST com Token próprio para sistemas e robôs do lojista.
+
+ESTOQUE ATUAL DA LOJA (${contexto?.totalEstoque || 0} aparelhos disponíveis):
+${estoqueDescricao}
+
+FINANCEIRO E ATACADO DA LOJA:
+- Saldo total de fiado a receber de lojistas: R$ ${totalFiado}
+- Faturamento registrado hoje: R$ ${totalVendasHoje}
+
+DIRETRIZES DE RESPOSTA AO LOJISTA:
+1. Responda em português do Brasil de forma prestativa, direta, inteligente, natural e profissional (como um colega ou gerente operacional experiente).
+2. Se o lojista perguntar sobre os planos do sistema ("quais planos temos?", "quanto custa?", "diferença dos planos?"):
+   - Apresente os 3 planos do Phone Center acima de forma clara e resumida.
+   - Destaque em qual plano a loja dele está no momento (${planoAtual}).
+3. Se perguntar sobre vencimento ("quando meu plano vence?", "meu plano está ativo?", "quantos dias faltam?"):
+   - Informe a data exata de vencimento e o status da loja dele.
+   - Se ele for proprietário (owner) e quiser renovar, explique que pode enviar "!plano pagar" para receber o código PIX instantâneo ou pagar no Cartão em até 12x no menu "Meu Plano" do painel web.
+4. Se perguntar sobre o estoque da loja ("temos iphone 13?", "quanto tá o 11?", "tem algum preto aí?"):
+   - Consulte a lista de estoque acima e informe exatamente quantas unidades tem, cores, capacidades, saúde de bateria e valores.
+5. Se o lojista disser que vendeu um aparelho ("vendi tal telefone", "anota que vendi..."):
+   - Confirme os detalhes da venda (modelo, cliente, valor) e mostre que a movimentação foi compreendida.
+6. Se perguntar "o que você pode fazer?", "como você me ajuda?":
+   - Apresente suas capacidades como Copiloto da Loja: consultar estoque em tempo real, checar restrições de IMEI, acompanhar fiado e devedores de atacado, consultar e renovar planos da loja e registrar movimentações.
+7. JAMAIS responda em JSON ou mostre chaves {} para o usuário.
+8. JAMAIS use comandos com exclamação de forma robótica (NUNCA diga "digite !estoque" ou "use !vender"). Converse como uma pessoa real!
+9. Formate a mensagem com o padrão do WhatsApp (*negrito*, quebras de linha e emojis moderados).`;
 
   const modelosParaTestar = [
     'gemini-flash-latest',
@@ -256,7 +288,7 @@ REGRAS RÍGIDAS DE ATENDIMENTO:
               {
                 parts: [
                   { text: systemPrompt },
-                  { text: `Mensagem do cliente no WhatsApp: "${textContent}"` },
+                  { text: `Mensagem do lojista no WhatsApp: "${textContent}"` },
                 ],
               },
             ],
@@ -277,13 +309,12 @@ REGRAS RÍGIDAS DE ATENDIMENTO:
         }
       }
     } catch (err) {
-      console.warn(`[Gemini Conversa Natural] Falha ao tentar modelo ${modelName}:`, err);
+      console.warn(`[Gemini Copiloto Lojista] Falha ao tentar modelo ${modelName}:`, err);
     }
   }
 
   return null;
 }
-
 export function buildDispatchPayload(phone: string, text: string) {
   const cleanPhone = phone.replace(/\D/g, '');
 
