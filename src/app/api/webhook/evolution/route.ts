@@ -850,6 +850,48 @@ const bufferUltimaMensagemParticipante = new Map<string, { texto: string; timest
 // Histórico de respostas enviadas no grupo para evitar flood e repetição desnecessária
 const historicoRespostasGrupo = new Map<string, number>();
 
+// ── AUXILIAR: Obter lojas com escuta de grupo ativa (Opt-in via configuracoes ou Lucas Imports) ──
+async function obterLojasComEscutaAtiva(
+  lojaIdContexto: string | null,
+  instanceName: string
+): Promise<Array<{ id: string; nome: string }>> {
+  // 1. Se veio de uma instância vinculada a uma loja específica
+  if (lojaIdContexto) {
+    const { data: loja } = await supabase
+      .from('lojas')
+      .select('id, nome, configuracoes')
+      .eq('id', lojaIdContexto)
+      .eq('ativo', true)
+      .maybeSingle();
+
+    if (loja) {
+      const config = (loja.configuracoes || {}) as any;
+      const isLucas = (loja.nome || '').toLowerCase().includes('lucas') || (instanceName || '').toLowerCase().includes('lucas');
+      const escutaAtiva = config.escuta_grupo_ativa === true || config.escuta_grupo_ativa === 'true' || isLucas;
+      if (escutaAtiva) {
+        return [{ id: loja.id, nome: loja.nome || 'Loja' }];
+      }
+    }
+    return [];
+  }
+
+  // 2. Se for instância compartilhada/central, busca todas as lojas com opt-in ativo
+  const { data: todasLojas } = await supabase
+    .from('lojas')
+    .select('id, nome, configuracoes')
+    .eq('ativo', true);
+
+  if (!todasLojas || todasLojas.length === 0) return [];
+
+  return todasLojas
+    .filter((l: any) => {
+      const config = (l.configuracoes || {}) as any;
+      const isLucas = (l.nome || '').toLowerCase().includes('lucas');
+      return config.escuta_grupo_ativa === true || config.escuta_grupo_ativa === 'true' || isLucas;
+    })
+    .map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
+}
+
 // ── AUXILIAR: Resposta Natural de Estoque / iPhone para Grupos e Privado ──
 async function responderConsultaEstoqueNatural(
   texto: string,
@@ -860,12 +902,10 @@ async function responderConsultaEstoqueNatural(
   senderPhone?: string,
   remoteJid?: string
 ): Promise<string | null> {
-  // 1. Exceção de Negócio: A escuta e resposta automática a conversas em grupos ("tem tal modelo? Responde: Tem aqui...")
-  // é uma funcionalidade EXCLUSIVA da Lucas Imports.
-  // Lojistas e clientes comuns da plataforma NÃO têm essa escuta automática ativada em grupos para não banalizar o bot
-  // e evitar misturar estoques. Eles utilizam os comandos normais no privado ou o comando explícito !estoque.
-  const isLucas = await verificarSeLojaLucasImports(lojaId, instanceName);
-  if (!isLucas || !lojaId) {
+  // 1. Escuta de Grupo Multi-Loja por Opt-in:
+  // Consulta as lojas que possuem escuta_grupo_ativa = true em configuracoes (ou Lucas Imports por compatibilidade)
+  const lojasComEscuta = await obterLojasComEscutaAtiva(lojaId, instanceName);
+  if (lojasComEscuta.length === 0) {
     return null;
   }
 
@@ -1056,10 +1096,13 @@ async function responderConsultaEstoqueNatural(
   }
 
   // 5. CONSULTA AO BANCO DE DADOS
+  const lojaIds = lojasComEscuta.map((l) => l.id);
+  const mapLojas = new Map(lojasComEscuta.map((l) => [l.id, l.nome]));
+
   const { data: aparelhos } = await supabase
     .from('aparelhos')
-    .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
-    .eq('loja_id', lojaId)
+    .select('id, loja_id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+    .in('loja_id', lojaIds)
     .eq('ativo', true)
     .neq('condicao', 'vendido')
     .neq('status', 'vendido');
@@ -1160,9 +1203,9 @@ async function responderConsultaEstoqueNatural(
     const bat = batNum ? `(${batNum}%)` : '';
     const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
     const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-    const modCap = [modNorm, cap].filter(Boolean).join(' ');
-    const extras = [nomeCor, bat].filter(Boolean).join(' ');
-    linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
+    const nomeLoja = mapLojas.get(a.loja_id) || 'Loja';
+    const tagLoja = ` [Loja: ${nomeLoja}]`;
+    linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}${tagLoja}`.replace(/\s+/g, ' ').trim());
   });
 
   if (isGroup && aparelhosEncontrados.length > 6) {
