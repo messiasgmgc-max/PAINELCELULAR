@@ -1,6 +1,6 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { buildWhatsAppText, parseGeminiPlan } from './commandExecutor';
+import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini } from './commandExecutor';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
@@ -2561,12 +2561,77 @@ Digite: *!broadcast agora*`;
       return NextResponse.json({ status: 'ok', message: 'Consulta de estoque respondida naturalmente.' }, { status: 200 });
     }
 
-    // ── 13. COMANDOS ESTRUTURADOS GEMINI PLAN ──
-    const geminiPlan = parseGeminiPlan(textContent);
+    // ── 13. COMANDOS ESTRUTURADOS GEMINI PLAN (LINGUAGEM NATURAL) ──
+    let nomeLoja: string | undefined;
+    if (lojaId) {
+      const { data: lojaInfo } = await supabase.from('lojas').select('nome').eq('id', lojaId).maybeSingle();
+      nomeLoja = lojaInfo?.nome;
+    }
+
+    const rawPlan = await gerarPlanoComGemini(textContent, {
+      nome: nomeLoja,
+      lojaId: lojaId || undefined,
+    });
+    const geminiPlan = parseGeminiPlan(rawPlan || '');
+
     if (geminiPlan) {
-      const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
-      await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-      return NextResponse.json({ status: 'ok', message: 'Comando IA executado.' }, { status: 200 });
+      // Funil de confiança - Nível Médio: pergunta objetiva de volta
+      if (geminiPlan.confianca === 'media' && geminiPlan.perguntaClarificacao) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❓ ${geminiPlan.perguntaClarificacao}`);
+        return NextResponse.json({ status: 'ok', message: 'Pergunta de clarificação enviada via IA.' }, { status: 200 });
+      }
+
+      // Funil de confiança - Nível Alto: executa / confirma
+      if (geminiPlan.confianca === 'alta') {
+        const acoesDeEscrita = [
+          'create_venda',
+          'create_aparelho',
+          'update_preco',
+          'abater_divida',
+          'create_os',
+          'create_cliente',
+        ];
+
+        // Se for ação que escreve dados ou move valores, valida permissão
+        if (acoesDeEscrita.includes(geminiPlan.action)) {
+          if (lojaId) {
+            const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+            if (!perm.autorizado) {
+              await enviarMensagemWhatsApp(
+                instanceName,
+                targetDestination,
+                '⚠️ *Acesso Restrito:* Este comando operacional é restrito à equipe autorizada da loja.'
+              );
+              return NextResponse.json({ status: 'error', message: 'Acesso negado para comando IA de escrita' }, { status: 200 });
+            }
+          }
+        }
+
+        const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+        return NextResponse.json({ status: 'ok', message: 'Comando IA executado com alta confiança.' }, { status: 200 });
+      }
+
+      // Se confiança for baixa em grupo, ignora silenciosamente para não floodar conversas alheias
+      if (isGroup) {
+        return NextResponse.json({ status: 'ok', message: 'Mensagem em grupo com baixa relevância ignorada.' }, { status: 200 });
+      }
+    }
+
+    // ── 14. PARTE 1: REGRA DE OURO (O BOT NUNCA FICA EM SILÊNCIO) ──
+    if (!isGroup) {
+      const fallbackAntiSilencio = `🤔 Não entendi direito o que você precisa.
+
+Aqui está o que eu sei fazer:
+📱 *!estoque* - Ver aparelhos disponíveis
+💰 *!vender [IMEI/Cód] [Valor]* - Dar baixa em venda
+📝 *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Entrada de aparelho
+🤝 *!saldo* - Consultar fiado/débitos
+
+💡 Ou digite *!ajuda* para ver todas as opções! 🚀`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, fallbackAntiSilencio);
+      return NextResponse.json({ status: 'ok', message: 'Fallback anti-silêncio enviado.' }, { status: 200 });
     }
 
     return NextResponse.json({ status: 'ok', message: 'Webhook processado com sucesso.' }, { status: 200 });
