@@ -885,6 +885,19 @@ const bufferUltimaMensagemParticipante = new Map<string, { texto: string; timest
 // Histórico de respostas enviadas no grupo para evitar flood e repetição desnecessária
 const historicoRespostasGrupo = new Map<string, number>();
 
+// Sincronização assíncrona com tabela whatsapp_antiflood_cache para escala horizontal
+async function persistirAntiFloodTimestamp(chave: string, timestamp: number) {
+  try {
+    await supabase.from('whatsapp_antiflood_cache').upsert({
+      chave,
+      timestamp,
+      created_at: new Date().toISOString(),
+    });
+  } catch {
+    // Falha silenciosa para não onerar o fluxo
+  }
+}
+
 // ── AUXILIAR: Obter lojas com escuta de grupo ativa (Opt-in via configuracoes ou Lucas Imports) ──
 async function obterLojasComEscutaAtiva(
   lojaIdContexto: string | null,
@@ -1213,6 +1226,8 @@ async function responderConsultaEstoqueNatural(
   if (isGroup && remoteJid) {
     historicoRespostasGrupo.set(`${remoteJid}:${modeloAlvoFormatado}`, agora);
     historicoRespostasGrupo.set(`${remoteJid}:${cleanSender}`, agora);
+    persistirAntiFloodTimestamp(`${remoteJid}:${modeloAlvoFormatado}`, agora);
+    persistirAntiFloodTimestamp(`${remoteJid}:${cleanSender}`, agora);
   }
 
   // Ordena por modelo normalizado
