@@ -2183,7 +2183,9 @@ export function AtacadoTab() {
             setShowNovoClienteModal(false);
             setClienteParaEditar(null);
           }}
+          lojaId={usuario?.lojaId || usuario?.loja_id || ''}
           clienteParaEditar={clienteParaEditar}
+          vendas={vendasBanco}
           onSuccess={fetchClientesAtacado}
         />
       </ModalPortal>

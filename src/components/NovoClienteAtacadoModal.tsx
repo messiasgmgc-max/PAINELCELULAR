@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Users, 
   X, 
@@ -13,7 +13,9 @@ import {
   Building2,
   CreditCard,
   MessageCircle,
-  AlertCircle
+  Search,
+  Check,
+  UserPlus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -23,6 +25,8 @@ interface NovoClienteAtacadoModalProps {
   onClose: () => void;
   lojaId: string;
   clienteParaEditar?: any | null;
+  /** Lista de vendas do banco — usada para sugerir nomes já existentes */
+  vendas?: any[];
   onSuccess: () => void;
 }
 
@@ -31,6 +35,7 @@ export function NovoClienteAtacadoModal({
   onClose,
   lojaId,
   clienteParaEditar,
+  vendas = [],
   onSuccess
 }: NovoClienteAtacadoModalProps) {
   const [nome, setNome] = useState('');
@@ -42,6 +47,68 @@ export function NovoClienteAtacadoModal({
   const [chavePix, setChavePix] = useState('');
   const [observacoes, setObservacoes] = useState('');
   const [salvando, setSalvando] = useState(false);
+
+  // Estado do autocomplete
+  const [dropdownAberto, setDropdownAberto] = useState(false);
+  const [sugestoes, setSugestoes] = useState<string[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Extrai nomes únicos de compradores a partir das vendas
+  const nomesExistentes = React.useMemo(() => {
+    const nomes = new Set<string>();
+    for (const v of vendas) {
+      const comprador = v.comprador || v.nome_comprador || v.raw?.nome_comprador || '';
+      if (comprador && comprador.trim().length > 1) {
+        nomes.add(comprador.trim());
+      }
+    }
+    return Array.from(nomes).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [vendas]);
+
+  // Filtra sugestões conforme o nome digitado
+  const atualizarSugestoes = useCallback((valor: string) => {
+    if (!valor.trim()) {
+      setSugestoes([]);
+      setDropdownAberto(false);
+      return;
+    }
+    const v = valor.toLowerCase();
+    const filtradas = nomesExistentes.filter(n => n.toLowerCase().includes(v));
+    setSugestoes(filtradas);
+    setDropdownAberto(filtradas.length > 0);
+  }, [nomesExistentes]);
+
+  const handleNomeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valor = e.target.value;
+    setNome(valor);
+    atualizarSugestoes(valor);
+  };
+
+  const selecionarSugestao = (nomeSelecionado: string) => {
+    setNome(nomeSelecionado);
+    setSugestoes([]);
+    setDropdownAberto(false);
+    // Foca no próximo campo (WhatsApp)
+    setTimeout(() => {
+      const el = document.getElementById('atacado-whatsapp');
+      el?.focus();
+    }, 50);
+  };
+
+  // Fecha dropdown ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        inputRef.current && !inputRef.current.contains(e.target as Node)
+      ) {
+        setDropdownAberto(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (clienteParaEditar) {
@@ -63,20 +130,25 @@ export function NovoClienteAtacadoModal({
       setChavePix('');
       setObservacoes('');
     }
+    setSugestoes([]);
+    setDropdownAberto(false);
   }, [clienteParaEditar, isOpen]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setDropdownAberto(false);
 
     if (!nome.trim()) {
       toast.error('Informe o nome do lojista ou cliente de atacado');
       return;
     }
 
-    if (!lojaId) {
-      toast.error('Loja não identificada');
+    // Garante que o lojaId está disponível (não bloqueia com erro visual)
+    const lojaIdFinal = lojaId?.trim();
+    if (!lojaIdFinal) {
+      toast.error('Sessão expirada. Recarregue a página e tente novamente.');
       return;
     }
 
@@ -85,7 +157,7 @@ export function NovoClienteAtacadoModal({
 
       const payload = {
         id: clienteParaEditar?.id || undefined,
-        lojaId,
+        lojaId: lojaIdFinal,
         nome: nome.trim(),
         whatsapp: whatsapp.replace(/\D/g, ''),
         telefone: whatsapp.replace(/\D/g, ''),
@@ -116,12 +188,17 @@ export function NovoClienteAtacadoModal({
     }
   };
 
+  const nomeTrimmed = nome.trim();
+  const isNovoNome = nomeTrimmed.length > 0 && !nomesExistentes.some(
+    n => n.toLowerCase() === nomeTrimmed.toLowerCase()
+  );
+
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
       <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
+        <div className="p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
               <Users className="w-5 h-5" />
@@ -146,22 +223,93 @@ export function NovoClienteAtacadoModal({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto scrollbar-soft">
           
-          {/* Nome */}
+          {/* Nome com autocomplete */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
               <Building2 className="w-3.5 h-3.5 text-blue-400" /> Nome do Lojista / Cliente *
             </label>
-            <input
-              type="text"
-              required
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
-              placeholder="Ex: Lucas Imports, Daniel Celulares..."
-              className="w-full h-10 bg-slate-950/80 border border-slate-800 rounded-xl px-3 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
+            <div className="relative">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  required
+                  value={nome}
+                  onChange={handleNomeChange}
+                  onFocus={() => nome.trim() && atualizarSugestoes(nome)}
+                  placeholder="Digite para buscar ou criar novo..."
+                  autoComplete="off"
+                  className="w-full h-10 bg-slate-950/80 border border-slate-800 rounded-xl pl-9 pr-3 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+
+              {/* Badge "Novo" quando o nome não existe */}
+              {isNovoNome && !dropdownAberto && (
+                <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold">
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Novo cliente — será criado ao salvar</span>
+                </div>
+              )}
+
+              {/* Dropdown de sugestões */}
+              {dropdownAberto && sugestoes.length > 0 && (
+                <div
+                  ref={dropdownRef}
+                  className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden"
+                >
+                  <div className="px-3 py-1.5 border-b border-slate-800">
+                    <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+                      Compradores com vendas registradas
+                    </span>
+                  </div>
+                  <ul className="max-h-48 overflow-y-auto">
+                    {sugestoes.map((sugestao, idx) => {
+                      const isExato = sugestao.toLowerCase() === nomeTrimmed.toLowerCase();
+                      return (
+                        <li key={idx}>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault(); // evita blur no input antes do click
+                              selecionarSugestao(sugestao);
+                            }}
+                            className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-xs text-slate-200 hover:bg-slate-800 transition cursor-pointer text-left"
+                          >
+                            <span className="flex items-center gap-2">
+                              <Users className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span>{sugestao}</span>
+                            </span>
+                            {isExato && (
+                              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {/* Opção de criar com o nome digitado (se não for exato match) */}
+                  {!sugestoes.some(s => s.toLowerCase() === nomeTrimmed.toLowerCase()) && (
+                    <div className="border-t border-slate-800">
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setDropdownAberto(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-emerald-400 hover:bg-slate-800 transition cursor-pointer text-left"
+                      >
+                        <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                        <span>Criar <strong>"{nome}"</strong> como novo cliente</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* WhatsApp & Telefone */}
+          {/* WhatsApp */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -179,7 +327,9 @@ export function NovoClienteAtacadoModal({
               )}
             </label>
             <input
+              id="atacado-whatsapp"
               type="tel"
+              inputMode="tel"
               value={whatsapp}
               onChange={(e) => setWhatsapp(e.target.value)}
               placeholder="Ex: 31999999999 (somente números)"
