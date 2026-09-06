@@ -129,10 +129,9 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
 }`;
 
   const modelosParaTestar = [
+    'gemini-flash-latest',
     'gemini-3.5-flash-lite',
     'gemini-3.6-flash',
-    'gemini-flash-latest',
-    'gemini-2.5-flash',
   ];
 
   for (const modelName of modelosParaTestar) {
@@ -142,7 +141,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(12000),
           body: JSON.stringify({
             contents: [
               {
@@ -154,6 +153,9 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
             ],
             generationConfig: {
               responseMimeType: 'application/json',
+              thinkingConfig: {
+                thinkingBudget: 0,
+              },
             },
           }),
         }
@@ -168,6 +170,114 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
       }
     } catch (err) {
       console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName}:`, err);
+    }
+  }
+
+  return null;
+}
+
+export interface ContextoConversaNatural {
+  nomeLoja?: string;
+  enderecoLoja?: string;
+  telefoneLoja?: string;
+  totalEstoque?: number;
+  modelosDisponiveis?: string[];
+  isGroup?: boolean;
+}
+
+export async function responderConversaNaturalComGemini(
+  textContent: string,
+  contexto?: ContextoConversaNatural
+): Promise<string | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || !textContent || !textContent.trim()) {
+    return null;
+  }
+
+  const nomeLoja = contexto?.nomeLoja || 'Phone Center';
+  const modelosEstoque = contexto?.modelosDisponiveis?.length
+    ? contexto.modelosDisponiveis.slice(0, 15).join(', ')
+    : 'Diversos modelos de iPhone lacrados e seminovos em estoque';
+
+  const systemPrompt = `Você é o atendente e assistente virtual humano da loja "${nomeLoja}".
+Você atende clientes no WhatsApp de forma calorosa, humana, prestativa, simpática e profissional (como um atendente real da loja de celulares).
+
+TODAS AS FUNCIONALIDADES, SERVIÇOS E DIFERENCIAIS DA NOSSA LOJA / SISTEMA PHONE CENTER:
+1. Venda de iPhones e Eletrônicos:
+   - Aparelhos novos lacrados com garantia de 1 ano Apple.
+   - Seminovos premium impecáveis, 100% testados em todos os componentes, com garantia da loja e saúde da bateria informada.
+2. Upgrade / Trade-In (Troca com Avaliação Justa):
+   - O cliente traz o iPhone usado dele para avaliação na hora de forma justa e transparente.
+   - O valor do usado entra como desconto ou entrada para ele levar um modelo mais novo.
+3. Assistência Técnica e Manutenção Especializada:
+   - Troca de telas originais e premium com garantia.
+   - Troca de baterias de alta performance com saúde 100%.
+   - Reparos de placa, Face ID, conectores de carga, botões e desoxidação.
+   - Todo serviço gera Ordem de Serviço (OS) formal com garantia documentada.
+4. Emissão Fiscal:
+   - Emissão de NFC-e (cupom fiscal para consumidor) e NF-e (para pessoas jurídicas e revendedores).
+5. Atacado e Revenda:
+   - Atendemos outros lojistas parceiros com tabela e preços especiais para atacado.
+6. Entregas Rápidas e Retiradas:
+   - Entrega expressa por motoboy no mesmo dia na região, ou retirada com segurança na nossa loja física.
+7. Pagamento Facilitado:
+   - PIX com desconto à vista.
+   - Cartões de crédito parcelado em até 12x ou 18x.
+   - Celular usado aceito na troca como parte do pagamento.
+
+MODELOS DISPONÍVEIS NO NOSSO ESTOQUE HOJE:
+${modelosEstoque}
+
+REGRAS RÍGIDAS DE ATENDIMENTO:
+- Responda SEMPRE em português do Brasil de forma 100% natural, simpática e humana.
+- JAMAIS responda em JSON ou mostre qualquer código, chave {} ou sintaxe técnica.
+- JAMAIS use comandos de robô com exclamação (NUNCA diga "digite !estoque", "!vender", "!cadastrar", "!ajuda" etc.). Converse como uma pessoa real!
+- Responda com clareza à dúvida do cliente, destacando como podemos ajudá-lo com nossos produtos e serviços.
+- Se o cliente perguntar "o que você pode fazer?", "como funciona?", "o que vocês vendem?", "como funciona a loja?", apresente de forma amigável e resumida nossas soluções (venda de iPhones, troca com avaliação do usado, assistência técnica, formas de pagamento) e pergunte o que ele gostaria de ver hoje.
+- Formate o texto usando o padrão do WhatsApp (*negrito*, quebras de linha harmoniosas e emojis moderados).
+- Mantenha respostas com tamanho agradável para o WhatsApp (2 a 3 parágrafos curtos).`;
+
+  const modelosParaTestar = [
+    'gemini-flash-latest',
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+  ];
+
+  for (const modelName of modelosParaTestar) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(12000),
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: systemPrompt },
+                  { text: `Mensagem do cliente no WhatsApp: "${textContent}"` },
+                ],
+              },
+            ],
+            generationConfig: {
+              thinkingConfig: {
+                thinkingBudget: 0,
+              },
+            },
+          }),
+        }
+      );
+
+      if (res.ok) {
+        const responseData = await res.json();
+        const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (textResponse && typeof textResponse === 'string' && textResponse.trim()) {
+          return textResponse.trim();
+        }
+      }
+    } catch (err) {
+      console.warn(`[Gemini Conversa Natural] Falha ao tentar modelo ${modelName}:`, err);
     }
   }
 
@@ -222,7 +332,17 @@ export function buildWhatsAppText(action: string, data: unknown, phone: string) 
     case 'list_estoque': {
       if (typeof data === 'string') return data;
       const total = entity.total !== undefined ? entity.total : (Array.isArray(entity.itens) ? entity.itens.length : 0);
-      return `📋 *Consulta de Estoque Realizada*\n\nTotal de itens encontrados: ${total}\n${entity.resumo || (typeof data === 'object' ? JSON.stringify(data, null, 2) : '')}`;
+      let detalhe = '';
+      if (entity.resumo) {
+        detalhe = String(entity.resumo);
+      } else if (Array.isArray(entity.itens) && entity.itens.length > 0) {
+        detalhe = entity.itens
+          .map((item: any) => `• ${item.modelo || item.marca || 'Aparelho'} ${item.capacidade || ''} ${item.cor ? `(${item.cor})` : ''} ${item.preco ? `- R$ ${item.preco}` : ''}`)
+          .join('\n');
+      } else if (entity.modelo) {
+        detalhe = `• Modelo pesquisado: ${entity.modelo}`;
+      }
+      return `📋 *Consulta de Estoque Realizada*\n\nTotal de itens encontrados: ${total}${detalhe ? `\n\n${detalhe}` : ''}`;
     }
     case 'update_preco': {
       const valorFormatado = entity.novoPreco || entity.preco
@@ -242,12 +362,18 @@ export function buildWhatsAppText(action: string, data: unknown, phone: string) 
       return `✅ Loja cadastrada com sucesso!\n\nNome: ${nombre}\nTelefone: ${extra || '-'}\n\nID: ${id || 'Confirmado'}`;
     case 'update_loja':
       return `✅ Loja atualizada com sucesso!\n\nNome: ${nombre}\nTelefone: ${extra || '-'}\n\nID: ${id || 'Confirmado'}`;
-    case 'list_lojas':
-      return `📋 Lojas disponíveis:\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
+    case 'list_lojas': {
+      if (typeof data === 'string') return data;
+      if (Array.isArray(data) && data.length > 0) {
+        const lojasFmt = data.map((l: any) => `🏪 *${l.nome || 'Loja'}* ${l.telefone ? `(${l.telefone})` : ''}`).join('\n');
+        return `📋 *Lojas Disponíveis:*\n\n${lojasFmt}`;
+      }
+      return `📋 Consulta de lojas concluída.`;
+    }
     case 'search_entities':
     case 'query_entities':
-      return `🔎 Consulta concluída.\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
+      return typeof data === 'string' ? data : (entity.resumo ? String(entity.resumo) : `🔎 Consulta concluída com sucesso.`);
     default:
-      return `✅ Comando processado com sucesso.\n\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}`;
+      return typeof data === 'string' ? data : (entity.mensagem ? String(entity.mensagem) : `✅ Informação processada com sucesso.`);
   }
 }

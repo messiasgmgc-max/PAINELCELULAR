@@ -1,6 +1,6 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini } from './commandExecutor';
+import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini } from './commandExecutor';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
@@ -898,46 +898,46 @@ async function persistirAntiFloodTimestamp(chave: string, timestamp: number) {
   }
 }
 
-// ── AUXILIAR: Obter lojas com escuta de grupo ativa (Opt-in via configuracoes ou Lucas Imports) ──
-async function obterLojasComEscutaAtiva(
+// ── AUXILIAR: Obter lojas para consulta de estoque (Grupos: todas as lojas ativas | Privado: loja da conversa) ──
+async function obterLojasParaConsulta(
   lojaIdContexto: string | null,
-  instanceName: string
+  isGroup: boolean
 ): Promise<Array<{ id: string; nome: string }>> {
-  // 1. Se veio de uma instância vinculada a uma loja específica
+  // 1. Em grupos: busca TODAS as lojas ativas cadastradas no sistema Phone Center
+  // Permitindo que o lojista veja opções de todas as lojas parceiras da rede
+  if (isGroup) {
+    const { data: todasLojas } = await supabase
+      .from('lojas')
+      .select('id, nome')
+      .eq('ativo', true);
+
+    if (todasLojas && todasLojas.length > 0) {
+      return todasLojas.map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
+    }
+    return [];
+  }
+
+  // 2. No privado: consulta a loja específica vinculada à conversa/instância
   if (lojaIdContexto) {
     const { data: loja } = await supabase
       .from('lojas')
-      .select('id, nome, configuracoes')
+      .select('id, nome')
       .eq('id', lojaIdContexto)
       .eq('ativo', true)
       .maybeSingle();
 
     if (loja) {
-      const config = (loja.configuracoes || {}) as any;
-      const isLucas = (loja.nome || '').toLowerCase().includes('lucas') || (instanceName || '').toLowerCase().includes('lucas');
-      const escutaAtiva = config.escuta_grupo_ativa === true || config.escuta_grupo_ativa === 'true' || isLucas;
-      if (escutaAtiva) {
-        return [{ id: loja.id, nome: loja.nome || 'Loja' }];
-      }
+      return [{ id: loja.id, nome: loja.nome || 'Loja' }];
     }
-    return [];
   }
 
-  // 2. Se for instância compartilhada/central, busca todas as lojas com opt-in ativo
+  // Se não foi identificado pelo ID no privado, busca todas as lojas ativas como fallback
   const { data: todasLojas } = await supabase
     .from('lojas')
-    .select('id, nome, configuracoes')
+    .select('id, nome')
     .eq('ativo', true);
 
-  if (!todasLojas || todasLojas.length === 0) return [];
-
-  return todasLojas
-    .filter((l: any) => {
-      const config = (l.configuracoes || {}) as any;
-      const isLucas = (l.nome || '').toLowerCase().includes('lucas');
-      return config.escuta_grupo_ativa === true || config.escuta_grupo_ativa === 'true' || isLucas;
-    })
-    .map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
+  return (todasLojas || []).map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
 }
 
 // ── AUXILIAR: Resposta Natural de Estoque / iPhone para Grupos e Privado ──
@@ -950,17 +950,15 @@ async function responderConsultaEstoqueNatural(
   senderPhone?: string,
   remoteJid?: string
 ): Promise<string | null> {
-  // 1. Escuta de Grupo Multi-Loja por Opt-in:
-  // Consulta as lojas que possuem escuta_grupo_ativa = true em configuracoes (ou Lucas Imports por compatibilidade)
-  const lojasComEscuta = await obterLojasComEscutaAtiva(lojaId, instanceName);
-  if (lojasComEscuta.length === 0) {
+  const lojasParaConsulta = await obterLojasParaConsulta(lojaId, isGroup);
+  if (lojasParaConsulta.length === 0) {
     return null;
   }
 
   const cleanSender = (senderPhone || '').replace(/\D/g, '');
   const cleanPushName = (pushName || '').toLowerCase();
 
-  // Se a mensagem em grupo vier do próprio Lucas ou da equipe da loja, o bot nunca responde a si mesmo
+  // Em grupos, ignora mensagens da própria equipe / bot
   if (isGroup) {
     if (
       cleanSender.endsWith('94986029') ||
@@ -974,12 +972,11 @@ async function responderConsultaEstoqueNatural(
 
   const textoLimpo = texto.toLowerCase().trim();
 
-  // Em grupos, ignora textos excessivamente longos (listas de terceiros, bate-papo longo, etc.)
-  if (isGroup && textoLimpo.length > 160) {
+  // Em grupos, ignora textos excessivamente longos (listas longas de terceiros)
+  if (isGroup && textoLimpo.length > 180) {
     return null;
   }
 
-  // Lógica de buffer para mensagens consecutivas do mesmo participante (ex: "15 pro max 256gb" e logo em seguida "quem tem?")
   const participantKey = `${remoteJid || 'direct'}:${cleanSender || 'unknown'}`;
   let textoParaAnalise = textoLimpo;
 
@@ -988,18 +985,15 @@ async function responderConsultaEstoqueNatural(
   const agora = Date.now();
   if (isGroup) {
     const prevMsg = bufferUltimaMensagemParticipante.get(participantKey);
-    // Se o usuário mandou uma mensagem nos últimos 20 segundos
     if (prevMsg && agora - prevMsg.timestamp < 20000) {
-      // Se a mensagem atual não tem modelo, mas tem intenção de compra, une com a anterior
       if (!IPHONE_REGEX.test(textoLimpo)) {
         textoParaAnalise = `${prevMsg.texto} ${textoLimpo}`.trim();
       }
     }
-    // Atualiza buffer da última mensagem deste participante
     bufferUltimaMensagemParticipante.set(participantKey, { texto: textoLimpo, timestamp: agora });
   }
 
-  // 1. FILTRO DE PRODUTOS EXCLUÍDOS (Não são iPhones: iPads, Apple Watch, Macbooks, fones, acessórios, caminhão, etc.)
+  // 1. FILTRO DE PRODUTOS EXCLUÍDOS (Não são smartphones/iPhones)
   const EXCLUDED_PRODUCTS = [
     /\bipad\b/i,
     /\bwatch\b/i,
@@ -1023,86 +1017,138 @@ async function responderConsultaEstoqueNatural(
     return null;
   }
 
-  // Se menciona termos de Apple Watch sem conter a palavra "iphone"
   if (/\b(4[0-9]mm|series\s*\d|s[789]\b|s1[0-9]\b|gps|cellular)\b/i.test(textoParaAnalise) && !/iphone\b/i.test(textoParaAnalise)) {
     return null;
   }
 
-  // 2. FILTRO DE VENDEDORES ANUNCIANDO, RESPOSTAS OU BATE-PAPO ALEATÓRIO (Não é comprador pedindo)
-  const SELLER_OR_CHAT_PATTERNS = [
-    /^\s*tem\b/i,
-    /^\s*tenho\b/i,
-    /\beu\s+tenho\b/i,
-    /\btemos\b/i,
-    /\bvem\s+nele\b/i,
-    /\bvem\s+que\s+tem\b/i,
-    /\bpasso\s+por\b/i,
-    /\bfa[cç]o\s+a\b/i,
-    /\bt[oô]\s+vendendo\b/i,
-    /\bvendo\b/i,
-    /\b0\s*ciclos\b/i,
-    /\bnunca\s+viu\s+chave\b/i,
-    /\btela\s+ori\b/i,
-    /\btrocadinho\b/i,
-    /\btomar\s+no\b/i,
-    /\bcu\b/i,
-    /\bfdp\b/i,
-    /\bkkk/i,
-    /\bhaha/i,
-    /\bengra[cç]ado\b/i,
-    /\bcasamento\b/i,
-    /\bde\s+volta\s+no\b/i,
-    /\bdando\s+\d+\s+pro\b/i,
-    /\banos\b/i,
-    /^\s*(\d{1,2}[.,]\d{3}|\d{3,4})\s*$/
-  ];
-  if (SELLER_OR_CHAT_PATTERNS.some((p) => p.test(textoParaAnalise))) {
-    return null;
+  // 2. FILTRO DE VENDEDORES ANUNCIANDO OU RESPOSTAS (Apenas em Grupos)
+  if (isGroup) {
+    const isPergunta = textoParaAnalise.includes('?') || /\b(quem\s+tem|algu[eé]m|tem\s+a[ií]|tem\s+aqui|preciso|procuro)\b/i.test(textoParaAnalise);
+
+    const SELLER_OR_CHAT_PATTERNS = [
+      /^\s*tenho\b/i,
+      /\beu\s+tenho\b/i,
+      /\btemos\b/i,
+      /\bvem\s+nele\b/i,
+      /\bvem\s+que\s+tem\b/i,
+      /\bpasso\s+por\b/i,
+      /\bfa[cç]o\s+a\b/i,
+      /\bt[oô]\s+vendendo\b/i,
+      /\bvendo\b/i,
+      /\b0\s*ciclos\b/i,
+      /\bnunca\s+viu\s+chave\b/i,
+      /\btela\s+ori\b/i,
+      /\btrocadinho\b/i,
+      /\btomar\s+no\b/i,
+      /\bcu\b/i,
+      /\bfdp\b/i,
+      /\bkkk/i,
+      /\bhaha/i,
+      /\bengra[cç]ado\b/i,
+      /\bcasamento\b/i,
+      /\bde\s+volta\s+no\b/i,
+      /\bdando\s+\d+\s+pro\b/i,
+      /\banos\b/i,
+      /^\s*(\d{1,2}[.,]\d{3}|\d{3,4})\s*$/
+    ];
+
+    if (!isPergunta && /^\s*tem\b/i.test(textoParaAnalise) && !/\b(quem|algu[eé]m|a[ií]|aqui)\b/i.test(textoParaAnalise)) {
+      return null;
+    }
+
+    if (SELLER_OR_CHAT_PATTERNS.some((p) => p.test(textoParaAnalise))) {
+      return null;
+    }
   }
 
-  // 3. INTENÇÃO DE COMPRA DO CLIENTE / LOJISTA
-  const BUYER_INTENT_PATTERNS = [
-    /\bquem\s+tem\b/i,
-    /\balgu[eé]m\b/i,
-    /\balgm\b/i,
-    /\bpreciso\s+de\b/i,
-    /\bt[oô]\s+precisando\b/i,
-    /\bprocuro\b/i,
-    /\bprocurando\b/i,
-    /\bcompro\b/i,
-    /\bcomprando\b/i,
-    /\bqual\s+tem\b/i,
-    /\bonde\s+tem\b/i,
-    /\btem\s+a[ií]\b/i,
-    /\btem\s+aqui\b/i,
-    /\bquem\s+t[aá]\s+tendo\b/i,
-    /\bpra\s+hoje\b/i,
-    /\bpra\s+agora\b/i,
-    /\bpego\s+hoje\b/i,
-    /\bpre[cç]o\s+campe[aã]o\b/i,
-    /\bpre[cç]o\s+de\s+noia\b/i,
-    /\bmelhor\s+pre[cç]o\b/i,
-    /\bmenor\s+valor\b/i,
-    /\bquem\s+tiver\b/i,
-    /\bmanda\s+pv\b/i,
-    /\bdispon[ií]vel\b.*\?/i,
-    /\b(64|128|256|512|1tb)\s*(?:gb|gigas|g)?\s*\?+/i,
-    /\b(pro|promax|pm|pmx|plus|mini)\b.*\?+/i
-  ];
+  // 3. INTENÇÃO DE COMPRA / CONSULTA
+  if (isGroup) {
+    const BUYER_INTENT_PATTERNS = [
+      /\bquem\s+tem\b/i,
+      /\balgu[eé]m\b/i,
+      /\balgm\b/i,
+      /\bpreciso\s+de\b/i,
+      /\bt[oô]\s+precisando\b/i,
+      /\bprocuro\b/i,
+      /\bprocurando\b/i,
+      /\bcompro\b/i,
+      /\bcomprando\b/i,
+      /\bqual\s+tem\b/i,
+      /\bonde\s+tem\b/i,
+      /\btem\s+a[ií]\b/i,
+      /\btem\s+aqui\b/i,
+      /\btem\s+dispon[ií]vel\b/i,
+      /\bquem\s+t[aá]\s+tendo\b/i,
+      /\bpra\s+hoje\b/i,
+      /\bpra\s+agora\b/i,
+      /\bpego\s+hoje\b/i,
+      /\bpre[cç]o\s+campe[aã]o\b/i,
+      /\bpre[cç]o\s+de\s+noia\b/i,
+      /\bmelhor\s+pre[cç]o\b/i,
+      /\bmenor\s+valor\b/i,
+      /\bquem\s+tiver\b/i,
+      /\bmanda\s+pv\b/i,
+      /\bdispon[ií]vel\b.*\?/i,
+      /\b(64|128|256|512|1tb)\s*(?:gb|gigas|g)?\s*\?+/i,
+      /\b(pro|promax|pm|pmx|plus|mini)\b.*\?+/i
+    ];
 
-  const temIntencaoCompra = BUYER_INTENT_PATTERNS.some((p) => p.test(textoParaAnalise));
-
-  // Em grupos: SÓ responde se houver intenção clara de compra! No privado aceita perguntas mais diretas
-  if (isGroup && !temIntencaoCompra) {
-    return null;
+    const temIntencaoCompra = BUYER_INTENT_PATTERNS.some((p) => p.test(textoParaAnalise)) || textoParaAnalise.includes('?');
+    if (!temIntencaoCompra) {
+      return null;
+    }
   }
 
-  // 4. EXTRAÇÃO DO MODELO DE IPHONE
+  const isPerguntaQuantidade = /\b(quantos|quantas|qtos|qtas|qtd|quantidade)\b/i.test(textoParaAnalise);
+  const isPerguntaGeralEstoque =
+    /\b(estoque|dispon[ií]veis|disponivel|aparelhos|iphones|celulares|celular|cardapio|tabela)\b/i.test(textoParaAnalise) &&
+    (/\b(o que|quais|qual|quantos|qtos|como|tem|temos)\b/i.test(textoParaAnalise) || textoParaAnalise.includes('?'));
+
   const modeloMatch = textoParaAnalise.match(IPHONE_REGEX);
+
+  // 4. CONSULTA GERAL DE ESTOQUE (Sem modelo específico: "quantos tem?", "qual o estoque?", "o que tem disponível?")
+  if (!modeloMatch && (isPerguntaGeralEstoque || isPerguntaQuantidade) && !isGroup) {
+    const lojaIds = lojasParaConsulta.map((l) => l.id);
+    const { data: todosAparelhos } = await supabase
+      .from('aparelhos')
+      .select('id, loja_id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, status, condicao')
+      .in('loja_id', lojaIds)
+      .eq('ativo', true)
+      .neq('condicao', 'vendido')
+      .neq('status', 'vendido');
+
+    if (!todosAparelhos || todosAparelhos.length === 0) {
+      return `No momento nosso estoque está zerado, mas estamos com reposição a caminho! 📦✨`;
+    }
+
+    const contagemMap = new Map<string, { count: number; menorPreco: number }>();
+    todosAparelhos.forEach((ap) => {
+      const modNorm = normalizarModelo(ap.modelo);
+      const cap = ap.capacidade && ap.capacidade !== 'N/A' ? ap.capacidade : '';
+      const chave = [modNorm, cap].filter(Boolean).join(' ');
+      const precoNum = Number(ap.preco || ap.preco_atacado || (ap as any).precoAtacado || 0);
+      const atual = contagemMap.get(chave) || { count: 0, menorPreco: precoNum };
+      atual.count += 1;
+      if (precoNum > 0 && (atual.menorPreco === 0 || precoNum < atual.menorPreco)) {
+        atual.menorPreco = precoNum;
+      }
+      contagemMap.set(chave, atual);
+    });
+
+    const linhasResumo: string[] = [];
+    contagemMap.forEach((val, mod) => {
+      const precoStr = val.menorPreco > 0 ? ` - a partir de R$ ${val.menorPreco.toFixed(2).replace('.', ',')}` : '';
+      linhasResumo.push(`• *${val.count}x* ${mod}${precoStr}`);
+    });
+
+    return `📱 *Estoque Disponível (${todosAparelhos.length} aparelhos no total):*\n\n${linhasResumo.join('\n')}\n\nQual desses modelos você gostaria de ver com mais detalhes? 😊`;
+  }
+
   if (!modeloMatch) {
     return null;
   }
 
+  // 5. EXTRAÇÃO ESPECÍFICA DO MODELO DE IPHONE
   const termoNumero = modeloMatch[1].toUpperCase();
   const sufRaw = (modeloMatch[2] || '').toLowerCase().replace(/\s+/g, '');
 
@@ -1126,26 +1172,24 @@ async function responderConsultaEstoqueNatural(
     modeloAlvoFormatado = termoNumero === '16E' ? 'iPhone 16e' : `iPhone ${termoNumero}`;
   }
 
-  // Anti-Flood em Grupos: não responder ao mesmo modelo no mesmo grupo nos últimos 30 segundos
+  // Anti-Flood em Grupos
   if (isGroup && remoteJid) {
     const floodKeyModelo = `${remoteJid}:${modeloAlvoFormatado}`;
     const ultimoEnvioModelo = historicoRespostasGrupo.get(floodKeyModelo);
     if (ultimoEnvioModelo && agora - ultimoEnvioModelo < 30000) {
-      console.log(`[Anti-Flood Grupo] Ignorado resposta para ${modeloAlvoFormatado} no grupo ${remoteJid} (enviado há menos de 30s)`);
       return null;
     }
 
     const floodKeyParticipante = `${remoteJid}:${cleanSender}`;
     const ultimoEnvioParticipante = historicoRespostasGrupo.get(floodKeyParticipante);
     if (ultimoEnvioParticipante && agora - ultimoEnvioParticipante < 20000) {
-      console.log(`[Anti-Flood Grupo] Ignorado resposta para participante ${cleanSender} no grupo ${remoteJid} (enviado há menos de 20s)`);
       return null;
     }
   }
 
-  // 5. CONSULTA AO BANCO DE DADOS
-  const lojaIds = lojasComEscuta.map((l) => l.id);
-  const mapLojas = new Map(lojasComEscuta.map((l) => [l.id, l.nome]));
+  // 6. CONSULTA AO BANCO DE DADOS
+  const lojaIds = lojasParaConsulta.map((l) => l.id);
+  const mapLojas = new Map(lojasParaConsulta.map((l) => [l.id, l.nome]));
 
   const { data: aparelhos } = await supabase
     .from('aparelhos')
@@ -1156,7 +1200,8 @@ async function responderConsultaEstoqueNatural(
     .neq('status', 'vendido');
 
   if (!aparelhos || aparelhos.length === 0) {
-    return null;
+    if (isGroup) return null;
+    return `No momento nosso estoque está zerado, mas estamos recebendo novidades em breve!`;
   }
 
   const numLower = termoNumero.toLowerCase();
@@ -1196,7 +1241,7 @@ async function responderConsultaEstoqueNatural(
     aparelhosEncontrados = aparelhosDaGeracao;
   }
 
-  // 6. FILTRO ESTREITO DE CAPACIDADE (Se o comprador especificou ex: "256gb" ou "128")
+  // 7. FILTRO DE CAPACIDADE (Se o comprador especificou ex: "256gb" ou "128")
   const capMatch = textoParaAnalise.match(/\b(64|128|256|512|1024|1\s*tb|1\s*tera)\s*(?:gb|gigas|g)?\b/i);
   if (capMatch) {
     const capAlvo = capMatch[1].toLowerCase().replace(/\s+/g, '');
@@ -1208,21 +1253,16 @@ async function responderConsultaEstoqueNatural(
     if (filtradosPorCap.length > 0) {
       aparelhosEncontrados = filtradosPorCap;
     } else if (isGroup) {
-      // Em grupo: se o lojista pediu 256GB e NÃO temos 256GB, NÃO responde nada para não poluir o grupo!
       return null;
     }
   }
 
-  // 7. CHECAGEM DE ESTOQUE
+  // 8. RESULTADO
   if (aparelhosEncontrados.length === 0) {
-    // Em grupos: SILÊNCIO TOTAL quando não tem em estoque! Zero spam.
-    if (isGroup) {
-      return null;
-    }
-    return `No momento o *${modeloAlvoFormatado}* esgotou por aqui.`;
+    if (isGroup) return null;
+    return `No momento o *${modeloAlvoFormatado}* esgotou por aqui, mas estamos com novas unidades chegando! Quer ver algum outro modelo? 😊`;
   }
 
-  // Atualiza cooldown de envio para este modelo e participante no grupo
   if (isGroup && remoteJid) {
     historicoRespostasGrupo.set(`${remoteJid}:${modeloAlvoFormatado}`, agora);
     historicoRespostasGrupo.set(`${remoteJid}:${cleanSender}`, agora);
@@ -1230,10 +1270,8 @@ async function responderConsultaEstoqueNatural(
     persistirAntiFloodTimestamp(`${remoteJid}:${cleanSender}`, agora);
   }
 
-  // Ordena por modelo normalizado
   aparelhosEncontrados.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
 
-  // Em grupos, limita a exibição a no máximo 6 itens para não sobrecarregar o chat
   const aparelhosExibicao = isGroup ? aparelhosEncontrados.slice(0, 6) : aparelhosEncontrados;
 
   let ultimoModelo = '';
@@ -1251,10 +1289,12 @@ async function responderConsultaEstoqueNatural(
     const batVal = a.saude_bateria || (a as any).saudeBateria;
     const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
     const bat = batNum ? `(${batNum}%)` : '';
+    const modCap = [modNorm, cap].filter(Boolean).join(' ');
+    const extras = [nomeCor, bat].filter(Boolean).join(' ');
     const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
     const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
     const nomeLoja = mapLojas.get(a.loja_id) || 'Loja';
-    const tagLoja = ` [Loja: ${nomeLoja}]`;
+    const tagLoja = isGroup ? ` [Loja: ${nomeLoja}]` : '';
     linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}${tagLoja}`.replace(/\s+/g, ' ').trim());
   });
 
@@ -1262,7 +1302,11 @@ async function responderConsultaEstoqueNatural(
     linhasEncontrados.push(`\n_... e mais ${aparelhosEncontrados.length - 6} opções disponíveis no estoque._`);
   }
 
-  return `Tem aqui esses modelos:\n\n${linhasEncontrados.join('\n')}`;
+  const prefixo = isPerguntaQuantidade
+    ? `📦 Temos *${aparelhosEncontrados.length} unidade(s)* de *${modeloAlvoFormatado}* disponível(is):\n\n`
+    : (isGroup ? `Tem aqui esses modelos:\n\n` : `Temos disponível no estoque:\n\n`);
+
+  return `${prefixo}${linhasEncontrados.join('\n')}`;
 }
 
 // ── POST: Processamento Principal do Webhook ──
@@ -2607,6 +2651,174 @@ Digite: *!broadcast agora*`;
           }
         }
 
+        // Execução real de consulta de estoque pela IA
+        if (geminiPlan.action === 'list_estoque') {
+          const lojasParaBusca = await obterLojasParaConsulta(lojaId, isGroup);
+          const lojaIds = lojasParaBusca.map((l) => l.id);
+          const mapLojas = new Map(lojasParaBusca.map((l) => [l.id, l.nome]));
+          const modeloBuscado = String(geminiPlan.params.modelo || '').trim();
+
+          const { data: aparelhos } = await supabase
+            .from('aparelhos')
+            .select('id, loja_id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+            .in('loja_id', lojaIds)
+            .eq('ativo', true)
+            .neq('condicao', 'vendido')
+            .neq('status', 'vendido');
+
+          let filtrados = aparelhos || [];
+          if (modeloBuscado) {
+            const modLower = modeloBuscado.toLowerCase();
+            filtrados = filtrados.filter((a) => {
+              const m = String(a.modelo || '').toLowerCase();
+              return m.includes(modLower) || modLower.includes(m);
+            });
+          }
+
+          if (filtrados.length === 0) {
+            const msgSemEstoque = modeloBuscado
+              ? `🔍 No momento o *${modeloBuscado}* está esgotado por aqui, mas estamos sempre recebendo novidades! Quer dar uma olhada em outro modelo? 😊`
+              : `📋 Não encontramos aparelhos disponíveis em estoque no momento.`;
+            await enviarMensagemWhatsApp(instanceName, targetDestination, msgSemEstoque);
+            return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado (vazio).' }, { status: 200 });
+          }
+
+          const linhas: string[] = [];
+          filtrados.slice(0, 8).forEach((a) => {
+            const modNorm = normalizarModelo(a.modelo);
+            const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
+            const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+            const batVal = a.saude_bateria || (a as any).saudeBateria;
+            const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+            const bat = batNum ? `(${batNum}%)` : '';
+            const modCap = [modNorm, cap].filter(Boolean).join(' ');
+            const extras = [nomeCor, bat].filter(Boolean).join(' ');
+            const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
+            const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+            const nomeLojaItem = mapLojas.get(a.loja_id) || 'Loja';
+            const tagLoja = isGroup ? ` [Loja: ${nomeLojaItem}]` : '';
+            linhas.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}${tagLoja}`.replace(/\s+/g, ' ').trim());
+          });
+
+          const msgEstoqueFinal = `📦 *Temos ${filtrados.length} unidade(s) disponível(is)${modeloBuscado ? ` de ${modeloBuscado}` : ''}:*\n\n${linhas.join('\n')}\n\nQual desses você gostaria de saber mais ou reservar? 😊`;
+          await enviarMensagemWhatsApp(instanceName, targetDestination, msgEstoqueFinal);
+          return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado com sucesso.' }, { status: 200 });
+        }
+
+        // Execução real de venda pela IA
+        if (geminiPlan.action === 'create_venda' && lojaId) {
+          const valorNum = Number(geminiPlan.params.valor || geminiPlan.params.preco || 0);
+          const compradorStr = String(geminiPlan.params.comprador || geminiPlan.params.cliente || 'Consumidor');
+          const modeloStr = String(geminiPlan.params.modelo || geminiPlan.params.aparelho || '');
+          const imeiStr = geminiPlan.params.imei ? String(geminiPlan.params.imei) : null;
+          const formaPag = String(geminiPlan.params.formaPagamento || 'pix');
+
+          let aparelhoId: string | null = null;
+          if (imeiStr || modeloStr) {
+            let apQuery = supabase.from('aparelhos').select('id, custo, preco').eq('loja_id', lojaId).eq('ativo', true).neq('status', 'vendido');
+            if (imeiStr) apQuery = apQuery.eq('imei', imeiStr);
+            else apQuery = apQuery.ilike('modelo', `%${modeloStr}%`);
+            const { data: apFound } = await apQuery.limit(1).maybeSingle();
+            if (apFound) {
+              aparelhoId = apFound.id;
+              await supabase.from('aparelhos').update({ status: 'vendido', condicao: 'vendido' }).eq('id', apFound.id);
+            }
+          }
+
+          const { data: novaVenda } = await supabase.from('vendas').insert({
+            loja_id: lojaId,
+            lojaId: lojaId,
+            clienteNome: compradorStr,
+            vendedor: `WhatsApp IA (${pushName})`,
+            tipoEntrega: 'Varejo',
+            valor: valorNum,
+            custo: 0,
+            lucro: valorNum,
+            percentualLucro: 100,
+            dataPagamento: new Date().toISOString(),
+            status: 'pago',
+            metodo: formaPag,
+            valorPago: valorNum,
+            saldoDevedor: 0,
+            descricao: `Venda registrada via WhatsApp IA - ${modeloStr}`,
+            garantia: '3 Meses (Garantia Legal)',
+            descontoTotal: 0,
+            itens: [
+              {
+                id: Date.now().toString(),
+                aparelhoId: aparelhoId,
+                descricao: `${modeloStr} - Vendido para ${compradorStr}`,
+                quantidade: 1,
+                valorInterno: 0,
+                valorExibir: valorNum,
+                desconto: 0,
+              },
+            ],
+          }).select().single();
+
+          const textResposta = buildWhatsAppText('create_venda', {
+            ...geminiPlan.params,
+            id: novaVenda?.id || 'Confirmada',
+            valor: valorNum,
+            modelo: modeloStr,
+            comprador: compradorStr,
+          }, senderPhone);
+          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+          return NextResponse.json({ status: 'ok', message: 'Venda IA registrada no banco.' }, { status: 200 });
+        }
+
+        // Execução real de cadastro de aparelho pela IA
+        if (geminiPlan.action === 'create_aparelho' && lojaId) {
+          const precoNum = Number(geminiPlan.params.preco || 0);
+          const modeloStr = String(geminiPlan.params.modelo || 'iPhone');
+          const capStr = geminiPlan.params.capacidade ? String(geminiPlan.params.capacidade) : null;
+          const corStr = geminiPlan.params.cor ? String(geminiPlan.params.cor) : null;
+          const imeiStr = geminiPlan.params.imei ? String(geminiPlan.params.imei) : null;
+
+          const { data: novoAp } = await supabase.from('aparelhos').insert({
+            loja_id: lojaId,
+            lojaId: lojaId,
+            marca: String(geminiPlan.params.marca || 'Apple'),
+            modelo: modeloStr,
+            capacidade: capStr,
+            cor: corStr,
+            preco: precoNum,
+            imei: imeiStr,
+            condicao: String(geminiPlan.params.condicao || 'seminovo'),
+            status: 'disponivel',
+            ativo: true,
+            dataCadastro: new Date().toISOString(),
+            observacoes: `Cadastrado via WhatsApp IA (${pushName})`,
+          }).select().single();
+
+          const textResposta = buildWhatsAppText('create_aparelho', {
+            ...geminiPlan.params,
+            id: novoAp?.id || 'Cadastrado',
+          }, senderPhone);
+          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+          return NextResponse.json({ status: 'ok', message: 'Aparelho IA cadastrado no banco.' }, { status: 200 });
+        }
+
+        // Execução real de atualização de preço pela IA
+        if (geminiPlan.action === 'update_preco' && lojaId) {
+          const novoPrecoNum = Number(geminiPlan.params.novoPreco || geminiPlan.params.preco || 0);
+          const aparelhoIdent = String(geminiPlan.params.aparelho || geminiPlan.params.modelo || geminiPlan.params.imei || '');
+
+          if (aparelhoIdent && novoPrecoNum > 0) {
+            let upQuery = supabase.from('aparelhos').update({ preco: novoPrecoNum }).eq('loja_id', lojaId);
+            if (geminiPlan.params.imei) {
+              upQuery = upQuery.eq('imei', String(geminiPlan.params.imei));
+            } else {
+              upQuery = upQuery.ilike('modelo', `%${aparelhoIdent}%`);
+            }
+            await upQuery;
+          }
+
+          const textResposta = buildWhatsAppText('update_preco', geminiPlan.params, senderPhone);
+          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+          return NextResponse.json({ status: 'ok', message: 'Preço IA atualizado.' }, { status: 200 });
+        }
+
         const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
         await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
         return NextResponse.json({ status: 'ok', message: 'Comando IA executado com alta confiança.' }, { status: 200 });
@@ -2618,20 +2830,56 @@ Digite: *!broadcast agora*`;
       }
     }
 
-    // ── 14. PARTE 1: REGRA DE OURO (O BOT NUNCA FICA EM SILÊNCIO) ──
+    // ── 14. CONVERSA NATURAL & ATENDIMENTO HUMANO VIRTUAL (PRIVADO) ──
     if (!isGroup) {
-      const fallbackAntiSilencio = `🤔 Não entendi direito o que você precisa.
+      let modelosEstoque: string[] = [];
+      let lojaInfo: any = null;
+      if (lojaId) {
+        const { data: lj } = await supabase.from('lojas').select('id, nome, endereco, telefone').eq('id', lojaId).maybeSingle();
+        lojaInfo = lj;
 
-Aqui está o que eu sei fazer:
-📱 *!estoque* - Ver aparelhos disponíveis
-💰 *!vender [IMEI/Cód] [Valor]* - Dar baixa em venda
-📝 *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Entrada de aparelho
-🤝 *!saldo* - Consultar fiado/débitos
+        const { data: aps } = await supabase
+          .from('aparelhos')
+          .select('modelo, capacidade')
+          .eq('loja_id', lojaId)
+          .eq('ativo', true)
+          .neq('status', 'vendido')
+          .limit(20);
 
-💡 Ou digite *!ajuda* para ver todas as opções! 🚀`;
+        if (aps && aps.length > 0) {
+          const setModelos = new Set(aps.map((a) => [a.modelo, a.capacidade].filter(Boolean).join(' ')));
+          modelosEstoque = Array.from(setModelos);
+        }
+      }
 
-      await enviarMensagemWhatsApp(instanceName, targetDestination, fallbackAntiSilencio);
-      return NextResponse.json({ status: 'ok', message: 'Fallback anti-silêncio enviado.' }, { status: 200 });
+      const respostaConversaIA = await responderConversaNaturalComGemini(textContent, {
+        nomeLoja: lojaInfo?.nome || nomeLoja || 'Phone Center',
+        enderecoLoja: lojaInfo?.endereco || undefined,
+        telefoneLoja: lojaInfo?.telefone || undefined,
+        totalEstoque: modelosEstoque.length,
+        modelosDisponiveis: modelosEstoque,
+        isGroup: false,
+      });
+
+      if (respostaConversaIA) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA);
+        return NextResponse.json({ status: 'ok', message: 'Resposta conversacional enviada via IA.' }, { status: 200 });
+      }
+
+      // Fallback humano acolhedor (caso a IA esteja offline, NUNCA expor lista robótica de comandos com !)
+      const nomeExibicao = lojaInfo?.nome || nomeLoja || 'Phone Center';
+      const fallbackHumano = `Olá! Seja muito bem-vindo(a) à *${nomeExibicao}*! 😊📱
+
+Como posso te ajudar hoje?
+✨ *Venda de iPhones:* Temos aparelhos novos lacrados e seminovos premium testados com garantia!
+🔄 *Troca / Upgrade:* Avaliamos seu iPhone usado na hora como entrada para um novo.
+🛠️ *Assistência Técnica:* Troca de telas, baterias e manutenção com Ordem de Serviço (OS) e garantia.
+💳 *Pagamentos:* Facilitamos em até 12x/18x no cartão, PIX com desconto e entrega rápida por motoboy!
+
+Me conta: qual modelo ou serviço você está procurando? 😉`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, fallbackHumano);
+      return NextResponse.json({ status: 'ok', message: 'Fallback conversacional humano enviado.' }, { status: 200 });
     }
 
     return NextResponse.json({ status: 'ok', message: 'Webhook processado com sucesso.' }, { status: 200 });

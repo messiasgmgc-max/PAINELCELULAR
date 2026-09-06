@@ -161,3 +161,21 @@ test('buildWhatsAppText formats update_preco and abater_divida with rich text', 
   assert.ok(textAbater.includes('500,00'));
 });
 
+test('buildWhatsAppText never outputs raw JSON for list_estoque or list_lojas', () => {
+  const textEstoqueParam = buildWhatsAppText('list_estoque', {
+    modelo: 'iPhone 15 Pro Max',
+  }, '5511999999999');
+
+  assert.ok(textEstoqueParam.includes('Consulta de Estoque Realizada'));
+  assert.ok(textEstoqueParam.includes('iPhone 15 Pro Max'));
+  assert.ok(!textEstoqueParam.includes('{') && !textEstoqueParam.includes('}'));
+
+  const textLojas = buildWhatsAppText('list_lojas', [
+    { nome: 'Loja Centro', telefone: '11999999999' }
+  ], '5511999999999');
+
+  assert.ok(textLojas.includes('Loja Centro'));
+  assert.ok(!textLojas.includes('{') && !textLojas.includes('}'));
+});
+
+
