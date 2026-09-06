@@ -1566,7 +1566,7 @@ export async function POST(request: Request) {
       payload.data?.instance ||
       DEFAULT_INSTANCE;
 
-    const lojaId = await resolverLojaId(instanceName);
+    let lojaId = await resolverLojaId(instanceName);
 
     // 2. Trata eventos de Conexão / Status / QR Code
     const eventName = String(payload.event || payload.type || '').toLowerCase();
@@ -1628,7 +1628,9 @@ export async function POST(request: Request) {
 
     // ── IDENTIFICAÇÃO MULTI-LOJA DO USUÁRIO PELO NÚMERO DO WHATSAPP ──
     const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName);
-    let lojaId = usuarioResolvido?.lojaId || (await resolverLojaId(instanceName));
+    if (usuarioResolvido?.lojaId) {
+      lojaId = usuarioResolvido.lojaId;
+    }
     const nomeLoja = usuarioResolvido?.lojaNome || 'Phone Center';
     const nomeUsuario = usuarioResolvido?.usuarioNome || pushName;
     const papelUsuario = usuarioResolvido?.papel || 'staff';
