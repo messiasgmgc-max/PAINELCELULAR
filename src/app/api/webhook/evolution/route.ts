@@ -1987,7 +1987,186 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens).` }, { status: 200 });
     }
 
-    // ── 11. COMANDOS BÁSICOS (!ajuda, !menu) ──
+    // ── 11. COMANDO: !abater [lojista] [valor] (Gestão de Fiado/Atacado) ──
+    if (lowerText.startsWith('!abater')) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
+      const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
+      }
+
+      const partes = textContent.trim().split(/\s+/);
+      if (partes.length < 3) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          '⚠️ *Formato de abatimento incompleto!*\nUse: *!abater [Nome do Lojista] [Valor]*\nExemplo: *!abater Lucas 1500*'
+        );
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const valorStr = partes[partes.length - 1];
+      const valorAbate = parseFloat(valorStr.replace(/[^\d.,]/g, '').replace(',', '.'));
+
+      if (isNaN(valorAbate) || valorAbate <= 0) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ Valor de abatimento inválido: "${valorStr}". Digite um valor numérico válido.`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const nomeLojista = partes.slice(1, -1).join(' ').trim();
+      if (!nomeLojista) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ Nome do lojista não informado.');
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const { data: devedores, error: errDev } = await supabase
+        .from('lojistas_devedores')
+        .select('*')
+        .eq('loja_id', lojaId)
+        .eq('ativo', true)
+        .ilike('nome', `%${nomeLojista}%`)
+        .limit(5);
+
+      if (errDev) {
+        console.error('Erro ao buscar lojistas_devedores:', errDev);
+      }
+
+      if (!devedores || devedores.length === 0) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          `❌ Nenhum lojista devedor encontrado com o nome "*${nomeLojista}*" nesta loja. Verifique o cadastro no painel!`
+        );
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const devedor = devedores[0];
+      const saldoAnterior = Number(devedor.saldo_devedor || 0);
+      const novoSaldo = Math.max(0, Number((saldoAnterior - valorAbate).toFixed(2)));
+
+      await supabase
+        .from('lojistas_devedores')
+        .update({
+          saldo_devedor: novoSaldo,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', devedor.id);
+
+      try {
+        await supabase.from('historico_abatimentos').insert({
+          loja_id: lojaId,
+          lojista_id: devedor.id,
+          valor: valorAbate,
+          data: new Date().toISOString(),
+          ator_telefone: authorPhone,
+          observacao: `Abatimento via WhatsApp por ${pushName}`,
+        });
+      } catch (histErr) {
+        console.warn('Falha ao inserir em historico_abatimentos:', histErr);
+      }
+
+      try {
+        await supabase.from('logs_sistema').insert({
+          loja_id: lojaId,
+          tipo_evento: 'financeiro',
+          acao: `Abatimento: ${devedor.nome}`,
+          detalhes: `Abatimento de R$ ${valorAbate.toFixed(2)} registrado por ${pushName} (${authorPhone}). Saldo anterior: R$ ${saldoAnterior.toFixed(2)}, novo saldo: R$ ${novoSaldo.toFixed(2)}`,
+          ator_telefone: authorPhone,
+          ator_papel: perm.papel,
+          valor_anterior: { saldo_devedor: saldoAnterior },
+          valor_novo: { saldo_devedor: novoSaldo },
+          created_at: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.warn('Falha ao inserir log de auditoria:', logErr);
+      }
+
+      const reciboAbate = `✅ *ABATIMENTO REGISTRADO COM SUCESSO!*
+
+👤 *Lojista:* ${devedor.nome}
+💵 *Valor Abatido:* R$ ${valorAbate.toFixed(2).replace('.', ',')}
+📉 *Saldo Devedor Anterior:* R$ ${saldoAnterior.toFixed(2).replace('.', ',')}
+💰 *Saldo Devedor Atual:* R$ ${novoSaldo.toFixed(2).replace('.', ',')}
+✨ Registrado e arquivado no financeiro da loja!`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, reciboAbate);
+      return NextResponse.json({ status: 'ok', message: 'Abatimento registrado.' }, { status: 200 });
+    }
+
+    // ── 12. COMANDO: !saldo ou !devo (Consulta de Débitos do Próprio Lojista/Cliente) ──
+    if (lowerText === '!saldo' || lowerText === '!devo' || lowerText.startsWith('!saldo ') || lowerText.startsWith('!devo ')) {
+      const cleanPhone = (authorPhone || senderPhone || '').replace(/\D/g, '');
+      if (!cleanPhone || cleanPhone.length < 8) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ Não consegui identificar o número de telefone de origem para consultar seus débitos.');
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const { data: todosDevedores, error: errDevs } = await supabase
+        .from('lojistas_devedores')
+        .select('id, nome, telefone, saldo_devedor, loja_id, lojas(nome)')
+        .eq('ativo', true)
+        .gt('saldo_devedor', 0);
+
+      if (errDevs) {
+        console.error('Erro ao consultar lojistas_devedores:', errDevs);
+      }
+
+      const meusDebitos = (todosDevedores || []).filter((item: any) => {
+        const itemPhone = (item.telefone || '').replace(/\D/g, '');
+        if (!itemPhone) return false;
+        if (itemPhone === cleanPhone) return true;
+        if (cleanPhone.endsWith(itemPhone) || itemPhone.endsWith(cleanPhone)) return true;
+        if (cleanPhone.length >= 8 && itemPhone.length >= 8) {
+          const l8User = cleanPhone.slice(-8);
+          const l8Item = itemPhone.slice(-8);
+          if (l8User === l8Item) {
+            if (cleanPhone.length >= 10 && itemPhone.length >= 10) {
+              const dddUser = cleanPhone.length >= 11 ? cleanPhone.slice(-11, -9) : cleanPhone.slice(-10, -8);
+              const dddItem = itemPhone.length >= 11 ? itemPhone.slice(-11, -9) : itemPhone.slice(-10, -8);
+              return dddUser === dddItem;
+            }
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (meusDebitos.length === 0) {
+        const msgSemDebito = `🎉 *Você não possui nenhum saldo devedor em aberto!*
+
+Tudo em dia por aqui. Obrigado pela parceria e preferência! 🤝`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgSemDebito);
+        return NextResponse.json({ status: 'ok', message: 'Sem débitos.' }, { status: 200 });
+      }
+
+      let totalGeral = 0;
+      const linhasDebito: string[] = [];
+
+      for (const deb of meusDebitos) {
+        const saldoNum = Number(deb.saldo_devedor || 0);
+        totalGeral += saldoNum;
+        const nomeLoja = (deb.lojas as any)?.nome || 'Loja Parceira';
+        linhasDebito.push(`🏪 *Loja:* ${nomeLoja}\n👤 *Titular:* ${deb.nome}\n💰 *Saldo Devedor:* R$ ${saldoNum.toFixed(2).replace('.', ',')}\n`);
+      }
+
+      const msgExtrato = `📋 *EXTRATO DE DÉBITOS EM ABERTO*
+
+${linhasDebito.join('\n')}
+────────────────────────
+💵 *Total Geral Devido:* R$ ${totalGeral.toFixed(2).replace('.', ',')}
+
+💡 _Para realizar pagamentos ou solicitar abatimentos, envie o comprovante ao responsável da loja._`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgExtrato);
+      return NextResponse.json({ status: 'ok', message: 'Extrato de débitos enviado.' }, { status: 200 });
+    }
+
+    // ── 13. COMANDOS BÁSICOS (!ajuda, !menu) ──
     if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
       const menuAjuda = `📱 *PHONE CENTER BOT - INTELIGÊNCIA ARTIFICIAL*
 
@@ -2005,6 +2184,10 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 • *!vender [IMEI/Cód] [Valor] [Nome]* - Registra venda e baixa do estoque
 • *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Entrada em novo aparelho
 • *!preco [IMEI/Cód] [Novo Valor]* - Atualiza preço no sistema
+
+🤝 *Gestão de Atacado & Fiado:*
+• *!abater [Lojista] [Valor]* - Registra abatimento no saldo devedor do lojista
+• *!saldo* ou *!devo* - Consulta débitos em aberto vinculados ao seu número
 
 💬 *Atendimento Inteligente:*
 • Pergunte qualquer coisa em grupos ou privado (ex: *"tem 15pm?"*, *"tem iphone 11?"*) e eu respondo na hora!`;
