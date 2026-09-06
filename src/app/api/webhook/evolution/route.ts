@@ -326,6 +326,94 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
   return null;
 }
 
+interface PermissaoWhatsAppResult {
+  autorizado: boolean;
+  papel: 'owner' | 'staff' | 'motoboy' | 'nenhum' | 'nao_configurado';
+  motivo?: string;
+}
+
+// ── AUXILIAR: Verificar Permissão de Usuário por WhatsApp ──
+async function verificarPermissaoWhatsApp(
+  lojaId: string,
+  telefone: string,
+  papeisPermitidos: ('owner' | 'staff' | 'motoboy')[] = ['owner', 'staff']
+): Promise<PermissaoWhatsAppResult> {
+  if (!lojaId) {
+    return { autorizado: false, papel: 'nenhum', motivo: 'Loja não identificada' };
+  }
+
+  const cleanPhone = (telefone || '').replace(/\D/g, '');
+  if (!cleanPhone) {
+    return { autorizado: false, papel: 'nenhum', motivo: 'Telefone inválido' };
+  }
+
+  try {
+    const { data: permissoes, error } = await supabase
+      .from('whatsapp_permissoes')
+      .select('*')
+      .eq('loja_id', lojaId)
+      .eq('ativo', true);
+
+    if (error) {
+      console.warn('⚠️ Erro ao consultar whatsapp_permissoes (tabela pode estar pendente no Supabase):', error.message);
+      return { autorizado: true, papel: 'nao_configurado' };
+    }
+
+    // Rollout seguro: se não há permissões cadastradas para esta loja,
+    // permite a execução e registra aviso em logs_sistema para não quebrar lojas em produção.
+    if (!permissoes || permissoes.length === 0) {
+      try {
+        await supabase.from('logs_sistema').insert({
+          loja_id: lojaId,
+          tipo_evento: 'permissao_nao_configurada',
+          ator_telefone: cleanPhone,
+          ator_papel: 'nao_configurado',
+          acao: 'Acesso sem permissões cadastradas',
+          detalhes: `Loja ${lojaId} não possui registros em whatsapp_permissoes. Acesso liberado por fallback de rollout.`,
+        });
+      } catch (logErr) {
+        // Silêncio para não quebrar fluxo
+      }
+      return { autorizado: true, papel: 'nao_configurado' };
+    }
+
+    // Compara telefone considerando DDI (55), DDD e 9º dígito
+    const permissaoEncontrada = permissoes.find((p: any) => {
+      const pClean = (p.telefone || '').replace(/\D/g, '');
+      if (!pClean) return false;
+      if (pClean === cleanPhone) return true;
+      if (cleanPhone.endsWith(pClean) || pClean.endsWith(cleanPhone)) return true;
+      if (cleanPhone.length >= 8 && pClean.length >= 8) {
+        const last8User = cleanPhone.slice(-8);
+        const last8Perm = pClean.slice(-8);
+        if (last8User === last8Perm) {
+          if (cleanPhone.length >= 10 && pClean.length >= 10) {
+            const dddUser = cleanPhone.length >= 11 ? cleanPhone.slice(-11, -9) : cleanPhone.slice(-10, -8);
+            const dddPerm = pClean.length >= 11 ? pClean.slice(-11, -9) : pClean.slice(-10, -8);
+            return dddUser === dddPerm;
+          }
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (!permissaoEncontrada) {
+      return { autorizado: false, papel: 'nenhum', motivo: 'Número não cadastrado nas permissões da loja' };
+    }
+
+    const papel = (permissaoEncontrada.papel || 'staff') as 'owner' | 'staff' | 'motoboy' | 'nenhum';
+    if (papeisPermitidos.includes(papel as any)) {
+      return { autorizado: true, papel };
+    }
+
+    return { autorizado: false, papel, motivo: `Papel '${papel}' não autorizado para esta ação` };
+  } catch (err: any) {
+    console.error('❌ Falha inesperada ao verificar permissão:', err);
+    return { autorizado: true, papel: 'nao_configurado' };
+  }
+}
+
 // ── AUXILIAR: Verificar se a loja é a Lucas Imports ──
 async function verificarSeLojaLucasImports(lojaId: string | null, instanceName: string): Promise<boolean> {
   const cleanInst = (instanceName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1164,6 +1252,7 @@ export async function POST(request: Request) {
     const participantJid = String(key.participant || msgData.participant || key.remoteJid || '');
     const participantPhone = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
     const senderPhone = remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
+    const authorPhone = isGroup ? (participantPhone || senderPhone) : senderPhone;
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : senderPhone;
 
@@ -1201,6 +1290,14 @@ export async function POST(request: Request) {
       }
 
       if (rawBase64) {
+        if (lojaId) {
+          const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+          if (!perm.autorizado) {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+            return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
+          }
+        }
+
         // Envia mensagem imediata informando processamento
         await enviarMensagemWhatsApp(instanceName, targetDestination, '🔍 *Analisando foto com IA Vision...* Só um instante! ⏳');
 
@@ -1274,6 +1371,12 @@ export async function POST(request: Request) {
       if (!lojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
+      const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
       }
 
       const partes = textContent.trim().split(/\s+/);
@@ -1401,6 +1504,12 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
 
+      const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
+      }
+
       const partes = textContent.trim().split(/\s+/);
       if (partes.length < 3) {
         const msgErro = `⚠️ *Formato de cadastro incompleto!*\nUse: *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]*\nExemplo: *!cadastrar iPhone 13 128GB 356829104829102 2800*`;
@@ -1486,6 +1595,12 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
 
+      const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
+      }
+
       const partes = textContent.trim().split(/\s+/);
       if (partes.length < 3) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ Use: *!preco [IMEI ou Código] [Novo Valor]*\nExemplo: *!preco 356829104829102 2750*`);
@@ -1550,6 +1665,12 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
 
+      const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
+      }
+
       const lines = textContent.split('\n');
       const totalProcessados = await processarListaPrecos(lines, pushName, lojaId);
 
@@ -1566,6 +1687,12 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       if (!resolvedLojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Nenhuma loja encontrada vinculada a esta sessão do WhatsApp.');
         return NextResponse.json({ status: 'error', message: 'Loja não encontrada' }, { status: 200 });
+      }
+
+      const perm = await verificarPermissaoWhatsApp(resolvedLojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
       }
 
       const { data: loja } = await supabase
