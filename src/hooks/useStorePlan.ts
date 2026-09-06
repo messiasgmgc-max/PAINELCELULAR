@@ -3,13 +3,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
+import { TipoPlano, PeriodoFaturamento, obterPlanoPorTipo } from '@/lib/planos-config';
 
 export interface StorePlanData {
   lojaId: string | null;
   nomeLoja: string;
+  planoTipo: TipoPlano;
+  periodoFaturamento: PeriodoFaturamento;
   planoStatus: 'ativo' | 'pendente' | 'vencido' | 'bloqueado';
   valorMensalidade: number;
   dataVencimento: string | null;
+  planoTrialAte: string | null;
+  isTrialAtivo: boolean;
+  trialPlanosUsados: string[];
+  apiKey: string | null;
   chavePixCobranca: string;
   comprovanteUrl: string | null;
   solicitacaoStatus: 'nenhuma' | 'pendente_aprovacao' | 'aprovado' | 'rejeitado';
@@ -22,9 +29,15 @@ export interface StorePlanData {
 const DEFAULT_PLAN: StorePlanData = {
   lojaId: null,
   nomeLoja: 'Phone Center',
+  planoTipo: 'entrada',
+  periodoFaturamento: 'mensal',
   planoStatus: 'ativo',
   valorMensalidade: 99.90,
   dataVencimento: null,
+  planoTrialAte: null,
+  isTrialAtivo: false,
+  trialPlanosUsados: [],
+  apiKey: null,
   chavePixCobranca: 'financeiro@phonecenter.com.br',
   comprovanteUrl: null,
   solicitacaoStatus: 'nenhuma',
@@ -101,17 +114,34 @@ export function useStorePlan() {
 
       const isBloqueado = status === 'bloqueado' || status === 'vencido';
 
+      // Checar se o trial de 3 dias está ativo
+      let isTrialAtivo = false;
+      if (loja.plano_trial_ate) {
+        const trialEnd = new Date(loja.plano_trial_ate).getTime();
+        isTrialAtivo = trialEnd > Date.now();
+      }
+
       // Sincroniza no banco se constava como ativo mas a data já venceu
-      if (isVencidoPorData && loja.plano_status === 'ativo') {
+      if (isVencidoPorData && loja.plano_status === 'ativo' && !isTrialAtivo) {
         supabase.from('lojas').update({ plano_status: 'vencido' }).eq('id', loja.id).then();
       }
+
+      const planoTipo = (loja.plano_tipo || 'entrada') as TipoPlano;
+      const periodoFaturamento = (loja.periodo_cobranca || 'mensal') as PeriodoFaturamento;
+      const trialPlanosUsados = Array.isArray(loja.trial_planos_usados) ? loja.trial_planos_usados : [];
 
       setPlanData({
         lojaId: loja.id,
         nomeLoja: loja.nome || 'Phone Center',
+        planoTipo,
+        periodoFaturamento,
         planoStatus: status,
-        valorMensalidade: Number(loja.valor_mensalidade) || 99.90,
+        valorMensalidade: Number(loja.valor_mensalidade) || obterPlanoPorTipo(planoTipo).precos.mensal.valorMensal,
         dataVencimento: loja.data_vencimento || null,
+        planoTrialAte: loja.plano_trial_ate || null,
+        isTrialAtivo,
+        trialPlanosUsados,
+        apiKey: loja.api_key || null,
         chavePixCobranca: loja.chave_pix_cobranca || 'financeiro@phonecenter.com.br',
         comprovanteUrl: loja.comprovante_url || null,
         solicitacaoStatus: (loja.solicitacao_liberacao_status || 'nenhuma') as StorePlanData['solicitacaoStatus'],
@@ -205,6 +235,56 @@ export function useStorePlan() {
     }
   };
 
+  // Solicitar 3 Dias de Teste Gratuito de um Plano
+  const solicitarTrial = async (novoPlano: TipoPlano) => {
+    if (!planData.lojaId) throw new Error('Loja não identificada');
+
+    const res = await fetch('/api/planos/solicitar-trial', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lojaId: planData.lojaId,
+        novoPlano
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao ativar teste');
+    }
+
+    await fetchPlanData();
+    await fetchHistorico();
+    return data;
+  };
+
+  // Iniciar Checkout com Cartão de Crédito Mercado Pago
+  const iniciarCheckoutCartao = async (
+    plano: TipoPlano = planData.planoTipo,
+    periodo: PeriodoFaturamento = planData.periodoFaturamento
+  ) => {
+    if (!planData.lojaId) throw new Error('Loja não identificada');
+
+    const res = await fetch('/api/planos/pagar-cartao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lojaId: planData.lojaId,
+        plano,
+        periodo,
+        email: usuario?.email,
+        nome: usuario?.nome || planData.nomeLoja
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao gerar checkout');
+    }
+
+    return data;
+  };
+
   return {
     planData,
     loading,
@@ -213,5 +293,7 @@ export function useStorePlan() {
     loadingHistorico,
     refetchHistorico: fetchHistorico,
     enviarSolicitacaoLiberacao,
+    solicitarTrial,
+    iniciarCheckoutCartao
   };
 }

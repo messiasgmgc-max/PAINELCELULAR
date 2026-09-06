@@ -101,9 +101,14 @@ export async function POST(request: Request) {
       const novoVencimentoFmt = `${nd}/${nm}/${ny}`;
 
       // 2. Liberar loja e renovar plano
+      const novoPlanoTipo = historico?.plano_contratado || lojaAtual?.plano_tipo || 'entrada';
+      const novoPeriodoCobranca = historico?.periodo_contratado || lojaAtual?.periodo_cobranca || 'mensal';
+
       await supabaseAdmin
         .from('lojas')
         .update({
+          plano_tipo: novoPlanoTipo,
+          periodo_cobranca: novoPeriodoCobranca,
           plano_status: 'ativo',
           data_vencimento: novoVencimento,
           solicitacao_liberacao_status: 'aprovado',
@@ -116,7 +121,7 @@ export async function POST(request: Request) {
         .from('historico_pagamentos_planos')
         .update({
           status: 'aprovado',
-          observacao: `Aprovado via Webhook Mercado Pago (ID: ${paymentId}) | Renovado +${diasAdicionar} dias até ${novoVencimentoFmt}`
+          observacao: `Aprovado via Webhook Mercado Pago (ID: ${paymentId}) | Plano: ${novoPlanoTipo.toUpperCase()} | Renovado +${diasAdicionar} dias até ${novoVencimentoFmt}`
         })
         .eq('mp_payment_id', String(paymentId));
 

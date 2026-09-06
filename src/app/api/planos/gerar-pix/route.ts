@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
+import { calcularValoresPlano, TipoPlano, PeriodoFaturamento, obterPlanoPorTipo } from '@/lib/planos-config';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { lojaId, valor, email, nome } = body;
+    const { lojaId, valor, email, nome, plano, periodo } = body;
 
     if (!lojaId) {
       return NextResponse.json({ error: 'ID da loja é obrigatório' }, { status: 400 });
@@ -21,6 +22,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Loja não encontrada' }, { status: 404 });
     }
 
+    const planoEscolhido = (plano || loja.plano_tipo || 'entrada') as TipoPlano;
+    const periodoEscolhido = (periodo || loja.periodo_cobranca || 'mensal') as PeriodoFaturamento;
+    const infoPlano = calcularValoresPlano(planoEscolhido, periodoEscolhido);
+
     // Calcular dias restantes e se é renovação antecipada proporcional
     let diasRestantes = 0;
     if (loja.data_vencimento) {
@@ -35,15 +40,15 @@ export async function POST(request: Request) {
       }
     }
 
-    const valorMensalBase = Number(loja.valor_mensalidade || 99.90);
+    const valorMensalBase = infoPlano.valorMensal;
     const valorDiaria = valorMensalBase / 30;
 
-    let valorCalculado = valorMensalBase;
-    let diasCobrados = 30;
+    let valorCalculado = infoPlano.valorTotal;
+    let diasCobrados = infoPlano.diasValidade;
     let isProporcional = false;
 
-    // Se ainda restam dias (ex: 10 dias) e o plano está ativo, cobra somente os dias para completar 30 dias (ex: 20 dias)
-    if (diasRestantes > 0 && diasRestantes < 30 && (loja.plano_status === 'ativo' || !loja.plano_status)) {
+    // Se é ciclo mensal e ainda restam dias (ex: 10 dias) e o plano está ativo, cobra somente os dias para completar 30 dias (se mesmo plano)
+    if (periodoEscolhido === 'mensal' && planoEscolhido === (loja.plano_tipo || 'entrada') && diasRestantes > 0 && diasRestantes < 30 && (loja.plano_status === 'ativo' || !loja.plano_status)) {
       diasCobrados = 30 - diasRestantes;
       valorCalculado = Math.max(1.00, Number((diasCobrados * valorDiaria).toFixed(2)));
       isProporcional = true;
@@ -118,8 +123,8 @@ export async function POST(request: Request) {
           const ticketUrl = txData.ticket_url;
 
           const obsHistorico = isProporcional
-            ? `PIX Mercado Pago gerado (ID: ${paymentId}) - Renovação Proporcional de ${diasCobrados} dias (restavam ${diasRestantes} dias)`
-            : `PIX Mercado Pago gerado (ID: ${paymentId})`;
+            ? `PIX Mercado Pago gerado (ID: ${paymentId}) - Renovação Proporcional de ${diasCobrados} dias (restavam ${diasRestantes} dias) | Plano: ${infoPlano.nomePlano} | Dias: ${diasCobrados}`
+            : `PIX Mercado Pago gerado (ID: ${paymentId}) | Plano: ${infoPlano.nomePlano} (${periodoEscolhido}) | Dias: ${diasCobrados}`;
 
           // Grava no histórico de pagamentos
           await supabaseAdmin.from('historico_pagamentos_planos').insert({
@@ -129,6 +134,9 @@ export async function POST(request: Request) {
             mp_payment_id: paymentId,
             qr_code: qrCode,
             qr_code_base64: qrCodeBase64,
+            metodo_pagamento: 'pix',
+            plano_contratado: planoEscolhido,
+            periodo_contratado: periodoEscolhido,
             observacao: obsHistorico
           });
 

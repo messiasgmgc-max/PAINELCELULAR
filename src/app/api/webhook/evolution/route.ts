@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini } from './commandExecutor';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
+import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -895,6 +896,20 @@ async function persistirAntiFloodTimestamp(chave: string, timestamp: number) {
     });
   } catch {
     // Falha silenciosa para não onerar o fluxo
+  }
+}
+
+// ── AUXILIAR: Obter tipo do plano da loja ──
+async function obterPlanoLoja(lojaId: string): Promise<TipoPlano> {
+  try {
+    const { data: loja } = await supabase
+      .from('lojas')
+      .select('plano_tipo')
+      .eq('id', lojaId)
+      .maybeSingle();
+    return (loja?.plano_tipo as TipoPlano) || 'entrada';
+  } catch {
+    return 'entrada';
   }
 }
 
