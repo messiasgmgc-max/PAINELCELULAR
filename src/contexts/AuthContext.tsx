@@ -171,7 +171,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!authReady || loading) return;
 
-    if (!usuario && pathname !== '/login' && !pathname.startsWith('/api/') && !pathname.startsWith('/recibo/')) {
+    const rotasPublicas = ['/login', '/assinar', '/avaliar', '/upgrade', '/coleta', '/motoboy', '/recibo'];
+    const ehRotaPublica = rotasPublicas.some(r => pathname === r || pathname?.startsWith(`${r}/`));
+
+    if (!usuario && !ehRotaPublica && !pathname?.startsWith('/api/')) {
       router.replace('/login');
     }
   }, [authReady, loading, usuario, pathname, router]);

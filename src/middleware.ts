@@ -6,7 +6,7 @@ export function middleware(request: NextRequest) {
   const cookie = request.cookies.get('sessao_usuario')
 
   // Rotas públicas (sem autenticação)
-  const publicRoutes = ['/login', '/api/auth/', '/avaliar', '/upgrade', '/coleta', '/motoboy', '/recibo']
+  const publicRoutes = ['/login', '/assinar', '/api/auth/', '/avaliar', '/upgrade', '/coleta', '/motoboy', '/recibo']
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
 
   // Se está em rota pública, permite
