@@ -1,11 +1,44 @@
-// Helper para consolidação exata de fiado da loja (lojistas_devedores + vendas em aberto)
+// Helper consolidado para gestão e extrato de fiado da loja (vendas + baixas de aparelhos + lojistas_devedores)
+
+export interface ItemExtrato {
+  descricao: string;
+  modelo?: string;
+  cor?: string;
+  capacidade?: string;
+  imei?: string;
+  aparelhoId?: string;
+  valor: number;
+}
+
+export interface PedidoExtrato {
+  id: string;
+  descricao: string;
+  data: string;
+  valorTotal: number;
+  valorPago: number;
+  saldoDevedor: number;
+  itens: ItemExtrato[];
+  origem: 'vendas' | 'aparelhos_baixa';
+}
+
+export interface ExtratoLojista {
+  lojistaNome: string;
+  telefone?: string;
+  pedidos: PedidoExtrato[];
+  totalComprado: number;
+  totalPago: number;
+  saldoDevedor: number;
+  totalAparelhos: number;
+  textoFormatado: string;
+}
 
 export interface DevedorConsolidado {
   nome: string;
   saldo: number;
+  totalAparelhos: number;
   telefone?: string;
   whatsapp?: string;
-  origem: 'cadastro' | 'venda_fiado' | 'ambos';
+  pedidos: PedidoExtrato[];
 }
 
 export interface ResultadoFiadoLoja {
@@ -14,48 +47,56 @@ export interface ResultadoFiadoLoja {
   detalhesDevedoresFormatado: string;
 }
 
-export function consolidarFiadoLoja(
-  devedoresCadastrados: Array<{
-    nome?: string | null;
-    saldo_devedor?: number | null;
-    telefone?: string | null;
-    whatsapp?: string | null;
-  }> | null | undefined,
-  vendasPendentes: Array<{
-    clienteNome?: string | null;
-    valor?: number | null;
-    valorPago?: number | null;
-    saldoDevedor?: number | null;
-    metodo?: string | null;
-    status?: string | null;
-    tipoEntrega?: string | null;
-    descricao?: string | null;
-  }> | null | undefined
-): ResultadoFiadoLoja {
-  const mapa = new Map<string, DevedorConsolidado>();
+function parseMonetaryValue(raw: string | number): number {
+  if (typeof raw === 'number') return raw;
+  if (!raw) return 0;
+  let clean = raw.toString().replace(/[^\d.,]/g, '').trim();
+  if (clean.includes(',') && clean.includes('.')) {
+    if (clean.lastIndexOf(',') > clean.lastIndexOf('.')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else {
+      clean = clean.replace(/,/g, '');
+    }
+  } else if (clean.includes(',')) {
+    clean = clean.replace(',', '.');
+  }
+  return parseFloat(clean) || 0;
+}
 
-  // 1. Processa devedores cadastrados formalmente
+export function consolidarFiadoCompleto(
+  devedoresCadastrados: any[] | null | undefined,
+  vendasBanco: any[] | null | undefined,
+  aparelhos: any[] | null | undefined,
+  nomeLoja: string = 'Lucas Imports',
+  chavePix: string = ''
+): ResultadoFiadoLoja {
+  const mapaDevedores = new Map<string, {
+    nome: string;
+    telefone?: string;
+    whatsapp?: string;
+    pedidos: PedidoExtrato[];
+  }>();
+
+  const aparelhosJaEmVendas = new Set<string>();
+  const imeisJaEmVendas = new Set<string>();
+
+  // 1. Inicializa com devedores cadastrados
   (devedoresCadastrados || []).forEach((d) => {
     const nomeLimpo = (d.nome || '').trim();
-    const saldo = Number(d.saldo_devedor || 0);
     if (!nomeLimpo) return;
-
     const chave = nomeLimpo.toLowerCase();
-    mapa.set(chave, {
+    mapaDevedores.set(chave, {
       nome: nomeLimpo,
-      saldo: Math.max(0, saldo),
       telefone: d.telefone || undefined,
       whatsapp: d.whatsapp || undefined,
-      origem: 'cadastro',
+      pedidos: [],
     });
   });
 
-  // 2. Processa vendas atacado / fiado / pendentes do banco
-  (vendasPendentes || []).forEach((v) => {
+  // 2. Processa vendas da tabela vendas
+  (vendasBanco || []).forEach((v) => {
     const tipoEntregaLower = String(v.tipoEntrega || '').toLowerCase();
     const descLower = String(v.descricao || '').toLowerCase();
-    
-    // Ignora vendas explicitamente marcadas apenas como varejo sem atacado
     const isVarejo = tipoEntregaLower.includes('varejo') || (descLower.includes('varejo') && !descLower.includes('atacado'));
     if (isVarejo) return;
 
@@ -63,6 +104,8 @@ export function consolidarFiadoLoja(
     const isPendente = v.status === 'pendente' || v.status === 'parcial';
     if (!isFiado && !isPendente) return;
 
+    const clienteNome = (v.clienteNome || 'Lojista / Revenda').trim();
+    const chave = clienteNome.toLowerCase();
     const total = Number(v.valor || 0);
     const pago = Number(v.valorPago || 0);
 
@@ -76,34 +119,162 @@ export function consolidarFiadoLoja(
     }
 
     if (devedor > 0.01) {
-      const nomeCliente = (v.clienteNome || 'Lojista / Revenda').trim();
-      const chave = nomeCliente.toLowerCase();
-
-      if (mapa.has(chave)) {
-        const existente = mapa.get(chave)!;
-        existente.saldo += devedor;
-        existente.origem = 'ambos';
-      } else {
-        mapa.set(chave, {
-          nome: nomeCliente,
-          saldo: devedor,
-          origem: 'venda_fiado',
+      if (!mapaDevedores.has(chave)) {
+        mapaDevedores.set(chave, {
+          nome: clienteNome,
+          pedidos: [],
         });
       }
+
+      const itensFmt: ItemExtrato[] = [];
+      if (v.itens && Array.isArray(v.itens) && v.itens.length > 0) {
+        v.itens.forEach((it: any) => {
+          let imei = it.imei ? String(it.imei).trim() : '';
+          if (!imei && it.descricao) {
+            const mId = it.descricao.match(/(?:IMEI\/ID|ID|IMEI):\s*([A-Za-z0-9]+)/i);
+            if (mId) imei = mId[1];
+          }
+          if (it.aparelhoId) aparelhosJaEmVendas.add(String(it.aparelhoId));
+          if (it.id) aparelhosJaEmVendas.add(String(it.id));
+          if (imei) imeisJaEmVendas.add(imei.toLowerCase());
+
+          itensFmt.push({
+            descricao: it.descricao || it.modelo || 'Aparelho',
+            modelo: it.modelo,
+            cor: it.cor,
+            capacidade: it.capacidade,
+            imei: imei || undefined,
+            aparelhoId: it.aparelhoId || it.id,
+            valor: Number(it.total || it.valorExibir || v.valor || 0),
+          });
+        });
+      } else {
+        itensFmt.push({
+          descricao: v.descricao || 'Aparelho',
+          valor: devedor,
+        });
+      }
+
+      mapaDevedores.get(chave)!.pedidos.push({
+        id: v.id,
+        descricao: v.descricao || 'Venda ATACADO',
+        data: v.dataPagamento || v.data || v.created_at || new Date().toISOString(),
+        valorTotal: total,
+        valorPago: pago,
+        saldoDevedor: devedor,
+        itens: itensFmt,
+        origem: 'vendas',
+      });
     }
   });
 
-  // 3. Filtra apenas quem tem saldo > 0.01 e ordena do maior devedor para o menor
-  const devedores = Array.from(mapa.values())
-    .filter((d) => d.saldo > 0.01)
-    .sort((a, b) => b.saldo - a.saldo);
+  // 3. Processa aparelhos vendidos em atacado a fiado via baixa de estoque
+  (aparelhos || []).forEach((a) => {
+    const obs = String(a.observacoes || '');
+    if (!obs.includes('BAIXA_ESTOQUE')) return;
+
+    const matchBaixa = obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
+      || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
+    if (!matchBaixa) return;
+
+    const textoDetalhe = matchBaixa[2] || '';
+    const matchTipo = textoDetalhe.match(/Venda (ATACADO|VAREJO)/i);
+    const matchComp = textoDetalhe.match(/(?:Comprador:\s*([^|\n]+)|para\s+([^|\n]+?)\s+por\s+R\$)/i);
+    const matchVal = textoDetalhe.match(/(?:Valor:\s*R\$|por\s*R\$)\s*([\d.,]+)/i);
+    const matchPgto = textoDetalhe.match(/Pgto:\s*([^|\n]+)/i);
+
+    const ehAtacado = (matchTipo && matchTipo[1].toUpperCase() === 'ATACADO') || obs.toUpperCase().includes('ATACADO');
+    if (!ehAtacado) return;
+
+    const metodoPgto = matchPgto ? matchPgto[1].trim().toLowerCase() : '';
+    if (!metodoPgto.includes('fiado') || metodoPgto.includes('quitado')) return;
+
+    const comprador = (matchComp ? (matchComp[1] || matchComp[2] || '') : '').trim();
+    if (!comprador || comprador === 'Não Informado' || comprador === 'Lojista / Revenda') return;
+    const chave = comprador.toLowerCase();
+
+    let imeiLimpo = (a.imei || '').trim();
+    if (!imeiLimpo) {
+      const matchImei = obs.match(/IMEI:\s*([A-Za-z0-9]+)/i);
+      if (matchImei) imeiLimpo = matchImei[1];
+    }
+
+    // Se já estiver nas vendas do banco pelo ID ou pelo IMEI, não duplica!
+    if (a.id && aparelhosJaEmVendas.has(String(a.id))) return;
+    if (imeiLimpo && imeisJaEmVendas.has(imeiLimpo.toLowerCase())) return;
+
+    let valorVenda = 0;
+    if (matchVal) {
+      valorVenda = parseMonetaryValue(matchVal[1]);
+    } else {
+      valorVenda = Number(a.precoAtacado || a.preco || 0);
+    }
+
+    if (!mapaDevedores.has(chave)) {
+      mapaDevedores.set(chave, {
+        nome: comprador,
+        pedidos: [],
+      });
+    }
+
+    const itemAparelho: ItemExtrato = {
+      descricao: `${a.marca || 'Apple'} ${a.modelo}`,
+      modelo: a.modelo,
+      cor: a.cor,
+      capacidade: a.capacidade,
+      imei: imeiLimpo || undefined,
+      aparelhoId: a.id,
+      valor: valorVenda,
+    };
+
+    mapaDevedores.get(chave)!.pedidos.push({
+      id: a.id,
+      descricao: `${a.marca || 'Apple'} ${a.modelo} (${[a.capacidade, a.cor].filter(Boolean).join(' ')})`,
+      data: matchBaixa[1] || a.created_at || new Date().toISOString(),
+      valorTotal: valorVenda,
+      valorPago: 0,
+      saldoDevedor: valorVenda,
+      itens: [itemAparelho],
+      origem: 'aparelhos_baixa',
+    });
+  });
+
+  // 4. Consolida saldo e monta lista final
+  const devedores: DevedorConsolidado[] = [];
+
+  mapaDevedores.forEach((entry, chave) => {
+    let saldoCalculado = entry.pedidos.reduce((acc, p) => acc + p.saldoDevedor, 0);
+
+    let totalAps = 0;
+    entry.pedidos.forEach((p) => {
+      totalAps += Math.max(1, p.itens.length);
+    });
+
+    const cadastrado = (devedoresCadastrados || []).find(
+      (d) => (d.nome || '').trim().toLowerCase() === chave
+    );
+    const saldoCadastrado = Number(cadastrado?.saldo_devedor || 0);
+    const saldoFinal = Math.max(saldoCalculado, saldoCadastrado);
+
+    if (saldoFinal > 0.01) {
+      devedores.push({
+        nome: entry.nome,
+        saldo: saldoFinal,
+        totalAparelhos: totalAps,
+        telefone: entry.telefone,
+        whatsapp: entry.whatsapp,
+        pedidos: entry.pedidos,
+      });
+    }
+  });
+
+  devedores.sort((a, b) => b.saldo - a.saldo);
 
   const totalFiadoEmAberto = devedores.reduce((acc, d) => acc + d.saldo, 0);
 
   const detalhesDevedoresFormatado = devedores.length > 0
     ? devedores
-        .slice(0, 10)
-        .map((d) => `• *${d.nome}:* R$ ${d.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+        .map((d) => `• *${d.nome}:* R$ ${d.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${d.totalAparelhos} aparelho${d.totalAparelhos > 1 ? 's' : ''} em aberto)`)
         .join('\n')
     : 'Nenhum lojista com débitos em aberto no momento.';
 
@@ -112,6 +283,62 @@ export function consolidarFiadoLoja(
     devedores,
     detalhesDevedoresFormatado,
   };
+}
+
+export const consolidarFiadoLoja = consolidarFiadoCompleto;
+
+export function formatarTextoExtrato(
+  lojista: DevedorConsolidado,
+  nomeLoja: string = 'Lucas Imports',
+  chavePix: string = ''
+): string {
+  const dataHoje = new Date().toLocaleDateString('pt-BR');
+  const saldoFmt = lojista.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  let msg = `📋 *EXTRATO DE CONTA - ${nomeLoja.toUpperCase()}*\n`;
+  msg += `👤 *Lojista / Parceiro:* ${lojista.nome}\n`;
+  msg += `📅 *Data de Emissão:* ${dataHoje}\n\n`;
+
+  msg += `📦 *PEDIDOS E APARELHOS EM ABERTO (${lojista.totalAparelhos} aparelho${lojista.totalAparelhos > 1 ? 's' : ''}):*\n`;
+
+  if (lojista.pedidos.length === 0) {
+    msg += `• Saldo devedor consolidado registrado: R$ ${saldoFmt}\n`;
+  } else {
+    lojista.pedidos.forEach((p, idx) => {
+      let dataFmt = 'Data não registrada';
+      try {
+        const d = new Date(p.data);
+        if (!isNaN(d.getTime())) dataFmt = d.toLocaleDateString('pt-BR');
+      } catch {}
+
+      const valFmt = p.saldoDevedor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      msg += `⏳ *${p.descricao}* (${dataFmt})\n`;
+      msg += `   Valor: R$ ${valFmt}\n`;
+
+      if (p.itens && p.itens.length > 0) {
+        p.itens.forEach((it) => {
+          const corCap = [it.capacidade, it.cor].filter(Boolean).join(' ');
+          const imeiStr = it.imei ? ` | IMEI/ID: ${it.imei}` : '';
+          const valItemFmt = it.valor ? ` - R$ ${Number(it.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+          msg += `   └ 📱 ${it.descricao}${corCap ? ` (${corCap})` : ''}${imeiStr}${valItemFmt}\n`;
+        });
+      }
+      msg += '\n';
+    });
+  }
+
+  msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `💵 *Total Geral Devido:* R$ ${saldoFmt}\n`;
+  msg += `🚨 *SALDO TOTAL PENDENTE: R$ ${saldoFmt} (${lojista.totalAparelhos} aparelhos)*\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  const pix = chavePix.trim();
+  if (pix) {
+    msg += `🔑 *Chave PIX para quitação:*\n${pix}\n\n`;
+  }
+
+  msg += `Qualquer dúvida estamos à disposição! 🤝`;
+  return msg.trim();
 }
 
 export async function buscarFiadoConsolidadoLoja(
@@ -126,19 +353,82 @@ export async function buscarFiadoConsolidadoLoja(
     };
   }
 
-  // Busca devedores cadastrados
+  // 1. Busca dados da loja (nome e pix)
+  const { data: loja } = await supabase
+    .from('lojas')
+    .select('nome, chave_pix, chave_pix_cobranca, config_atacado')
+    .eq('id', lojaId)
+    .maybeSingle();
+
+  const nomeLoja = loja?.nome || 'Lucas Imports';
+  const chavePix = (loja?.config_atacado as any)?.chave_pix || loja?.chave_pix || loja?.chave_pix_cobranca || '';
+
+  // 2. Busca devedores cadastrados
   const { data: devedoresCadastrados } = await supabase
     .from('lojistas_devedores')
     .select('nome, saldo_devedor, telefone, whatsapp')
     .eq('loja_id', lojaId)
     .eq('ativo', true);
 
-  // Busca vendas fiado/pendente
-  const { data: vendasPendentes } = await supabase
+  // 3. Busca vendas atacado / fiado / pendentes
+  const { data: vendasBanco } = await supabase
     .from('vendas')
-    .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao')
-    .eq('loja_id', lojaId)
-    .or('metodo.eq.fiado,status.eq.pendente,status.eq.parcial');
+    .select('id, clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento, created_at')
+    .eq('loja_id', lojaId);
 
-  return consolidarFiadoLoja(devedoresCadastrados, vendasPendentes);
+  // 4. Busca aparelhos do estoque da loja
+  const { data: aparelhos } = await supabase
+    .from('aparelhos')
+    .select('id, modelo, marca, cor, capacidade, imei, preco, precoAtacado, observacoes, status, condicao, created_at')
+    .eq('loja_id', lojaId);
+
+  return consolidarFiadoCompleto(devedoresCadastrados, vendasBanco, aparelhos, nomeLoja, chavePix);
+}
+
+export async function buscarExtratoLojista(
+  supabase: any,
+  lojaId: string,
+  lojistaNomeOuBusca?: string
+): Promise<ExtratoLojista | null> {
+  const fiado = await buscarFiadoConsolidadoLoja(supabase, lojaId);
+  if (fiado.devedores.length === 0) return null;
+
+  // Busca dados da loja
+  const { data: loja } = await supabase
+    .from('lojas')
+    .select('nome, chave_pix, chave_pix_cobranca, config_atacado')
+    .eq('id', lojaId)
+    .maybeSingle();
+
+  const nomeLoja = loja?.nome || 'Lucas Imports';
+  const chavePix = (loja?.config_atacado as any)?.chave_pix || loja?.chave_pix || loja?.chave_pix_cobranca || '';
+
+  let devedorAlvo: DevedorConsolidado | undefined;
+
+  if (lojistaNomeOuBusca && lojistaNomeOuBusca.trim()) {
+    const q = lojistaNomeOuBusca.trim().toLowerCase();
+    devedorAlvo = fiado.devedores.find(
+      (d) => d.nome.toLowerCase() === q || d.nome.toLowerCase().includes(q)
+    );
+  }
+
+  // Se não especificou ou não achou exato, pega o primeiro devedor com maior saldo (ex: CL)
+  if (!devedorAlvo) {
+    devedorAlvo = fiado.devedores[0];
+  }
+
+  if (!devedorAlvo) return null;
+
+  const textoFormatado = formatarTextoExtrato(devedorAlvo, nomeLoja, chavePix);
+
+  return {
+    lojistaNome: devedorAlvo.nome,
+    telefone: devedorAlvo.whatsapp || devedorAlvo.telefone,
+    pedidos: devedorAlvo.pedidos,
+    totalComprado: devedorAlvo.saldo,
+    totalPago: 0,
+    saldoDevedor: devedorAlvo.saldo,
+    totalAparelhos: devedorAlvo.totalAparelhos,
+    textoFormatado,
+  };
 }

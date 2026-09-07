@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini } from './commandExecutor';
-import { buscarFiadoConsolidadoLoja } from './fiadoHelper';
+import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
 
@@ -2882,6 +2882,50 @@ ${linhasDebito.join('\n')}
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgExtrato);
       return NextResponse.json({ status: 'ok', message: 'Extrato de débitos enviado.' }, { status: 200 });
+    }
+
+    // ── 12.1 COMANDO: !extrato [lojista] ou Envio de Extrato Detalhado com Itens e PIX ──
+    const ehComandoExtratoDireto = lowerText.startsWith('!extrato') || lowerText === '!extrato';
+    const ehPedidoExtratoNatural = !isGroup && (
+      lowerText === 'extrato' ||
+      lowerText.startsWith('extrato ') ||
+      /(?:me )?(?:manda|envia|gerar?|ver|passa|consultar?|qual|copia|quero)(?: o)? extrato/i.test(lowerText) ||
+      /(?:extrato)(?: do)? (?:lojista|fiado|devedor|cliente|cl)/i.test(lowerText)
+    );
+
+    if (ehComandoExtratoDireto || ehPedidoExtratoNatural) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar a sua loja para consultar o extrato.");
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      let lojistaBusca = '';
+      if (ehComandoExtratoDireto) {
+        const partes = textContent.trim().split(/\s+/);
+        if (partes.length > 1) {
+          lojistaBusca = partes.slice(1).join(' ').trim();
+        }
+      } else {
+        const mNome = textContent.match(/(?:extrato(?: do)?|lojista|cliente)\s+([A-Za-z0-9\s]+)/i);
+        if (mNome && mNome[1]) {
+          const possivelNome = mNome[1].trim();
+          if (!['do', 'de', 'fiado', 'devedor', 'conta', 'por favor', 'agora'].includes(possivelNome.toLowerCase())) {
+            lojistaBusca = possivelNome;
+          }
+        }
+        if (!lojistaBusca && (lowerText.includes('cl') || lowerText === 'extrato')) {
+          lojistaBusca = 'cl';
+        }
+      }
+
+      const extrato = await buscarExtratoLojista(supabase, lojaId, lojistaBusca);
+      if (!extrato) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `ℹ️ *Nenhum lojista devedor com débitos ou aparelhos em aberto encontrado nesta loja.*`);
+        return NextResponse.json({ status: 'ok', message: 'Sem devedores para extrato.' }, { status: 200 });
+      }
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, extrato.textoFormatado);
+      return NextResponse.json({ status: 'ok', message: `Extrato do lojista ${extrato.lojistaNome} enviado via WhatsApp.` }, { status: 200 });
     }
 
     // ── 13. COMANDO: !checarimei [imei] ou !checar [imei] ──
