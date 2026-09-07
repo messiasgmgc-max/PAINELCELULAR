@@ -1,15 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
-
-function formatarTelefoneWhatsApp(numeroRaw: string): string {
-  let limpo = numeroRaw.replace(/\D/g, '');
-  if (!limpo) return '';
-  // Se for DDD + 8 ou 9 dígitos sem código do país (ex: 31999999999 ou 11988887777)
-  if (limpo.length === 10 || limpo.length === 11) {
-    limpo = '55' + limpo;
-  }
-  return limpo;
-}
+import { enviarTextoWhatsApp, formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 
 export async function POST(request: Request) {
   try {
@@ -17,6 +8,7 @@ export async function POST(request: Request) {
     const { 
       lojaId, 
       clienteId, 
+      destinatarios: destinatariosFrontend,
       mensagemPersonalizada, 
       modoSimulacao = false 
     } = body;
@@ -43,52 +35,150 @@ export async function POST(request: Request) {
     const chavePixLoja = loja.chave_pix || loja.chave_pix_cobranca || 'Solicitar via WhatsApp';
     const nomeLoja = loja.nome || 'Phone Center';
 
-    // 2. Buscar destinatários
-    let query = supabaseAdmin
-      .from('lojistas_devedores')
-      .select('*')
-      .eq('loja_id', lojaId)
-      .eq('ativo', true);
+    // 2. Montar lista de devedores consolidada
+    let devedoresParaDisparo: Array<{
+      id?: string;
+      nome: string;
+      telefone?: string;
+      whatsapp?: string;
+      saldo_devedor: number;
+    }> = [];
 
-    if (clienteId) {
-      query = query.eq('id', clienteId);
+    // Se o frontend passou a lista exata exibida na tela sob "Fiado & Devedores"
+    if (Array.isArray(destinatariosFrontend) && destinatariosFrontend.length > 0) {
+      devedoresParaDisparo = destinatariosFrontend.map((d: any) => ({
+        id: d.id,
+        nome: d.nome || d.lojistaNome,
+        telefone: d.whatsapp || d.telefone,
+        whatsapp: d.whatsapp || d.telefone,
+        saldo_devedor: Number(d.saldoDevedor || d.saldo_devedor || 0),
+      })).filter((d: any) => d.saldo_devedor > 0.01);
     } else {
-      query = query.gt('saldo_devedor', 0);
+      // Caso contrário, busca na tabela lojistas_devedores e sincroniza com vendas
+      let query = supabaseAdmin
+        .from('lojistas_devedores')
+        .select('*')
+        .eq('loja_id', lojaId)
+        .eq('ativo', true);
+
+      if (clienteId) {
+        query = query.eq('id', clienteId);
+      } else {
+        query = query.gt('saldo_devedor', 0);
+      }
+
+      const { data: devedoresDb } = await query;
+      devedoresParaDisparo = (devedoresDb || []).map(d => ({
+        id: d.id,
+        nome: d.nome,
+        telefone: d.whatsapp || d.telefone,
+        whatsapp: d.whatsapp || d.telefone,
+        saldo_devedor: Number(d.saldo_devedor || 0),
+      }));
+
+      // Se nenhum devedor estava cadastrado com saldo > 0 na tabela lojistas_devedores,
+      // sincroniza dinamicamente a partir das vendas da loja com fiado/pendente
+      if (devedoresParaDisparo.length === 0 && !clienteId) {
+        try {
+          const { data: vendasPendentes } = await supabaseAdmin
+            .from('vendas')
+            .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
+            .eq('loja_id', lojaId);
+
+          if (vendasPendentes && vendasPendentes.length > 0) {
+            const mapDeb = new Map<string, { nome: string; telefone: string; saldo: number }>();
+            vendasPendentes.forEach(v => {
+              const nome = (v.clienteNome || '').trim();
+              if (!nome || ['não informado', 'lojista / revenda', 'cliente balcão'].includes(nome.toLowerCase())) return;
+              
+              const val = Number(v.valor || 0);
+              const pago = Number(v.valorPago || 0);
+              let dev = 0;
+              if (v.saldoDevedor !== undefined && v.saldoDevedor !== null && Number(v.saldoDevedor) > 0) {
+                dev = Number(v.saldoDevedor);
+              } else if (v.metodo === 'fiado' || v.status === 'pendente' || v.status === 'parcial') {
+                dev = Math.max(0, val - pago);
+                if (dev <= 0 && v.status !== 'pago') dev = val;
+              }
+
+              if (dev > 0.01) {
+                const chave = nome.toLowerCase();
+                if (!mapDeb.has(chave)) {
+                  mapDeb.set(chave, { nome, telefone: v.clienteTelefone || '', saldo: dev });
+                } else {
+                  mapDeb.get(chave)!.saldo += dev;
+                }
+              }
+            });
+
+            mapDeb.forEach((item) => {
+              devedoresParaDisparo.push({
+                nome: item.nome,
+                telefone: item.telefone,
+                whatsapp: item.telefone,
+                saldo_devedor: item.saldo,
+              });
+            });
+          }
+        } catch (eSync) {
+          console.warn('Aviso ao sincronizar vendas pendentes para cobrança:', eSync);
+        }
+      }
     }
 
-    const { data: devedores, error: errDev } = await query;
-    if (errDev) throw errDev;
-
-    if (!devedores || devedores.length === 0) {
+    if (!devedoresParaDisparo || devedoresParaDisparo.length === 0) {
       return NextResponse.json({
         success: true,
         totalEnviados: 0,
+        totalFalhas: 0,
         mensagem: 'Nenhum lojista devedor com saldo em aberto encontrado para envio.'
       });
     }
-
-    // Configurações da Evolution API
-    let evolutionUrl = (process.env.EVOLUTION_API_URL || 'http://13.140.36.50:8080').trim().replace(/\/+$/, '');
-    if (!evolutionUrl.startsWith('http://') && !evolutionUrl.startsWith('https://')) {
-      evolutionUrl = 'http://' + evolutionUrl;
-    }
-    const evolutionApiKey = (process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449').trim();
-
-    // Buscar sessão/instância do WhatsApp vinculada à loja
-    const { data: session } = await supabaseAdmin
-      .from('whatsapp_sessions')
-      .select('session_name')
-      .eq('loja_id', lojaId)
-      .maybeSingle();
-
-    const instanceName = session?.session_name || process.env.EVOLUTION_INSTANCE_NAME || 'lucasimports';
 
     const resultados: any[] = [];
     let enviadosCount = 0;
     let falhasCount = 0;
 
-    for (const dev of devedores) {
-      const tel = dev.whatsapp || dev.telefone || '';
+    for (const dev of devedoresParaDisparo) {
+      let tel = dev.whatsapp || dev.telefone || '';
+
+      // Se não veio telefone, busca em lojistas_devedores, clientes ou compradores_frequentes
+      if (!tel) {
+        try {
+          const { data: lDb } = await supabaseAdmin
+            .from('lojistas_devedores')
+            .select('whatsapp, telefone')
+            .eq('loja_id', lojaId)
+            .ilike('nome', dev.nome.trim())
+            .maybeSingle();
+          if (lDb?.whatsapp || lDb?.telefone) tel = lDb.whatsapp || lDb.telefone || '';
+        } catch {}
+
+        if (!tel) {
+          try {
+            const { data: compDb } = await supabaseAdmin
+              .from('compradores_frequentes')
+              .select('telefone')
+              .eq('loja_id', lojaId)
+              .ilike('nome', dev.nome.trim())
+              .maybeSingle();
+            if (compDb?.telefone) tel = compDb.telefone;
+          } catch {}
+        }
+
+        if (!tel) {
+          try {
+            const { data: cliDb } = await supabaseAdmin
+              .from('clientes')
+              .select('telefone')
+              .eq('loja_id', lojaId)
+              .ilike('nome', dev.nome.trim())
+              .maybeSingle();
+            if (cliDb?.telefone) tel = cliDb.telefone;
+          } catch {}
+        }
+      }
+
       const cleanPhone = formatarTelefoneWhatsApp(tel);
       const saldoFmt = Number(dev.saldo_devedor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -96,7 +186,7 @@ export async function POST(request: Request) {
         resultados.push({
           cliente: dev.nome,
           status: 'erro',
-          motivo: 'Número de WhatsApp inválido ou não cadastrado'
+          motivo: `Número de WhatsApp não cadastrado para o lojista "${dev.nome}"`
         });
         falhasCount++;
         continue;
@@ -121,49 +211,47 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Envio Real via Evolution API
-      try {
-        const endpoint = `${evolutionUrl}/message/sendText/${instanceName}`;
-        const resEnvio = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: evolutionApiKey
-          },
-          body: JSON.stringify({
-            number: cleanPhone,
-            text: textoFinal,
-            options: { delay: 1200, presence: 'composing' }
-          })
+      // Envio Real via Evolution API (com retry 12/13 dígitos)
+      const envio = await enviarTextoWhatsApp({
+        lojaId,
+        telefone: cleanPhone,
+        texto: textoFinal,
+      });
+
+      if (!envio.success) {
+        resultados.push({
+          cliente: dev.nome,
+          status: 'erro',
+          motivo: envio.error || 'Falha ao entregar mensagem no WhatsApp'
+        });
+        falhasCount++;
+      } else {
+        enviadosCount++;
+        resultados.push({
+          cliente: dev.nome,
+          telefone: cleanPhone,
+          status: 'enviado'
         });
 
-        if (!resEnvio.ok) {
-          const errBody = await resEnvio.text();
-          resultados.push({
-            cliente: dev.nome,
-            status: 'erro',
-            motivo: `Evolution API (${resEnvio.status}): ${errBody.slice(0, 100)}`
-          });
-          falhasCount++;
-        } else {
-          // Sucesso
-          enviadosCount++;
-          resultados.push({
-            cliente: dev.nome,
-            telefone: cleanPhone,
-            status: 'enviado'
-          });
-
-          // Atualizar último disparo no cliente
+        // Atualizar último disparo no cliente (se tiver id na tabela lojistas_devedores)
+        if (dev.id && !String(dev.id).startsWith('venda-')) {
           await supabaseAdmin
             .from('lojistas_devedores')
             .update({ ultimo_disparo_cobranca: new Date().toISOString() })
             .eq('id', dev.id);
+        } else {
+          await supabaseAdmin
+            .from('lojistas_devedores')
+            .update({ ultimo_disparo_cobranca: new Date().toISOString() })
+            .eq('loja_id', lojaId)
+            .ilike('nome', dev.nome.trim());
+        }
 
-          // Inserir registro no histórico
+        // Inserir registro no histórico de cobranças
+        try {
           await supabaseAdmin.from('historico_cobrancas_atacado').insert({
             loja_id: lojaId,
-            lojista_id: dev.id,
+            lojista_id: dev.id && !String(dev.id).startsWith('venda-') ? dev.id : undefined,
             lojista_nome: dev.nome,
             whatsapp: cleanPhone,
             valor_cobrado: Number(dev.saldo_devedor || 0),
@@ -171,26 +259,20 @@ export async function POST(request: Request) {
             status: 'enviado',
             origem: clienteId ? 'manual_unitario' : 'manual_lote'
           });
-        }
-      } catch (sendErr: any) {
-        console.error(`Falha no envio para ${dev.nome}:`, sendErr);
-        resultados.push({
-          cliente: dev.nome,
-          status: 'erro',
-          motivo: sendErr.message || 'Erro de rede'
-        });
-        falhasCount++;
+        } catch {}
       }
     }
 
     return NextResponse.json({
-      success: true,
+      success: enviadosCount > 0 || (modoSimulacao && devedoresParaDisparo.length > 0),
       totalEnviados: enviadosCount,
       totalFalhas: falhasCount,
       resultados,
       mensagem: modoSimulacao 
-        ? `Simulação de ${enviadosCount} cobrança(s) gerada com sucesso!`
-        : `Cobranças enviadas: ${enviadosCount} sucesso(s) e ${falhasCount} falha(s).`
+        ? `Simulação concluída: ${enviadosCount} devedor(es) receberiam mensagem.`
+        : (falhasCount > 0 && enviadosCount === 0)
+          ? `Nenhuma mensagem enviada. ${falhasCount} falha(s): ${resultados.find(r => r.status === 'erro')?.motivo || ''}`
+          : `Cobranças enviadas: ${enviadosCount} sucesso(s) e ${falhasCount} falha(s).`
     });
 
   } catch (err: any) {

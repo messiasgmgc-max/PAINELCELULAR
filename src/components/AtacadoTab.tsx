@@ -300,10 +300,24 @@ export function AtacadoTab() {
     const toastId = toast.loading(simular ? 'Simulando disparos do bot...' : 'Enviando cobranças via WhatsApp...');
 
     try {
+      // Mapeia os devedores da tela com seus respectivos telefones cadastrados
+      const destinatarios = lojistasDevedores.map(l => {
+        const cli = todosClientesAtacado.find(c => c.nome.trim().toLowerCase() === l.lojistaNome.trim().toLowerCase());
+        return {
+          nome: l.lojistaNome,
+          telefone: cli?.whatsapp || cli?.telefone || '',
+          saldoDevedor: l.saldoDevedor,
+        };
+      });
+
       const res = await fetch('/api/atacado/disparar-cobrancas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lojaId: lojaIdAtual, modoSimulacao: simular }),
+        body: JSON.stringify({ 
+          lojaId: lojaIdAtual, 
+          modoSimulacao: simular,
+          destinatarios,
+        }),
       });
 
       const json = await res.json();
@@ -313,9 +327,16 @@ export function AtacadoTab() {
       }
 
       if (simular) {
-        toast.info(`Simulação concluída: ${json.totalEnviados || 0} devedor(es) receberiam mensagem.`, { id: toastId });
+        toast.info(json.mensagem || `Simulação concluída: ${json.totalEnviados || 0} devedor(es) receberiam mensagem.`, { id: toastId, duration: 6000 });
       } else {
-        toast.success(`Disparo finalizado! ${json.totalEnviados || 0} mensagem(ns) enviada(s) com sucesso.`, { id: toastId });
+        if (json.totalEnviados > 0) {
+          toast.success(json.mensagem || `Disparo finalizado! ${json.totalEnviados} mensagem(ns) enviada(s) com sucesso.`, { id: toastId, duration: 6000 });
+        } else if (json.totalFalhas > 0) {
+          const primeiroErro = json.resultados?.find((r: any) => r.status === 'erro')?.motivo || 'Erro ao enviar para o WhatsApp';
+          toast.error(`⚠️ Nenhuma mensagem entregue. ${primeiroErro}`, { id: toastId, duration: 8000 });
+        } else {
+          toast.info(json.mensagem || 'Nenhum lojista devedor com saldo em aberto encontrado.', { id: toastId });
+        }
         await fetchClientesAtacado();
         await fetchVendasBanco();
       }

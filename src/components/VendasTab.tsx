@@ -1410,6 +1410,40 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           .catch(eF => console.warn('Aviso emissão fiscal PDV:', eF));
       }
 
+      // Se for venda de atacado realizada no PDV, notifica o lojista automaticamente no WhatsApp
+      const isAtacadoPDV = 
+        posDados.tipoEntrega?.toLowerCase().includes('atacado') || 
+        posDados.tipoVenda?.toLowerCase().includes('atacado');
+
+      if (isAtacadoPDV && vendaSalva?.id && !foiEdicao) {
+        try {
+          fetch('/api/atacado/notificar-venda', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lojaId: usuario?.lojaId || (vendaSalva as any).loja_id,
+              compradorNome: posDados.clienteNome,
+              compradorTelefone: clienteVenda?.telefone || undefined,
+              itens: carrinho.map((item) => ({
+                modelo: item.descricao,
+                valor: item.total || item.valorExibir,
+              })),
+              valorTotal: valorFinal,
+              formaPagamento: metodoPrincipal,
+            }),
+          })
+            .then(async (r) => {
+              const j = await r.json();
+              if (j.enviado) {
+                toast.success(`📲 Comprovante e saldo devedor enviados no WhatsApp de ${posDados.clienteNome}!`, { duration: 6000 });
+              }
+            })
+            .catch((eW) => console.warn('Aviso notificação WhatsApp atacado PDV:', eW));
+        } catch (eW) {
+          console.warn('Erro ao disparar notificação WhatsApp atacado PDV:', eW);
+        }
+      }
+
       await carregarVendas();
       setShowSaleCelebration(true);
       playSaleSuccessSound();

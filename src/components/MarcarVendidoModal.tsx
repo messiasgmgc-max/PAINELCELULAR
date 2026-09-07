@@ -13,7 +13,8 @@ import {
   FileText, 
   Sparkles,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  MessageCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +55,7 @@ export function MarcarVendidoModal({
 }: MarcarVendidoModalProps) {
   const [tipoVenda, setTipoVenda] = useState<'atacado' | 'varejo' | 'manutencao' | 'perda'>('atacado');
   const [comprador, setComprador] = useState('');
+  const [compradorTelefone, setCompradorTelefone] = useState('');
   const [valorVenda, setValorVenda] = useState<string>('');
   const [metodoPgto, setMetodoPgto] = useState<string>('pix');
   const [dataVenda, setDataVenda] = useState<string>(() => new Date().toISOString().split('T')[0]);
@@ -77,12 +79,27 @@ export function MarcarVendidoModal({
         : (aparelho.preco || 0);
 
       setValorVenda(precoPadrao > 0 ? String(precoPadrao) : '');
-      setComprador(aparelho.cliente || '');
+      const compInicial = aparelho.cliente || '';
+      setComprador(compInicial);
+      const matchComp = compradores.find(c => c.nome.trim().toLowerCase() === compInicial.trim().toLowerCase());
+      setCompradorTelefone(matchComp?.telefone || '');
       setObservacoes('');
       setDataVenda(new Date().toISOString().split('T')[0]);
       setMetodoPgto('pix');
     }
-  }, [isOpen, aparelho, tipoInicial]);
+  }, [isOpen, aparelho, tipoInicial, compradores]);
+
+  const handleCompradorChange = (novoNome: string) => {
+    setComprador(novoNome);
+    if (!novoNome.trim()) {
+      setCompradorTelefone('');
+      return;
+    }
+    const matchComp = compradores.find(c => c.nome.trim().toLowerCase() === novoNome.trim().toLowerCase());
+    if (matchComp?.telefone) {
+      setCompradorTelefone(matchComp.telefone);
+    }
+  };
 
   // Atualiza preço sugerido ao mudar tipo de venda
   const handleTipoVendaChange = (novoTipo: 'atacado' | 'varejo' | 'manutencao' | 'perda') => {
@@ -247,6 +264,44 @@ export function MarcarVendidoModal({
       }, tipoVenda === 'manutencao' ? 'Envio para Manutenção' : 'Saída de Estoque / Venda', usuario, lojaId);
 
       toast.success(`🎉 Venda de ${aparelho.modelo} registrada com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
+
+      // Se for venda de atacado, notifica o lojista automaticamente no WhatsApp com itens e saldo devedor
+      if (tipoVenda === 'atacado') {
+        try {
+          fetch('/api/atacado/notificar-venda', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lojaId: lojaId || null,
+              compradorNome: compradorFinal,
+              compradorTelefone: compradorTelefone || undefined,
+              itens: [
+                {
+                  modelo: aparelho.modelo,
+                  capacidade: aparelho.capacidade,
+                  cor: aparelho.cor,
+                  imei: aparelho.imei,
+                  codigo: getAparelhoCodigo(aparelho),
+                  valor: valorVendaNum,
+                },
+              ],
+              valorTotal: valorVendaNum,
+              formaPagamento: metodoPgto,
+              dataVencimento: dataVencIso,
+            }),
+          })
+            .then(async (r) => {
+              const j = await r.json();
+              if (j.enviado) {
+                toast.success(`📲 Comprovante e saldo devedor enviados no WhatsApp de ${compradorFinal}!`, { duration: 6000 });
+              }
+            })
+            .catch((eW) => console.warn('Aviso notificação WhatsApp atacado:', eW));
+        } catch (eW) {
+          console.warn('Aviso disparo WhatsApp atacado:', eW);
+        }
+      }
+
       await onSuccess();
       onClose();
     } catch (err: any) {
@@ -351,7 +406,7 @@ export function MarcarVendidoModal({
 
             <CompradorAutocomplete
               value={comprador}
-              onChange={setComprador}
+              onChange={handleCompradorChange}
               compradores={compradores}
               onBuscar={(termo) => buscarCompradores(termo, tipoVenda === 'atacado' ? 'lojista' : undefined)}
               tipo={tipoVenda === 'atacado' ? 'lojista' : 'todos'}
@@ -364,6 +419,25 @@ export function MarcarVendidoModal({
               }
               required={tipoVenda === 'atacado' || (tipoVenda === 'varejo' && !dadosPendente)}
             />
+
+            {tipoVenda === 'atacado' && (
+              <div className="space-y-1 pt-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                    <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+                    WhatsApp do Lojista (Comprovante e Saldo)
+                  </label>
+                  <span className="text-[10px] text-emerald-400 font-medium">📲 Notificação automática</span>
+                </div>
+                <input
+                  type="tel"
+                  placeholder="(31) 99999-9999"
+                  value={compradorTelefone}
+                  onChange={(e) => setCompradorTelefone(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 outline-none font-mono"
+                />
+              </div>
+            )}
 
             {tipoVenda === 'varejo' && (
               <label className={cn(

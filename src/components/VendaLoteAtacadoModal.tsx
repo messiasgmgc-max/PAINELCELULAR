@@ -15,7 +15,8 @@ import {
   Trash2,
   AlertCircle,
   Camera,
-  QrCode
+  QrCode,
+  MessageCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -60,6 +61,7 @@ export function VendaLoteAtacadoModal({
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [precosCustomizados, setPrecosCustomizados] = useState<Record<string, number>>({});
   const [comprador, setComprador] = useState('');
+  const [compradorTelefone, setCompradorTelefone] = useState('');
   const [metodoPgto, setMetodoPgto] = useState('pix');
   const [valorEntrada, setValorEntrada] = useState('');
   const [dataVencimento, setDataVencimento] = useState('');
@@ -71,6 +73,18 @@ export function VendaLoteAtacadoModal({
 
   const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
   
+  const handleCompradorChange = (novoNome: string) => {
+    setComprador(novoNome);
+    if (!novoNome.trim()) {
+      setCompradorTelefone('');
+      return;
+    }
+    const matchComp = compradores.find(c => c.nome.trim().toLowerCase() === novoNome.trim().toLowerCase());
+    if (matchComp?.telefone) {
+      setCompradorTelefone(matchComp.telefone);
+    }
+  };
+
   const keyBufferRef = useRef<string>('');
   const keyTimeoutRef = useRef<any>(null);
 
@@ -80,6 +94,7 @@ export function VendaLoteAtacadoModal({
       setSelecionados([]);
       setPrecosCustomizados({});
       setComprador('');
+      setCompradorTelefone('');
       setObservacoes('');
       setValorEntrada('');
       setDataVencimento('');
@@ -377,7 +392,7 @@ export function VendaLoteAtacadoModal({
         throw errInsert;
       }
 
-      await upsertComprador(compradorFinal, 'lojista');
+      await upsertComprador(compradorFinal, 'lojista', compradorTelefone || undefined);
 
       logVenda({
         clienteNome: compradorFinal,
@@ -388,6 +403,40 @@ export function VendaLoteAtacadoModal({
       }, usuario, lojaId);
 
       toast.success(`🎉 Lote de ${itensSelecionados.length} aparelhos vendido com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
+
+      // Notifica o lojista automaticamente no WhatsApp com itens e saldo devedor
+      try {
+        fetch('/api/atacado/notificar-venda', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lojaId: lojaId || null,
+            compradorNome: compradorFinal,
+            compradorTelefone: compradorTelefone || undefined,
+            itens: itensSelecionados.map((item) => ({
+              modelo: item.modelo,
+              capacidade: item.capacidade,
+              cor: item.cor,
+              imei: item.imei,
+              codigo: getAparelhoCodigo(item),
+              valor: getPrecoItem(item),
+            })),
+            valorTotal: totais.valorTotal,
+            formaPagamento: metodoPgto,
+            dataVencimento: dataVencimento ? new Date(dataVencimento + 'T12:00:00').toISOString() : undefined,
+          }),
+        })
+          .then(async (r) => {
+            const j = await r.json();
+            if (j.enviado) {
+              toast.success(`📲 Comprovante e saldo devedor enviados no WhatsApp de ${compradorFinal}!`, { duration: 6000 });
+            }
+          })
+          .catch((eW) => console.warn('Aviso notificação WhatsApp atacado lote:', eW));
+      } catch (eW) {
+        console.warn('Erro ao disparar notificação WhatsApp atacado lote:', eW);
+      }
+
       await onSuccess();
       onClose();
     } catch (err: any) {
@@ -614,13 +663,29 @@ export function VendaLoteAtacadoModal({
 
                 <CompradorAutocomplete
                   value={comprador}
-                  onChange={setComprador}
+                  onChange={handleCompradorChange}
                   compradores={compradores}
                   onBuscar={(termo) => buscarCompradores(termo, 'lojista')}
                   tipo="lojista"
                   placeholder="Buscar lojista ou digitar novo (ex: Junior, Tech Cell...)"
                   required
                 />
+                <div className="pt-1">
+                  <label className="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+                      WhatsApp do Lojista (Notificação Automática)
+                    </span>
+                    <span className="text-[10px] text-slate-500">Opcional</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={compradorTelefone}
+                    onChange={(e) => setCompradorTelefone(e.target.value)}
+                    placeholder="Ex: 31999999999 ou (31) 99999-9999"
+                    className="w-full mt-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                  />
+                </div>
               </div>
 
               {/* LISTA DOS ITENS SELECIONADOS NO PEDIDO */}
