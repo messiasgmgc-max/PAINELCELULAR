@@ -445,10 +445,10 @@ export async function buscarExtratoLojista(
     devedorAlvo = fiado.devedores.find(
       (d) => d.nome.toLowerCase() === q || d.nome.toLowerCase().includes(q)
     );
-  }
-
-  // Se não especificou ou não achou exato, pega o primeiro devedor com maior saldo (ex: CL)
-  if (!devedorAlvo) {
+    // Se buscou por um nome específico e não encontrou, não gera extrato de outro lojista
+    if (!devedorAlvo) return null;
+  } else {
+    // Se não passou nome nenhum (comando !extrato puro), sugere o primeiro devedor com débitos
     devedorAlvo = fiado.devedores[0];
   }
 

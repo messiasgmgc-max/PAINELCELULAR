@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini } from './commandExecutor';
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
+import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
@@ -2883,8 +2884,9 @@ ${linhasDebito.join('\n')}
     }
 
     // ── 12.1 COMANDO: !extrato [lojista] ou Envio de Extrato Detalhado com Itens e PIX ──
-    const ehComandoExtratoDireto = lowerText.startsWith('!extrato') || lowerText === '!extrato';
-    const ehPedidoExtratoNatural = !isGroup && (
+    const ehPerguntaRelatorioGeral = /(?:venda|vendas|atacado|varejo|historico|histórico|relatorio|relatório|hoje|ontem|mes|mês|semana|quanto|faturamento|total)/i.test(lowerText);
+    const ehComandoExtratoDireto = (lowerText.startsWith('!extrato') || lowerText === '!extrato') && !ehPerguntaRelatorioGeral;
+    const ehPedidoExtratoNatural = !isGroup && !ehPerguntaRelatorioGeral && (
       lowerText === 'extrato' ||
       lowerText.startsWith('extrato ') ||
       /(?:me )?(?:manda|envia|gerar?|ver|passa|consultar?|qual|copia|quero)(?: o)? extrato/i.test(lowerText) ||
@@ -3293,12 +3295,16 @@ Digite: *!broadcast agora*`;
             }
           }
 
+          const tipoEntregaResolvido = String(geminiPlan.params.tipoEntrega || '').toLowerCase().includes('atacado')
+            ? 'Atacado / Lojista'
+            : 'Varejo';
+
           const { data: novaVenda } = await supabase.from('vendas').insert({
             loja_id: lojaId,
             lojaId: lojaId,
             clienteNome: compradorStr,
             vendedor: `WhatsApp IA (${pushName})`,
-            tipoEntrega: 'Varejo',
+            tipoEntrega: tipoEntregaResolvido,
             valor: valorNum,
             custo: 0,
             lucro: valorNum,
@@ -3308,7 +3314,7 @@ Digite: *!broadcast agora*`;
             metodo: formaPag,
             valorPago: valorNum,
             saldoDevedor: 0,
-            descricao: `Venda registrada via WhatsApp IA - ${modeloStr}`,
+            descricao: `Venda registrada via WhatsApp IA - ${modeloStr} (${tipoEntregaResolvido})`,
             garantia: '3 Meses (Garantia Legal)',
             descontoTotal: 0,
             itens: [
@@ -3330,6 +3336,7 @@ Digite: *!broadcast agora*`;
             valor: valorNum,
             modelo: modeloStr,
             comprador: compradorStr,
+            tipoEntrega: tipoEntregaResolvido,
           }, senderPhone);
           await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
           return NextResponse.json({ status: 'ok', message: 'Venda IA registrada no banco.' }, { status: 200 });
@@ -3480,17 +3487,15 @@ Digite: *!broadcast agora*`;
         totalFiadoEmAberto = fiadoConsolidado.totalFiadoEmAberto;
         detalhesDevedoresFormatado = fiadoConsolidado.detalhesDevedoresFormatado;
 
-        // 3. Busca faturamento de vendas de hoje
-        const hojeInicio = new Date();
-        hojeInicio.setHours(0, 0, 0, 0);
-        const { data: vendasHoje } = await supabase
-          .from('vendas')
-          .select('valor')
-          .eq('loja_id', lojaId)
-          .gte('dataPagamento', hojeInicio.toISOString());
-
-        if (vendasHoje && vendasHoje.length > 0) {
-          totalVendasHoje = vendasHoje.reduce((acc, v) => acc + Number(v.valor || 0), 0);
+        // 3. Busca analítica de vendas abrangente (Hoje, Semana, Mês, Atacado vs Varejo e Histórico)
+        let analiticaVendas: ResumoVendasAgregado | null = null;
+        try {
+          analiticaVendas = await buscarResumoVendasLoja(supabase, lojaId);
+          if (analiticaVendas) {
+            totalVendasHoje = analiticaVendas.hoje.total;
+          }
+        } catch (eErr) {
+          console.error('[Copiloto IA] Erro ao carregar analítica de vendas:', eErr);
         }
       }
 
@@ -3508,6 +3513,11 @@ Digite: *!broadcast agora*`;
         totalFiadoEmAberto,
         detalhesDevedoresFormatado,
         totalVendasHoje,
+        resumoVendasHoje: analiticaVendas?.hoje?.resumoTexto,
+        resumoVendasSemana: analiticaVendas?.semana?.resumoTexto,
+        resumoVendasMes: analiticaVendas?.mes?.resumoTexto,
+        historicoAtacadoMes: analiticaVendas?.historicoAtacadoMes,
+        historicoVendasRecentes: analiticaVendas?.historicoRecente,
         isGroup: false,
       });
 
