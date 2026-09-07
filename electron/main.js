@@ -104,11 +104,15 @@ function createWindow() {
     Menu.setApplicationMenu(null);
   }
 
-  const targetUrl = isDev ? APP_URL : (process.env.PRODUCTION_URL || 'https://painelcelular.vercel.app');
+  const targetUrl = isDev ? APP_URL : (process.env.PRODUCTION_URL || 'https://app.phonecenter.tech');
   
-  mainWindow.loadURL(targetUrl).catch(() => {
-    console.log('[Electron] Falha ao carregar URL remota, tentando localhost...');
-    mainWindow.loadURL('http://localhost:3000');
+  mainWindow.loadURL(targetUrl).catch((err) => {
+    console.log('[Electron] Falha ao carregar URL remota, tentando recarregar...', err?.message);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL('https://app.phonecenter.tech').catch(() => {});
+      }
+    }, 3000);
   });
 
   mainWindow.once('ready-to-show', () => {

@@ -1,6 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Phone Center icon">
-  <rect width="512" height="512" rx="96" fill="#2563eb"/>
-  <rect x="144" y="64" width="224" height="384" rx="36" fill="#ffffff"/>
-  <rect x="172" y="96" width="168" height="256" rx="20" fill="#dbeafe"/>
-  <circle cx="256" cy="392" r="20" fill="#2563eb"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Gradiente de Fundo Premium Dark -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19"/>
+      <stop offset="50%" stop-color="#090d16"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </linearGradient>
+
+    <!-- Gradiente do Smartphone Azul Elétrico -->
+    <linearGradient id="phoneBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+
+    <!-- Gradiente da Tela -->
+    <linearGradient id="screenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+
+    <!-- Brilho / Glow Azul -->
+    <filter id="blueGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="30" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Fundo com cantos arredondados estilo App Icon -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bgGrad)"/>
+  <rect width="1020" height="1020" x="2" y="2" rx="218" fill="none" stroke="#1e293b" stroke-width="4"/>
+
+  <!-- Brilho de fundo sutil atrás do smartphone -->
+  <circle cx="512" cy="512" r="280" fill="#3b82f6" opacity="0.15" filter="url(#blueGlow)"/>
+
+  <!-- Corpo do Smartphone Minimalista -->
+  <rect x="312" y="162" width="400" height="700" rx="72" fill="url(#phoneBodyGrad)" filter="url(#blueGlow)"/>
+  
+  <!-- Chassi / Moldura interna -->
+  <rect x="328" y="178" width="368" height="668" rx="56" fill="#090d16"/>
+
+  <!-- Tela com gradiente sutil escuro -->
+  <rect x="344" y="194" width="336" height="636" rx="44" fill="url(#screenGrad)"/>
+
+  <!-- Dynamic Island / Câmera minimalista topo -->
+  <rect x="442" y="218" width="140" height="32" rx="16" fill="#030712"/>
+  <circle cx="550" cy="234" r="6" fill="#1e293b"/>
+
+  <!-- Elementos de interface minimalista no centro da tela -->
+  <rect x="432" y="432" width="160" height="160" rx="36" fill="#1e293b" stroke="#3b82f6" stroke-width="6"/>
+  
+  <!-- Barras do Dashboard/ERP dentro do chip -->
+  <rect x="468" y="520" width="16" height="36" rx="6" fill="#3b82f6"/>
+  <rect x="496" y="490" width="16" height="66" rx="6" fill="#60a5fa"/>
+  <rect x="524" y="468" width="16" height="88" rx="6" fill="#93c5fd"/>
+  <rect x="552" y="480" width="16" height="76" rx="6" fill="#3b82f6"/>
+
+  <!-- Barra de início inferior (Home Bar) -->
+  <rect x="442" y="784" width="140" height="10" rx="5" fill="#ffffff" opacity="0.7"/>
 </svg>

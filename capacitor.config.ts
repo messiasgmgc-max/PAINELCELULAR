@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Phone Center',
   webDir: 'public',
   server: {
-    url: process.env.CAPACITOR_SERVER_URL || 'https://painelcelular.vercel.app',
+    url: process.env.CAPACITOR_SERVER_URL || 'https://app.phonecenter.tech',
     cleartext: true,
     androidScheme: 'https'
   },
