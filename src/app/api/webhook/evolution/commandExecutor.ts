@@ -123,9 +123,12 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
 }`;
 
   const modelosParaTestar = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.5-flash-lite',
     'gemini-3.5-flash',
     'gemini-3.7-flash',
-    'gemini-3.5-flash-lite',
     'gemini-flash-latest',
   ];
 
@@ -313,9 +316,12 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
    - Em 3 linhas curtas: consulto vendas e relatórios (hoje, semana, mês, atacado/varejo), estoque em tempo real, saldo e extratos de fiado, checo IMEI e registro vendas.`;
 
   const modelosParaTestar = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.5-flash-lite',
     'gemini-3.5-flash',
     'gemini-3.7-flash',
-    'gemini-3.5-flash-lite',
     'gemini-flash-latest',
     'gemini-flash-lite-latest',
   ];

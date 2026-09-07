@@ -3459,6 +3459,7 @@ Digite: *!broadcast agora*`;
       let totalFiadoEmAberto = 0;
       let detalhesDevedoresFormatado = '';
       let totalVendasHoje = 0;
+      let analiticaVendas: ResumoVendasAgregado | null = null;
 
       if (lojaId) {
         // 1. Busca aparelhos detalhados do estoque
@@ -3488,7 +3489,6 @@ Digite: *!broadcast agora*`;
         detalhesDevedoresFormatado = fiadoConsolidado.detalhesDevedoresFormatado;
 
         // 3. Busca analítica de vendas abrangente (Hoje, Semana, Mês, Atacado vs Varejo e Histórico)
-        let analiticaVendas: ResumoVendasAgregado | null = null;
         try {
           analiticaVendas = await buscarResumoVendasLoja(supabase, lojaId);
           if (analiticaVendas) {
