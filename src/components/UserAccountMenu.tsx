@@ -14,11 +14,14 @@ import {
   XCircle,
   Smartphone,
   Sparkles,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStorePlan } from '@/hooks/useStorePlan';
 import { usePanelMode } from '@/hooks/usePanelMode';
+import { useColorTheme } from '@/components/ThemeProvider';
 import { checkIsSuperAdmin } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -41,6 +44,7 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
   const { usuario, logout } = useAuth();
   const { planData } = useStorePlan();
   const { isModoSimples, toggleModoSimples } = usePanelMode();
+  const { colorTheme, setColorTheme } = useColorTheme();
 
   if (!usuario) return null;
 
@@ -123,6 +127,24 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
           </div>
           <Badge className={isModoSimples ? "bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px]" : "bg-purple-500/20 text-purple-300 border-purple-500/30 text-[10px]"}>
             {isModoSimples ? "Modo Simples" : "Modo Completo"}
+          </Badge>
+        </DropdownMenuItem>
+
+        {/* Alternar Visual White Clean / Dark */}
+        <DropdownMenuItem 
+          onClick={() => setColorTheme(colorTheme === 'white-clean' ? 'padrao' : 'white-clean')}
+          className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-slate-200"
+        >
+          <div className="flex items-center gap-2">
+            {colorTheme === 'white-clean' ? (
+              <Sun className="w-4 h-4 text-amber-500" />
+            ) : (
+              <Moon className="w-4 h-4 text-cyan-400" />
+            )}
+            <span>Aparência:</span>
+          </div>
+          <Badge className={colorTheme === 'white-clean' ? "bg-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-500/30 text-[10px]" : "bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px]"}>
+            {colorTheme === 'white-clean' ? "White Clean" : "Dark"}
           </Badge>
         </DropdownMenuItem>
 

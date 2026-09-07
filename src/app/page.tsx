@@ -30,13 +30,16 @@ import { MeuPlanoModal } from '@/components/MeuPlanoModal';
 import { PlanPaywallModal } from '@/components/PlanPaywallModal';
 import { PwaInstallPrompt } from '@/components/PwaInstallPrompt';
 import { CommandPaletteModal } from '@/components/CommandPaletteModal';
+import { useColorTheme } from '@/components/ThemeProvider';
 import { 
   Smartphone, 
   LogOut,
   User,
   Shield,
   CreditCard,
-  Search
+  Search,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 export default function Home() {
@@ -52,6 +55,7 @@ export default function Home() {
   const subtitulo = config.subtituloLoja || 'Sistema de Gestão';
   const headerLogoLoja = config.logoLoja;
   const [showMeuPlanoModal, setShowMeuPlanoModal] = useState(false);
+  const { colorTheme, setColorTheme } = useColorTheme();
 
   const normalizeTabFromPath = (path: string) => {
     const segment = path.split('/').filter(Boolean)[0] || 'dashboard';
@@ -267,6 +271,19 @@ export default function Home() {
                 <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-mono font-bold bg-slate-800 text-cyan-300 rounded border border-slate-700 ml-0.5">
                   Ctrl K
                 </kbd>
+              </button>
+
+              {/* Botão Rápido de Alternar Tema White / Dark */}
+              <button
+                onClick={() => setColorTheme(colorTheme === 'white-clean' ? 'padrao' : 'white-clean')}
+                className="flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 transition-all text-slate-300 hover:text-white shrink-0 cursor-pointer shadow-sm"
+                title={colorTheme === 'white-clean' ? 'Mudar para Modo Dark' : 'Mudar para Modo White Clean'}
+              >
+                {colorTheme === 'white-clean' ? (
+                  <Moon className="w-4 h-4 text-cyan-500" />
+                ) : (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                )}
               </button>
 
               {/* Botão Meu Plano */}

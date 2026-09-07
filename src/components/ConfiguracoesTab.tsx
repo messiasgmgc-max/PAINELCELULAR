@@ -404,12 +404,13 @@ export function ConfiguracoesTab() {
                     <Palette className="w-5 h-5" /> Aparência e Temas
                   </h3>
                   <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-400">
-                    Escolha a paleta de cores principal do sistema. Temas customizados ativam o modo escuro automaticamente.
+                    Escolha a paleta de cores principal do sistema. Alterne entre o visual White Clean profissional ou os temas Dark de alta visibilidade.
                   </p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {[
-                    { id: 'padrao', name: 'Padrão (Azul)', color: '#2563eb' },
+                    { id: 'padrao', name: 'Padrão Dark (Azul)', color: '#2563eb' },
+                    { id: 'white-clean', name: 'White Clean (Profissional)', color: '#f8fafc', border: true },
                     { id: 'black-white', name: 'Black & White', color: '#1f2937' },
                     { id: 'purple', name: 'Roxo Escuro', color: '#9333ea' },
                     { id: 'red-black', name: 'Vermelho & Preto', color: '#dc2626' },
@@ -420,7 +421,7 @@ export function ConfiguracoesTab() {
                       onClick={() => setColorTheme(t.id as ColorTheme)}
                       className={`p-3 sm:p-4 rounded-2xl flex items-center gap-3 border-2 transition-all ${colorTheme === t.id ? 'border-blue-600 bg-white/20 shadow-lg' : 'border-transparent bg-white/5 hover:bg-white/10'}`}
                     >
-                      <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full shadow-md border border-white/20 flex-shrink-0" style={{ backgroundColor: t.color }} />
+                      <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full shadow-md border border-slate-300 dark:border-white/20 flex-shrink-0" style={{ backgroundColor: t.color }} />
                       <span className="font-medium text-sm text-left leading-tight">{t.name}</span>
                     </button>
                   ))}

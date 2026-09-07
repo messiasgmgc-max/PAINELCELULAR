@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { ThemeProvider as NextThemesProvider, ThemeProviderProps, useTheme } from "next-themes";
 
-export type ColorTheme = 'padrao' | 'black-white' | 'purple' | 'red-black' | 'green-black';
+export type ColorTheme = 'padrao' | 'white-clean' | 'black-white' | 'purple' | 'red-black' | 'green-black';
 
 interface ColorThemeContextType {
   colorTheme: ColorTheme;
@@ -23,8 +23,10 @@ function ThemeSync({ children }: { children: React.ReactNode }) {
   const { setTheme } = useTheme();
 
   useEffect(() => {
-    if (colorTheme !== 'padrao') {
-      setTheme('dark'); // Força o modo escuro para os temas customizados
+    if (colorTheme === 'white-clean') {
+      setTheme('light');
+    } else if (colorTheme !== 'padrao') {
+      setTheme('dark'); // Força o modo escuro para os temas customizados escuros
     }
   }, [colorTheme, setTheme]);
 
@@ -71,6 +73,180 @@ function ColorThemeStyles({ theme }: { theme: ColorTheme }) {
 
   // Interceptação e substituição CSS das classes Tailwind originais do sistema
   const styles: Record<string, string> = {
+    'white-clean': `
+      [data-color-theme="white-clean"] body, 
+      [data-color-theme="white-clean"] .bg-background { 
+        background-color: #f8fafc !important; 
+        color: #0f172a !important; 
+        background-image: 
+          radial-gradient(at 0% 0%, #f1f5f9 0px, transparent 50%),
+          radial-gradient(at 100% 0%, #e2e8f0 0px, transparent 50%),
+          radial-gradient(at 100% 100%, #e0e7ff 0px, transparent 50%),
+          radial-gradient(at 0% 100%, #f8fafc 0px, transparent 50%) !important;
+      }
+      [data-color-theme="white-clean"] {
+        --mesh-1: #f8fafc !important;
+        --mesh-2: #f1f5f9 !important;
+        --mesh-3: #e2e8f0 !important;
+        --mesh-4: #e0e7ff !important;
+        --glass-bg: rgba(255, 255, 255, 0.95) !important;
+        --glass-border: rgba(226, 232, 240, 0.9) !important;
+        --glass-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05), 0 8px 10px -6px rgba(15, 23, 42, 0.03) !important;
+      }
+      [data-color-theme="white-clean"] .glass {
+        background: #ffffff !important;
+        border-color: #e2e8f0 !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.04) !important;
+      }
+      [data-color-theme="white-clean"] .nav-surface {
+        background: rgba(255, 255, 255, 0.94) !important;
+        border-color: #e2e8f0 !important;
+        backdrop-filter: blur(16px) !important;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04) !important;
+      }
+      [data-color-theme="white-clean"] .modal-overlay {
+        background: rgba(15, 23, 42, 0.45) !important;
+        backdrop-filter: blur(12px) !important;
+      }
+      [data-color-theme="white-clean"] .modal-panel,
+      [data-color-theme="white-clean"] .pos-modal-panel {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border-color: #e2e8f0 !important;
+        box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15) !important;
+      }
+      [data-color-theme="white-clean"] .modal-header {
+        background-color: #f8fafc !important;
+        border-bottom-color: #e2e8f0 !important;
+      }
+      [data-color-theme="white-clean"] .text-white {
+        color: #0f172a !important;
+      }
+      [data-color-theme="white-clean"] .text-slate-100,
+      [data-color-theme="white-clean"] .text-slate-200,
+      [data-color-theme="white-clean"] .text-slate-300 {
+        color: #1e293b !important;
+      }
+      [data-color-theme="white-clean"] .text-slate-400,
+      [data-color-theme="white-clean"] .text-gray-400 {
+        color: #64748b !important;
+      }
+      [data-color-theme="white-clean"] .border-white\\/10,
+      [data-color-theme="white-clean"] .border-white\\/15,
+      [data-color-theme="white-clean"] .border-white\\/20,
+      [data-color-theme="white-clean"] .border-slate-800,
+      [data-color-theme="white-clean"] .dark\\:border-slate-800,
+      [data-color-theme="white-clean"] .dark\\:border-slate-700 {
+        border-color: #e2e8f0 !important;
+      }
+      [data-color-theme="white-clean"] .bg-slate-900,
+      [data-color-theme="white-clean"] .bg-slate-950,
+      [data-color-theme="white-clean"] .dark\\:bg-slate-900,
+      [data-color-theme="white-clean"] .dark\\:bg-slate-950 {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+      }
+      [data-color-theme="white-clean"] .bg-slate-900\\/80,
+      [data-color-theme="white-clean"] .bg-slate-950\\/60,
+      [data-color-theme="white-clean"] .dark\\:bg-slate-900\\/60,
+      [data-color-theme="white-clean"] .dark\\:bg-slate-950\\/98 {
+        background-color: #f8fafc !important;
+      }
+      [data-color-theme="white-clean"] .bg-slate-800,
+      [data-color-theme="white-clean"] .bg-slate-800\\/80,
+      [data-color-theme="white-clean"] .dark\\:bg-slate-800 {
+        background-color: #f1f5f9 !important;
+        color: #0f172a !important;
+      }
+      [data-color-theme="white-clean"] .hover\\:bg-slate-700\\/80:hover,
+      [data-color-theme="white-clean"] .hover\\:bg-slate-800:hover,
+      [data-color-theme="white-clean"] .hover\\:bg-white\\/10:hover,
+      [data-color-theme="white-clean"] .dark\\:hover\\:bg-white\\/10:hover {
+        background-color: #f1f5f9 !important;
+      }
+      [data-color-theme="white-clean"] .bg-white\\/5,
+      [data-color-theme="white-clean"] .bg-white\\/10 {
+        background-color: #f8fafc !important;
+      }
+      /* Preservar botões de ação e destaque primário */
+      [data-color-theme="white-clean"] .bg-blue-600,
+      [data-color-theme="white-clean"] .bg-blue-600\\/90,
+      [data-color-theme="white-clean"] .bg-primary,
+      [data-color-theme="white-clean"] .bg-emerald-600,
+      [data-color-theme="white-clean"] .bg-green-600,
+      [data-color-theme="white-clean"] .bg-red-600,
+      [data-color-theme="white-clean"] .bg-purple-600 {
+        color: #ffffff !important;
+      }
+      [data-color-theme="white-clean"] button.bg-blue-600,
+      [data-color-theme="white-clean"] button.bg-emerald-600,
+      [data-color-theme="white-clean"] button.bg-green-600,
+      [data-color-theme="white-clean"] button.bg-red-600,
+      [data-color-theme="white-clean"] button.bg-purple-600,
+      [data-color-theme="white-clean"] .bg-blue-600 *,
+      [data-color-theme="white-clean"] .bg-blue-600\\/90 *,
+      [data-color-theme="white-clean"] .bg-primary *,
+      [data-color-theme="white-clean"] .bg-emerald-600 *,
+      [data-color-theme="white-clean"] .bg-green-600 *,
+      [data-color-theme="white-clean"] .bg-red-600 *,
+      [data-color-theme="white-clean"] .bg-purple-600 * {
+        color: #ffffff !important;
+      }
+      [data-color-theme="white-clean"] .text-blue-600,
+      [data-color-theme="white-clean"] .text-blue-500,
+      [data-color-theme="white-clean"] .dark\\:text-blue-400 {
+        color: #2563eb !important;
+      }
+      [data-color-theme="white-clean"] .text-emerald-600,
+      [data-color-theme="white-clean"] .text-emerald-500,
+      [data-color-theme="white-clean"] .dark\\:text-emerald-400 {
+        color: #059669 !important;
+      }
+      [data-color-theme="white-clean"] .text-green-600,
+      [data-color-theme="white-clean"] .text-green-500,
+      [data-color-theme="white-clean"] .dark\\:text-green-400 {
+        color: #16a34a !important;
+      }
+      [data-color-theme="white-clean"] .text-amber-600,
+      [data-color-theme="white-clean"] .text-amber-500,
+      [data-color-theme="white-clean"] .dark\\:text-amber-400 {
+        color: #d97706 !important;
+      }
+      [data-color-theme="white-clean"] .text-purple-600,
+      [data-color-theme="white-clean"] .text-purple-500,
+      [data-color-theme="white-clean"] .dark\\:text-purple-400 {
+        color: #9333ea !important;
+      }
+      [data-color-theme="white-clean"] .text-red-600,
+      [data-color-theme="white-clean"] .text-red-500,
+      [data-color-theme="white-clean"] .dark\\:text-red-400 {
+        color: #dc2626 !important;
+      }
+      [data-color-theme="white-clean"] input,
+      [data-color-theme="white-clean"] select,
+      [data-color-theme="white-clean"] textarea {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border-color: #cbd5e1 !important;
+      }
+      [data-color-theme="white-clean"] input::placeholder,
+      [data-color-theme="white-clean"] textarea::placeholder {
+        color: #94a3b8 !important;
+      }
+      [data-color-theme="white-clean"] table tr {
+        border-bottom-color: #e2e8f0 !important;
+      }
+      [data-color-theme="white-clean"] table tr:hover {
+        background-color: #f8fafc !important;
+      }
+      [data-color-theme="white-clean"] th {
+        background-color: #f1f5f9 !important;
+        color: #475569 !important;
+      }
+      [data-color-theme="white-clean"] td {
+        color: #1e293b !important;
+      }
+    `,
     'black-white': `
       [data-color-theme="black-white"] body, [data-color-theme="black-white"] .bg-background { background-color: #000000 !important; }
       [data-color-theme="black-white"] .dark\\:bg-slate-950 { background-color: #050505 !important; }
