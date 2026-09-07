@@ -1479,7 +1479,7 @@ async function responderConsultaEstoqueNatural(
       const mod = String(a.modelo || '').toLowerCase();
       return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('mini');
     });
-    aparelhosEncontrados = baseModels.length > 0 ? baseModels : aparelhosDaGeracao;
+    aparelhosEncontrados = baseModels;
   } else {
     aparelhosEncontrados = aparelhosDaGeracao;
   }
@@ -1500,6 +1500,42 @@ async function responderConsultaEstoqueNatural(
     }
   }
 
+  // 7.1. FILTRO DE COR (Se o comprador especificou uma cor na mensagem: ex: preto, branco, azul, etc.)
+  const CORES_KEYWORDS: Record<string, string[]> = {
+    preto: ['preto', 'black', 'grafite', 'meia-noite', 'space gray', 'space grey', 'cinza espacial'],
+    branco: ['branco', 'white', 'prata', 'silver', 'estelar', 'starlight'],
+    azul: ['azul', 'blue', 'sierra', 'ultramarine', 'ultramarino', 'pacífico', 'pacific'],
+    roxo: ['roxo', 'purple', 'lilas', 'lilás', 'deep purple'],
+    dourado: ['dourado', 'gold', 'ouro'],
+    amarelo: ['amarelo', 'yellow'],
+    verde: ['verde', 'green', 'teal', 'alpino', 'alpine'],
+    vermelho: ['vermelho', 'red', 'product red'],
+    rosa: ['rosa', 'pink', 'rose'],
+    titanio_natural: ['natural', 'desert', 'deserto', 'titanium', 'titânio', 'cinza', 'gray', 'grey'],
+    laranja: ['laranja', 'orange', 'coral']
+  };
+
+  let corSolicitada: string[] | null = null;
+  for (const [, termos] of Object.entries(CORES_KEYWORDS)) {
+    if (termos.some((termo) => new RegExp(`\\b${termo}\\b`, 'i').test(textoParaAnalise))) {
+      corSolicitada = termos;
+      break;
+    }
+  }
+
+  if (corSolicitada) {
+    const filtradosPorCor = aparelhosEncontrados.filter((a) => {
+      const corAp = String(a.cor || '').toLowerCase();
+      return corSolicitada!.some((termo) => corAp.includes(termo));
+    });
+
+    if (filtradosPorCor.length > 0) {
+      aparelhosEncontrados = filtradosPorCor;
+    } else if (isGroup) {
+      return null;
+    }
+  }
+
   // 8. RESULTADO
   if (aparelhosEncontrados.length === 0) {
     if (isGroup) return null;
@@ -1515,8 +1551,54 @@ async function responderConsultaEstoqueNatural(
 
   aparelhosEncontrados.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
 
-  const aparelhosExibicao = isGroup ? aparelhosEncontrados.slice(0, 6) : aparelhosEncontrados;
+  // Em grupos: Agrupar claramente por loja com visual limpo
+  if (isGroup) {
+    const aparelhosPorLoja = new Map<string, any[]>();
+    aparelhosEncontrados.forEach((ap) => {
+      const nomeLoja = (mapLojas.get(ap.loja_id) || 'Phone Center').toUpperCase().trim();
+      const lista = aparelhosPorLoja.get(nomeLoja) || [];
+      lista.push(ap);
+      aparelhosPorLoja.set(nomeLoja, lista);
+    });
 
+    const blocosLojas: string[] = [];
+    aparelhosPorLoja.forEach((itensLoja, nomeLoja) => {
+      const linhasLoja: string[] = [];
+      linhasLoja.push(`*${nomeLoja}*`);
+
+      // Limitar a até 6 aparelhos por loja para manter a lista objetiva e sem poluição
+      const itensExibicao = itensLoja.slice(0, 6);
+      itensExibicao.forEach((a) => {
+        const modNorm = normalizarModelo(a.modelo);
+        const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
+        const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+        const batVal = a.saude_bateria || (a as any).saudeBateria;
+        const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+        const bat = batNum ? `(${batNum}%)` : '';
+        const modCap = [modNorm, cap].filter(Boolean).join(' ');
+        const extras = [nomeCor, bat].filter(Boolean).join(' ');
+        const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
+        const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+
+        linhasLoja.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
+      });
+
+      if (itensLoja.length > 6) {
+        linhasLoja.push(`_... e mais ${itensLoja.length - 6} opções_`);
+      }
+
+      blocosLojas.push(linhasLoja.join('\n'));
+    });
+
+    const prefixo = isPerguntaQuantidade
+      ? `📦 Temos *${aparelhosEncontrados.length} unidade(s)* de *${modeloAlvoFormatado}* disponível(is):\n\n`
+      : `Tem aqui esses modelos:\n\n`;
+
+    return `${prefixo}${blocosLojas.join('\n\n')}`;
+  }
+
+  // No privado (atendimento direto ao cliente/lojista):
+  const aparelhosExibicao = aparelhosEncontrados;
   let ultimoModelo = '';
   const linhasEncontrados: string[] = [];
 
@@ -1536,18 +1618,12 @@ async function responderConsultaEstoqueNatural(
     const extras = [nomeCor, bat].filter(Boolean).join(' ');
     const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
     const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-    const nomeLoja = mapLojas.get(a.loja_id) || 'Loja';
-    const tagLoja = isGroup ? ` [Loja: ${nomeLoja}]` : '';
-    linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}${tagLoja}`.replace(/\s+/g, ' ').trim());
+    linhasEncontrados.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
   });
-
-  if (isGroup && aparelhosEncontrados.length > 6) {
-    linhasEncontrados.push(`\n_... e mais ${aparelhosEncontrados.length - 6} opções disponíveis no estoque._`);
-  }
 
   const prefixo = isPerguntaQuantidade
     ? `📦 Temos *${aparelhosEncontrados.length} unidade(s)* de *${modeloAlvoFormatado}* disponível(is):\n\n`
-    : (isGroup ? `Tem aqui esses modelos:\n\n` : `Temos disponível no estoque:\n\n`);
+    : `Temos disponível no estoque:\n\n`;
 
   return `${prefixo}${linhasEncontrados.join('\n')}`;
 }
@@ -3010,6 +3086,47 @@ Digite: *!broadcast agora*`;
             return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado (vazio).' }, { status: 200 });
           }
 
+          if (isGroup) {
+            const aparelhosPorLoja = new Map<string, any[]>();
+            filtrados.forEach((ap) => {
+              const nomeLoja = (mapLojas.get(ap.loja_id) || 'Phone Center').toUpperCase().trim();
+              const lista = aparelhosPorLoja.get(nomeLoja) || [];
+              lista.push(ap);
+              aparelhosPorLoja.set(nomeLoja, lista);
+            });
+
+            const blocosLojas: string[] = [];
+            aparelhosPorLoja.forEach((itensLoja, nomeLoja) => {
+              const linhasLoja: string[] = [];
+              linhasLoja.push(`*${nomeLoja}*`);
+
+              itensLoja.slice(0, 6).forEach((a) => {
+                const modNorm = normalizarModelo(a.modelo);
+                const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
+                const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+                const batVal = a.saude_bateria || (a as any).saudeBateria;
+                const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+                const bat = batNum ? `(${batNum}%)` : '';
+                const modCap = [modNorm, cap].filter(Boolean).join(' ');
+                const extras = [nomeCor, bat].filter(Boolean).join(' ');
+                const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
+                const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
+
+                linhasLoja.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
+              });
+
+              if (itensLoja.length > 6) {
+                linhasLoja.push(`_... e mais ${itensLoja.length - 6} opções_`);
+              }
+
+              blocosLojas.push(linhasLoja.join('\n'));
+            });
+
+            const msgEstoqueFinal = `📦 *Temos ${filtrados.length} unidade(s) disponível(is)${modeloBuscado ? ` de ${modeloBuscado}` : ''}:*\n\n${blocosLojas.join('\n\n')}`;
+            await enviarMensagemWhatsApp(instanceName, targetDestination, msgEstoqueFinal);
+            return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado com sucesso.' }, { status: 200 });
+          }
+
           const linhas: string[] = [];
           filtrados.slice(0, 8).forEach((a) => {
             const modNorm = normalizarModelo(a.modelo);
@@ -3022,9 +3139,7 @@ Digite: *!broadcast agora*`;
             const extras = [nomeCor, bat].filter(Boolean).join(' ');
             const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
             const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-            const nomeLojaItem = mapLojas.get(a.loja_id) || 'Loja';
-            const tagLoja = isGroup ? ` [Loja: ${nomeLojaItem}]` : '';
-            linhas.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}${tagLoja}`.replace(/\s+/g, ' ').trim());
+            linhas.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
           });
 
           const msgEstoqueFinal = `📦 *Temos ${filtrados.length} unidade(s) disponível(is)${modeloBuscado ? ` de ${modeloBuscado}` : ''}:*\n\n${linhas.join('\n')}\n\nQual desses você gostaria de saber mais ou reservar? 😊`;
