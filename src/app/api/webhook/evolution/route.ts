@@ -37,6 +37,18 @@ const EVOLUTION_URL = getCleanEvolutionUrl();
 const EVOLUTION_API_KEY = (process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449').trim();
 const DEFAULT_INSTANCE = (process.env.EVOLUTION_INSTANCE_NAME || 'lucasimports').trim();
 
+// ── AUXILIAR: Formatar Data com Segurança ──
+function formatarDataSegura(dataIso?: string | null): string {
+  if (!dataIso) return 'Não definida';
+  try {
+    const d = new Date(dataIso);
+    if (isNaN(d.getTime())) return String(dataIso);
+    return d.toLocaleDateString('pt-BR');
+  } catch {
+    return String(dataIso);
+  }
+}
+
 // ── GET: Endpoint de Validação & Healthcheck do Webhook ──
 export async function GET() {
   return NextResponse.json(
