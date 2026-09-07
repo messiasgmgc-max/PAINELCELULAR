@@ -17,7 +17,8 @@ ALTER TABLE public.lojas
     "enviar_somente_dias_uteis": true,
     "notificar_dono": true,
     "chave_pix": ""
-  }'::jsonb;
+  }'::jsonb,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
 
 -- 2. GARANTIR A CRIAÇÃO DA TABELA lojistas_devedores (CLIENTES ATACADO)
 CREATE TABLE IF NOT EXISTS public.lojistas_devedores (

@@ -97,7 +97,6 @@ export async function POST(request: Request) {
 
     const updateLojaData: Record<string, any> = {
       config_atacado: configPayload,
-      updated_at: new Date().toISOString(),
     };
 
     if (configPayload.chave_pix && typeof configPayload.chave_pix === 'string') {
