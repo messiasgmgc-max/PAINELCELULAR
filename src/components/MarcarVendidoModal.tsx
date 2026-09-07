@@ -430,8 +430,8 @@ export function MarcarVendidoModal({
                   <span className="text-[10px] text-emerald-400 font-medium">📲 Notificação automática</span>
                 </div>
                 <input
-                  type="tel"
-                  placeholder="(31) 99999-9999"
+                  type="text"
+                  placeholder="(31) 99999-9999 ou +1 (305) 123-4567"
                   value={compradorTelefone}
                   onChange={(e) => setCompradorTelefone(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 outline-none font-mono"

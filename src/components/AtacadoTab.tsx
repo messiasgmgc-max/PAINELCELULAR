@@ -1677,12 +1677,22 @@ export function AtacadoTab() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {clientesFiltrados.map((cliente) => {
                   const saldo = Number(cliente.saldo_devedor || 0);
-                  const limite = Number(cliente.limite_credito || 0);
-                  const zapLimpo = (cliente.whatsapp || cliente.telefone || '').replace(/\D/g, '');
-                  const temZap = zapLimpo.length >= 10;
-                  const zapLink = temZap 
-                    ? `https://wa.me/${zapLimpo.startsWith('55') ? zapLimpo : `55${zapLimpo}`}`
-                    : null;
+                  const zapRaw = String(cliente.whatsapp || cliente.telefone || '').trim();
+                  const zapLimpo = zapRaw.replace(/\D/g, '');
+                  const temZap = zapLimpo.length >= 8;
+                  let finalZap = zapLimpo;
+                  if (zapRaw.startsWith('+')) {
+                    finalZap = zapLimpo;
+                  } else if (zapLimpo.startsWith('55') && (zapLimpo.length === 12 || zapLimpo.length === 13)) {
+                    finalZap = zapLimpo;
+                  } else {
+                    const dddNum = parseInt(zapLimpo.substring(0, 2), 10);
+                    const pareceBr = dddNum >= 11 && dddNum <= 99;
+                    if ((zapLimpo.length === 11 && pareceBr && zapLimpo.charAt(2) === '9') || (zapLimpo.length === 10 && pareceBr)) {
+                      finalZap = `55${zapLimpo}`;
+                    }
+                  }
+                  const zapLink = temZap ? `https://wa.me/${finalZap}` : null;
 
                   return (
                     <div 

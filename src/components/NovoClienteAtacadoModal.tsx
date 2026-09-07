@@ -209,12 +209,17 @@ export function NovoClienteAtacadoModal({
         ? clienteParaEditar.id
         : undefined;
 
+      const rawZap = String(whatsapp || '').trim();
+      const hasPlus = rawZap.startsWith('+');
+      const digitsZap = rawZap.replace(/\D/g, '');
+      const finalZap = digitsZap ? (hasPlus ? `+${digitsZap}` : digitsZap) : '';
+
       const payload = {
         id: realId,
         lojaId: lojaIdFinal,
         nome: nome.trim(),
-        whatsapp: whatsapp.replace(/\D/g, ''),
-        telefone: whatsapp.replace(/\D/g, ''),
+        whatsapp: finalZap,
+        telefone: finalZap,
         limiteCredito: limiteCredito ? parseFloat(limiteCredito.replace(',', '.')) : 0,
         saldoDevedor: saldoDevedor ? parseFloat(saldoDevedor.replace(',', '.')) : 0,
         cpfCnpj: cpfCnpj.trim() || undefined,
@@ -368,11 +373,23 @@ export function NovoClienteAtacadoModal({
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp com DDD (Fundamental para o Bot)
+                <Phone className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp / Celular
               </span>
               {whatsapp && (
                 <a
-                  href={`https://wa.me/55${whatsapp.replace(/\D/g, '')}`}
+                  href={(() => {
+                    const raw = String(whatsapp || '').trim();
+                    const limpo = raw.replace(/\D/g, '');
+                    if (!limpo) return '#';
+                    if (raw.startsWith('+')) return `https://wa.me/${limpo}`;
+                    if (limpo.startsWith('55') && (limpo.length === 12 || limpo.length === 13)) return `https://wa.me/${limpo}`;
+                    const dddNum = parseInt(limpo.substring(0, 2), 10);
+                    const pareceBr = dddNum >= 11 && dddNum <= 99;
+                    if ((limpo.length === 11 && pareceBr && limpo.charAt(2) === '9') || (limpo.length === 10 && pareceBr)) {
+                      return `https://wa.me/55${limpo}`;
+                    }
+                    return `https://wa.me/${limpo}`;
+                  })()}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1"
@@ -383,15 +400,14 @@ export function NovoClienteAtacadoModal({
             </label>
             <input
               id="atacado-whatsapp"
-              type="tel"
-              inputMode="tel"
+              type="text"
               value={whatsapp}
               onChange={(e) => setWhatsapp(e.target.value)}
-              placeholder="Ex: 31999999999 (somente números)"
+              placeholder="Ex: 31999999999 ou +1 (305) 123-4567 para outro país"
               className="w-full h-10 bg-slate-950/80 border border-slate-800 rounded-xl px-3 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
             />
-            <p className="text-[10px] text-slate-500">
-              O bot de cobrança automática e extratos usará este número para enviar mensagens.
+            <p className="text-[10px] text-slate-400">
+              💡 Para lojistas de outro país, use <strong>+</strong> e o código do país (ex: <strong>+1</strong> EUA, <strong>+595</strong> Paraguai, <strong>+351</strong> Portugal). O sistema detecta e envia direto sem forçar o 55 do Brasil.
             </p>
           </div>
 

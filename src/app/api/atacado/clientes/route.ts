@@ -125,7 +125,10 @@ export async function POST(request: Request) {
     }
 
     const cleanNome = String(nome).trim();
-    const cleanWhatsapp = (whatsapp || telefone || '').replace(/\D/g, '');
+    const rawZap = String(whatsapp || telefone || '').trim();
+    const hasPlus = rawZap.startsWith('+');
+    const digitsZap = rawZap.replace(/\D/g, '');
+    const cleanWhatsapp = digitsZap ? (hasPlus ? `+${digitsZap}` : digitsZap) : null;
 
     const recordPayload: any = {
       loja_id: lojaId,

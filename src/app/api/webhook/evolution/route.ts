@@ -298,14 +298,23 @@ async function monitorarCicloVidaPix(params: {
 
 // ── AUXILIAR: Resolver ID da Loja ──
 
-// ── AUXILIAR: Gerar Variantes de Telefone Brasileiro (DDI, DDD, 9º Dígito) ──
+// ── AUXILIAR: Gerar Variantes de Telefone (Brasileiro e Internacional) ──
 function obterVariantesTelefone(rawPhone: string): string[] {
-  const digits = String(rawPhone || '').replace(/\D/g, '');
+  const rawTrimmed = String(rawPhone || '').trim();
+  const comMais = rawTrimmed.startsWith('+');
+  const digits = rawTrimmed.replace(/\D/g, '');
   if (!digits) return [];
   const variants = new Set<string>();
   variants.add(digits);
+  variants.add(`+${digits}`);
 
-  if (digits.startsWith('55') && digits.length >= 12) {
+  // Se explicitamente começa com '+' e não é Brasil (55), é internacional: não adiciona 55
+  if (comMais && !digits.startsWith('55')) {
+    return Array.from(variants);
+  }
+
+  // Se começa com 55 e tem comprimento típico brasileiro (12 ou 13 dígitos)
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
     const local = digits.substring(2);
     variants.add(local);
     const ddd = local.substring(0, 2);
@@ -318,15 +327,23 @@ function obterVariantesTelefone(rawPhone: string): string[] {
       variants.add(`${ddd}9${num}`);
     }
   } else if (digits.length >= 10 && digits.length <= 11) {
-    variants.add(`55${digits}`);
     const ddd = digits.substring(0, 2);
-    const num = digits.substring(2);
-    if (num.length === 9 && num.startsWith('9')) {
-      variants.add(`55${ddd}${num.substring(1)}`);
-      variants.add(`${ddd}${num.substring(1)}`);
-    } else if (num.length === 8) {
-      variants.add(`55${ddd}9${num}`);
-      variants.add(`${ddd}9${num}`);
+    const dddNum = parseInt(ddd, 10);
+    const eDddBrasil = dddNum >= 11 && dddNum <= 99;
+    const eCelularBrasil = digits.length === 11 && digits.charAt(2) === '9';
+    const eFixoBrasil = digits.length === 10;
+
+    // Só aplica regras brasileiras se parecer DDD válido do Brasil e nono dígito/fixo
+    if (eDddBrasil && (eCelularBrasil || eFixoBrasil)) {
+      variants.add(`55${digits}`);
+      const num = digits.substring(2);
+      if (num.length === 9 && num.startsWith('9')) {
+        variants.add(`55${ddd}${num.substring(1)}`);
+        variants.add(`${ddd}${num.substring(1)}`);
+      } else if (num.length === 8) {
+        variants.add(`55${ddd}9${num}`);
+        variants.add(`${ddd}9${num}`);
+      }
     }
   }
 

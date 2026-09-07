@@ -25,16 +25,48 @@ export function getCleanEvolutionUrl(): string {
 }
 
 /**
- * Formata um número bruto para o padrão internacional do WhatsApp (55 + DDD + Número)
+ * Formata um número para o padrão internacional do WhatsApp.
+ * Suporta números do Brasil (adiciona 55 se vier com DDD de 10 ou 11 dígitos)
+ * e números internacionais de qualquer país (EUA +1, Paraguai +595, Portugal +351, etc.).
  */
 export function formatarTelefoneWhatsApp(numeroRaw: string): string {
-  let limpo = (numeroRaw || '').replace(/\D/g, '');
+  if (!numeroRaw) return '';
+  const rawTrimmed = String(numeroRaw).trim();
+  const comMais = rawTrimmed.startsWith('+');
+  let limpo = rawTrimmed.replace(/\D/g, '');
   if (!limpo) return '';
-  // Se for DDD + 8 ou 9 dígitos sem o DDI 55
-  if (limpo.length === 10 || limpo.length === 11) {
-    limpo = '55' + limpo;
+
+  // 1. Se o usuário explicitamente colocou '+' no início, respeita o DDI internacional digitado
+  if (comMais) {
+    return limpo;
   }
-  return limpo;
+
+  // 2. Se já começa com 55 e tem comprimento típico brasileiro (12 ou 13 dígitos)
+  if (limpo.startsWith('55') && (limpo.length === 12 || limpo.length === 13)) {
+    return limpo;
+  }
+
+  // 3. Se for número com 10 ou 11 dígitos típico do Brasil (DDD 11 a 99)
+  const primeiroDigito = limpo.charAt(0);
+  const segundoDigito = limpo.charAt(1);
+  const pareceDDDBrasil = primeiroDigito >= '1' && primeiroDigito <= '9' && segundoDigito >= '1' && segundoDigito <= '9';
+
+  // Se tem 11 dígitos (DDD + 9 dígitos começando com 9) e parece DDD BR
+  if (limpo.length === 11 && pareceDDDBrasil && limpo.charAt(2) === '9') {
+    return '55' + limpo;
+  }
+  // Se tem 10 dígitos (DDD + fixo) e parece DDD BR
+  if (limpo.length === 10 && pareceDDDBrasil) {
+    return '55' + limpo;
+  }
+
+  // 4. Se tem mais de 10 dígitos e não parece DDD local brasileiro, já é número internacional com DDI (ex: 1305..., 595981..., 351912...)
+  if (limpo.length >= 10) {
+    return limpo;
+  }
+
+  // Fallback padrão
+  return limpo.length >= 8 ? '55' + limpo : limpo;
 }
 
 /**

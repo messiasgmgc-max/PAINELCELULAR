@@ -682,7 +682,7 @@ export function VendaLoteAtacadoModal({
                     type="text"
                     value={compradorTelefone}
                     onChange={(e) => setCompradorTelefone(e.target.value)}
-                    placeholder="Ex: 31999999999 ou (31) 99999-9999"
+                    placeholder="Ex: 31999999999 ou +1 (305) 123-4567 para outro país"
                     className="w-full mt-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                   />
                 </div>

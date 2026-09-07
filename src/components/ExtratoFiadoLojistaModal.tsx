@@ -239,8 +239,21 @@ export function ExtratoFiadoLojistaModal({
   // Link para abrir diretamente no Web WhatsApp
   const handleAbrirWebWhatsApp = () => {
     const msg = encodeURIComponent(gerarTextoExtrato());
-    const tel = telefoneInput.replace(/\D/g, '');
-    const url = tel ? `https://wa.me/${tel.startsWith('55') ? tel : `55${tel}`}?text=${msg}` : `https://wa.me/?text=${msg}`;
+    const raw = String(telefoneInput || '').trim();
+    const tel = raw.replace(/\D/g, '');
+    let finalTel = tel;
+    if (raw.startsWith('+')) {
+      finalTel = tel;
+    } else if (tel.startsWith('55') && (tel.length === 12 || tel.length === 13)) {
+      finalTel = tel;
+    } else {
+      const dddNum = parseInt(tel.substring(0, 2), 10);
+      const pareceBr = dddNum >= 11 && dddNum <= 99;
+      if ((tel.length === 11 && pareceBr && tel.charAt(2) === '9') || (tel.length === 10 && pareceBr)) {
+        finalTel = `55${tel}`;
+      }
+    }
+    const url = finalTel ? `https://wa.me/${finalTel}?text=${msg}` : `https://wa.me/?text=${msg}`;
     window.open(url, '_blank');
   };
 
@@ -329,7 +342,7 @@ export function ExtratoFiadoLojistaModal({
                 type="text"
                 value={telefoneInput}
                 onChange={(e) => setTelefoneInput(e.target.value)}
-                placeholder="Ex: 31999999999"
+                placeholder="Ex: 31999999999 ou +1 305 123-4567"
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-white font-mono font-bold outline-none focus:border-emerald-500"
               />
             </div>
