@@ -130,51 +130,92 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
   "perguntaClarificacao": "pergunta_se_confianca_media"
 }`;
 
-  const modelosParaTestar = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-2.5-flash-lite',
+  const modelosGemini = [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
     'gemini-3.7-flash',
+    'gemini-3.8-flash',
     'gemini-flash-latest',
+    'gemini-flash-lite-latest',
   ];
 
-  for (const modelName of modelosParaTestar) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(12000),
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: systemPrompt },
-                  { text: `Mensagem do lojista/cliente: "${textContent}"` },
-                ],
+  // 1. Tenta executar via Google Gemini
+  if (apiKey) {
+    for (const modelName of modelosGemini) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(10000),
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    { text: systemPrompt },
+                    { text: `Mensagem do lojista/cliente: "${textContent}"` },
+                  ],
+                },
+              ],
+              generationConfig: {
+                responseMimeType: 'application/json',
               },
-            ],
-            generationConfig: {
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
-      );
+            }),
+          }
+        );
 
-      if (res.ok) {
-        const responseData = await res.json();
-        const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (textResponse) {
-          return textResponse.trim();
+        if (res.ok) {
+          const responseData = await res.json();
+          const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (textResponse) {
+            return textResponse.trim();
+          }
+        } else {
+          const errJson = await res.json().catch(() => ({}));
+          console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName} (${res.status}):`, errJson?.error?.message || res.statusText);
         }
-      } else {
-        const errJson = await res.json().catch(() => ({}));
-        console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName} (${res.status}):`, errJson?.error?.message || res.statusText);
+      } catch (err) {
+        console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName}:`, err);
       }
-    } catch (err) {
-      console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName}:`, err);
+    }
+  }
+
+  // 2. FALLBACK GROQ (se o Gemini estiver fora do ar ou com quota excedida 429)
+  const groqApiKey = process.env.GROQ_API_KEY;
+  if (groqApiKey) {
+    const modelosGroq = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+    for (const groqModel of modelosGroq) {
+      try {
+        const resGroq = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${groqApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(10000),
+          body: JSON.stringify({
+            model: groqModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: `Mensagem do lojista/cliente: "${textContent}"` },
+            ],
+            temperature: 0.1,
+            response_format: { type: 'json_object' },
+          }),
+        });
+
+        if (resGroq.ok) {
+          const groqData = await resGroq.json();
+          const content = groqData.choices?.[0]?.message?.content;
+          if (content && typeof content === 'string' && content.trim()) {
+            return content.trim();
+          }
+        }
+      } catch (gErr) {
+        console.warn(`[Groq Fallback Natural Language] Falha modelo ${groqModel}:`, gErr);
+      }
     }
   }
 
@@ -344,12 +385,12 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
 8. "O que você faz?" ou "?":
    - Em 3 linhas curtas: consulto vendas e relatórios (lucro, custo, faturamento, atacado/varejo), estoque e IMEIs em tempo real, saldo e extratos de fiado, checo IMEI e registro/edito vendas.`;
 
-  const modelosParaTestar = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-2.5-flash-lite',
+  const modelosGemini = [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
     'gemini-3.7-flash',
+    'gemini-3.8-flash',
     'gemini-flash-latest',
     'gemini-flash-lite-latest',
   ];
@@ -394,47 +435,109 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
     });
   }
 
-  for (const modelName of modelosParaTestar) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(12000),
-          body: JSON.stringify({
-            contents: contentsPayload,
-          }),
-        }
-      );
+  // 1. Tenta responder via Google Gemini
+  if (apiKey) {
+    for (const modelName of modelosGemini) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(10000),
+            body: JSON.stringify({
+              contents: contentsPayload,
+            }),
+          }
+        );
 
-      if (res.ok) {
-        const responseData = await res.json();
-        const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (textResponse && typeof textResponse === 'string' && textResponse.trim()) {
-          return {
-            sucesso: true,
-            resposta: sanitizarTextoWhatsApp(textResponse.trim()),
-            modeloUsado: modelName,
-          };
+        if (res.ok) {
+          const responseData = await res.json();
+          const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (textResponse && typeof textResponse === 'string' && textResponse.trim()) {
+            return {
+              sucesso: true,
+              resposta: sanitizarTextoWhatsApp(textResponse.trim()),
+              modeloUsado: modelName,
+            };
+          } else {
+            errosColetados.push(`• ${modelName}: Resposta vazia da API`);
+          }
         } else {
-          errosColetados.push(`• ${modelName}: Resposta vazia da API`);
+          const errJson = await res.json().catch(() => ({}));
+          const msg = errJson?.error?.message || res.statusText || `HTTP ${res.status}`;
+          errosColetados.push(`• ${modelName} (${res.status}): ${msg.slice(0, 100)}`);
+          console.warn(`[Gemini Copiloto Lojista] Falha modelo ${modelName} (${res.status}):`, msg);
         }
-      } else {
-        const errJson = await res.json().catch(() => ({}));
-        const msg = errJson?.error?.message || res.statusText || `HTTP ${res.status}`;
-        errosColetados.push(`• ${modelName} (${res.status}): ${msg.slice(0, 100)}`);
-        console.warn(`[Gemini Copiloto Lojista] Falha modelo ${modelName} (${res.status}):`, msg);
+      } catch (err: any) {
+        errosColetados.push(`• ${modelName}: ${err?.message || 'Falha de conexão / timeout'}`);
+        console.warn(`[Gemini Copiloto Lojista] Falha ao tentar modelo ${modelName}:`, err);
       }
-    } catch (err: any) {
-      errosColetados.push(`• ${modelName}: ${err?.message || 'Falha de conexão / timeout'}`);
-      console.warn(`[Gemini Copiloto Lojista] Falha ao tentar modelo ${modelName}:`, err);
+    }
+  }
+
+  // 2. FALLBACK GROQ (se o Gemini falhar por 429 quota excedida ou indisponibilidade)
+  const groqApiKey = process.env.GROQ_API_KEY;
+  if (groqApiKey) {
+    const modelosGroq = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+    
+    // Monta mensagens para o Groq
+    const groqMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    if (historicoChat.length > 0) {
+      for (const h of historicoChat) {
+        groqMessages.push({
+          role: h.role === 'user' ? 'user' : 'assistant',
+          content: h.text,
+        });
+      }
+    }
+
+    groqMessages.push({ role: 'user', content: textContent });
+
+    for (const groqModel of modelosGroq) {
+      try {
+        const resGroq = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${groqApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(10000),
+          body: JSON.stringify({
+            model: groqModel,
+            messages: groqMessages,
+            temperature: 0.3,
+          }),
+        });
+
+        if (resGroq.ok) {
+          const groqData = await resGroq.json();
+          const content = groqData.choices?.[0]?.message?.content;
+          if (content && typeof content === 'string' && content.trim()) {
+            return {
+              sucesso: true,
+              resposta: sanitizarTextoWhatsApp(content.trim()),
+              modeloUsado: `Groq (${groqModel})`,
+            };
+          }
+        } else {
+          const errGroq = await resGroq.json().catch(() => ({}));
+          console.warn(`[Groq Copiloto Lojista] Falha modelo ${groqModel}:`, errGroq);
+          errosColetados.push(`• Groq ${groqModel} (${resGroq.status}): ${errGroq?.error?.message || resGroq.statusText}`);
+        }
+      } catch (gErr: any) {
+        console.warn(`[Groq Copiloto Lojista] Falha conexao modelo ${groqModel}:`, gErr);
+        errosColetados.push(`• Groq ${groqModel}: ${gErr?.message || 'Falha'}`);
+      }
     }
   }
 
   return {
     sucesso: false,
-    erroLog: errosColetados.join('\n') || 'Nenhum dos modelos Gemini conseguiu responder.',
+    erroLog: errosColetados.join('\n') || 'Nenhum dos modelos Gemini ou Groq conseguiu responder.',
   };
 }
 
