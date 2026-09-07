@@ -4,10 +4,16 @@ import { PLANOS_SISTEMA } from '@/lib/planos-config';
 export type GeminiCommandAction =
   | 'create_aparelho'
   | 'create_cliente'
+  | 'list_clientes'
   | 'create_tecnico'
   | 'create_os'
+  | 'list_os'
+  | 'update_os'
   | 'create_agendamento'
+  | 'list_agendamentos'
   | 'create_garantia'
+  | 'list_garantias'
+  | 'list_pecas'
   | 'create_venda'
   | 'update_venda'
   | 'generate_etiquetas'
@@ -89,6 +95,15 @@ AÇÕES OPERACIONAIS REAIS (action):
 - "create_aparelho": cadastrar novo aparelho no estoque (params: marca, modelo, capacidade, cor, preco, imei, condicao).
 - "update_preco": alterar/atualizar preço de um aparelho (params: aparelho, modelo, imei, codigo, novoPreco).
 - "abater_divida": abater ou registrar pagamento de fiado/saldo devedor (params: cliente, valor, observacao).
+- "create_os": abrir/criar nova Ordem de Serviço (params: clienteNome, aparelhoModelo, defeito, tecnico, prazoEntrega, observacoes).
+- "list_os": listar/consultar Ordens de Serviço (params: clienteNome, status, numeroOS).
+- "update_os": atualizar status de uma OS (params: numeroOS, clienteNome, aparelhoModelo, novoStatus ['aguardando' | 'em_andamento' | 'pronto' | 'entregue' | 'cancelado']).
+- "create_cliente": cadastrar novo cliente (params: nome, telefone, email, cpf, endereco).
+- "list_clientes": consultar/buscar clientes cadastrados (params: nome, telefone).
+- "create_agendamento": criar novo agendamento (params: clienteNome, data, hora, tipoServico, aparelhoModelo, observacoes).
+- "list_agendamentos": consultar agendamentos (params: data, clienteNome, status).
+- "list_garantias": consultar garantias (params: clienteNome, aparelhoModelo, status ['ativa' | 'expirada' | 'acionada']).
+- "list_pecas": consultar estoque de peças (params: nome, categoria).
 
 FUNIL DE CONFIANÇA (confianca):
 1. "alta": Quando a intenção for clara E for uma ação operacional acima com dados suficientes:
@@ -103,6 +118,26 @@ FUNIL DE CONFIANÇA (confianca):
      Ex: "muda o preço do aparelho X pra 3000" -> confianca: "alta", params: {"aparelho": "X", "novoPreco": 3000}
    - "abater_divida": Precisa de cliente e valor.
      Ex: "abater 300 do joao" -> confianca: "alta", params: {"cliente": "joao", "valor": 300}
+   - "create_os": Precisa de cliente e defeito (aparelho e técnico são opcionais).
+     Ex: "abre OS pro João, defeito tela quebrada" -> confianca: "alta", params: {"clienteNome": "João", "defeito": "tela quebrada"}
+   - "update_os": Precisa de identificador (número ou cliente/aparelho) e novo status.
+     Ex: "marca OS do João como pronto" -> confianca: "alta", params: {"clienteNome": "João", "novoStatus": "pronto"}
+     Ex: "OS 42 entregue" -> confianca: "alta", params: {"numeroOS": "42", "novoStatus": "entregue"}
+   - "create_cliente": Precisa de nome (telefone é opcional).
+     Ex: "cadastra cliente Maria da Silva tel 31999990000" -> confianca: "alta", params: {"nome": "Maria da Silva", "telefone": "31999990000"}
+   - "create_agendamento": Precisa de cliente e data (hora e tipo de serviço são opcionais).
+     Ex: "agenda o Lucas pra amanhã às 14h pra troca de tela" -> confianca: "alta", params: {"clienteNome": "Lucas", "data": "amanhã", "hora": "14:00", "tipoServico": "troca de tela"}
+   - "list_os": Para consultas simples de OS.
+     Ex: "lista as OS abertas" -> confianca: "alta", params: {"status": "em_andamento"}
+     Ex: "OS do cliente Pedro" -> confianca: "alta", params: {"clienteNome": "Pedro"}
+   - "list_clientes": Para busca de clientes.
+     Ex: "busca cliente Ana" -> confianca: "alta", params: {"nome": "Ana"}
+   - "list_garantias": Para consulta de garantias.
+     Ex: "garantia do João ainda tá ativa?" -> confianca: "alta", params: {"clienteNome": "João"}
+   - "list_agendamentos": Para consulta de agenda.
+     Ex: "quais agendamentos de hoje?" -> confianca: "alta", params: {"data": "hoje"}
+   - "list_pecas": Para consulta de peças.
+     Ex: "tem tela de iphone 11 no estoque?" -> confianca: "alta", params: {"nome": "tela iphone 11"}
 
 2. "media": Quando a intenção de alterar/registrar for identificada, MAS faltar algum dado principal:
    - "create_venda": Falta o valor da venda, o modelo do aparelho ou o comprador.
@@ -115,10 +150,16 @@ FUNIL DE CONFIANÇA (confianca):
      Ex: "cadastra esse celular preto aqui" -> confianca: "media", campoFaltante: "modelo e preco", perguntaClarificacao: "Qual é o modelo e o preço do aparelho a ser cadastrado?"
    - "abater_divida": Falta o valor ou falta o cliente.
      Ex: "abate o fiado do joao" -> confianca: "media", campoFaltante: "valor", perguntaClarificacao: "Qual o valor a ser abatido da dívida do João?"
+   - "create_os": Falta o defeito ou cliente.
+     Ex: "abre uma OS" -> confianca: "media", campoFaltante: "cliente e defeito", perguntaClarificacao: "Para qual cliente e com qual defeito devo abrir a OS?"
+   - "update_os": Falta o novo status ou identificador da OS.
+     Ex: "atualiza a OS do João" -> confianca: "media", campoFaltante: "novo status", perguntaClarificacao: "Qual o novo status da OS? (aguardando, em andamento, pronto, entregue)"
+   - "create_agendamento": Falta data ou cliente.
+     Ex: "agenda um cliente pra troca de tela" -> confianca: "media", campoFaltante: "cliente e data", perguntaClarificacao: "Qual o nome do cliente e para qual data/hora devo agendar?"
    Nesse caso, NUNCA invente dados fictícios. Defina "campoFaltante" e uma "perguntaClarificacao" direta, simples e amigável.
 
 3. "baixa": IMPORTANTE! Quando a mensagem NÃO for uma ordem de cadastro/venda/preço/abatimento acima, for uma pergunta, dúvida, consulta sobre vendas (hoje, semana, mês, atacado, varejo), histórico, relatórios, estoque, planos, faturamento, fiado, devedores, saudação ou conversa geral.
-   Ex: "quais vendas feitas hoje?", "historico de atacado", "extrato de vendas", "qual faturamento da semana?", "bom dia" -> confianca: "baixa"
+   Ex: "quais vendas feitas hoje?", "historico de atacado", "extrato de vendas", "qual faturamento da semana?", "bom dia", "quais OS abertas?", "tem agendamento amanhã?" -> confianca: "baixa"
 
 FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
 {
@@ -131,9 +172,10 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
 }`;
 
   const modelosGemini = [
-    'gemini-3.6-flash',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.6-flash',
     'gemini-3.7-flash',
     'gemini-3.8-flash',
     'gemini-flash-latest',
@@ -149,7 +191,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(6000),
             body: JSON.stringify({
               contents: [
                 {
@@ -185,7 +227,12 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
   // 2. FALLBACK GROQ (se o Gemini estiver fora do ar ou com quota excedida 429)
   const groqApiKey = process.env.GROQ_API_KEY;
   if (groqApiKey) {
-    const modelosGroq = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+    const modelosGroq = [
+      'qwen/qwen3.8-27b',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'groq/compound-mini',
+    ];
     for (const groqModel of modelosGroq) {
       try {
         const resGroq = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -194,7 +241,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
             'Authorization': `Bearer ${groqApiKey}`,
             'Content-Type': 'application/json',
           },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(6000),
           body: JSON.stringify({
             model: groqModel,
             messages: [
@@ -202,6 +249,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
               { role: 'user', content: `Mensagem do lojista/cliente: "${textContent}"` },
             ],
             temperature: 0.1,
+            max_tokens: 300,
             response_format: { type: 'json_object' },
           }),
         });
@@ -212,6 +260,9 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
           if (content && typeof content === 'string' && content.trim()) {
             return content.trim();
           }
+        } else {
+          const errGroq = await resGroq.json().catch(() => ({}));
+          console.warn(`[Groq Fallback Natural Language] Falha modelo ${groqModel} (${resGroq.status}):`, errGroq?.error?.message || resGroq.statusText);
         }
       } catch (gErr) {
         console.warn(`[Groq Fallback Natural Language] Falha modelo ${groqModel}:`, gErr);
@@ -251,6 +302,9 @@ export interface ContextoConversaNatural {
   resumoLucroMes?: string;
   historicoAtacadoMes?: string;
   historicoVendasRecentes?: string;
+  resumoOSAbertas?: string;
+  resumoAgendamentosHoje?: string;
+  resumoGarantiasAtivas?: string;
   historicoChat?: MensagemHistorico[];
   isGroup?: boolean;
 }
@@ -315,6 +369,7 @@ export async function responderConversaNaturalComGemini(
   const resumoVendasHoje = contexto?.resumoVendasHoje || (contexto?.totalVendasHoje
     ? `Total: R$ ${totalVendasHoje}`
     : 'Nenhuma venda registrada hoje até o momento.');
+
   const resumoLucroHoje = contexto?.resumoLucroHoje ? `\n- Métricas de Lucro Hoje: ${contexto.resumoLucroHoje}` : '';
   const resumoVendasSemana = contexto?.resumoVendasSemana || 'Sem dados da semana.';
   const resumoLucroSemana = contexto?.resumoLucroSemana ? `\n- Lucro da Semana: ${contexto.resumoLucroSemana}` : '';
@@ -322,6 +377,9 @@ export async function responderConversaNaturalComGemini(
   const resumoLucroMes = contexto?.resumoLucroMes ? `\n- Lucro do Mês: ${contexto.resumoLucroMes}` : '';
   const historicoAtacado = contexto?.historicoAtacadoMes || 'Nenhuma venda de atacado registrada neste mês.';
   const historicoRecente = contexto?.historicoVendasRecentes || 'Nenhuma venda recente registrada.';
+  const resumoOSAbertas = contexto?.resumoOSAbertas || 'Nenhuma OS em aberto registrada.';
+  const resumoAgendamentosHoje = contexto?.resumoAgendamentosHoje || 'Nenhum agendamento para hoje.';
+  const resumoGarantiasAtivas = contexto?.resumoGarantiasAtivas || 'Nenhuma garantia ativa registrada.';
 
   const planosDescricaoPrecos = Object.values(PLANOS_SISTEMA)
     .map((p) => `${p.nome} (R$ ${p.precos.mensal.valorMensal.toFixed(2).replace('.', ',')}/mês)`)
@@ -355,6 +413,12 @@ ${estoqueDescricao}
 ${historicoAtacado}
 - Histórico Geral Recente (Últimas vendas da loja com valor, custo e lucro):
 ${historicoRecente}
+- Ordens de Serviço em Aberto:
+${resumoOSAbertas}
+- Agendamentos de Hoje:
+${resumoAgendamentosHoje}
+- Garantias Ativas:
+${resumoGarantiasAtivas}
 
 COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
 1. Vendas / Faturamento / Relatório (Hoje, Semana, Mês):
@@ -380,15 +444,34 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
 6. Estoque e IMEIs:
    - Se perguntar quais IMEIs ou detalhes de aparelhos em estoque (ex: "quais imeis?", "quais iphones 15?"):
      -> Consulte a lista de estoque disponível fornecida acima. Cada item possui seu IMEI e código. Liste os IMEIs dos aparelhos correspondentes em 1 a 3 linhas objetivas! NUNCA diga que não tem IMEI se a lista acima tiver aparelhos.
-7. Planos:
-   - Liste apenas os 3 planos e seus valores em 3 linhas curtas, informando o plano atual dele.
-8. "O que você faz?" ou "?":
-   - Em 3 linhas curtas: consulto vendas e relatórios (lucro, custo, faturamento, atacado/varejo), estoque e IMEIs em tempo real, saldo e extratos de fiado, checo IMEI e registro/edito vendas.`;
+7. Ordens de Serviço (OS):
+   - Se perguntar sobre OS abertas, pendentes, prontas ou de um cliente específico:
+     -> Consulte o resumo de OS fornecido acima e responda de forma direta. Ex: "Há 3 OS abertas: João (tela), Maria (bateria), Pedro (câmera)."
+   - Se pedir para abrir uma OS: diga que para criar uma OS basta dizer "abre OS para [cliente] defeito [defeito]".
+   - Se pedir para atualizar status: diga "diga 'marca OS do [cliente] como pronto/entregue/cancelado'".
+8. Agendamentos:
+   - Se perguntar sobre agendamentos de hoje, amanhã ou de um cliente:
+     -> Consulte o resumo de agendamentos de hoje acima e responda diretamente. Ex: "Hoje tem 2 agendamentos: Lucas às 10h (troca de tela) e Ana às 15h (bateria)."
+   - Para criar agendamento: "diga 'agenda [cliente] para [data] às [hora] para [serviço]'."
+9. Garantias:
+   - Se perguntar se a garantia de um cliente ainda está ativa ou válida:
+     -> Consulte o resumo de garantias ativas acima. Ex: "A garantia do João está ativa até 15/03/2025 (iPhone 12)."
+   - Se a garantia não estiver no resumo, informe que não há garantia registrada para esse cliente.
+10. Peças / Estoque de Peças:
+    - Se perguntar se tem determinada peça em estoque (tela, bateria, conector, etc.):
+      -> Diga para usar o comando "!pecas [nome da peça]" para consulta detalhada, ou que vai verificar o estoque de peças.
+11. Planos:
+    - Liste apenas os 3 planos e seus valores em 3 linhas curtas, informando o plano atual dele.
+12. "O que você faz?" ou "?":
+    - Em 3 linhas curtas: consulto vendas, lucros, estoque/IMEIs, fiado, OS, agendamentos, garantias e peças em tempo real. Registro e edito vendas, OS e clientes. Checo IMEI e faço broadcasts de estoque.`;
+
+
 
   const modelosGemini = [
-    'gemini-3.6-flash',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.6-flash',
     'gemini-3.7-flash',
     'gemini-3.8-flash',
     'gemini-flash-latest',
@@ -444,7 +527,7 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(6000),
             body: JSON.stringify({
               contents: contentsPayload,
             }),
@@ -479,7 +562,12 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
   // 2. FALLBACK GROQ (se o Gemini falhar por 429 quota excedida ou indisponibilidade)
   const groqApiKey = process.env.GROQ_API_KEY;
   if (groqApiKey) {
-    const modelosGroq = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+    const modelosGroq = [
+      'qwen/qwen3.8-27b',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'groq/compound-mini',
+    ];
     
     // Monta mensagens para o Groq
     const groqMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -505,11 +593,12 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
             'Authorization': `Bearer ${groqApiKey}`,
             'Content-Type': 'application/json',
           },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(6000),
           body: JSON.stringify({
             model: groqModel,
             messages: groqMessages,
             temperature: 0.3,
+            max_tokens: 300,
           }),
         });
 
@@ -639,6 +728,54 @@ export function buildWhatsAppText(action: string, data: unknown, phone: string) 
         return `📋 *Lojas Disponíveis:*\n\n${lojasFmt}`;
       }
       return `📋 Consulta de lojas concluída.`;
+    }
+    case 'create_os':
+      return `✅ *OS Aberta com Sucesso!*\n\n👤 *Cliente:* ${entity.clienteNome || nombre}\n🔧 *Defeito:* ${entity.defeito || '-'}\n📱 *Aparelho:* ${entity.aparelhoModelo || '-'}\n\nOS: ${id || 'Criada no sistema'}`;
+    case 'list_os': {
+      if (typeof data === 'string') return data;
+      if (Array.isArray(data) && data.length > 0) {
+        const osFmt = data.map((os: any) => `• OS #${os.numeroOS || '?'} — ${os.clienteNome || 'Cliente'} | ${os.aparelhoModelo || '-'} | Status: ${os.status || '-'}`).join('\n');
+        return `🔧 *Ordens de Serviço:*\n\n${osFmt}`;
+      }
+      return entity.resumo ? String(entity.resumo) : '🔧 Nenhuma OS encontrada.';
+    }
+    case 'update_os':
+      return `✅ *OS Atualizada com Sucesso!*\n\n👤 *Cliente:* ${entity.clienteNome || nombre}\n🔄 *Novo Status:* ${entity.novoStatus || '-'}\n\nOS: ${id || 'Atualizada no sistema'}`;
+    case 'create_cliente':
+      return `✅ *Cliente Cadastrado!*\n\n👤 *Nome:* ${entity.nome || nombre}\n📱 *Telefone:* ${entity.telefone || extra || '-'}\n\nID: ${id || 'Confirmado'}`;
+    case 'list_clientes': {
+      if (typeof data === 'string') return data;
+      if (Array.isArray(data) && data.length > 0) {
+        const cliFmt = data.map((c: any) => `• ${c.nome || 'Cliente'} ${c.telefone ? `— ${c.telefone}` : ''}`).join('\n');
+        return `👥 *Clientes Encontrados:*\n\n${cliFmt}`;
+      }
+      return entity.resumo ? String(entity.resumo) : '👥 Nenhum cliente encontrado.';
+    }
+    case 'create_agendamento':
+      return `✅ *Agendamento Criado!*\n\n👤 *Cliente:* ${entity.clienteNome || nombre}\n📅 *Data:* ${entity.data || '-'} ${entity.hora ? `às ${entity.hora}` : ''}\n🔧 *Serviço:* ${entity.tipoServico || '-'}\n\nID: ${id || 'Confirmado'}`;
+    case 'list_agendamentos': {
+      if (typeof data === 'string') return data;
+      if (Array.isArray(data) && data.length > 0) {
+        const agFmt = data.map((a: any) => `• ${a.clienteNome || 'Cliente'} — ${a.data || '-'} ${a.hora || ''} | ${a.tipoServico || '-'}`).join('\n');
+        return `📅 *Agendamentos:*\n\n${agFmt}`;
+      }
+      return entity.resumo ? String(entity.resumo) : '📅 Nenhum agendamento encontrado.';
+    }
+    case 'list_garantias': {
+      if (typeof data === 'string') return data;
+      if (Array.isArray(data) && data.length > 0) {
+        const garFmt = data.map((g: any) => `• ${g.clienteNome || 'Cliente'} — ${g.aparelhoModelo || '-'} | Válida até: ${g.dataFim || '-'} | Status: ${g.status || '-'}`).join('\n');
+        return `🛡️ *Garantias:*\n\n${garFmt}`;
+      }
+      return entity.resumo ? String(entity.resumo) : '🛡️ Nenhuma garantia encontrada.';
+    }
+    case 'list_pecas': {
+      if (typeof data === 'string') return data;
+      if (Array.isArray(data) && data.length > 0) {
+        const pecasFmt = data.map((p: any) => `• ${p.nome || 'Peça'} ${p.categoria ? `(${p.categoria})` : ''} — Qtd: ${p.quantidade || 0}${p.preco ? ` | R$ ${Number(p.preco).toFixed(2).replace('.', ',')}` : ''}`).join('\n');
+        return `🔩 *Estoque de Peças:*\n\n${pecasFmt}`;
+      }
+      return entity.resumo ? String(entity.resumo) : '🔩 Nenhuma peça encontrada.';
     }
     case 'search_entities':
     case 'query_entities':

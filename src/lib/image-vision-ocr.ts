@@ -194,8 +194,13 @@ export async function analyzeImageWithGemini(
       geminiMime = 'image/jpeg';
     }
 
-    // Tenta gemini-3.6-flash ou gemini-2.5-flash
-    const modelosParaTestar = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+    // Tenta modelos com suporte a visão multimodal
+    const modelosParaTestar = [
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-flash-latest',
+    ];
 
     for (const modelName of modelosParaTestar) {
       const res = await fetch(

@@ -3751,12 +3751,247 @@ A venda foi enviada para validação de um administrador no painel!`;
           }
         }
 
+        // Execução real de criação de OS pela IA
+        if (geminiPlan.action === 'create_os' && lojaId) {
+          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
+          const defeitoStr = String(geminiPlan.params.defeito || '').trim();
+          const aparelhoModeloStr = String(geminiPlan.params.aparelhoModelo || '').trim();
+          const tecnicoStr = String(geminiPlan.params.tecnico || '').trim();
+
+          if (clienteNomeStr && defeitoStr) {
+            const { data: novaOS } = await supabase.from('ordens_servico').insert({
+              loja_id: lojaId,
+              clienteNome: clienteNomeStr,
+              aparelhoModelo: aparelhoModeloStr || 'Não informado',
+              defeito: defeitoStr,
+              status: 'aguardando',
+              tecnico: tecnicoStr || null,
+              observacoes: `OS criada via WhatsApp IA por ${pushName}`,
+              dataEntrada: new Date().toISOString(),
+              ativo: true,
+            }).select().single();
+
+            const textResposta = buildWhatsAppText('create_os', {
+              ...geminiPlan.params,
+              clienteNome: clienteNomeStr,
+              defeito: defeitoStr,
+              aparelhoModelo: aparelhoModeloStr,
+              id: (novaOS as any)?.numeroOS || (novaOS as any)?.id || 'Criada',
+            }, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'OS IA criada.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de consulta de OS pela IA
+        if (geminiPlan.action === 'list_os' && lojaId) {
+          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
+          const statusStr = String(geminiPlan.params.status || '').trim();
+          const numeroOSStr = String(geminiPlan.params.numeroOS || '').trim();
+
+          let osQuery = supabase.from('ordens_servico').select('id, numeroOS, clienteNome, aparelhoModelo, defeito, status, dataEntrada').eq('loja_id', lojaId).eq('ativo', true);
+          if (clienteNomeStr) osQuery = osQuery.ilike('clienteNome', `%${clienteNomeStr}%`);
+          if (statusStr) osQuery = osQuery.eq('status', statusStr);
+          if (numeroOSStr) osQuery = (osQuery as any).eq('numeroOS', parseInt(numeroOSStr, 10));
+          osQuery = (osQuery as any).order('dataEntrada', { ascending: false }).limit(10);
+
+          const { data: osList } = await osQuery;
+
+          if (osList && osList.length > 0) {
+            const osFmt = osList.map((os: any) => `• OS #${os.numeroOS || '?'} — ${os.clienteNome} | ${os.aparelhoModelo || '-'} | ${os.defeito || '-'} | Status: ${os.status || '-'}`).join('\n');
+            const textResposta = `🔧 *Ordens de Serviço (${osList.length}):*\n\n${osFmt}`;
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Lista OS IA enviada.' }, { status: 200 });
+          } else {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, '🔧 Nenhuma OS encontrada com os filtros informados.');
+            return NextResponse.json({ status: 'ok', message: 'Sem OS IA.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de atualização de status de OS pela IA
+        if (geminiPlan.action === 'update_os' && lojaId) {
+          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
+          const numeroOSStr = String(geminiPlan.params.numeroOS || '').trim();
+          const novoStatusStr = String(geminiPlan.params.novoStatus || '').trim();
+
+          if (novoStatusStr) {
+            let upOsQuery = supabase.from('ordens_servico').update({ status: novoStatusStr, updated_at: new Date().toISOString() }).eq('loja_id', lojaId);
+            if (numeroOSStr) upOsQuery = (upOsQuery as any).eq('numeroOS', parseInt(numeroOSStr, 10));
+            else if (clienteNomeStr) upOsQuery = (upOsQuery as any).ilike('clienteNome', `%${clienteNomeStr}%`);
+
+            await upOsQuery;
+
+            const textResposta = buildWhatsAppText('update_os', {
+              ...geminiPlan.params,
+              clienteNome: clienteNomeStr,
+              novoStatus: novoStatusStr,
+            }, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'OS IA atualizada.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de criação de cliente pela IA
+        if (geminiPlan.action === 'create_cliente' && lojaId) {
+          const nomeStr = String(geminiPlan.params.nome || '').trim();
+          const telefoneStr = String(geminiPlan.params.telefone || '').trim();
+
+          if (nomeStr) {
+            const { data: novoCliente } = await supabase.from('clientes').insert({
+              loja_id: lojaId,
+              nome: nomeStr,
+              telefone: telefoneStr || null,
+              email: geminiPlan.params.email ? String(geminiPlan.params.email) : null,
+              cpf: geminiPlan.params.cpf ? String(geminiPlan.params.cpf) : null,
+              dataCadastro: new Date().toISOString(),
+              ativo: true,
+            }).select().single();
+
+            const textResposta = buildWhatsAppText('create_cliente', {
+              ...geminiPlan.params,
+              nome: nomeStr,
+              telefone: telefoneStr,
+              id: (novoCliente as any)?.id || 'Criado',
+            }, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Cliente IA criado.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de consulta de clientes pela IA
+        if (geminiPlan.action === 'list_clientes' && lojaId) {
+          const nomeStr = String(geminiPlan.params.nome || '').trim();
+          const telefoneStr = String(geminiPlan.params.telefone || '').trim();
+
+          let cliQuery = supabase.from('clientes').select('id, nome, telefone, email').eq('loja_id', lojaId).eq('ativo', true);
+          if (nomeStr) cliQuery = cliQuery.ilike('nome', `%${nomeStr}%`);
+          if (telefoneStr) cliQuery = cliQuery.ilike('telefone', `%${telefoneStr}%`);
+          cliQuery = cliQuery.limit(10) as any;
+
+          const { data: clientes } = await cliQuery;
+
+          if (clientes && clientes.length > 0) {
+            const textResposta = buildWhatsAppText('list_clientes', clientes, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Clientes IA listados.' }, { status: 200 });
+          } else {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, '👥 Nenhum cliente encontrado com esses dados.');
+            return NextResponse.json({ status: 'ok', message: 'Sem clientes IA.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de criação de agendamento pela IA
+        if (geminiPlan.action === 'create_agendamento' && lojaId) {
+          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
+          const dataStr = String(geminiPlan.params.data || '').trim();
+          const horaStr = String(geminiPlan.params.hora || '').trim();
+          const tipoServicoStr = String(geminiPlan.params.tipoServico || '').trim();
+
+          if (clienteNomeStr && dataStr) {
+            const { data: novoAg } = await supabase.from('agendamentos').insert({
+              loja_id: lojaId,
+              clienteNome: clienteNomeStr,
+              data: dataStr,
+              hora: horaStr || null,
+              tipoServico: tipoServicoStr || 'Serviço geral',
+              aparelhoModelo: geminiPlan.params.aparelhoModelo ? String(geminiPlan.params.aparelhoModelo) : null,
+              observacoes: `Agendamento criado via WhatsApp IA por ${pushName}`,
+              status: 'agendado',
+              ativo: true,
+            }).select().single();
+
+            const textResposta = buildWhatsAppText('create_agendamento', {
+              ...geminiPlan.params,
+              clienteNome: clienteNomeStr,
+              data: dataStr,
+              hora: horaStr,
+              tipoServico: tipoServicoStr,
+              id: (novoAg as any)?.id || 'Criado',
+            }, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Agendamento IA criado.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de consulta de agendamentos pela IA
+        if (geminiPlan.action === 'list_agendamentos' && lojaId) {
+          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
+          const dataParamStr = String(geminiPlan.params.data || '').trim().toLowerCase();
+
+          const hoje = new Date().toISOString().split('T')[0];
+          const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+          const dataFiltro = dataParamStr === 'hoje' ? hoje : dataParamStr === 'amanhã' || dataParamStr === 'amanha' ? amanha : null;
+
+          let agQuery = supabase.from('agendamentos').select('id, clienteNome, data, hora, tipoServico, aparelhoModelo, status').eq('loja_id', lojaId).eq('ativo', true);
+          if (dataFiltro) agQuery = agQuery.eq('data', dataFiltro);
+          if (clienteNomeStr) agQuery = agQuery.ilike('clienteNome', `%${clienteNomeStr}%`);
+          agQuery = (agQuery as any).order('data', { ascending: true }).limit(10);
+
+          const { data: agList } = await agQuery;
+
+          if (agList && agList.length > 0) {
+            const textResposta = buildWhatsAppText('list_agendamentos', agList, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Agendamentos IA listados.' }, { status: 200 });
+          } else {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, '📅 Nenhum agendamento encontrado.');
+            return NextResponse.json({ status: 'ok', message: 'Sem agendamentos IA.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de consulta de garantias pela IA
+        if (geminiPlan.action === 'list_garantias' && lojaId) {
+          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
+          const aparelhoModeloStr = String(geminiPlan.params.aparelhoModelo || '').trim();
+          const statusGarStr = String(geminiPlan.params.status || '').trim();
+
+          let garQuery = supabase.from('garantias').select('id, clienteNome, aparelhoModelo, dataInicio, dataFim, status, diasGarantia').eq('loja_id', lojaId).eq('ativo', true);
+          if (clienteNomeStr) garQuery = garQuery.ilike('clienteNome', `%${clienteNomeStr}%`);
+          if (aparelhoModeloStr) garQuery = garQuery.ilike('aparelhoModelo', `%${aparelhoModeloStr}%`);
+          if (statusGarStr) garQuery = garQuery.eq('status', statusGarStr);
+          garQuery = (garQuery as any).order('dataInicio', { ascending: false }).limit(10);
+
+          const { data: garList } = await garQuery;
+
+          if (garList && garList.length > 0) {
+            const textResposta = buildWhatsAppText('list_garantias', garList, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Garantias IA listadas.' }, { status: 200 });
+          } else {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, '🛡️ Nenhuma garantia encontrada com esses filtros.');
+            return NextResponse.json({ status: 'ok', message: 'Sem garantias IA.' }, { status: 200 });
+          }
+        }
+
+        // Execução real de consulta de peças pela IA
+        if (geminiPlan.action === 'list_pecas' && lojaId) {
+          const nomeStr = String(geminiPlan.params.nome || '').trim();
+          const categoriaStr = String(geminiPlan.params.categoria || '').trim();
+
+          let pecasQuery = supabase.from('pecas').select('id, nome, categoria, quantidade, preco, descricao').eq('loja_id', lojaId);
+          if (nomeStr) pecasQuery = pecasQuery.ilike('nome', `%${nomeStr}%`);
+          if (categoriaStr) pecasQuery = pecasQuery.ilike('categoria', `%${categoriaStr}%`);
+          pecasQuery = pecasQuery.order('nome').limit(15) as any;
+
+          const { data: pecasList } = await pecasQuery;
+
+          if (pecasList && pecasList.length > 0) {
+            const textResposta = buildWhatsAppText('list_pecas', pecasList, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Peças IA listadas.' }, { status: 200 });
+          } else {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, `🔩 Nenhuma peça encontrada${nomeStr ? ` para "${nomeStr}"` : ''}.`);
+            return NextResponse.json({ status: 'ok', message: 'Sem peças IA.' }, { status: 200 });
+          }
+        }
+
         // Se for grupo, envia resposta do comando estruturado
         if (isGroup) {
           const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
           await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
           return NextResponse.json({ status: 'ok', message: 'Comando IA executado com alta confiança em grupo.' }, { status: 200 });
         }
+
 
         // Em chat privado, se não for uma ação de alteração de banco (venda, aparelho, preco, abate),
         // NÃO enviamos mensagem genérica tipo "Consulta concluída com sucesso".
@@ -3818,6 +4053,65 @@ A venda foi enviada para validação de um administrador no painel!`;
         } catch (eErr) {
           console.error('[Copiloto IA] Erro ao carregar analítica de vendas:', eErr);
         }
+
+        // 4. Busca Ordens de Serviço (OS) em aberto
+        let resumoOSAbertas = '';
+        try {
+          const { data: osRows } = await supabase
+            .from('ordens_servico')
+            .select('numeroOS, clienteNome, aparelhoModelo, defeito, status')
+            .eq('loja_id', lojaId)
+            .eq('ativo', true)
+            .neq('status', 'entregue')
+            .neq('status', 'cancelado')
+            .order('dataEntrada', { ascending: false })
+            .limit(10);
+
+          if (osRows && osRows.length > 0) {
+            resumoOSAbertas = osRows.map((o: any) => `• OS #${o.numeroOS || '?'}: ${o.clienteNome || 'Cliente'} (${o.aparelhoModelo || 'Aparelho'}) - Defeito: ${o.defeito || '-'} [Status: ${o.status}]`).join('\n');
+          }
+        } catch (osErr) {
+          console.warn('[Copiloto IA] Erro ao carregar resumo de OS:', osErr);
+        }
+
+        // 5. Busca Agendamentos de Hoje
+        let resumoAgendamentosHoje = '';
+        try {
+          const hojeIso = new Date().toISOString().split('T')[0];
+          const { data: agRows } = await supabase
+            .from('agendamentos')
+            .select('clienteNome, hora, tipoServico, aparelhoModelo, status')
+            .eq('loja_id', lojaId)
+            .eq('ativo', true)
+            .eq('data', hojeIso)
+            .order('hora', { ascending: true })
+            .limit(10);
+
+          if (agRows && agRows.length > 0) {
+            resumoAgendamentosHoje = agRows.map((a: any) => `• ${a.hora ? `${a.hora} - ` : ''}${a.clienteNome || 'Cliente'}: ${a.tipoServico || 'Serviço'} (${a.aparelhoModelo || '-'})`).join('\n');
+          }
+        } catch (agErr) {
+          console.warn('[Copiloto IA] Erro ao carregar resumo de Agendamentos:', agErr);
+        }
+
+        // 6. Busca Garantias Ativas
+        let resumoGarantiasAtivas = '';
+        try {
+          const { data: garRows } = await supabase
+            .from('garantias')
+            .select('clienteNome, aparelhoModelo, dataFim, status')
+            .eq('loja_id', lojaId)
+            .eq('ativo', true)
+            .eq('status', 'ativa')
+            .order('dataFim', { ascending: true })
+            .limit(10);
+
+          if (garRows && garRows.length > 0) {
+            resumoGarantiasAtivas = garRows.map((g: any) => `• ${g.clienteNome || 'Cliente'} - ${g.aparelhoModelo || 'Aparelho'} (Válida até: ${g.dataFim || '-'})`).join('\n');
+          }
+        } catch (garErr) {
+          console.warn('[Copiloto IA] Erro ao carregar resumo de Garantias:', garErr);
+        }
       }
 
       // Recupera histórico recente de até 3 minutos do usuário no chat privado
@@ -3846,6 +4140,9 @@ A venda foi enviada para validação de um administrador no painel!`;
         resumoLucroMes: analiticaVendas?.mes?.resumoLucroTexto,
         historicoAtacadoMes: analiticaVendas?.historicoAtacadoMes,
         historicoVendasRecentes: analiticaVendas?.historicoRecente,
+        resumoOSAbertas,
+        resumoAgendamentosHoje,
+        resumoGarantiasAtivas,
         historicoChat,
         isGroup: false,
       });
