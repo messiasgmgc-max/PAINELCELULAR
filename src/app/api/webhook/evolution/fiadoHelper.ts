@@ -1,4 +1,5 @@
 // Helper consolidado para gestão e extrato de fiado da loja (vendas + baixas de aparelhos + lojistas_devedores)
+import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 
 export interface ItemExtrato {
   descricao: string;
@@ -316,51 +317,63 @@ export function formatarTextoExtrato(
 ): string {
   const dataHoje = new Date().toLocaleDateString('pt-BR');
   const saldoFmt = lojista.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const lojaLimpa = (nomeLoja || 'Lucas Imports').trim().replace(/^\*+|\*+$/g, '');
+  const lojistaLimpo = (lojista.nome || 'Parceiro').trim().replace(/^\*+|\*+$/g, '');
 
-  let msg = `📋 *EXTRATO DE CONTA - ${nomeLoja.toUpperCase()}*\n`;
-  msg += `👤 *Lojista / Parceiro:* ${lojista.nome}\n`;
-  msg += `📅 *Data de Emissão:* ${dataHoje}\n\n`;
-
-  msg += `📦 *PEDIDOS E APARELHOS EM ABERTO (${lojista.totalAparelhos} aparelho${lojista.totalAparelhos > 1 ? 's' : ''}):*\n`;
+  let msg = `📋 *Extrato - ${lojaLimpa}*\n`;
+  msg += `👤 Lojista: *${lojistaLimpo}* (${dataHoje})\n\n`;
 
   if (lojista.pedidos.length === 0) {
-    msg += `• Saldo devedor consolidado registrado: R$ ${saldoFmt}\n`;
+    msg += `📦 Débito em aberto: R$ ${saldoFmt}\n\n`;
   } else {
-    lojista.pedidos.forEach((p, idx) => {
-      let dataFmt = 'Data não registrada';
-      try {
-        const d = new Date(p.data);
-        if (!isNaN(d.getTime())) dataFmt = d.toLocaleDateString('pt-BR');
-      } catch {}
+    const itensExtrato: { desc: string; imei?: string; valor: number }[] = [];
 
-      const valFmt = p.saldoDevedor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      msg += `⏳ *${p.descricao}* (${dataFmt})\n`;
-      msg += `   Valor: R$ ${valFmt}\n`;
-
+    lojista.pedidos.forEach((p) => {
       if (p.itens && p.itens.length > 0) {
         p.itens.forEach((it) => {
+          let desc = (it.descricao || it.modelo || 'Aparelho').trim().replace(/^Apple\s+/i, '');
           const corCap = [it.capacidade, it.cor].filter(Boolean).join(' ');
-          const imeiStr = it.imei ? ` | IMEI/ID: ${it.imei}` : '';
-          const valItemFmt = it.valor ? ` - R$ ${Number(it.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
-          msg += `   └ 📱 ${it.descricao}${corCap ? ` (${corCap})` : ''}${imeiStr}${valItemFmt}\n`;
+          if (corCap && !desc.includes(it.capacidade || '')) {
+            desc += ` ${corCap}`;
+          }
+
+          let imeiCurto = '';
+          if (it.imei) {
+            const rawIm = String(it.imei).trim();
+            imeiCurto = rawIm.length > 6 ? rawIm.slice(-6) : rawIm;
+          }
+
+          itensExtrato.push({
+            desc,
+            imei: imeiCurto || undefined,
+            valor: Number(it.valor || p.saldoDevedor || 0),
+          });
+        });
+      } else {
+        itensExtrato.push({
+          desc: p.descricao.trim().replace(/^Apple\s+/i, ''),
+          valor: p.saldoDevedor,
         });
       }
-      msg += '\n';
     });
+
+    msg += `📦 *Aparelhos em aberto (${itensExtrato.length} un):*\n`;
+    itensExtrato.forEach((it) => {
+      const imeiTxt = it.imei ? ` (${it.imei})` : '';
+      const valTxt = it.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      msg += `• ${it.desc}${imeiTxt}: R$ ${valTxt}\n`;
+    });
+    msg += `\n`;
   }
 
-  msg += `━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `💵 *Total Geral Devido:* R$ ${saldoFmt}\n`;
-  msg += `🚨 *SALDO TOTAL PENDENTE: R$ ${saldoFmt} (${lojista.totalAparelhos} aparelhos)*\n`;
-  msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+  msg += `💰 *Total a acertar: R$ ${saldoFmt}*\n`;
 
-  const pix = chavePix.trim();
+  const pix = chavePix.trim().replace(/^\*+|\*+$/g, '');
   if (pix) {
-    msg += `🔑 *Chave PIX para quitação:*\n${pix}\n\n`;
+    msg += `🔑 *PIX:* ${pix}\n`;
   }
 
-  msg += `Qualquer dúvida estamos à disposição! 🤝`;
-  return msg.trim();
+  return sanitizarTextoWhatsApp(msg);
 }
 
 export async function buscarFiadoConsolidadoLoja(

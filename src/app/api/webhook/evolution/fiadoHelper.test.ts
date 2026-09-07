@@ -101,9 +101,9 @@ describe('fiadoHelper - Consolidação Completa de Fiado (Vendas + Baixas de Est
     assert.equal(lojistaCL.totalAparelhos, 4);
 
     const extratoTexto = formatarTextoExtrato(lojistaCL, 'Lucas Imports', '31999999999');
-    assert.ok(extratoTexto.includes('EXTRATO DE CONTA - LUCAS IMPORTS'));
+    assert.ok(extratoTexto.includes('Extrato - Lucas Imports'));
     assert.ok(extratoTexto.includes('21.400,00'));
-    assert.ok(extratoTexto.includes('4 aparelhos'));
+    assert.ok(extratoTexto.includes('4 un'));
     assert.ok(extratoTexto.includes('iPhone 17 Pro Max'));
     assert.ok(extratoTexto.includes('iPhone 14 Pro'));
     assert.ok(extratoTexto.includes('iPhone 15 Pro Max'));

@@ -4,6 +4,7 @@ import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConve
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
+import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -75,6 +76,7 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
   const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
   if (!cleanDestination) return false;
 
+  const cleanText = sanitizarTextoWhatsApp(text);
   const targetInstance = instanceName || DEFAULT_INSTANCE;
   const endpoint = `${EVOLUTION_URL}/message/sendText/${targetInstance}`;
 
@@ -87,7 +89,7 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
       },
       body: JSON.stringify({
         number: cleanDestination,
-        text,
+        text: cleanText,
         options: {
           delay: 800,
           presence: 'composing',
@@ -2802,16 +2804,12 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         return `${i + 1}. *${d.nome}*${cont}: R$ ${valFmt}`;
       }).join('\n');
 
-      const msgFiado = `📋 *CONTROLE DE FIADO & DEVEDORES (ATACADO)*
-🏪 *Loja:* ${nomeLoja}
-
-💰 *Total Geral a Receber:* R$ ${totalFmt}
-👥 *Lojistas com Débitos:* ${fiadoConsolidado.devedores.length}
+      const msgFiado = `📋 *Fiado & Devedores - ${nomeLoja}*
+💰 *Total a receber:* R$ ${totalFmt} (${fiadoConsolidado.devedores.length} lojistas)
 
 ${listaFmt}
 
-────────────────────────
-💡 _Para abater um valor, você pode digitar ex: "!abater 500 nome_do_lojista" ou mandar em linguagem natural pro robô._`;
+💡 Use *!extrato [nome]* para ver o extrato completo com PIX.`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgFiado);
       return NextResponse.json({ status: 'ok', message: 'Relatório de fiado enviado.' }, { status: 200 });

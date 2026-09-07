@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 
 interface ExtratoFiadoLojistaModalProps {
   isOpen: boolean;
@@ -123,69 +124,80 @@ export function ExtratoFiadoLojistaModal({
   });
   todosAbatimentos.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
 
-  // Gera texto de extrato consolidado e detalhado
+  // Gera texto de extrato consolidado e compacto para WhatsApp
   const gerarTextoExtrato = (): string => {
     const dataHoje = new Date().toLocaleDateString('pt-BR');
-    
-    let msg = `📋 *EXTRATO DE CONTA - ${nomeLoja.toUpperCase()}*\n`;
-    msg += `👤 *Lojista / Parceiro:* ${lojistaNome}\n`;
-    msg += `📅 *Data de Emissão:* ${dataHoje}\n\n`;
+    const lojaLimpa = (nomeLoja || 'Lucas Imports').trim().replace(/^\*+|\*+$/g, '');
+    const lojistaLimpo = (lojistaNome || 'Parceiro').trim().replace(/^\*+|\*+$/g, '');
+    const saldoFinalFmt = saldoComJuros.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
 
-    msg += `📦 *PEDIDOS E APARELHOS EM ABERTO:*\n`;
-    vendasLojista.forEach((v) => {
-      const dataVenda = new Date(v.dataPagamento || v.data || v.created_at).toLocaleDateString('pt-BR');
-      const val = Number(v.valor || 0);
-      const pago = Number(v.valorPago || 0);
-      const pend = Math.max(0, val - pago);
+    let msg = `📋 *Extrato - ${lojaLimpa}*\n`;
+    msg += `👤 Lojista: *${lojistaLimpo}* (${dataHoje})\n\n`;
 
-      let statusEmoji = pend <= 0.01 ? '✅' : pago > 0 ? '🟡' : '⏳';
-      msg += `${statusEmoji} *${v.descricao || 'Pedido'}* (${dataVenda})\n`;
-      msg += `   Valor: R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-      if (pago > 0 && pend > 0) {
-        msg += ` | Já pago: R$ ${pago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | *Resta: R$ ${pend.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}*`;
-      }
-      if (v.dataVencimento) {
-        msg += ` | Vencimento: ${new Date(v.dataVencimento).toLocaleDateString('pt-BR')}`;
-      }
-      msg += `\n`;
+    if (detalharItens) {
+      // Opção A: Detalhado com Itens (1 linha por aparelho, direto e sem poluição)
+      const todosAparelhos: Array<{ desc: string; imei?: string; valor: number }> = [];
 
-      // Detalhamento individual dos aparelhos (IMEI, Cor, Capacidade, Valor)
-      if (detalharItens && v.itens && Array.isArray(v.itens) && v.itens.length > 0) {
-        v.itens.forEach((it: any) => {
-          const desc = it.descricao || it.modelo || 'Aparelho';
-          const im = it.imei ? ` | IMEI: ${it.imei}` : '';
-          const corCap = [it.capacidade, it.cor].filter(Boolean).join(' ');
-          const valItem = it.total || it.valorExibir;
-          msg += `   └ 📱 ${desc}${corCap ? ` (${corCap})` : ''}${im}`;
-          if (valItem) {
-            msg += ` - R$ ${Number(valItem).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-          }
-          msg += `\n`;
+      vendasLojista.forEach((v) => {
+        if (v.itens && Array.isArray(v.itens) && v.itens.length > 0) {
+          v.itens.forEach((it: any) => {
+            let desc = (it.descricao || it.modelo || 'Aparelho').trim().replace(/^Apple\s+/i, '');
+            const corCap = [it.capacidade, it.cor].filter(Boolean).join(' ');
+            if (corCap && !desc.includes(it.capacidade || '')) {
+              desc += ` ${corCap}`;
+            }
+
+            let imeiCurto = '';
+            if (it.imei) {
+              const rawIm = String(it.imei).trim();
+              imeiCurto = rawIm.length > 6 ? rawIm.slice(-6) : rawIm;
+            }
+
+            todosAparelhos.push({
+              desc,
+              imei: imeiCurto || undefined,
+              valor: Number(it.total || it.valorExibir || v.valor || 0),
+            });
+          });
+        } else {
+          todosAparelhos.push({
+            desc: (v.descricao || 'Pedido / Aparelho').trim().replace(/^Apple\s+/i, ''),
+            valor: Number(v.saldoDevedor || v.valor || 0),
+          });
+        }
+      });
+
+      if (todosAparelhos.length > 0) {
+        msg += `📦 *Aparelhos em aberto (${todosAparelhos.length} un):*\n`;
+        todosAparelhos.forEach((a) => {
+          const imeiTxt = a.imei ? ` (${a.imei})` : '';
+          const vTxt = a.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+          msg += `• ${a.desc}${imeiTxt}: R$ ${vTxt}\n`;
         });
+        msg += `\n`;
+      } else {
+        msg += `📦 Débito em aberto: R$ ${saldoFinalFmt}\n\n`;
       }
-    });
-
-    msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `💵 *Total Geral Comprado:* R$ ${totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
-    msg += `✅ *Total Já Pago:* R$ ${totalPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
-    msg += `⚠️ *Saldo Devedor Principal:* R$ ${saldoDevedor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+    } else {
+      // Opção B: Resumo Geral
+      msg += `📦 *Resumo do Fiado:*\n`;
+      msg += `• Total Comprado: R$ ${totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+      msg += `• Total Já Pago: R$ ${totalPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
+      msg += `• Pedidos Registrados: ${vendasLojista.length}\n\n`;
+    }
 
     if (aplicarJuros && estaEmAtraso && valorJurosCalculado > 0) {
-      msg += `⏳ *Atraso:* ${diasAtraso} dias (Vencimento: ${dataVencimentoMaisAntiga?.toLocaleDateString('pt-BR')})\n`;
-      msg += `📈 *Juros por Atraso (${taxaJurosNum.toFixed(1)}% a.m.):* + R$ ${valorJurosCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
-      msg += `🚨 *TOTAL ATUALIZADO PARA QUITAÇÃO: R$ ${saldoComJuros.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}*\n`;
-    } else {
-      msg += `🚨 *SALDO TOTAL PENDENTE: R$ ${saldoDevedor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}*\n`;
+      msg += `⚠️ Juros por atraso (${diasAtraso} dias): + R$ ${valorJurosCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n`;
     }
-    msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-    const pixFinal = chavePixInput.trim();
+    msg += `💰 *Total a acertar: R$ ${saldoFinalFmt}*\n`;
+
+    const pixFinal = chavePixInput.trim().replace(/^\*+|\*+$/g, '');
     if (pixFinal) {
-      msg += `🔑 *Chave PIX para pagamento:*\n${pixFinal}\n\n`;
+      msg += `🔑 *PIX:* ${pixFinal}\n`;
     }
 
-    msg += `Qualquer dúvida estamos à disposição! 🤝`;
-    return msg;
+    return sanitizarTextoWhatsApp(msg);
   };
 
   // Copia mensagem de extrato formatada para o WhatsApp

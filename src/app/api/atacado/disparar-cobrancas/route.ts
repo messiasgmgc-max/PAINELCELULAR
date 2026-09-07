@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { enviarTextoWhatsApp, formatarTelefoneWhatsApp } from '@/lib/whatsappService';
+import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 
 export async function POST(request: Request) {
   try {
@@ -200,7 +201,7 @@ export async function POST(request: Request) {
       try {
         const { data: vendasLojista } = await supabaseAdmin
           .from('vendas')
-          .select('id, descricao, itens, valor, valorPago, saldoDevedor, metodo, status, dataPagamento, dataVencimento, created_at')
+          .select('id, descricao, itens, valor, valorPago, saldoDevedor, metodo, status, dataPagamento, dataVencimento')
           .eq('loja_id', lojaId)
           .ilike('clienteNome', dev.nome.trim())
           .order('dataPagamento', { ascending: false });
@@ -305,7 +306,7 @@ export async function POST(request: Request) {
       }
 
       // Interpolação de variáveis no texto
-      const textoFinal = templateMsg
+      const textoInterpolado = templateMsg
         .replace(/\{nome\}/gi, dev.nome)
         .replace(/\{valor\}/gi, saldoFmt)
         .replace(/\{chave_pix\}/gi, chavePixLoja)
@@ -314,6 +315,8 @@ export async function POST(request: Request) {
         .replace(/\{itens\}/gi, listaItensSimples)
         .replace(/\{extrato_completo\}/gi, blocoExtratoCompleto)
         .replace(/\{extrato\}/gi, blocoExtratoCompleto);
+
+      const textoFinal = sanitizarTextoWhatsApp(textoInterpolado);
 
       if (modoSimulacao) {
         resultados.push({

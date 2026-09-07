@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/integrations/supabase/server';
+import { sanitizarTextoWhatsApp } from './whatsappFormatting';
 
 export interface EvolutionConfig {
   evolutionUrl: string;
@@ -115,6 +116,7 @@ export async function enviarTextoWhatsApp({
     return { success: false, error: 'Telefone inválido ou não informado' };
   }
 
+  const cleanTexto = sanitizarTextoWhatsApp(texto);
   const { evolutionUrl, apiKey, instanceName } = await getEvolutionConfig(lojaId);
   const endpoint = `${evolutionUrl}/message/sendText/${instanceName}`;
 
@@ -127,7 +129,7 @@ export async function enviarTextoWhatsApp({
       },
       body: JSON.stringify({
         number: cleanPhone,
-        text: texto,
+        text: cleanTexto,
         options: { delay: 800, presence: 'composing' },
       }),
     });
