@@ -226,6 +226,55 @@ export function EditarVendaRegistroModal({
           .eq('id', idParaVenda);
 
         if (errVenda) console.error('Erro ao atualizar registro de venda:', errVenda);
+      } else {
+        // Se a venda ainda não estava na tabela 'vendas' (ex: venda antiga originada apenas em aparelhos),
+        // cria o registro correspondente no banco para manter a integridade
+        const valorPagoAtual = Number(venda.valorPago || 0);
+        let novoSaldoDevedor = 0;
+        let novoStatus = 'pago';
+
+        if (metodoPgto === 'fiado' || venda.metodo === 'fiado' || venda.status === 'pendente' || venda.status === 'parcial') {
+          novoSaldoDevedor = Math.max(0, valorVendaNum - valorPagoAtual);
+          novoStatus = novoSaldoDevedor <= 0.01 ? 'pago' : (valorPagoAtual > 0 ? 'parcial' : 'pendente');
+        }
+
+        const payloadVendaInsert: any = {
+          loja_id: lojaId || undefined,
+          aparelhoId: venda.aparelhoId || undefined,
+          clienteNome: compradorFinal,
+          valor: valorVendaNum,
+          valorPago: valorPagoAtual,
+          saldoDevedor: novoSaldoDevedor,
+          status: novoStatus,
+          custo: custoNum,
+          lucro: lucroNum,
+          percentualLucro: parseFloat(margemPercent) || 0,
+          dataPagamento: dataIso,
+          dataVencimento: dataVencIso,
+          metodo: metodoPgto,
+          tipoEntrega: tipoVenda,
+          descricao: `Venda ${tipoVenda.toUpperCase()} - ${venda.modelo || ''} para ${compradorFinal}`,
+          itens: [
+            {
+              aparelhoId: venda.aparelhoId,
+              modelo: venda.modelo || 'Aparelho',
+              marca: venda.marca || 'Apple',
+              imei: venda.imei || '',
+              valorUnitario: valorVendaNum,
+              total: valorVendaNum,
+              valorExibir: valorVendaNum,
+              custoUnitario: custoNum,
+              lucroUnitario: lucroNum,
+              tipoVenda: tipoVenda.toLowerCase(),
+            }
+          ]
+        };
+
+        const { error: errInsert } = await supabase
+          .from('vendas')
+          .insert([payloadVendaInsert]);
+
+        if (errInsert) console.error('Erro ao inserir registro de venda ao editar:', errInsert);
       }
 
       await upsertComprador(compradorFinal, tipoVenda.toLowerCase().includes('atacado') ? 'lojista' : 'cliente');

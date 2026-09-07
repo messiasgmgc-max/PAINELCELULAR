@@ -21,64 +21,94 @@ export function useCompradores(lojaId: string | null) {
     if (!lojaId) return;
     setLoading(true);
     try {
-      let query = supabase
-        .from('compradores_frequentes')
-        .select('*')
-        .or(`loja_id.eq.${lojaId},loja_id.is.null`)
-        .order('total_compras', { ascending: false })
-        .limit(100);
+      const mapa = new Map<string, CompradorFrequente>();
 
-      if (tipo) {
-        query = query.eq('tipo', tipo);
+      // 1. Busca da tabela compradores_frequentes
+      try {
+        let query = supabase
+          .from('compradores_frequentes')
+          .select('*')
+          .or(`loja_id.eq.${lojaId},loja_id.is.null`)
+          .order('total_compras', { ascending: false })
+          .limit(100);
+
+        if (tipo) {
+          query = query.eq('tipo', tipo);
+        }
+
+        const { data, error } = await query;
+        if (!error && data) {
+          data.forEach(c => {
+            if (c.nome?.trim()) {
+              mapa.set(c.nome.trim().toLowerCase(), c);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('compradores_frequentes não disponível:', e);
       }
 
-      const { data, error } = await query;
-      if (error) {
-        console.warn('Erro ao buscar compradores frequentes:', error);
-        // Fallback: tabela pode não existir ainda
-        setCompradores([]);
-        return;
+      // 2. Busca da tabela lojistas_devedores (Clientes Atacado)
+      try {
+        const { data: lojistas, error: errLojistas } = await supabase
+          .from('lojistas_devedores')
+          .select('id, nome, whatsapp, telefone, created_at')
+          .eq('loja_id', lojaId)
+          .eq('ativo', true);
+
+        if (!errLojistas && lojistas) {
+          lojistas.forEach(l => {
+            const chave = (l.nome || '').trim().toLowerCase();
+            if (chave && !mapa.has(chave)) {
+              mapa.set(chave, {
+                id: l.id,
+                nome: l.nome.trim(),
+                tipo: 'lojista',
+                telefone: l.whatsapp || l.telefone || '',
+                total_compras: 1,
+                ultimo_compra: l.created_at || new Date().toISOString(),
+                loja_id: lojaId,
+              });
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('lojistas_devedores não disponível:', e);
       }
-      setCompradores(data || []);
-    } catch (err) {
-      console.warn('compradores_frequentes não disponível:', err);
-      setCompradores([]);
+
+      // 3. Fallback localStorage
+      try {
+        const key = 'painel_celular_compradores_recentes';
+        const salvas: string[] = JSON.parse(localStorage.getItem(key) || '[]');
+        salvas.forEach(nomeRecente => {
+          const chave = (nomeRecente || '').trim().toLowerCase();
+          if (chave && !mapa.has(chave)) {
+            mapa.set(chave, {
+              id: `local-${chave}`,
+              nome: nomeRecente.trim(),
+              tipo: 'lojista',
+              total_compras: 1,
+              ultimo_compra: new Date().toISOString(),
+              loja_id: lojaId,
+            });
+          }
+        });
+      } catch {}
+
+      const lista = Array.from(mapa.values()).sort((a, b) => (b.total_compras || 0) - (a.total_compras || 0));
+      setCompradores(lista);
     } finally {
       setLoading(false);
     }
   }, [lojaId]);
 
   const buscarCompradores = useCallback(async (termo: string, tipo?: 'lojista' | 'cliente'): Promise<CompradorFrequente[]> => {
-    if (!lojaId || !termo || termo.trim().length < 1) return compradores;
-
-    try {
-      let query = supabase
-        .from('compradores_frequentes')
-        .select('*')
-        .or(`loja_id.eq.${lojaId},loja_id.is.null`)
-        .ilike('nome', `%${termo.trim()}%`)
-        .order('total_compras', { ascending: false })
-        .limit(15);
-
-      if (tipo) {
-        query = query.eq('tipo', tipo);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        console.warn('Erro busca compradores:', error);
-        // Fallback: filtrar localmente
-        return compradores.filter(c =>
-          c.nome.toLowerCase().includes(termo.toLowerCase())
-        );
-      }
-      return data || [];
-    } catch {
-      return compradores.filter(c =>
-        c.nome.toLowerCase().includes(termo.toLowerCase())
-      );
-    }
-  }, [lojaId, compradores]);
+    if (!termo || termo.trim().length < 1) return compradores;
+    const t = termo.trim().toLowerCase();
+    return compradores.filter(c =>
+      c.nome.toLowerCase().includes(t) || (c.telefone && c.telefone.includes(t))
+    );
+  }, [compradores]);
 
   const upsertComprador = useCallback(async (
     nome: string,

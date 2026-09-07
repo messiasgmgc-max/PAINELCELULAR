@@ -1661,12 +1661,41 @@ export function AtacadoTab() {
                             </div>
                           )}
 
-                          <div className="flex items-center justify-between text-[11px] pt-1 border-t border-white/5">
-                            <span className="text-slate-400">Limite de Crédito:</span>
-                            <span className="font-mono text-blue-300 font-bold">
-                              R$ {limite.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
-                          </div>
+                          {/* Vinculação Direta com Histórico de Vendas & Aparelhos */}
+                          {(() => {
+                            const estatisticas = rankingCompradores.find(
+                              r => r.nome.trim().toLowerCase() === cliente.nome.trim().toLowerCase()
+                            );
+                            const totalGasto = estatisticas?.totalGasto || 0;
+                            const totalAparelhos = estatisticas?.totalAparelhos || 0;
+                            const percLimite = limite > 0 ? Math.min(100, Math.round((saldo / limite) * 100)) : 0;
+
+                            return (
+                              <>
+                                <div className="flex items-center justify-between text-[11px] pt-1 border-t border-white/5">
+                                  <span className="text-slate-400">Total Comprado:</span>
+                                  <span className="font-mono text-emerald-300 font-semibold">
+                                    R$ {totalGasto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <span className="text-[10px] text-slate-500 font-normal ml-1">
+                                      ({totalAparelhos} {totalAparelhos === 1 ? 'item' : 'itens'})
+                                    </span>
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-slate-400">Limite de Crédito:</span>
+                                  <span className="font-mono text-blue-300 font-bold">
+                                    R$ {limite.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    {limite > 0 && (
+                                      <span className={cn("text-[10px] font-normal ml-1", percLimite > 80 ? "text-rose-400" : "text-slate-500")}>
+                                        ({percLimite}% em uso)
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              </>
+                            );
+                          })()}
 
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="text-slate-400">Saldo Devedor:</span>
