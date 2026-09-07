@@ -224,7 +224,9 @@ export function AtacadoTab() {
   const fetchClientesAtacado = useCallback(async () => {
     setLoadingClientes(true);
     try {
-      const res = await fetch('/api/atacado/clientes');
+      const lojaIdAtual = usuario?.lojaId || (usuario as any)?.loja_id;
+      if (!lojaIdAtual) return;
+      const res = await fetch(`/api/atacado/clientes?lojaId=${lojaIdAtual}`);
       if (res.ok) {
         const json = await res.json();
         if (json.clientes) {
@@ -236,7 +238,7 @@ export function AtacadoTab() {
     } finally {
       setLoadingClientes(false);
     }
-  }, []);
+  }, [usuario]);
 
   // Carrega configurações do Bot
   const fetchConfigBot = useCallback(async () => {
@@ -287,6 +289,12 @@ export function AtacadoTab() {
       return;
     }
 
+    const lojaIdAtual = usuario?.lojaId || (usuario as any)?.loja_id;
+    if (!lojaIdAtual) {
+      toast.error('Sessão expirada. Recarregue a página e tente novamente.');
+      return;
+    }
+
     setDisparandoCobrancas(true);
     const toastId = toast.loading(simular ? 'Simulando disparos do bot...' : 'Enviando cobranças via WhatsApp...');
 
@@ -294,7 +302,7 @@ export function AtacadoTab() {
       const res = await fetch('/api/atacado/disparar-cobrancas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ simular }),
+        body: JSON.stringify({ lojaId: lojaIdAtual, modoSimulacao: simular }),
       });
 
       const json = await res.json();
@@ -304,9 +312,9 @@ export function AtacadoTab() {
       }
 
       if (simular) {
-        toast.info(`Simulação concluída: ${json.devedoresEncontrados || 0} devedor(es) analisado(s). ${json.mensagensEnviadas || 0} receberiam mensagem.`, { id: toastId });
+        toast.info(`Simulação concluída: ${json.totalEnviados || 0} devedor(es) receberiam mensagem.`, { id: toastId });
       } else {
-        toast.success(`Disparo finalizado! ${json.mensagensEnviadas || 0} mensagem(ns) enviada(s) com sucesso.`, { id: toastId });
+        toast.success(`Disparo finalizado! ${json.totalEnviados || 0} mensagem(ns) enviada(s) com sucesso.`, { id: toastId });
         await fetchClientesAtacado();
         await fetchVendasBanco();
       }
@@ -317,6 +325,7 @@ export function AtacadoTab() {
       setDisparandoCobrancas(false);
     }
   };
+
 
   // Excluir cliente de atacado
   const handleExcluirCliente = async (id: string, nome: string) => {
@@ -2186,6 +2195,8 @@ export function AtacadoTab() {
           lojaId={usuario?.lojaId || usuario?.loja_id || ''}
           clienteParaEditar={clienteParaEditar}
           vendas={vendasBanco}
+          vendasAtacado={vendasAtacado}
+          lojistasDevedores={lojistasDevedores}
           onSuccess={fetchClientesAtacado}
         />
       </ModalPortal>

@@ -27,6 +27,10 @@ interface NovoClienteAtacadoModalProps {
   clienteParaEditar?: any | null;
   /** Lista de vendas do banco — usada para sugerir nomes já existentes */
   vendas?: any[];
+  /** Lista consolidada de vendas de atacado */
+  vendasAtacado?: any[];
+  /** Lojistas que já possuem fiado/dívida ou histórico */
+  lojistasDevedores?: any[];
   onSuccess: () => void;
 }
 
@@ -36,6 +40,8 @@ export function NovoClienteAtacadoModal({
   lojaId,
   clienteParaEditar,
   vendas = [],
+  vendasAtacado = [],
+  lojistasDevedores = [],
   onSuccess
 }: NovoClienteAtacadoModalProps) {
   const [nome, setNome] = useState('');
@@ -54,26 +60,61 @@ export function NovoClienteAtacadoModal({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Extrai nomes únicos de compradores a partir das vendas
+  // Extrai nomes únicos de compradores a partir de vendasBanco, vendasAtacado e lojistasDevedores
   const nomesExistentes = React.useMemo(() => {
     const nomes = new Set<string>();
+
+    // 1. Devedores consolidados (ex: "CL", "GR")
+    for (const dev of lojistasDevedores) {
+      const n = dev.lojistaNome || dev.nome;
+      if (n && typeof n === 'string' && n.trim().length > 0 && n.trim() !== 'Não Informado' && n.trim() !== 'Lojista / Revenda') {
+        nomes.add(n.trim());
+      }
+    }
+
+    // 2. Vendas de atacado processadas (inclui as do estoque com tag BAIXA_ESTOQUE)
+    for (const va of vendasAtacado) {
+      const comp = va.comprador;
+      if (comp && typeof comp === 'string' && comp.trim().length > 0 && comp.trim() !== 'Não Informado' && comp.trim() !== 'Lojista / Revenda') {
+        nomes.add(comp.trim());
+      }
+    }
+
+    // 3. Vendas brutas do banco
     for (const v of vendas) {
-      const comprador = v.comprador || v.nome_comprador || v.raw?.nome_comprador || '';
-      if (comprador && comprador.trim().length > 1) {
-        nomes.add(comprador.trim());
+      const candidatos = [
+        v.comprador,
+        v.nome_comprador,
+        v.nomeComprador,
+        v.cliente,
+        v.clienteNome,
+        v.nome_cliente,
+        v.raw?.comprador,
+        v.raw?.nome_comprador,
+      ];
+      if (Array.isArray(v.itens)) {
+        for (const it of v.itens) {
+          candidatos.push(it.comprador, it.nome_comprador, it.nomeComprador, it.clienteNome);
+        }
+      }
+      for (const c of candidatos) {
+        if (c && typeof c === 'string' && c.trim().length > 0 && c.trim() !== 'Não Informado' && c.trim() !== 'Lojista / Revenda') {
+          nomes.add(c.trim());
+        }
       }
     }
     return Array.from(nomes).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [vendas]);
+  }, [vendas, vendasAtacado, lojistasDevedores]);
 
-  // Filtra sugestões conforme o nome digitado
+  // Filtra sugestões conforme o nome digitado ou exibe todas se campo estiver em branco
   const atualizarSugestoes = useCallback((valor: string) => {
-    if (!valor.trim()) {
-      setSugestoes([]);
-      setDropdownAberto(false);
+    const v = valor.trim().toLowerCase();
+    if (!v) {
+      // Se não digitou nada, exibe todas as opções disponíveis
+      setSugestoes(nomesExistentes);
+      setDropdownAberto(nomesExistentes.length > 0);
       return;
     }
-    const v = valor.toLowerCase();
     const filtradas = nomesExistentes.filter(n => n.toLowerCase().includes(v));
     setSugestoes(filtradas);
     setDropdownAberto(filtradas.length > 0);
@@ -89,6 +130,15 @@ export function NovoClienteAtacadoModal({
     setNome(nomeSelecionado);
     setSugestoes([]);
     setDropdownAberto(false);
+
+    // Se for um devedor conhecido, já preenche automaticamente o saldo devedor dele!
+    const devedorEncontrado = lojistasDevedores.find(
+      d => (d.lojistaNome || d.nome || '').trim().toLowerCase() === nomeSelecionado.trim().toLowerCase()
+    );
+    if (devedorEncontrado && devedorEncontrado.saldoDevedor > 0) {
+      setSaldoDevedor(String(devedorEncontrado.saldoDevedor));
+    }
+
     // Foca no próximo campo (WhatsApp)
     setTimeout(() => {
       const el = document.getElementById('atacado-whatsapp');
@@ -237,7 +287,8 @@ export function NovoClienteAtacadoModal({
                   required
                   value={nome}
                   onChange={handleNomeChange}
-                  onFocus={() => nome.trim() && atualizarSugestoes(nome)}
+                  onFocus={() => atualizarSugestoes(nome)}
+                  onClick={() => atualizarSugestoes(nome)}
                   placeholder="Digite para buscar ou criar novo..."
                   autoComplete="off"
                   className="w-full h-10 bg-slate-950/80 border border-slate-800 rounded-xl pl-9 pr-3 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition"

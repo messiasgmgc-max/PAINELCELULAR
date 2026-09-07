@@ -10,6 +10,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'ID da loja é obrigatório' }, { status: 400 });
     }
 
+    // Busca clientes já cadastrados formalmente
     const { data: clientes, error } = await supabaseAdmin
       .from('lojistas_devedores')
       .select('*')
@@ -19,9 +20,9 @@ export async function GET(request: Request) {
 
     if (error) throw error;
 
-    return NextResponse.json({
-      success: true,
-      clientes: (clientes || []).map(c => ({
+    const mapaClientes = new Map<string, any>();
+    (clientes || []).forEach(c => {
+      mapaClientes.set(c.nome.trim().toLowerCase(), {
         id: c.id,
         nome: c.nome,
         whatsapp: c.whatsapp || c.telefone || '',
@@ -33,8 +34,68 @@ export async function GET(request: Request) {
         observacoes: c.observacoes || '',
         chavePix: c.chave_pix || '',
         ultimoDisparo: c.ultimo_disparo_cobranca || null,
-        createdAt: c.created_at
-      }))
+        createdAt: c.created_at,
+        origem: 'cadastrado'
+      });
+    });
+
+    // Auto-população inteligente: se existirem vendas com devedores no banco para esta loja,
+    // inclui no retorno para que apareçam imediatamente na lista mesmo antes de salvar formalmente
+    try {
+      const { data: vendasLoja } = await supabaseAdmin
+        .from('vendas')
+        .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
+        .or(`loja_id.eq.${lojaId}`);
+
+      if (vendasLoja && vendasLoja.length > 0) {
+        for (const v of vendasLoja) {
+          const nomeComp = (v.clienteNome || '').trim();
+          if (!nomeComp || nomeComp === 'Não Informado' || nomeComp === 'Lojista / Revenda') continue;
+          const chave = nomeComp.toLowerCase();
+
+          const total = Number(v.valor || 0);
+          const pago = Number(v.valorPago || 0);
+          let devedor = 0;
+          if (v.saldoDevedor !== undefined && v.saldoDevedor !== null && Number(v.saldoDevedor) > 0) {
+            devedor = Number(v.saldoDevedor);
+          } else {
+            devedor = Math.max(0, total - pago);
+            if (devedor <= 0 && v.metodo === 'fiado' && v.status !== 'pago') devedor = total;
+          }
+
+          if (!mapaClientes.has(chave)) {
+            mapaClientes.set(chave, {
+              id: `venda-${chave}`,
+              nome: nomeComp,
+              whatsapp: v.clienteTelefone || '',
+              telefone: v.clienteTelefone || '',
+              saldoDevedor: devedor,
+              limiteCredito: 0,
+              cpfCnpj: '',
+              cidade: '',
+              observacoes: 'Identificado automaticamente a partir de vendas/fiado.',
+              chavePix: '',
+              ultimoDisparo: null,
+              createdAt: new Date().toISOString(),
+              origem: 'auto_venda'
+            });
+          } else {
+            const existente = mapaClientes.get(chave);
+            if (existente.origem === 'auto_venda') {
+              existente.saldoDevedor += devedor;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Aviso ao sincronizar compradores de vendas em clientes atacado:', e);
+    }
+
+    const listaFinal = Array.from(mapaClientes.values()).sort((a, b) => b.saldoDevedor - a.saldoDevedor);
+
+    return NextResponse.json({
+      success: true,
+      clientes: listaFinal
     });
   } catch (err: any) {
     console.error('Erro ao buscar clientes de atacado:', err);

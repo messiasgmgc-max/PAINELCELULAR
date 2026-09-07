@@ -433,19 +433,29 @@ async function resolverLojaEUsuarioPorTelefone(
     console.warn('Erro ao consultar lojas:', err);
   }
 
-  // 3. Busca na tabela tecnicos (colaboradores cadastrados pelo lojista)
+  // 3. Busca na tabela tecnicos (colaboradores cadastrados pelo lojista como vendedor, técnico ou gerente)
   try {
-    const { data: tecs } = await supabase
+    const { data: tecs, error: errTecs } = await supabase
       .from('tecnicos')
-      .select('id, nome, telefone, whatsapp, cargo, loja_id, ativo')
-      .eq('ativo', true);
+      .select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo');
 
-    if (tecs && tecs.length > 0) {
+    if (!errTecs && tecs && tecs.length > 0) {
       const matchTec = tecs.find((t) => {
+        if (t.ativo === false) return false;
         const tel1 = (t.whatsapp || '').replace(/\D/g, '');
         const tel2 = (t.telefone || '').replace(/\D/g, '');
-        return variants.some((v) => (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) ||
-                                  (tel2 && (tel2 === v || v.endsWith(tel2) || tel2.endsWith(v))));
+        return variants.some((v) => {
+          if (!v) return false;
+          if (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) return true;
+          if (tel2 && (tel2 === v || v.endsWith(tel2) || tel2.endsWith(v))) return true;
+          // Compara os últimos 8 dígitos (elimina inconsistências de 9º dígito / DDD / 55)
+          if (v.length >= 8) {
+            const vLast8 = v.slice(-8);
+            if (tel1 && tel1.length >= 8 && tel1.slice(-8) === vLast8) return true;
+            if (tel2 && tel2.length >= 8 && tel2.slice(-8) === vLast8) return true;
+          }
+          return false;
+        });
       });
 
       if (matchTec && matchTec.loja_id) {
@@ -463,11 +473,11 @@ async function resolverLojaEUsuarioPorTelefone(
             diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
           }
 
-          const cleanCargo = String(matchTec.cargo || '').toLowerCase();
+          const cargoStr = String(matchTec.cargo || matchTec.tipo || '').toLowerCase();
           const papel: 'owner' | 'staff' | 'motoboy' =
-            ['owner', 'dono', 'admin', 'gerente'].includes(cleanCargo)
+            ['owner', 'dono', 'admin', 'gerente', 'administrador'].some(c => cargoStr.includes(c))
               ? 'owner'
-              : ['motoboy', 'entregador'].includes(cleanCargo)
+              : ['motoboy', 'entregador'].some(c => cargoStr.includes(c))
               ? 'motoboy'
               : 'staff';
 
@@ -1638,7 +1648,7 @@ export async function POST(request: Request) {
     // ── BLOQUEIO DE SEGURANÇA: NÚMERO NÃO CADASTRADO EM NENHUMA LOJA (CHAT PRIVADO) ──
     if (!isGroup && !usuarioResolvido) {
       console.warn(`🔒 [Segurança] Acesso negado para telefone não cadastrado: ${authorPhone}`);
-      const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe*.\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://phonecenter.com.br/assinar*`;
+      const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe* (ou *Técnicos & Vendedores*).\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://www.astrogeek.com.br/assinar* (ou *https://phonecenter.tech/assinar*)`;
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgBloqueio);
       return NextResponse.json({ status: 'unauthorized', message: 'Telefone não vinculado a nenhuma loja.' }, { status: 200 });
     }
