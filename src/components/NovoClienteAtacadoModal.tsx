@@ -205,8 +205,12 @@ export function NovoClienteAtacadoModal({
     try {
       setSalvando(true);
 
+      const realId = clienteParaEditar?.id && !String(clienteParaEditar.id).startsWith('devedor-') && !String(clienteParaEditar.id).startsWith('comprador-') && !String(clienteParaEditar.id).startsWith('venda-')
+        ? clienteParaEditar.id
+        : undefined;
+
       const payload = {
-        id: clienteParaEditar?.id || undefined,
+        id: realId,
         lojaId: lojaIdFinal,
         nome: nome.trim(),
         whatsapp: whatsapp.replace(/\D/g, ''),

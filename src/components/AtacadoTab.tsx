@@ -717,18 +717,83 @@ export function AtacadoTab() {
     return lojistasDevedores.reduce((acc, l) => acc + l.saldoDevedor, 0);
   }, [lojistasDevedores]);
 
+  // ── Consolidação Dinâmica: Clientes Atacado + Devedores de Fiado + Compradores ──
+  const todosClientesAtacado = useMemo(() => {
+    const mapa = new Map<string, ClienteAtacado>();
+
+    // 1. Clientes cadastrados formalmente no banco
+    clientesAtacado.forEach(c => {
+      const chave = c.nome.trim().toLowerCase();
+      mapa.set(chave, { ...c });
+    });
+
+    // 2. Lojistas identificados na aba "Fiado & Devedores" (ex: "CL", "GR")
+    lojistasDevedores.forEach(dev => {
+      const nomeLimpo = (dev.lojistaNome || '').trim();
+      if (!nomeLimpo || nomeLimpo === 'Não Informado' || nomeLimpo === 'Lojista / Revenda') return;
+      const chave = nomeLimpo.toLowerCase();
+
+      if (mapa.has(chave)) {
+        // Atualiza saldo devedor se o fiado for mais recente ou maior
+        const existente = mapa.get(chave)!;
+        existente.saldo_devedor = dev.saldoDevedor;
+      } else {
+        mapa.set(chave, {
+          id: `devedor-${chave}`,
+          loja_id: usuario?.lojaId || (usuario as any)?.loja_id || '',
+          nome: nomeLimpo,
+          saldo_devedor: dev.saldoDevedor,
+          limite_credito: 0,
+          telefone: '',
+          whatsapp: '',
+          cidade: '',
+          cpf_cnpj: '',
+          observacoes: 'Identificado no controle de fiado e devedores.',
+          ativo: true,
+          created_at: dev.ultimoPedido || new Date().toISOString()
+        });
+      }
+    });
+
+    // 3. Compradores com vendas de atacado registradas
+    vendasAtacado.forEach(va => {
+      const comp = (va.comprador || '').trim();
+      if (!comp || comp === 'Não Informado' || comp === 'Lojista / Revenda') return;
+      const chave = comp.toLowerCase();
+
+      if (!mapa.has(chave)) {
+        mapa.set(chave, {
+          id: `comprador-${chave}`,
+          loja_id: usuario?.lojaId || (usuario as any)?.loja_id || '',
+          nome: comp,
+          saldo_devedor: 0,
+          limite_credito: 0,
+          telefone: '',
+          whatsapp: '',
+          cidade: '',
+          cpf_cnpj: '',
+          observacoes: 'Identificado a partir do histórico de vendas em atacado.',
+          ativo: true,
+          created_at: va.data || new Date().toISOString()
+        });
+      }
+    });
+
+    return Array.from(mapa.values()).sort((a, b) => (b.saldo_devedor || 0) - (a.saldo_devedor || 0));
+  }, [clientesAtacado, lojistasDevedores, vendasAtacado, usuario]);
+
   // Clientes Filtrados
   const clientesFiltrados = useMemo(() => {
-    if (!buscaClientes.trim()) return clientesAtacado;
+    if (!buscaClientes.trim()) return todosClientesAtacado;
     const q = buscaClientes.toLowerCase();
-    return clientesAtacado.filter(c => 
+    return todosClientesAtacado.filter(c => 
       c.nome.toLowerCase().includes(q) ||
       (c.whatsapp || '').includes(q) ||
       (c.telefone || '').includes(q) ||
       (c.cidade || '').toLowerCase().includes(q) ||
       (c.cpf_cnpj || '').includes(q)
     );
-  }, [clientesAtacado, buscaClientes]);
+  }, [todosClientesAtacado, buscaClientes]);
 
   // Emissão NF-e
   const handleEmitirNFeAtacado = async (v: VendaAtacadoItem) => {
@@ -1178,7 +1243,7 @@ export function AtacadoTab() {
                 : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-800"
             )}
           >
-            <Users className="w-4 h-4" /> 👥 Clientes Atacado ({clientesAtacado.length})
+            <Users className="w-4 h-4" /> 👥 Clientes Atacado ({todosClientesAtacado.length})
           </button>
 
           <button
