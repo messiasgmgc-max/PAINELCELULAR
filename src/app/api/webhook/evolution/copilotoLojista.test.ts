@@ -166,15 +166,87 @@ describe('Copiloto Operacional do Lojista - Validações', () => {
     assert.equal(permitidas[0].id, 'loja-a');
   });
 
-  it('deve reter vendas que ultrapassam o limite de aprovação manual da loja', () => {
-    const limiteAprovacao = 3000;
-    const vendaNormal = 2500;
-    const vendaAlta = 5500;
+  it('deve calcular corretamente lucro, custo total e margem nas vendas agregadas', () => {
+    const { processarAnaliticaVendas } = require('./vendasAnalyticsHelper');
 
-    const precisaAprovacaoNormal = limiteAprovacao > 0 && vendaNormal > limiteAprovacao;
-    const precisaAprovacaoAlta = limiteAprovacao > 0 && vendaAlta > limiteAprovacao;
+    const vendasMock = [
+      {
+        id: 'v1',
+        valor: 2500,
+        custo: 1800,
+        lucro: 700,
+        tipoEntrega: 'Atacado',
+        clienteNome: 'Lucas Imports',
+        dataPagamento: new Date().toISOString(),
+      },
+      {
+        id: 'v2',
+        valor: 1500,
+        custo: 1000,
+        lucro: 500,
+        tipoEntrega: 'Varejo',
+        clienteNome: 'Mariana',
+        dataPagamento: new Date().toISOString(),
+      },
+    ];
 
-    assert.equal(precisaAprovacaoNormal, false);
-    assert.equal(precisaAprovacaoAlta, true);
+    const analitica = processarAnaliticaVendas(vendasMock);
+    assert.equal(analitica.hoje.total, 4000);
+    assert.equal(analitica.hoje.custoTotal, 2800);
+    assert.equal(analitica.hoje.lucroTotal, 1200);
+    assert.equal(analitica.hoje.margemPercentual.toFixed(1), '30.0');
+    assert.equal(analitica.hoje.atacadoLucro, 700);
+    assert.equal(analitica.hoje.varejoLucro, 500);
+    assert.ok(analitica.hoje.resumoLucroTexto.includes('1.200,00'));
+    assert.ok(analitica.hoje.itensFormatados.includes('Lucro: R$ 700,00'));
+  });
+
+  it('deve gerenciar memória de conversa recente e expirar após 3 minutos sem interação', () => {
+    const TEMPO_EXPIRACAO_MS = 3 * 60 * 1000;
+    const historicoSessao: { mensagens: Array<{ role: string; text: string }>; ultimoTimestamp: number } = {
+      mensagens: [
+        { role: 'user', text: 'quais iphones 15 temos no estoque?' },
+        { role: 'model', text: 'Temos 2 iPhone 15 disponíveis.' },
+      ],
+      ultimoTimestamp: Date.now(),
+    };
+
+    const obterHistorico = (agora: number) => {
+      if (agora - historicoSessao.ultimoTimestamp > TEMPO_EXPIRACAO_MS) {
+        return [];
+      }
+      return historicoSessao.mensagens;
+    };
+
+    // 1. Mensagem enviada dentro de 2 minutos (120s): deve manter o contexto
+    const dentroDoTempo = Date.now() + 2 * 60 * 1000;
+    assert.equal(obterHistorico(dentroDoTempo).length, 2);
+
+    // 2. Mensagem enviada após 3 minutos e 10 segundos (190s): expira e reseta o histórico
+    const aposExpirar = Date.now() + (3 * 60 + 10) * 1000;
+    assert.equal(obterHistorico(aposExpirar).length, 0);
+  });
+
+  it('deve interpretar plano de update_venda para alteração de valor ou custo', () => {
+    const { parseGeminiPlan } = require('./commandExecutor');
+
+    const planoJson = JSON.stringify({
+      type: 'command',
+      action: 'update_venda',
+      params: {
+        comprador: 'Lucas',
+        novoValor: 2600,
+        novoCusto: 1900,
+      },
+      confianca: 'alta',
+    });
+
+    const parsed = parseGeminiPlan(planoJson);
+    assert.ok(parsed);
+    assert.equal(parsed.action, 'update_venda');
+    assert.equal(parsed.confianca, 'alta');
+    assert.equal(parsed.params.comprador, 'Lucas');
+    assert.equal(parsed.params.novoValor, 2600);
+    assert.equal(parsed.params.novoCusto, 1900);
   });
 });

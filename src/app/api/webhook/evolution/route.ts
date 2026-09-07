@@ -1,6 +1,6 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini } from './commandExecutor';
+import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini, MensagemHistorico } from './commandExecutor';
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
@@ -8,6 +8,48 @@ import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
+
+// ── MEMÓRIA DE CONVERSA RECENTE DO COPILOTO (JANELA DE 3 MINUTOS) ──
+// Se passar de 3 minutos sem interação, o histórico expira e retorna ao padrão (nova conversa)
+interface SessaoConversa {
+  mensagens: MensagemHistorico[];
+  ultimoTimestamp: number;
+}
+
+const TEMPO_EXPIRACAO_CONVERSA_MS = 3 * 60 * 1000; // 3 minutos (180.000 ms)
+const cacheConversaRecente = new Map<string, SessaoConversa>();
+
+function obterHistoricoConversaRecente(chave: string): MensagemHistorico[] {
+  const agora = Date.now();
+  const sessao = cacheConversaRecente.get(chave);
+  if (!sessao) return [];
+
+  if (agora - sessao.ultimoTimestamp > TEMPO_EXPIRACAO_CONVERSA_MS) {
+    cacheConversaRecente.delete(chave);
+    return [];
+  }
+
+  return [...sessao.mensagens];
+}
+
+function registrarMensagemHistoricoConversa(chave: string, role: 'user' | 'model', text: string): void {
+  const agora = Date.now();
+  let sessao = cacheConversaRecente.get(chave);
+
+  if (!sessao || (agora - sessao.ultimoTimestamp > TEMPO_EXPIRACAO_CONVERSA_MS)) {
+    sessao = { mensagens: [], ultimoTimestamp: agora };
+  }
+
+  sessao.ultimoTimestamp = agora;
+  sessao.mensagens.push({ role, text });
+
+  // Mantém no máximo os últimos 10 turnos para evitar estouro de tokens
+  if (sessao.mensagens.length > 10) {
+    sessao.mensagens = sessao.mensagens.slice(-10);
+  }
+
+  cacheConversaRecente.set(chave, sessao);
+}
 
 // Instancia cliente do Supabase com Service Role Key para bypass de RLS no backend
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -3509,6 +3551,115 @@ A venda foi enviada para validação de um administrador no painel!`;
           return NextResponse.json({ status: 'ok', message: 'Venda IA registrada no banco.' }, { status: 200 });
         }
 
+        // Execução real de alteração/edição de venda pela IA
+        if (geminiPlan.action === 'update_venda' && lojaId) {
+          const novoValorNum = Number(geminiPlan.params.novoValor || geminiPlan.params.valor || 0);
+          const novoCustoNum = Number(geminiPlan.params.novoCusto || geminiPlan.params.custo || 0);
+          const compradorStr = String(geminiPlan.params.comprador || geminiPlan.params.cliente || '').trim();
+          const modeloStr = String(geminiPlan.params.modelo || geminiPlan.params.aparelho || '').trim();
+
+          // Busca a venda mais recente da loja que corresponda ao comprador ou modelo
+          let queryVenda = supabase
+            .from('vendas')
+            .select('id, clienteNome, valor, custo, lucro, itens, status, saldoDevedor, valorPago')
+            .eq('loja_id', lojaId)
+            .order('created_at', { ascending: false });
+
+          if (compradorStr) {
+            queryVenda = queryVenda.ilike('clienteNome', `%${compradorStr}%`);
+          } else if (modeloStr) {
+            queryVenda = queryVenda.ilike('descricao', `%${modeloStr}%`);
+          }
+
+          const { data: vendasEncontradas } = await queryVenda.limit(1);
+
+          if (vendasEncontradas && vendasEncontradas.length > 0) {
+            const vendaAlvo = vendasEncontradas[0];
+            const valorFinal = novoValorNum > 0 ? novoValorNum : Number(vendaAlvo.valor || 0);
+            const custoFinal = novoCustoNum > 0 ? novoCustoNum : Number(vendaAlvo.custo || 0);
+            const lucroFinal = Math.max(0, valorFinal - custoFinal);
+            const margemFinal = valorFinal > 0 ? ((lucroFinal / valorFinal) * 100).toFixed(1) : '0';
+
+            const payloadUpdate: any = {
+              lucro: lucroFinal,
+              percentualLucro: parseFloat(margemFinal) || 0,
+            };
+
+            if (novoValorNum > 0) {
+              payloadUpdate.valor = novoValorNum;
+              if (vendaAlvo.status === 'pago') {
+                payloadUpdate.valorPago = novoValorNum;
+                payloadUpdate.saldoDevedor = 0;
+              } else {
+                const pago = Number(vendaAlvo.valorPago || 0);
+                payloadUpdate.saldoDevedor = Math.max(0, novoValorNum - pago);
+              }
+            }
+
+            if (novoCustoNum > 0) {
+              payloadUpdate.custo = novoCustoNum;
+            }
+
+            if (vendaAlvo.itens && Array.isArray(vendaAlvo.itens) && vendaAlvo.itens.length > 0) {
+              payloadUpdate.itens = vendaAlvo.itens.map((it: any) => ({
+                ...it,
+                ...(novoValorNum > 0 ? { total: novoValorNum, valorExibir: novoValorNum, valorUnitario: novoValorNum } : {}),
+                ...(novoCustoNum > 0 ? { custoUnitario: novoCustoNum, valorInterno: novoCustoNum } : {}),
+                lucroUnitario: lucroFinal,
+              }));
+            }
+
+            await supabase.from('vendas').update(payloadUpdate).eq('id', vendaAlvo.id);
+
+            // Se a venda tiver aparelhoId nos itens, atualiza também na tabela 'aparelhos'
+            const apId = vendaAlvo.itens?.[0]?.aparelhoId;
+            if (apId) {
+              const apUpdate: any = {};
+              if (novoValorNum > 0) {
+                apUpdate.preco = novoValorNum;
+                apUpdate.preco_atacado = novoValorNum;
+              }
+              if (novoCustoNum > 0) {
+                apUpdate.custo = novoCustoNum;
+              }
+              if (Object.keys(apUpdate).length > 0) {
+                await supabase.from('aparelhos').update(apUpdate).eq('id', apId);
+              }
+            }
+
+            // Log de auditoria da alteração
+            try {
+              await supabase.from('logs_sistema').insert({
+                loja_id: lojaId,
+                tipo_evento: 'venda',
+                acao: `Venda Editada via WhatsApp IA: ${vendaAlvo.clienteNome || modeloStr}`,
+                detalhes: `Venda ID ${vendaAlvo.id} alterada. Novo Valor: R$ ${valorFinal.toFixed(2)}, Novo Custo: R$ ${custoFinal.toFixed(2)}`,
+                ator_telefone: authorPhone,
+                ator_papel: 'staff',
+                valor_anterior: { valor: vendaAlvo.valor, custo: vendaAlvo.custo },
+                valor_novo: { valor: valorFinal, custo: custoFinal, lucro: lucroFinal },
+                created_at: new Date().toISOString(),
+              });
+            } catch (logErr) {
+              console.warn('Falha silenciosa ao registrar log_sistema na alteração de venda:', logErr);
+            }
+
+            const textResposta = buildWhatsAppText('update_venda', {
+              ...geminiPlan.params,
+              comprador: vendaAlvo.clienteNome || compradorStr || 'Cliente',
+              modelo: modeloStr || 'Venda',
+              novoValor: novoValorNum > 0 ? novoValorNum : undefined,
+              novoCusto: novoCustoNum > 0 ? novoCustoNum : undefined,
+            }, senderPhone);
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Venda IA atualizada no banco.' }, { status: 200 });
+          } else {
+            const textResposta = `⚠️ Não encontrei nenhuma venda recente para ${compradorStr || modeloStr || 'os dados informados'} para editar.`;
+            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+            return NextResponse.json({ status: 'ok', message: 'Venda alvo não encontrada.' }, { status: 200 });
+          }
+        }
+
         // Execução real de cadastro de aparelho pela IA
         if (geminiPlan.action === 'create_aparelho' && lojaId) {
           const precoNum = Number(geminiPlan.params.preco || 0);
@@ -3629,14 +3780,14 @@ A venda foi enviada para validação de um administrador no painel!`;
       let analiticaVendas: ResumoVendasAgregado | null = null;
 
       if (lojaId) {
-        // 1. Busca aparelhos detalhados do estoque
+        // 1. Busca aparelhos detalhados do estoque com imei, codigo, custo e precos
         const { data: aps } = await supabase
           .from('aparelhos')
-          .select('modelo, capacidade, cor, preco, precoAtacado, saudeBateria, saude_bateria, condicao')
+          .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saudeBateria, saude_bateria, condicao')
           .eq('loja_id', lojaId)
           .eq('ativo', true)
           .neq('status', 'vendido')
-          .limit(30);
+          .limit(80);
 
         if (aps && aps.length > 0) {
           totalEstoque = aps.length;
@@ -3646,7 +3797,10 @@ A venda foi enviada para validação de um administrador no painel!`;
           detalhesEstoqueFormatado = aps.map((a) => {
             const bat = a.saudeBateria || a.saude_bateria ? ` (Bat: ${a.saudeBateria || a.saude_bateria})` : '';
             const preco = a.preco || a.precoAtacado ? ` - R$ ${(a.preco || a.precoAtacado).toLocaleString('pt-BR')}` : '';
-            return `• ${a.modelo} ${a.capacidade || ''} ${a.cor || ''}${bat}${preco}`;
+            const custo = a.custo ? ` [Custo: R$ ${Number(a.custo).toLocaleString('pt-BR')}]` : '';
+            const imeiStr = a.imei ? ` | IMEI: ${a.imei}` : '';
+            const codStr = a.codigo ? ` | Cód: ${a.codigo}` : '';
+            return `• ${a.modelo} ${a.capacidade || ''} ${a.cor || ''}${bat}${preco}${custo}${imeiStr}${codStr}`;
           }).join('\n');
         }
 
@@ -3655,7 +3809,7 @@ A venda foi enviada para validação de um administrador no painel!`;
         totalFiadoEmAberto = fiadoConsolidado.totalFiadoEmAberto;
         detalhesDevedoresFormatado = fiadoConsolidado.detalhesDevedoresFormatado;
 
-        // 3. Busca analítica de vendas abrangente (Hoje, Semana, Mês, Atacado vs Varejo e Histórico)
+        // 3. Busca analítica de vendas abrangente (Hoje, Semana, Mês, Atacado vs Varejo, Lucro e Histórico)
         try {
           analiticaVendas = await buscarResumoVendasLoja(supabase, lojaId);
           if (analiticaVendas) {
@@ -3665,6 +3819,10 @@ A venda foi enviada para validação de um administrador no painel!`;
           console.error('[Copiloto IA] Erro ao carregar analítica de vendas:', eErr);
         }
       }
+
+      // Recupera histórico recente de até 3 minutos do usuário no chat privado
+      const chaveSessao = `${remoteJid}:${authorPhone || senderPhone}`;
+      const historicoChat = obterHistoricoConversaRecente(chaveSessao);
 
       const respostaConversaIA = await responderConversaNaturalComGemini(textContent, {
         nomeLoja,
@@ -3681,14 +3839,22 @@ A venda foi enviada para validação de um administrador no painel!`;
         detalhesDevedoresFormatado,
         totalVendasHoje,
         resumoVendasHoje: analiticaVendas?.hoje?.resumoTexto,
+        resumoLucroHoje: analiticaVendas?.hoje?.resumoLucroTexto,
         resumoVendasSemana: analiticaVendas?.semana?.resumoTexto,
+        resumoLucroSemana: analiticaVendas?.semana?.resumoLucroTexto,
         resumoVendasMes: analiticaVendas?.mes?.resumoTexto,
+        resumoLucroMes: analiticaVendas?.mes?.resumoLucroTexto,
         historicoAtacadoMes: analiticaVendas?.historicoAtacadoMes,
         historicoVendasRecentes: analiticaVendas?.historicoRecente,
+        historicoChat,
         isGroup: false,
       });
 
       if (respostaConversaIA.sucesso && respostaConversaIA.resposta) {
+        // Registra a mensagem do usuário e da IA na memória de 3 minutos
+        registrarMensagemHistoricoConversa(chaveSessao, 'user', textContent);
+        registrarMensagemHistoricoConversa(chaveSessao, 'model', respostaConversaIA.resposta);
+
         await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA.resposta);
         return NextResponse.json({ status: 'ok', message: `Resposta do copiloto enviada via IA (${respostaConversaIA.modeloUsado}).` }, { status: 200 });
       }
