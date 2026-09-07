@@ -1,6 +1,7 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini } from './commandExecutor';
+import { buscarFiadoConsolidadoLoja } from './fiadoHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
 
@@ -2776,8 +2777,47 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       return NextResponse.json({ status: 'ok', message: 'Abatimento registrado.' }, { status: 200 });
     }
 
-    // ── 12. COMANDO: !saldo ou !devo (Consulta de Débitos do Próprio Lojista/Cliente) ──
-    if (lowerText === '!saldo' || lowerText === '!devo' || lowerText.startsWith('!saldo ') || lowerText.startsWith('!devo ')) {
+    // ── 12. COMANDO: !fiado ou !devedores (Contas a Receber da Loja) ou !saldo / !devo (Consulta de Débitos) ──
+    const ehComandoFiadoLoja = lowerText === '!fiado' || lowerText.startsWith('!fiado ') || lowerText === '!devedores' || lowerText.startsWith('!devedores ');
+    const ehComandoSaldo = lowerText === '!saldo' || lowerText === '!devo' || lowerText.startsWith('!saldo ') || lowerText.startsWith('!devo ');
+
+    // Se for comando explícito de fiado da loja OU se o membro da equipe enviar !saldo
+    if (ehComandoFiadoLoja || (ehComandoSaldo && usuarioResolvido && usuarioResolvido.papel !== 'nenhum' && lojaId && lowerText === '!saldo')) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar a sua loja para consultar o fiado.");
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      const fiadoConsolidado = await buscarFiadoConsolidadoLoja(supabase, lojaId);
+      const totalFmt = fiadoConsolidado.totalFiadoEmAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      if (fiadoConsolidado.devedores.length === 0) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `🎉 *Parabéns! Sua loja não possui nenhum saldo de fiado pendente a receber no momento.*`);
+        return NextResponse.json({ status: 'ok', message: 'Sem fiado pendente.' }, { status: 200 });
+      }
+
+      const listaFmt = fiadoConsolidado.devedores.map((d, i) => {
+        const valFmt = d.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const cont = d.whatsapp || d.telefone ? ` (${d.whatsapp || d.telefone})` : '';
+        return `${i + 1}. *${d.nome}*${cont}: R$ ${valFmt}`;
+      }).join('\n');
+
+      const msgFiado = `📋 *CONTROLE DE FIADO & DEVEDORES (ATACADO)*
+🏪 *Loja:* ${nomeLoja}
+
+💰 *Total Geral a Receber:* R$ ${totalFmt}
+👥 *Lojistas com Débitos:* ${fiadoConsolidado.devedores.length}
+
+${listaFmt}
+
+────────────────────────
+💡 _Para abater um valor, você pode digitar ex: "!abater 500 nome_do_lojista" ou mandar em linguagem natural pro robô._`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgFiado);
+      return NextResponse.json({ status: 'ok', message: 'Relatório de fiado enviado.' }, { status: 200 });
+    }
+
+    if (ehComandoSaldo) {
       const cleanPhone = (authorPhone || senderPhone || '').replace(/\D/g, '');
       if (!cleanPhone || cleanPhone.length < 8) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ Não consegui identificar o número de telefone de origem para consultar seus débitos.');
@@ -3305,9 +3345,55 @@ Digite: *!broadcast agora*`;
           return NextResponse.json({ status: 'ok', message: 'Preço IA atualizado.' }, { status: 200 });
         }
 
-        const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
-        await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-        return NextResponse.json({ status: 'ok', message: 'Comando IA executado com alta confiança.' }, { status: 200 });
+        // Execução real de abatimento de dívida pela IA
+        if (geminiPlan.action === 'abater_divida' && lojaId) {
+          const clienteStr = String(geminiPlan.params.cliente || '');
+          const valorAbate = Number(geminiPlan.params.valor || 0);
+
+          if (clienteStr && valorAbate > 0) {
+            const { data: devedores } = await supabase
+              .from('lojistas_devedores')
+              .select('*')
+              .eq('loja_id', lojaId)
+              .eq('ativo', true)
+              .ilike('nome', `%${clienteStr}%`)
+              .limit(1);
+
+            if (devedores && devedores.length > 0) {
+              const devedor = devedores[0];
+              const saldoAnterior = Number(devedor.saldo_devedor || 0);
+              const novoSaldo = Math.max(0, Number((saldoAnterior - valorAbate).toFixed(2)));
+
+              await supabase
+                .from('lojistas_devedores')
+                .update({
+                  saldo_devedor: novoSaldo,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', devedor.id);
+
+              const textResposta = `✅ *ABATIMENTO REGISTRADO PELA IA!*
+
+👤 *Lojista:* ${devedor.nome}
+💵 *Valor Abatido:* R$ ${valorAbate.toFixed(2).replace('.', ',')}
+💰 *Novo Saldo:* R$ ${novoSaldo.toFixed(2).replace('.', ',')}`;
+
+              await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+              return NextResponse.json({ status: 'ok', message: 'Abatimento IA registrado.' }, { status: 200 });
+            }
+          }
+        }
+
+        // Se for grupo, envia resposta do comando estruturado
+        if (isGroup) {
+          const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
+          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
+          return NextResponse.json({ status: 'ok', message: 'Comando IA executado com alta confiança em grupo.' }, { status: 200 });
+        }
+
+        // Em chat privado, se não for uma ação de alteração de banco (venda, aparelho, preco, abate),
+        // NÃO enviamos mensagem genérica tipo "Consulta concluída com sucesso".
+        // Deixamos prosseguir para a Seção 14 (Copiloto Operacional Inteligente) para responder de forma rica e neural!
       }
 
       // Se confiança for baixa em grupo, ignora silenciosamente para não floodar conversas alheias
@@ -3322,6 +3408,7 @@ Digite: *!broadcast agora*`;
       let detalhesEstoqueFormatado = '';
       let totalEstoque = 0;
       let totalFiadoEmAberto = 0;
+      let detalhesDevedoresFormatado = '';
       let totalVendasHoje = 0;
 
       if (lojaId) {
@@ -3346,16 +3433,10 @@ Digite: *!broadcast agora*`;
           }).join('\n');
         }
 
-        // 2. Busca total de fiado em aberto
-        const { data: devedores } = await supabase
-          .from('lojistas_devedores')
-          .select('saldo_devedor')
-          .eq('loja_id', lojaId)
-          .eq('ativo', true);
-
-        if (devedores && devedores.length > 0) {
-          totalFiadoEmAberto = devedores.reduce((acc, d) => acc + Number(d.saldo_devedor || 0), 0);
-        }
+        // 2. Busca total de fiado em aberto e detalhamento dos devedores (consolidando cadastrados + vendas pendentes)
+        const fiadoConsolidado = await buscarFiadoConsolidadoLoja(supabase, lojaId);
+        totalFiadoEmAberto = fiadoConsolidado.totalFiadoEmAberto;
+        detalhesDevedoresFormatado = fiadoConsolidado.detalhesDevedoresFormatado;
 
         // 3. Busca faturamento de vendas de hoje
         const hojeInicio = new Date();
@@ -3383,6 +3464,7 @@ Digite: *!broadcast agora*`;
         modelosDisponiveis: modelosEstoque,
         detalhesEstoqueFormatado,
         totalFiadoEmAberto,
+        detalhesDevedoresFormatado,
         totalVendasHoje,
         isGroup: false,
       });
