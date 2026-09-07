@@ -790,6 +790,7 @@ export function AtacadoTab() {
 
     // 1. Clientes cadastrados formalmente no banco
     clientesAtacado.forEach(c => {
+      if (!c?.nome) return;
       const chave = c.nome.trim().toLowerCase();
       mapa.set(chave, { ...c });
     });
@@ -854,11 +855,11 @@ export function AtacadoTab() {
     if (!buscaClientes.trim()) return todosClientesAtacado;
     const q = buscaClientes.toLowerCase();
     return todosClientesAtacado.filter(c => 
-      c.nome.toLowerCase().includes(q) ||
-      (c.whatsapp || '').includes(q) ||
-      (c.telefone || '').includes(q) ||
-      (c.cidade || '').toLowerCase().includes(q) ||
-      (c.cpf_cnpj || '').includes(q)
+      (c?.nome || '').toLowerCase().includes(q) ||
+      (c?.whatsapp || '').includes(q) ||
+      (c?.telefone || '').includes(q) ||
+      (c?.cidade || '').toLowerCase().includes(q) ||
+      (c?.cpf_cnpj || '').includes(q)
     );
   }, [todosClientesAtacado, buscaClientes]);
 
@@ -1676,7 +1677,9 @@ export function AtacadoTab() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {clientesFiltrados.map((cliente) => {
-                  const saldo = Number(cliente.saldo_devedor || 0);
+                  const saldo = Number(cliente.saldo_devedor ?? (cliente as any).saldoDevedor ?? 0);
+                  const limite = Number(cliente.limite_credito ?? (cliente as any).limiteCredito ?? 0);
+                  const nomeCliente = cliente.nome || 'Lojista';
                   const zapRaw = String(cliente.whatsapp || cliente.telefone || '').trim();
                   const zapLimpo = zapRaw.replace(/\D/g, '');
                   const temZap = zapLimpo.length >= 8;
@@ -1704,10 +1707,10 @@ export function AtacadoTab() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2.5">
                             <div className="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-sm">
-                              {cliente.nome.charAt(0).toUpperCase()}
+                              {nomeCliente.charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <h4 className="font-bold text-sm text-white">{cliente.nome}</h4>
+                              <h4 className="font-bold text-sm text-white">{nomeCliente}</h4>
                               {cliente.cidade ? (
                                 <span className="text-[11px] text-slate-400 block">{cliente.cidade}</span>
                               ) : (
@@ -1752,7 +1755,7 @@ export function AtacadoTab() {
                           {/* Vinculação Direta com Histórico de Vendas & Aparelhos */}
                           {(() => {
                             const estatisticas = rankingCompradores.find(
-                              r => r.nome.trim().toLowerCase() === cliente.nome.trim().toLowerCase()
+                              r => (r?.nome || '').trim().toLowerCase() === nomeCliente.trim().toLowerCase()
                             );
                             const totalGasto = estatisticas?.totalGasto || 0;
                             const totalAparelhos = estatisticas?.totalAparelhos || 0;

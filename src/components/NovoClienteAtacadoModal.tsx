@@ -164,11 +164,13 @@ export function NovoClienteAtacadoModal({
     if (clienteParaEditar) {
       setNome(clienteParaEditar.nome || '');
       setWhatsapp(clienteParaEditar.whatsapp || clienteParaEditar.telefone || '');
-      setLimiteCredito(clienteParaEditar.limiteCredito ? String(clienteParaEditar.limiteCredito) : '');
-      setSaldoDevedor(clienteParaEditar.saldoDevedor !== undefined ? String(clienteParaEditar.saldoDevedor) : '');
-      setCpfCnpj(clienteParaEditar.cpfCnpj || '');
+      const lim = clienteParaEditar.limiteCredito ?? clienteParaEditar.limite_credito;
+      setLimiteCredito(lim !== undefined && lim !== null && lim !== '' ? String(lim) : '');
+      const sld = clienteParaEditar.saldoDevedor ?? clienteParaEditar.saldo_devedor;
+      setSaldoDevedor(sld !== undefined && sld !== null && sld !== '' ? String(sld) : '0');
+      setCpfCnpj(clienteParaEditar.cpfCnpj || clienteParaEditar.cpf_cnpj || '');
       setCidade(clienteParaEditar.cidade || '');
-      setChavePix(clienteParaEditar.chavePix || '');
+      setChavePix(clienteParaEditar.chavePix || clienteParaEditar.chave_pix || '');
       setObservacoes(clienteParaEditar.observacoes || '');
     } else {
       setNome('');
