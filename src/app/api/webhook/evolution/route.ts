@@ -3375,24 +3375,33 @@ Digite: *!broadcast agora*`;
         isGroup: false,
       });
 
-      if (respostaConversaIA) {
-        await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA);
-        return NextResponse.json({ status: 'ok', message: 'Resposta do copiloto enviada via IA.' }, { status: 200 });
+      if (respostaConversaIA.sucesso && respostaConversaIA.resposta) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA.resposta);
+        return NextResponse.json({ status: 'ok', message: `Resposta do copiloto enviada via IA (${respostaConversaIA.modeloUsado}).` }, { status: 200 });
       }
 
-      // Fallback oficial do Copiloto do Lojista (caso a IA esteja momentaneamente inacessível)
-      const fallbackCopiloto = `Olá, *${nomeUsuario}*! Sou o copiloto operacional da *${nomeLoja}* no Phone Center. 📱🤖
+      // Mensagem de erro técnico solicitada caso o Gemini falhe em todos os modelos
+      const msgErroTecnico = `⚠️ *O bot está com um erro técnico no módulo de inteligência neural (Google Gemini).*
 
-Estou à sua disposição para:
-📦 *Estoque:* Consultar aparelhos disponíveis, capacidades e valores.
-💰 *Vendas:* Registrar vendas e baixas de estoque na hora.
-🤝 *Atacado:* Acompanhar fiado, devedores e cobranças.
-📋 *Assinatura:* Consultar vencimento e detalhes do seu plano.
+Mande este relatório/log para os desenvolvedores:
+\`\`\`
+[Phone Center AI Engine Error]
+Timestamp: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+Loja: "${nomeLoja}" (${lojaId || 'sem_loja'})
+Usuário: "${nomeUsuario}" (${papelUsuario})
+Mensagem enviada: "${textContent.slice(0, 70)}"
+Diagnóstico da API:
+${respostaConversaIA.erroLog || 'Nenhum modelo Gemini respondeu com sucesso.'}
+\`\`\`
 
-Como posso te ajudar agora?`;
+💡 *Dica:* Enquanto nossa equipe técnica analisa, você pode utilizar os comandos operacionais do robô:
+• *!estoque* - Ver aparelhos disponíveis e valores
+• *!vender* - Registrar venda na hora
+• *!fiado* ou *!saldo* - Consultar devedores e recebíveis
+• *!plano* - Consultar vencimento e assinatura`;
 
-      await enviarMensagemWhatsApp(instanceName, targetDestination, fallbackCopiloto);
-      return NextResponse.json({ status: 'ok', message: 'Fallback do copiloto enviado.' }, { status: 200 });
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgErroTecnico);
+      return NextResponse.json({ status: 'ok', message: 'Relatório de erro técnico no Gemini enviado ao lojista.' }, { status: 200 });
     }
 
     return NextResponse.json({ status: 'ok', message: 'Webhook processado com sucesso.' }, { status: 200 });

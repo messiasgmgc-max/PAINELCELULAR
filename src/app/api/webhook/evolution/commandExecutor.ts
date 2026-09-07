@@ -129,9 +129,12 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
 }`;
 
   const modelosParaTestar = [
-    'gemini-flash-latest',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
     'gemini-3.5-flash-lite',
-    'gemini-3.6-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
   ];
 
   for (const modelName of modelosParaTestar) {
@@ -153,9 +156,6 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
             ],
             generationConfig: {
               responseMimeType: 'application/json',
-              thinkingConfig: {
-                thinkingBudget: 0,
-              },
             },
           }),
         }
@@ -167,6 +167,9 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
         if (textResponse) {
           return textResponse.trim();
         }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName} (${res.status}):`, errJson?.error?.message || res.statusText);
       }
     } catch (err) {
       console.warn(`[Gemini Natural Language] Falha ao tentar modelo ${modelName}:`, err);
@@ -193,13 +196,30 @@ export interface ContextoConversaNatural {
   isGroup?: boolean;
 }
 
+export interface RespostaConversaIA {
+  sucesso: boolean;
+  resposta?: string;
+  modeloUsado?: string;
+  erroLog?: string;
+}
+
 export async function responderConversaNaturalComGemini(
   textContent: string,
   contexto?: ContextoConversaNatural
-): Promise<string | null> {
+): Promise<RespostaConversaIA> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || !textContent || !textContent.trim()) {
-    return null;
+  if (!apiKey) {
+    return {
+      sucesso: false,
+      erroLog: 'GEMINI_API_KEY não configurada no ambiente do servidor (.env.local).',
+    };
+  }
+
+  if (!textContent || !textContent.trim()) {
+    return {
+      sucesso: false,
+      erroLog: 'Mensagem vazia recebida para a IA.',
+    };
   }
 
   const nomeLoja = contexto?.nomeLoja || 'Phone Center';
@@ -270,10 +290,15 @@ DIRETRIZES DE RESPOSTA AO LOJISTA:
 9. Formate a mensagem com o padrão do WhatsApp (*negrito*, quebras de linha e emojis moderados).`;
 
   const modelosParaTestar = [
-    'gemini-flash-latest',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
     'gemini-3.5-flash-lite',
-    'gemini-3.6-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
   ];
+
+  const errosColetados: string[] = [];
 
   for (const modelName of modelosParaTestar) {
     try {
@@ -292,11 +317,6 @@ DIRETRIZES DE RESPOSTA AO LOJISTA:
                 ],
               },
             ],
-            generationConfig: {
-              thinkingConfig: {
-                thinkingBudget: 0,
-              },
-            },
           }),
         }
       );
@@ -305,16 +325,32 @@ DIRETRIZES DE RESPOSTA AO LOJISTA:
         const responseData = await res.json();
         const textResponse = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
         if (textResponse && typeof textResponse === 'string' && textResponse.trim()) {
-          return textResponse.trim();
+          return {
+            sucesso: true,
+            resposta: textResponse.trim(),
+            modeloUsado: modelName,
+          };
+        } else {
+          errosColetados.push(`• ${modelName}: Resposta vazia da API`);
         }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        const msg = errJson?.error?.message || res.statusText || `HTTP ${res.status}`;
+        errosColetados.push(`• ${modelName} (${res.status}): ${msg.slice(0, 100)}`);
+        console.warn(`[Gemini Copiloto Lojista] Falha modelo ${modelName} (${res.status}):`, msg);
       }
-    } catch (err) {
+    } catch (err: any) {
+      errosColetados.push(`• ${modelName}: ${err?.message || 'Falha de conexão / timeout'}`);
       console.warn(`[Gemini Copiloto Lojista] Falha ao tentar modelo ${modelName}:`, err);
     }
   }
 
-  return null;
+  return {
+    sucesso: false,
+    erroLog: errosColetados.join('\n') || 'Nenhum dos modelos Gemini conseguiu responder.',
+  };
 }
+
 export function buildDispatchPayload(phone: string, text: string) {
   const cleanPhone = phone.replace(/\D/g, '');
 
