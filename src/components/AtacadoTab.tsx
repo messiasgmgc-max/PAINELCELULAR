@@ -72,6 +72,7 @@ import { NovoClienteAtacadoModal } from '@/components/NovoClienteAtacadoModal';
 
 interface VendaAtacadoItem {
   id: string;
+  vendaId?: string;
   aparelhoId?: string;
   data: string;
   comprador: string;
@@ -386,8 +387,8 @@ export function AtacadoTab() {
         else if (/^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/.test(dataIso)) dataIso += ':00';
 
         const matchTipo = textoDetalhe.match(/Venda (ATACADO|VAREJO)/i);
-        const matchComp = textoDetalhe.match(/Comprador:\s*([^|\n]+)/i);
-        const matchVal = textoDetalhe.match(/Valor:\s*R\$\s*([\d.,]+)/i);
+        const matchComp = textoDetalhe.match(/(?:Comprador:\s*([^|\n]+)|para\s+([^|\n]+?)\s+por\s+R\$)/i);
+        const matchVal = textoDetalhe.match(/(?:Valor:\s*R\$|por\s*R\$)\s*([\d.,]+)/i);
         const matchPgto = textoDetalhe.match(/Pgto:\s*([^|\n]+)/i);
 
         const ehAtacado = (matchTipo && matchTipo[1].toUpperCase() === 'ATACADO') || 
@@ -395,12 +396,34 @@ export function AtacadoTab() {
                           (a.tipo_venda && a.tipo_venda.toUpperCase() === 'ATACADO');
 
         if (ehAtacado) {
-          const valorVenda = matchVal ? parseMonetaryValue(matchVal[1]) : (a.preco || 0);
-          const custo = Number(a.custo || a.precoCompra || 0);
+          // Localiza se já existe registro correspondente na tabela vendas para este aparelho
+          const vendaBancoItem = vendasBanco.find((vb: any) => 
+            (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === a.id)) ||
+            (vb as any).aparelhoId === a.id
+          );
+
+          let valorVenda = 0;
+          if (matchVal) {
+            valorVenda = parseMonetaryValue(matchVal[1]);
+          } else if (vendaBancoItem && Number(vendaBancoItem.valor) > 0) {
+            valorVenda = Number(vendaBancoItem.valor);
+          } else {
+            valorVenda = Number(a.preco_atacado || a.preco || 0);
+          }
+
+          const custo = Number(a.custo || a.precoCompra || (vendaBancoItem ? vendaBancoItem.custo : 0) || 0);
           const lucro = valorVenda - custo;
           const margem = custo > 0 ? (lucro / custo) * 100 : 0;
-          const comprador = matchComp ? matchComp[1].trim() : (a.cliente || 'Lojista / Revenda');
-          const metodoPgto = matchPgto ? matchPgto[1].trim() : 'dinheiro';
+          
+          let comprador = '';
+          if (matchComp) {
+            comprador = (matchComp[1] || matchComp[2] || '').trim();
+          }
+          if (!comprador) {
+            comprador = vendaBancoItem?.clienteNome || a.cliente || 'Lojista / Revenda';
+          }
+
+          const metodoPgto = matchPgto ? matchPgto[1].trim() : (vendaBancoItem?.metodo || 'dinheiro');
 
           let imeiLimpo = (a.imei || '').trim();
           if (!imeiLimpo && a.observacoes) {
@@ -411,6 +434,7 @@ export function AtacadoTab() {
           lista.push({
             id: a.id,
             aparelhoId: a.id,
+            vendaId: vendaBancoItem?.id,
             data: dataIso,
             comprador,
             modelo: a.modelo || 'Sem Modelo',
@@ -424,7 +448,10 @@ export function AtacadoTab() {
             lucro,
             margem,
             metodoPgto,
-            status: 'concluida',
+            status: vendaBancoItem?.status || 'concluida',
+            valorPago: vendaBancoItem?.valorPago,
+            saldoDevedor: vendaBancoItem?.saldoDevedor,
+            dataVencimento: vendaBancoItem?.dataVencimento,
             raw: a,
           });
         }
@@ -441,6 +468,7 @@ export function AtacadoTab() {
         const jaEstaNaLista = lista.some(item => 
           item.id === v.id || 
           item.aparelhoId === v.aparelhoId || 
+          (item.vendaId && item.vendaId === v.id) ||
           (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.aparelhoId === item.aparelhoId))
         );
 
@@ -452,6 +480,7 @@ export function AtacadoTab() {
 
           lista.push({
             id: v.id,
+            vendaId: v.id,
             aparelhoId: v.aparelhoId,
             data: v.dataPagamento || v.data || v.created_at || new Date().toISOString(),
             comprador: v.clienteNome || 'Lojista / Revenda',
@@ -2346,6 +2375,7 @@ export function AtacadoTab() {
           onSuccess={async () => {
             await fetchAparelhos();
             await fetchVendasBanco();
+            await fetchClientesAtacado();
           }}
         />
       </ModalPortal>

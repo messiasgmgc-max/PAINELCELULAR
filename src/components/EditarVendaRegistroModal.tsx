@@ -130,10 +130,15 @@ export function EditarVendaRegistroModal({
         const obsBase = String(aparAtual?.observacoes || '')
           .replace(/BAIXA_ESTOQUE:[^\n|]+(?:\|\s*)?/gi, '')
           .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
+          .replace(/Comprador:[^\n|]*(?:\|\s*)?/gi, '')
+          .replace(/Valor:[^\n|]*(?:\|\s*)?/gi, '')
+          .replace(/Custo:[^\n|]*(?:\|\s*)?/gi, '')
+          .replace(/Lucro:[^\n|]*(?:\|\s*)?/gi, '')
+          .replace(/Pgto:[^\n|]*(?:\|\s*)?/gi, '')
           .trim();
 
         const obsBaixa = [
-          `BAIXA_ESTOQUE:${dataIso}:Venda ${tipoVenda.toUpperCase()} para ${compradorFinal} por R$ ${valorVendaNum.toFixed(2)} | Custo: R$ ${custoNum.toFixed(2)} | Lucro: R$ ${lucroNum.toFixed(2)} | Pgto: ${metodoPgto}`,
+          `BAIXA_ESTOQUE:${dataIso}:Venda ${tipoVenda.toUpperCase()} para ${compradorFinal} por R$ ${valorVendaNum.toFixed(2)} | Valor: R$ ${valorVendaNum.toFixed(2)} | Comprador: ${compradorFinal} | Custo: R$ ${custoNum.toFixed(2)} | Lucro: R$ ${lucroNum.toFixed(2)} | Pgto: ${metodoPgto}`,
           observacoes ? `Obs: ${observacoes.trim()}` : '',
           venda.codigo ? `ID: ${venda.codigo}` : '',
           venda.imei ? `IMEI: ${venda.imei}` : '',
@@ -143,6 +148,8 @@ export function EditarVendaRegistroModal({
         const { error: errAparelho } = await supabase
           .from('aparelhos')
           .update({
+            preco: valorVendaNum,
+            preco_atacado: valorVendaNum,
             custo: custoNum,
             cliente: compradorFinal,
             observacoes: obsBaixa,
@@ -154,15 +161,22 @@ export function EditarVendaRegistroModal({
 
       // 2. Se tem vendaId ou id correspondente na tabela 'vendas', atualiza a venda
       const isValidUUID = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-      let idParaVenda = isValidUUID(venda.vendaId) ? venda.vendaId : (isValidUUID(venda.id) ? venda.id : null);
+      
+      // Se vendaId veio explicitamente ou se venda.id não for o aparelhoId
+      let idParaVenda = isValidUUID(venda.vendaId) ? venda.vendaId : null;
+      if (!idParaVenda && isValidUUID(venda.id) && venda.id !== venda.aparelhoId) {
+        idParaVenda = venda.id;
+      }
+
       const dataVencIso = dataVencimento ? new Date(dataVencimento + 'T12:00:00').toISOString() : null;
 
-      // Se não tem UUID direto, busca na tabela 'vendas' pelo aparelhoId
+      // Se ainda não temos idParaVenda e temos aparelhoId, busca na tabela 'vendas'
       if (!idParaVenda && venda.aparelhoId) {
         const { data: vendasExistentes } = await supabase
           .from('vendas')
-          .select('id, itens, valorPago, saldoDevedor, status')
-          .limit(200);
+          .select('id, itens, valorPago, saldoDevedor, status, aparelhoId')
+          .order('created_at', { ascending: false })
+          .limit(500);
 
         const vendaEncontrada = vendasExistentes?.find((v: any) => 
           (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
@@ -207,17 +221,44 @@ export function EditarVendaRegistroModal({
           dados_cliente_pendente: false,
         };
 
-        if (venda.itens && Array.isArray(venda.itens) && venda.itens.length > 0) {
-          payloadVendaUpdate.itens = venda.itens.map((it: any, idx: number) => {
-            if (idx === 0) {
+        // Busca itens atuais da venda no banco se venda.itens não estiver populado
+        let itensParaAtualizar = venda.itens;
+        if (!itensParaAtualizar || !Array.isArray(itensParaAtualizar) || itensParaAtualizar.length === 0) {
+          const { data: dbVenda } = await supabase
+            .from('vendas')
+            .select('itens')
+            .eq('id', idParaVenda)
+            .maybeSingle();
+          if (dbVenda?.itens && Array.isArray(dbVenda.itens)) {
+            itensParaAtualizar = dbVenda.itens;
+          }
+        }
+
+        if (itensParaAtualizar && Array.isArray(itensParaAtualizar) && itensParaAtualizar.length > 0) {
+          payloadVendaUpdate.itens = itensParaAtualizar.map((it: any, idx: number) => {
+            if (idx === 0 || (venda.aparelhoId && it.aparelhoId === venda.aparelhoId)) {
               return {
                 ...it,
                 total: valorVendaNum,
                 valorExibir: valorVendaNum,
+                valorUnitario: valorVendaNum,
+                custoUnitario: custoNum,
+                lucroUnitario: lucroNum,
               };
             }
             return it;
           });
+        }
+
+        if (metodoPgto !== 'fiado') {
+          payloadVendaUpdate.pagamentos = [
+            {
+              id: Date.now().toString(),
+              metodo: metodoPgto,
+              valor: valorVendaNum,
+              parcelas: 1,
+            }
+          ];
         }
 
         const { error: errVenda } = await supabase
@@ -225,7 +266,10 @@ export function EditarVendaRegistroModal({
           .update(payloadVendaUpdate)
           .eq('id', idParaVenda);
 
-        if (errVenda) console.error('Erro ao atualizar registro de venda:', errVenda);
+        if (errVenda) {
+          console.error('Erro ao atualizar registro de venda:', errVenda);
+          throw errVenda;
+        }
       } else {
         // Se a venda ainda não estava na tabela 'vendas' (ex: venda antiga originada apenas em aparelhos),
         // cria o registro correspondente no banco para manter a integridade
@@ -274,7 +318,10 @@ export function EditarVendaRegistroModal({
           .from('vendas')
           .insert([payloadVendaInsert]);
 
-        if (errInsert) console.error('Erro ao inserir registro de venda ao editar:', errInsert);
+        if (errInsert) {
+          console.error('Erro ao inserir registro de venda ao editar:', errInsert);
+          throw errInsert;
+        }
       }
 
       await upsertComprador(compradorFinal, tipoVenda.toLowerCase().includes('atacado') ? 'lojista' : 'cliente');

@@ -19,7 +19,7 @@ import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
-import { getAparelhoCodigo, cn, canViewFinancials } from "@/lib/utils";
+import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -3136,6 +3136,9 @@ export function AparelhosTab() {
                             {canViewFinancials(usuario) && (
                               <button
                                 onClick={() => {
+                                  const matchValObs = String(item.observacoes || '').match(/(?:Valor:\s*R\$|por\s*R\$)\s*([\d.,]+)/i);
+                                  const valVendaFinal = matchValObs ? parseMonetaryValue(matchValObs[1]) : (item.preco || item.preco_atacado || 0);
+
                                   setSaidaParaEditar({
                                     aparelhoId: item.id,
                                     data: item.dataSaida || item.dataCadastro,
@@ -3146,7 +3149,7 @@ export function AparelhosTab() {
                                     capacidade: item.capacidade,
                                     imei: item.imei,
                                     codigo: getAparelhoCodigo(item),
-                                    valorVenda: item.preco || 0,
+                                    valorVenda: valVendaFinal,
                                     custo: item.custo || 0,
                                     observacoes: item.observacoes || '',
                                   });

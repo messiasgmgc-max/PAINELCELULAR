@@ -3520,6 +3520,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                   metodoPgto: venda.metodo || 'pix',
                                   tipoVenda: (venda as any).tipoEntrega || 'Varejo',
                                   observacoes: venda.descricao || '',
+                                  itens: venda.itens,
+                                  raw: venda,
                                 });
                               }}
                               className="text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/40 cursor-pointer flex items-center gap-1 shadow-sm"
@@ -3612,6 +3614,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                     metodoPgto: venda.metodo || 'pix',
                                     tipoVenda: (venda as any).tipoEntrega || 'Varejo',
                                     observacoes: venda.descricao || '',
+                                    itens: venda.itens,
+                                    raw: venda,
                                   });
                                 }}
                               >
