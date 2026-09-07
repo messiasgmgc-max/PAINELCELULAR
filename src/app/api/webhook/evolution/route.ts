@@ -353,20 +353,22 @@ async function resolverLojaEUsuarioPorTelefone(
   const variants = obterVariantesTelefone(authorPhone);
   if (variants.length === 0) return null;
 
+  // Resolve loja vinculada à instância da Evolution API (ex: lucasimports)
+  const lojaIdInstancia = instanceName ? await resolverLojaId(instanceName) : null;
+
   // 1. Busca em whatsapp_permissoes (fonte prioritária de permissão no WhatsApp)
   try {
     const { data: perms } = await supabase
       .from('whatsapp_permissoes')
       .select('loja_id, telefone, nome, papel, ativo')
       .in('telefone', variants)
-      .eq('ativo', true)
-      .limit(1);
+      .eq('ativo', true);
 
     if (perms && perms.length > 0) {
-      const p = perms[0];
+      const p = (lojaIdInstancia ? perms.find((x) => x.loja_id === lojaIdInstancia) : null) || perms[0];
       const { data: loja } = await supabase
         .from('lojas')
-        .select('id, nome, plano_tipo, plano_status, data_vencimento, plano_trial_ate')
+        .select('id, nome, plano_status, data_vencimento')
         .eq('id', p.loja_id)
         .maybeSingle();
 
@@ -383,7 +385,7 @@ async function resolverLojaEUsuarioPorTelefone(
           lojaNome: loja.nome || 'Phone Center',
           usuarioNome: p.nome || 'Colaborador',
           papel: (p.papel as any) || 'staff',
-          planoTipo: loja.plano_tipo || 'entrada',
+          planoTipo: 'pro',
           planoStatus: loja.plano_status || 'ativo',
           dataVencimento: loja.data_vencimento || undefined,
           diasRestantes,
@@ -398,11 +400,12 @@ async function resolverLojaEUsuarioPorTelefone(
   try {
     const { data: lojas } = await supabase
       .from('lojas')
-      .select('id, nome, telefone, dono_whatsapp, plano_tipo, plano_status, data_vencimento, plano_trial_ate')
+      .select('id, nome, telefone, dono_whatsapp, plano_status, data_vencimento')
       .eq('ativo', true);
 
     if (lojas && lojas.length > 0) {
-      const matchLoja = lojas.find((l) => {
+      const lojasFiltradas = (lojaIdInstancia ? lojas.filter((l) => l.id === lojaIdInstancia) : lojas);
+      const matchLoja = (lojasFiltradas.length > 0 ? lojasFiltradas : lojas).find((l) => {
         const tel1 = (l.telefone || '').replace(/\D/g, '');
         const tel2 = (l.dono_whatsapp || '').replace(/\D/g, '');
         return variants.some((v) => (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) ||
@@ -422,7 +425,7 @@ async function resolverLojaEUsuarioPorTelefone(
           lojaNome: matchLoja.nome || 'Phone Center',
           usuarioNome: 'Proprietário',
           papel: 'owner',
-          planoTipo: matchLoja.plano_tipo || 'entrada',
+          planoTipo: 'pro',
           planoStatus: matchLoja.plano_status || 'ativo',
           dataVencimento: matchLoja.data_vencimento || undefined,
           diasRestantes,
@@ -440,7 +443,7 @@ async function resolverLojaEUsuarioPorTelefone(
       .select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo');
 
     if (!errTecs && tecs && tecs.length > 0) {
-      const matchTec = tecs.find((t) => {
+      const matchingTecs = tecs.filter((t) => {
         if (t.ativo === false) return false;
         const tel1 = (t.whatsapp || '').replace(/\D/g, '');
         const tel2 = (t.telefone || '').replace(/\D/g, '');
@@ -458,10 +461,13 @@ async function resolverLojaEUsuarioPorTelefone(
         });
       });
 
+      // Prioriza a loja da instância ativa se houver múltiplos cadastros
+      const matchTec = (lojaIdInstancia ? matchingTecs.find((t) => t.loja_id === lojaIdInstancia) : null) || matchingTecs[0];
+
       if (matchTec && matchTec.loja_id) {
         const { data: loja } = await supabase
           .from('lojas')
-          .select('id, nome, plano_tipo, plano_status, data_vencimento, plano_trial_ate')
+          .select('id, nome, plano_status, data_vencimento')
           .eq('id', matchTec.loja_id)
           .maybeSingle();
 
@@ -475,9 +481,9 @@ async function resolverLojaEUsuarioPorTelefone(
 
           const cargoStr = String(matchTec.cargo || matchTec.tipo || '').toLowerCase();
           const papel: 'owner' | 'staff' | 'motoboy' =
-            ['owner', 'dono', 'admin', 'gerente', 'administrador'].some(c => cargoStr.includes(c))
+            ['owner', 'dono', 'admin', 'gerente', 'administrador'].some((c) => cargoStr.includes(c))
               ? 'owner'
-              : ['motoboy', 'entregador'].some(c => cargoStr.includes(c))
+              : ['motoboy', 'entregador'].some((c) => cargoStr.includes(c))
               ? 'motoboy'
               : 'staff';
 
@@ -486,7 +492,7 @@ async function resolverLojaEUsuarioPorTelefone(
             lojaNome: loja.nome || 'Phone Center',
             usuarioNome: matchTec.nome || 'Colaborador',
             papel,
-            planoTipo: loja.plano_tipo || 'entrada',
+            planoTipo: 'pro',
             planoStatus: loja.plano_status || 'ativo',
             dataVencimento: loja.data_vencimento || undefined,
             diasRestantes,
@@ -504,7 +510,7 @@ async function resolverLojaEUsuarioPorTelefone(
     if (lojaIdFallback) {
       const { data: loja } = await supabase
         .from('lojas')
-        .select('id, nome, plano_tipo, plano_status, data_vencimento')
+        .select('id, nome, plano_status, data_vencimento')
         .eq('id', lojaIdFallback)
         .maybeSingle();
 
@@ -514,7 +520,7 @@ async function resolverLojaEUsuarioPorTelefone(
           lojaNome: loja.nome || 'Phone Center',
           usuarioNome: 'Lojista',
           papel: 'staff',
-          planoTipo: loja.plano_tipo || 'entrada',
+          planoTipo: 'pro',
           planoStatus: loja.plano_status || 'ativo',
           dataVencimento: loja.data_vencimento || undefined,
         };
@@ -526,21 +532,28 @@ async function resolverLojaEUsuarioPorTelefone(
 }
 
 async function resolverLojaId(instanceName?: string): Promise<string | null> {
-  if (instanceName && instanceName.startsWith('loja-')) {
+  if (!instanceName) return null;
+
+  if (instanceName.startsWith('loja-')) {
     const extractedId = instanceName.replace('loja-', '').trim();
     if (extractedId.length >= 30) return extractedId;
   }
 
-  if (instanceName) {
+  // Busca na tabela whatsapp_sessions pelo session_name
+  try {
     const { data: session } = await supabase
       .from('whatsapp_sessions')
       .select('loja_id')
-      .or(`session_name.eq.${instanceName},loja_id.eq.${instanceName}`)
+      .eq('session_name', instanceName)
       .maybeSingle();
 
     if (session?.loja_id) return session.loja_id;
+  } catch (eSess) {
+    console.warn('Aviso busca session por instanceName:', eSess);
+  }
 
-    // Busca loja por aproximação de nome (ex: lucasimports -> Lucas Imports)
+  // Busca loja por aproximação de nome (ex: lucasimports -> Lucas Imports)
+  try {
     const { data: lojas } = await supabase.from('lojas').select('id, nome').eq('ativo', true);
     if (lojas && lojas.length > 0) {
       const cleanInst = instanceName.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -550,6 +563,8 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
       });
       if (lojaMatch) return lojaMatch.id;
     }
+  } catch (eLoja) {
+    console.warn('Aviso busca lojas por nome:', eLoja);
   }
 
   return null;
@@ -1132,12 +1147,12 @@ async function obterPlanoLoja(lojaId: string): Promise<TipoPlano> {
   try {
     const { data: loja } = await supabase
       .from('lojas')
-      .select('plano_tipo')
+      .select('plano_status')
       .eq('id', lojaId)
       .maybeSingle();
-    return (loja?.plano_tipo as TipoPlano) || 'entrada';
+    return (loja as any)?.plano_tipo || 'pro';
   } catch {
-    return 'entrada';
+    return 'pro';
   }
 }
 
