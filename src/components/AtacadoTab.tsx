@@ -121,17 +121,25 @@ interface ConfigAtacadoBot {
   enviar_somente_dias_uteis: boolean;
   notificar_dono: boolean;
   chave_pix?: string;
+  tipo_modelo?: 'simples' | 'extrato' | 'detalhado';
 }
+
+const MODELOS_MENSAGEM_PREDEFINIDOS = {
+  simples: `Olá {nome}! Tudo bem? Passando para lembrar sobre os pagamentos pendentes das suas retiradas de atacado na {nome_loja}.\n\n*Saldo em aberto: {valor}*\n\nChave Pix para quitação: {chave_pix}\n\nSe já realizou a transferência, por favor nos envie o comprovante!`,
+  extrato: `📋 *EXTRATO DE CONTA - {nome_loja}*\n👤 *Lojista:* {nome}\n\n{extrato_completo}\n\n━━━━━━━━━━━━━━━━━━━━\n🚨 *TOTAL PENDENTE: {valor}*\n🔑 *Chave PIX:* {chave_pix}\n━━━━━━━━━━━━━━━━━━━━\n\nQualquer dúvida estamos à disposição! 🤝`,
+  detalhado: `Olá {nome}! Segue a relação dos seus aparelhos pendentes na {nome_loja}:\n\n📦 *Aparelhos em Aberto:*\n{itens_detalhados}\n\n🚨 *Saldo total pendente: {valor}*\n\n🔑 *Chave Pix para pagamento:* {chave_pix}\n\nPor favor, nos envie o comprovante após o pagamento!`,
+};
 
 const DEFAULT_CONFIG_BOT: ConfigAtacadoBot = {
   ativo: true,
   horario_disparo: '10:00',
   dias_semana: [1, 2, 3, 4, 5],
   dias_carencia: 1,
-  mensagem_template: `Olá {nome}! Tudo bem? Passando para lembrar sobre os pagamentos pendentes das suas retiradas de atacado na {nome_loja}.\n\n*Saldo em aberto: {valor}*\n\nChave Pix para quitação: {chave_pix}\n\nSe já realizou a transferência, por favor nos envie o comprovante!`,
+  mensagem_template: MODELOS_MENSAGEM_PREDEFINIDOS.simples,
   enviar_somente_dias_uteis: true,
   notificar_dono: true,
   chave_pix: '',
+  tipo_modelo: 'simples',
 };
 
 const DIAS_SEMANA_OPCOES = [
@@ -189,7 +197,7 @@ export function AtacadoTab() {
   const [aparelhoSelecionadoVenda, setAparelhoSelecionadoVenda] = useState<Aparelho | null>(null);
   const [vendaParaEditar, setVendaParaEditar] = useState<any | null>(null);
   const [lojistaParaBaixa, setLojistaParaBaixa] = useState<{ lojistaNome: string; saldoDevedorTotal: number; vendasEmAberto: any[] } | null>(null);
-  const [lojistaParaExtrato, setLojistaParaExtrato] = useState<{ lojistaNome: string; vendasLojista: any[] } | null>(null);
+  const [lojistaParaExtrato, setLojistaParaExtrato] = useState<{ lojistaNome: string; vendasLojista: any[]; telefone?: string } | null>(null);
   const [vendasBanco, setVendasBanco] = useState<any[]>([]);
 
   // Clientes de Atacado & Bot
@@ -245,14 +253,18 @@ export function AtacadoTab() {
   const fetchConfigBot = useCallback(async () => {
     setLoadingConfigBot(true);
     try {
-      const res = await fetch('/api/atacado/configuracoes');
+      const lojaIdAtual = usuario?.lojaId || (usuario as any)?.loja_id;
+      const res = await fetch(`/api/atacado/configuracoes${lojaIdAtual ? `?lojaId=${lojaIdAtual}` : ''}`);
       if (res.ok) {
         const json = await res.json();
         if (json.config) {
+          const cfg = json.config;
+          const msg = cfg.mensagem_template || cfg.modelo_mensagem || DEFAULT_CONFIG_BOT.mensagem_template;
           setConfigBot({
             ...DEFAULT_CONFIG_BOT,
-            ...json.config,
-            chave_pix: json.config.chave_pix || config.chavePix || '',
+            ...cfg,
+            mensagem_template: msg,
+            chave_pix: cfg.chave_pix || json.chavePix || config.chavePix || '',
           });
         }
       }
@@ -261,19 +273,24 @@ export function AtacadoTab() {
     } finally {
       setLoadingConfigBot(false);
     }
-  }, [config.chavePix]);
+  }, [config.chavePix, usuario]);
 
   // Salvar configurações do Bot
   const handleSalvarConfigBot = async () => {
     setSalvandoConfigBot(true);
     try {
+      const lojaIdAtual = usuario?.lojaId || (usuario as any)?.loja_id;
       const res = await fetch('/api/atacado/configuracoes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(configBot),
+        body: JSON.stringify({
+          lojaId: lojaIdAtual || null,
+          configAtacado: configBot,
+        }),
       });
 
-      if (!res.ok) throw new Error('Falha ao salvar configurações.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao salvar configurações.');
 
       toast.success('Configurações do Bot de Atacado salvas com sucesso! 🤖✅');
     } catch (err: any) {
@@ -1033,12 +1050,19 @@ export function AtacadoTab() {
   // Live preview do template de mensagem do bot
   const previewMensagemBot = useMemo(() => {
     const template = configBot.mensagem_template || '';
+    const itensExemplo = '• iPhone 13 128GB (R$ 2.450,00)\n• iPhone 14 Pro 128GB (R$ 4.200,00)';
+    const itensDetalhadosExemplo = '• iPhone 13 128GB Azul - IMEI: 356892110293812 (R$ 2.450,00)\n• iPhone 14 Pro 128GB Roxo - IMEI: 357912384910283 (R$ 4.200,00)';
+    const extratoExemplo = `📦 *PEDIDOS E APARELHOS EM ABERTO:*\n⏳ *Venda Lote (2 itens)* (05/09/2026)\n   Valor: R$ 6.650,00 | *Resta: R$ 6.650,00*\n   └ 📱 iPhone 13 128GB Azul | IMEI: 356892110293812 (R$ 2.450,00)\n   └ 📱 iPhone 14 Pro 128GB Roxo | IMEI: 357912384910283 (R$ 4.200,00)`;
+
     return template
-      .replace(/\{nome\}/gi, 'João da Silva')
-      .replace(/\{valor\}/gi, 'R$ 3.850,00')
-      .replace(/\{chave_pix\}/gi, configBot.chave_pix || config.chavePix || '12.345.678/0001-90')
-      .replace(/\{nome_loja\}/gi, config.nomeLoja || 'Phone Center')
-      .replace(/\{itens\}/gi, 'iPhone 13 128GB, iPhone 14 Pro');
+      .replace(/\{nome\}/gi, 'Junior Imports')
+      .replace(/\{valor\}/gi, 'R$ 6.650,00')
+      .replace(/\{chave_pix\}/gi, configBot.chave_pix || config.chavePix || 'contato@lucasimports.com.br')
+      .replace(/\{nome_loja\}/gi, config.nomeLoja || 'Lucas Imports')
+      .replace(/\{itens_detalhados\}/gi, itensDetalhadosExemplo)
+      .replace(/\{itens\}/gi, itensExemplo)
+      .replace(/\{extrato_completo\}/gi, extratoExemplo)
+      .replace(/\{extrato\}/gi, extratoExemplo);
   }, [configBot.mensagem_template, configBot.chave_pix, config.chavePix, config.nomeLoja]);
 
   return (
@@ -1563,13 +1587,17 @@ export function AtacadoTab() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setLojistaParaExtrato({
-                        lojistaNome: lojista.lojistaNome,
-                        vendasLojista: lojista.pedidos,
-                      })}
+                      onClick={() => {
+                        const cli = todosClientesAtacado.find(c => c.nome.trim().toLowerCase() === lojista.lojistaNome.trim().toLowerCase());
+                        setLojistaParaExtrato({
+                          lojistaNome: lojista.lojistaNome,
+                          vendasLojista: lojista.pedidos,
+                          telefone: cli?.whatsapp || cli?.telefone || '',
+                        });
+                      }}
                       className="bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200 text-xs h-9 rounded-xl gap-1.5 cursor-pointer"
                     >
-                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> Extrato Zap
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> Extrato & WhatsApp
                     </Button>
                   </div>
 
@@ -1961,35 +1989,113 @@ export function AtacadoTab() {
                 </div>
 
                 {/* Template da Mensagem */}
-                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
+                <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-slate-300">
                       Modelo da Mensagem de Cobrança:
                     </label>
-                    <span className="text-[10px] text-slate-400">Variáveis disponíveis abaixo</span>
+                    <span className="text-[10px] text-amber-400 font-medium">Escolha um estilo pronto ou personalize</span>
+                  </div>
+
+                  {/* Seletor de Modelos Prontos */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfigBot({
+                          ...configBot,
+                          tipo_modelo: 'simples',
+                          mensagem_template: MODELOS_MENSAGEM_PREDEFINIDOS.simples,
+                        });
+                        toast.success('Modelo simples com PIX selecionado!');
+                      }}
+                      className={cn(
+                        "p-2 rounded-xl border text-left text-[11px] font-medium transition-all cursor-pointer",
+                        configBot.tipo_modelo === 'simples'
+                          ? "bg-blue-600/20 border-blue-500/50 text-blue-300 shadow-sm"
+                          : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                      )}
+                    >
+                      <span className="font-bold block text-white text-xs">Opção A</span>
+                      Lembrete com PIX
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfigBot({
+                          ...configBot,
+                          tipo_modelo: 'extrato',
+                          mensagem_template: MODELOS_MENSAGEM_PREDEFINIDOS.extrato,
+                        });
+                        toast.success('Modelo B (Extrato Completo do Fiado) selecionado!');
+                      }}
+                      className={cn(
+                        "p-2 rounded-xl border text-left text-[11px] font-medium transition-all cursor-pointer",
+                        configBot.tipo_modelo === 'extrato'
+                          ? "bg-emerald-600/20 border-emerald-500/50 text-emerald-300 shadow-sm"
+                          : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                      )}
+                    >
+                      <span className="font-bold block text-white text-xs">Opção B</span>
+                      Extrato do Fiado
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfigBot({
+                          ...configBot,
+                          tipo_modelo: 'detalhado',
+                          mensagem_template: MODELOS_MENSAGEM_PREDEFINIDOS.detalhado,
+                        });
+                        toast.success('Modelo C (Itens com IMEI e Cor) selecionado!');
+                      }}
+                      className={cn(
+                        "p-2 rounded-xl border text-left text-[11px] font-medium transition-all cursor-pointer",
+                        configBot.tipo_modelo === 'detalhado'
+                          ? "bg-amber-600/20 border-amber-500/50 text-amber-300 shadow-sm"
+                          : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                      )}
+                    >
+                      <span className="font-bold block text-white text-xs">Opção C</span>
+                      Itens com IMEI/Cor
+                    </button>
                   </div>
 
                   {/* Badges para inserir variáveis no texto */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {['{nome}', '{valor}', '{chave_pix}', '{nome_loja}', '{itens}'].map(tag => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => {
-                          setConfigBot({
-                            ...configBot,
-                            mensagem_template: (configBot.mensagem_template || '') + ` ${tag} `,
-                          });
-                        }}
-                        className="bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] font-mono cursor-pointer transition-colors"
-                      >
-                        + {tag}
-                      </button>
-                    ))}
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-slate-400 block font-medium">Clique nas tags para adicionar ao texto:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { tag: '{nome}', desc: 'Nome' },
+                        { tag: '{valor}', desc: 'Saldo Devedor' },
+                        { tag: '{chave_pix}', desc: 'PIX' },
+                        { tag: '{nome_loja}', desc: 'Loja' },
+                        { tag: '{itens}', desc: 'Modelos' },
+                        { tag: '{itens_detalhados}', desc: 'IMEI, Cor e Valor' },
+                        { tag: '{extrato_completo}', desc: 'Extrato Fiado' },
+                      ].map(item => (
+                        <button
+                          key={item.tag}
+                          type="button"
+                          onClick={() => {
+                            setConfigBot({
+                              ...configBot,
+                              mensagem_template: (configBot.mensagem_template || '') + ` ${item.tag} `,
+                            });
+                          }}
+                          title={item.desc}
+                          className="bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] font-mono cursor-pointer transition-colors"
+                        >
+                          + {item.tag}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <textarea
-                    rows={6}
+                    rows={7}
                     value={configBot.mensagem_template}
                     onChange={(e) => setConfigBot({ ...configBot, mensagem_template: e.target.value })}
                     className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-xl p-3 outline-none focus:border-blue-500 font-sans leading-relaxed"
@@ -2426,6 +2532,9 @@ export function AtacadoTab() {
           lojistaNome={lojistaParaExtrato?.lojistaNome || ''}
           vendasLojista={lojistaParaExtrato?.vendasLojista || []}
           chavePix={configBot.chave_pix || config.chavePix || ''}
+          nomeLoja={config.nomeLoja || 'Lucas Imports'}
+          lojaId={usuario?.lojaId || (usuario as any)?.loja_id}
+          telefoneInicial={lojistaParaExtrato?.telefone || ''}
           onAbrirBaixaModal={() => {
             if (lojistaParaExtrato) {
               const devedor = lojistaParaExtrato.vendasLojista.reduce((acc, v) => acc + (Number(v.saldoDevedor !== undefined ? v.saldoDevedor : (Number(v.valor || 0) - Number(v.valorPago || 0)))), 0);

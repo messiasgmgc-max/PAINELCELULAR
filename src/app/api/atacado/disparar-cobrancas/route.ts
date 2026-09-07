@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const { 
       lojaId, 
       clienteId, 
-      destinatarios: destinatariosFrontend,
+      destinatarios: destinatariosFrontend, 
       mensagemPersonalizada, 
       modoSimulacao = false 
     } = body;
@@ -29,11 +29,11 @@ export async function POST(request: Request) {
     }
 
     const configAtacado = loja.config_atacado || {};
-    const templateMsg = mensagemPersonalizada || configAtacado.modelo_mensagem || 
-      'Olá {nome}! Tudo bem? Passando para lembrar sobre seu saldo em aberto de R$ {valor} no {nome_loja}.\n\nChave PIX: {chave_pix}';
+    const defaultMsg = 'Olá {nome}! Tudo bem? Passando para lembrar sobre os pagamentos pendentes das suas retiradas de atacado na {nome_loja}.\n\n*Saldo em aberto: {valor}*\n\nChave Pix para quitação: {chave_pix}\n\nSe já realizou a transferência, por favor nos envie o comprovante!';
+    const templateMsg = mensagemPersonalizada || configAtacado.mensagem_template || configAtacado.modelo_mensagem || defaultMsg;
 
-    const chavePixLoja = loja.chave_pix || loja.chave_pix_cobranca || 'Solicitar via WhatsApp';
-    const nomeLoja = loja.nome || 'Phone Center';
+    const chavePixLoja = configAtacado.chave_pix || loja.chave_pix || loja.chave_pix_cobranca || 'Solicitar via WhatsApp';
+    const nomeLoja = loja.nome || 'Lucas Imports';
 
     // 2. Montar lista de devedores consolidada
     let devedoresParaDisparo: Array<{
@@ -192,12 +192,128 @@ export async function POST(request: Request) {
         continue;
       }
 
+      // ── Montagem dinâmica dos Itens e Extrato Detalhado do Lojista ──
+      let listaItensSimples = '';
+      let listaItensDetalhados = '';
+      let blocoExtratoCompleto = '';
+
+      try {
+        const { data: vendasLojista } = await supabaseAdmin
+          .from('vendas')
+          .select('id, descricao, itens, valor, valorPago, saldoDevedor, metodo, status, dataPagamento, dataVencimento, created_at')
+          .eq('loja_id', lojaId)
+          .ilike('clienteNome', dev.nome.trim())
+          .order('dataPagamento', { ascending: false });
+
+        const pendentes = (vendasLojista || []).filter(v => {
+          const val = Number(v.valor || 0);
+          const pago = Number(v.valorPago || 0);
+          const saldo = v.saldoDevedor !== undefined && v.saldoDevedor !== null ? Number(v.saldoDevedor) : (val - pago);
+          return saldo > 0.01 || v.metodo === 'fiado' || v.status === 'pendente' || v.status === 'parcial';
+        });
+
+        const itensColetados: Array<{
+          modelo: string;
+          detalhes: string;
+          valor: number;
+          data: string;
+          vencimento?: string;
+        }> = [];
+
+        pendentes.forEach(v => {
+          const dataVenda = v.dataPagamento || v.created_at ? new Date(v.dataPagamento || v.created_at).toLocaleDateString('pt-BR') : '';
+          const dataVenc = v.dataVencimento ? new Date(v.dataVencimento).toLocaleDateString('pt-BR') : undefined;
+
+          if (v.itens && Array.isArray(v.itens) && v.itens.length > 0) {
+            v.itens.forEach((it: any) => {
+              const valItem = Number(it.total || it.valorExibir || it.valor || (v.valor / v.itens.length));
+              const desc = it.descricao || it.modelo || 'Aparelho';
+              const imei = it.imei || '';
+              const cor = it.cor || '';
+              const cap = it.capacidade || '';
+              const extraParts = [cap, cor, imei ? `IMEI: ${imei}` : ''].filter(Boolean).join(' · ');
+
+              itensColetados.push({
+                modelo: desc,
+                detalhes: extraParts ? `${desc} (${extraParts})` : desc,
+                valor: valItem,
+                data: dataVenda,
+                vencimento: dataVenc,
+              });
+            });
+          } else {
+            const valVenda = Number(v.saldoDevedor || v.valor || 0);
+            itensColetados.push({
+              modelo: v.descricao || 'Pedido / Aparelho',
+              detalhes: v.descricao || 'Pedido / Aparelho',
+              valor: valVenda,
+              data: dataVenda,
+              vencimento: dataVenc,
+            });
+          }
+        });
+
+        if (itensColetados.length > 0) {
+          listaItensSimples = itensColetados
+            .map(it => `• ${it.modelo} (R$ ${it.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`)
+            .join('\n');
+
+          listaItensDetalhados = itensColetados
+            .map(it => `• ${it.detalhes} - R$ ${it.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` + (it.vencimento ? ` (Venc: ${it.vencimento})` : ''))
+            .join('\n');
+        } else {
+          listaItensSimples = `• Saldo devedor consolidado: R$ ${saldoFmt}`;
+          listaItensDetalhados = `• Saldo devedor consolidado: R$ ${saldoFmt}`;
+        }
+
+        // Monta bloco de extrato completo (idêntico ao copia e cola do Fiado)
+        let ext = `📦 *PEDIDOS E APARELHOS EM ABERTO:*\n`;
+        if (pendentes.length > 0) {
+          pendentes.forEach(p => {
+            const dataV = p.dataPagamento || p.created_at ? new Date(p.dataPagamento || p.created_at).toLocaleDateString('pt-BR') : '';
+            const valTotal = Number(p.valor || 0);
+            const valPago = Number(p.valorPago || 0);
+            const valSaldo = Math.max(0, valTotal - valPago);
+            const venc = p.dataVencimento ? ` | Vencimento: ${new Date(p.dataVencimento).toLocaleDateString('pt-BR')}` : '';
+
+            ext += `⏳ *${p.descricao || 'Pedido'}* (${dataV})\n`;
+            ext += `   Valor: R$ ${valTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+            if (valPago > 0) {
+              ext += ` | Já pago: R$ ${valPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | *Resta: R$ ${valSaldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}*`;
+            }
+            ext += `${venc}\n`;
+
+            // Se o pedido tiver aparelhos detalhados internamente
+            if (p.itens && Array.isArray(p.itens) && p.itens.length > 0) {
+              p.itens.forEach((it: any) => {
+                const im = it.imei ? ` | IMEI: ${it.imei}` : '';
+                const corCap = [it.capacidade, it.cor].filter(Boolean).join(' ');
+                ext += `   └ 📱 ${it.descricao || it.modelo}${corCap ? ` (${corCap})` : ''}${im} (R$ ${Number(it.total || it.valorExibir || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})\n`;
+              });
+            }
+          });
+        } else {
+          ext += `• Saldo total em aberto: R$ ${saldoFmt}\n`;
+        }
+
+        blocoExtratoCompleto = ext.trim();
+      } catch (errItens) {
+        console.warn('Aviso ao montar itens detalhados para cobrança:', errItens);
+        listaItensSimples = `• Saldo em aberto: R$ ${saldoFmt}`;
+        listaItensDetalhados = `• Saldo em aberto: R$ ${saldoFmt}`;
+        blocoExtratoCompleto = `• Saldo total em aberto: R$ ${saldoFmt}`;
+      }
+
       // Interpolação de variáveis no texto
       const textoFinal = templateMsg
         .replace(/\{nome\}/gi, dev.nome)
         .replace(/\{valor\}/gi, saldoFmt)
         .replace(/\{chave_pix\}/gi, chavePixLoja)
-        .replace(/\{nome_loja\}/gi, nomeLoja);
+        .replace(/\{nome_loja\}/gi, nomeLoja)
+        .replace(/\{itens_detalhados\}/gi, listaItensDetalhados)
+        .replace(/\{itens\}/gi, listaItensSimples)
+        .replace(/\{extrato_completo\}/gi, blocoExtratoCompleto)
+        .replace(/\{extrato\}/gi, blocoExtratoCompleto);
 
       if (modoSimulacao) {
         resultados.push({
@@ -239,44 +355,39 @@ export async function POST(request: Request) {
             .from('lojistas_devedores')
             .update({ ultimo_disparo_cobranca: new Date().toISOString() })
             .eq('id', dev.id);
-        } else {
-          await supabaseAdmin
-            .from('lojistas_devedores')
-            .update({ ultimo_disparo_cobranca: new Date().toISOString() })
-            .eq('loja_id', lojaId)
-            .ilike('nome', dev.nome.trim());
         }
 
-        // Inserir registro no histórico de cobranças
+        // Histórico de auditoria de disparos de atacado
         try {
-          await supabaseAdmin.from('historico_cobrancas_atacado').insert({
+          await supabaseAdmin.from('historico_cobrancas_atacado').insert([{
             loja_id: lojaId,
-            lojista_id: dev.id && !String(dev.id).startsWith('venda-') ? dev.id : undefined,
+            lojista_id: dev.id && !String(dev.id).startsWith('venda-') ? dev.id : null,
             lojista_nome: dev.nome,
             whatsapp: cleanPhone,
-            valor_cobrado: Number(dev.saldo_devedor || 0),
+            valor_cobrado: dev.saldo_devedor,
             mensagem_enviada: textoFinal,
             status: 'enviado',
-            origem: clienteId ? 'manual_unitario' : 'manual_lote'
-          });
-        } catch {}
+            origem: 'manual_lote',
+          }]);
+        } catch (eLog) {
+          console.warn('Aviso histórico cobrança:', eLog);
+        }
       }
     }
 
     return NextResponse.json({
-      success: enviadosCount > 0 || (modoSimulacao && devedoresParaDisparo.length > 0),
+      success: true,
+      totalProcessados: devedoresParaDisparo.length,
       totalEnviados: enviadosCount,
       totalFalhas: falhasCount,
-      resultados,
       mensagem: modoSimulacao 
-        ? `Simulação concluída: ${enviadosCount} devedor(es) receberiam mensagem.`
-        : (falhasCount > 0 && enviadosCount === 0)
-          ? `Nenhuma mensagem enviada. ${falhasCount} falha(s): ${resultados.find(r => r.status === 'erro')?.motivo || ''}`
-          : `Cobranças enviadas: ${enviadosCount} sucesso(s) e ${falhasCount} falha(s).`
+        ? `Simulação concluída: ${enviadosCount} lojista(s) devedor(es) receberiam mensagem.`
+        : `Disparo finalizado: ${enviadosCount} mensagem(ns) enviada(s) com sucesso.`,
+      resultados
     });
 
   } catch (err: any) {
-    console.error('Erro na rota de disparo de cobranças:', err);
-    return NextResponse.json({ error: err.message || 'Erro interno ao disparar cobranças' }, { status: 500 });
+    console.error('Erro na rota de disparo de cobrança de atacado:', err);
+    return NextResponse.json({ error: err.message || 'Erro interno no servidor' }, { status: 500 });
   }
 }

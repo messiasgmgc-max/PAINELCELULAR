@@ -18,7 +18,10 @@ import {
   Sparkles,
   Percent,
   AlertTriangle,
-  Key
+  Key,
+  Send,
+  ExternalLink,
+  Phone
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +35,8 @@ interface ExtratoFiadoLojistaModalProps {
   vendasLojista: any[];
   chavePix?: string;
   nomeLoja?: string;
+  lojaId?: string | null;
+  telefoneInicial?: string;
   onAbrirBaixaModal: () => void;
 }
 
@@ -42,18 +47,29 @@ export function ExtratoFiadoLojistaModal({
   vendasLojista,
   chavePix = '',
   nomeLoja = 'Lucas Imports',
+  lojaId = null,
+  telefoneInicial = '',
   onAbrirBaixaModal,
 }: ExtratoFiadoLojistaModalProps) {
   const [abaAtiva, setAbaAtiva] = useState<'itens' | 'abatimentos'>('itens');
   const [chavePixInput, setChavePixInput] = useState(chavePix);
+  const [telefoneInput, setTelefoneInput] = useState(telefoneInicial);
   const [taxaJurosMensal, setTaxaJurosMensal] = useState('2.0');
   const [aplicarJuros, setAplicarJuros] = useState(false);
+  const [detalharItens, setDetalharItens] = useState(true);
+  const [enviandoZap, setEnviandoZap] = useState(false);
 
   useEffect(() => {
     if (chavePix) {
       setChavePixInput(chavePix);
     }
   }, [chavePix]);
+
+  useEffect(() => {
+    if (telefoneInicial) {
+      setTelefoneInput(telefoneInicial);
+    }
+  }, [telefoneInicial]);
 
   if (!isOpen) return null;
 
@@ -107,15 +123,15 @@ export function ExtratoFiadoLojistaModal({
   });
   todosAbatimentos.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
 
-  // Copia mensagem de extrato formatada para o WhatsApp
-  const handleCopiarWhatsApp = () => {
+  // Gera texto de extrato consolidado e detalhado
+  const gerarTextoExtrato = (): string => {
     const dataHoje = new Date().toLocaleDateString('pt-BR');
     
     let msg = `📋 *EXTRATO DE CONTA - ${nomeLoja.toUpperCase()}*\n`;
     msg += `👤 *Lojista / Parceiro:* ${lojistaNome}\n`;
     msg += `📅 *Data de Emissão:* ${dataHoje}\n\n`;
 
-    msg += `📦 *ITENS E PEDIDOS:*\n`;
+    msg += `📦 *PEDIDOS E APARELHOS EM ABERTO:*\n`;
     vendasLojista.forEach((v) => {
       const dataVenda = new Date(v.dataPagamento || v.data || v.created_at).toLocaleDateString('pt-BR');
       const val = Number(v.valor || 0);
@@ -132,6 +148,21 @@ export function ExtratoFiadoLojistaModal({
         msg += ` | Vencimento: ${new Date(v.dataVencimento).toLocaleDateString('pt-BR')}`;
       }
       msg += `\n`;
+
+      // Detalhamento individual dos aparelhos (IMEI, Cor, Capacidade, Valor)
+      if (detalharItens && v.itens && Array.isArray(v.itens) && v.itens.length > 0) {
+        v.itens.forEach((it: any) => {
+          const desc = it.descricao || it.modelo || 'Aparelho';
+          const im = it.imei ? ` | IMEI: ${it.imei}` : '';
+          const corCap = [it.capacidade, it.cor].filter(Boolean).join(' ');
+          const valItem = it.total || it.valorExibir;
+          msg += `   └ 📱 ${desc}${corCap ? ` (${corCap})` : ''}${im}`;
+          if (valItem) {
+            msg += ` - R$ ${Number(valItem).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+          }
+          msg += `\n`;
+        });
+      }
     });
 
     msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
@@ -154,15 +185,68 @@ export function ExtratoFiadoLojistaModal({
     }
 
     msg += `Qualquer dúvida estamos à disposição! 🤝`;
+    return msg;
+  };
 
+  // Copia mensagem de extrato formatada para o WhatsApp
+  const handleCopiarWhatsApp = () => {
+    const msg = gerarTextoExtrato();
     navigator.clipboard.writeText(msg)
-      .then(() => toast.success('Extrato copiado para o WhatsApp com PIX e cálculos! 📲'))
+      .then(() => toast.success('Extrato copiado para a área de transferência com sucesso! 📋'))
       .catch(() => toast.error('Erro ao copiar extrato.'));
+  };
+
+  // Disparo direto do extrato pelo WhatsApp do lojista
+  const handleEnviarWhatsAppDireto = async () => {
+    const msg = gerarTextoExtrato();
+    const tel = telefoneInput.trim();
+
+    if (!tel) {
+      toast.error('Informe o número de WhatsApp do lojista abaixo para enviar.');
+      return;
+    }
+
+    setEnviandoZap(true);
+    const toastId = toast.loading(`Enviando extrato para ${lojistaNome} (${tel})...`);
+
+    try {
+      const res = await fetch('/api/atacado/enviar-extrato', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lojaId,
+          lojistaNome,
+          telefone: tel,
+          mensagem: msg,
+          valorTotal: saldoComJuros,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha ao enviar extrato via Evolution API.');
+      }
+
+      toast.success(data.mensagem || `📲 Extrato entregue com sucesso no WhatsApp de ${lojistaNome}!`, { id: toastId, duration: 6000 });
+    } catch (err: any) {
+      console.error('Erro ao enviar extrato WhatsApp:', err);
+      toast.error(err.message || 'Erro ao entregar mensagem no WhatsApp.', { id: toastId, duration: 7000 });
+    } finally {
+      setEnviandoZap(false);
+    }
+  };
+
+  // Link para abrir diretamente no Web WhatsApp
+  const handleAbrirWebWhatsApp = () => {
+    const msg = encodeURIComponent(gerarTextoExtrato());
+    const tel = telefoneInput.replace(/\D/g, '');
+    const url = tel ? `https://wa.me/${tel.startsWith('55') ? tel : `55${tel}`}?text=${msg}` : `https://wa.me/?text=${msg}`;
+    window.open(url, '_blank');
   };
 
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-white my-auto shrink-0 relative max-h-[92vh] flex flex-col">
+      <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-white my-auto shrink-0 relative max-h-[94vh] flex flex-col">
         
         {/* CABEÇALHO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
@@ -171,7 +255,7 @@ export function ExtratoFiadoLojistaModal({
               <User className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-base sm:text-lg text-white">
                   Extrato do Lojista: <span className="text-amber-400">{lojistaNome}</span>
                 </h3>
@@ -182,7 +266,7 @@ export function ExtratoFiadoLojistaModal({
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Detalhamento completo de fiados, juros por atraso e chave PIX para cobrança
+                Detalhamento completo de fiados, aparelhos com IMEI, juros e envio direto no WhatsApp
               </p>
             </div>
           </div>
@@ -216,12 +300,12 @@ export function ExtratoFiadoLojistaModal({
           </div>
         </div>
 
-        {/* BARRA DE CONFIGURAÇÃO DE PIX E JUROS */}
+        {/* BARRA DE CONFIGURAÇÃO DE PIX, TELEFONE E JUROS */}
         <div className="bg-slate-950/80 border border-slate-800/80 p-3 rounded-2xl space-y-2.5">
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
             
             {/* Chave PIX */}
-            <div className="sm:col-span-6 space-y-1">
+            <div className="sm:col-span-4 space-y-1">
               <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
                 <Key className="w-3 h-3 text-emerald-400" /> Chave PIX para Cobrança
               </label>
@@ -229,16 +313,32 @@ export function ExtratoFiadoLojistaModal({
                 type="text"
                 value={chavePixInput}
                 onChange={(e) => setChavePixInput(e.target.value)}
-                placeholder="Ex: seuemail@pix.com ou 12345678900"
+                placeholder="Ex: seuemail@pix.com"
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-mono font-bold outline-none focus:border-emerald-500"
               />
             </div>
 
-            {/* Cálculo de Juros */}
-            <div className="sm:col-span-6 flex flex-col justify-end space-y-1">
+            {/* Telefone WhatsApp para Envio */}
+            <div className="sm:col-span-4 space-y-1">
+              <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-emerald-400" /> WhatsApp do Lojista
+                </span>
+              </label>
+              <input
+                type="text"
+                value={telefoneInput}
+                onChange={(e) => setTelefoneInput(e.target.value)}
+                placeholder="Ex: 31999999999"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-white font-mono font-bold outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            {/* Cálculo de Juros & Toggle Detalhar Itens */}
+            <div className="sm:col-span-4 flex flex-col justify-end space-y-1">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
-                  <Percent className="w-3 h-3 text-amber-400" /> Juros por Atraso (% a.m.)
+                  <Percent className="w-3 h-3 text-amber-400" /> Juros (% a.m.)
                 </label>
                 {estaEmAtraso && (
                   <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-amber-400 font-bold">
@@ -248,7 +348,7 @@ export function ExtratoFiadoLojistaModal({
                       onChange={(e) => setAplicarJuros(e.target.checked)}
                       className="rounded accent-amber-500 cursor-pointer"
                     />
-                    Aplicar no Extrato
+                    Aplicar
                   </label>
                 )}
               </div>
@@ -259,25 +359,25 @@ export function ExtratoFiadoLojistaModal({
                   value={taxaJurosMensal}
                   onChange={(e) => setTaxaJurosMensal(e.target.value)}
                   placeholder="2.0"
-                  className="w-20 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-500 text-center"
+                  className="w-16 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-500 text-center"
                 />
-                {estaEmAtraso ? (
-                  <span className="text-[11px] text-slate-400">
-                    {diasAtraso}d atraso ➔ <strong className="text-rose-400 font-mono">+ R$ {valorJurosCalculado.toFixed(2)}</strong>
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-emerald-400 font-semibold">
-                    ✓ Sem atrasos pendentes
-                  </span>
-                )}
+                <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={detalharItens}
+                    onChange={(e) => setDetalharItens(e.target.checked)}
+                    className="rounded accent-emerald-500 cursor-pointer"
+                  />
+                  <span>Itens com IMEI/cor</span>
+                </label>
               </div>
             </div>
 
           </div>
         </div>
 
-        {/* ABAS: ITENS EM ABERTO vs HISTÓRICO DE ABATIMENTOS */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2 shrink-0">
+        {/* ABAS & BOTÕES DE ENVIO DO WHATSAPP */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 border-b border-slate-800 pb-2 shrink-0">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAbaAtiva('itens')}
@@ -300,14 +400,35 @@ export function ExtratoFiadoLojistaModal({
             </button>
           </div>
 
-          {/* BOTÕES DE AÇÃO RÁPIDA */}
-          <div className="flex items-center gap-2">
+          {/* BOTÕES DE AÇÃO: ENVIAR NO WHATSAPP + COPIAR + ABATER */}
+          <div className="flex items-center gap-1.5 flex-wrap">
             <Button
               size="sm"
-              onClick={handleCopiarWhatsApp}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-3 rounded-xl gap-1.5 shadow-md shadow-emerald-950/30 cursor-pointer"
+              onClick={handleEnviarWhatsAppDireto}
+              disabled={enviandoZap}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-3 rounded-xl gap-1.5 shadow-md shadow-emerald-950/30 cursor-pointer disabled:opacity-50"
             >
-              <MessageCircle className="w-3.5 h-3.5" /> Copiar Extrato WhatsApp
+              <Send className="w-3.5 h-3.5" />
+              {enviandoZap ? 'Enviando...' : 'Enviar no WhatsApp'}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleCopiarWhatsApp}
+              className="bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200 font-medium text-xs h-8 px-2.5 rounded-xl gap-1 cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" /> Copiar
+            </Button>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleAbrirWebWhatsApp}
+              title="Abrir no Web WhatsApp"
+              className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30 text-xs h-8 px-2 rounded-xl cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
             </Button>
 
             {saldoDevedor > 0 && (
@@ -319,7 +440,7 @@ export function ExtratoFiadoLojistaModal({
                 }}
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs h-8 px-3 rounded-xl gap-1.5 shadow-md shadow-amber-950/30 cursor-pointer"
               >
-                <DollarSign className="w-3.5 h-3.5" /> Abater Pagamento
+                <DollarSign className="w-3.5 h-3.5" /> Abater
               </Button>
             )}
           </div>
@@ -341,35 +462,62 @@ export function ExtratoFiadoLojistaModal({
                 const estaVencido = dataVenc && dataVenc.getTime() < agora.getTime() && pendente > 0.01;
 
                 return (
-                  <div key={v.id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between gap-3 text-xs">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white flex items-center gap-2 flex-wrap">
-                        <span>{v.descricao || 'Pedido'}</span>
-                        <Badge variant="outline" className={cn("text-[10px]", pendente <= 0.01 ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30")}>
-                          {pendente <= 0.01 ? 'Quitado' : pago > 0 ? 'Parcial' : 'Em Aberto'}
-                        </Badge>
-                        {estaVencido && (
-                          <Badge className="bg-red-500/20 text-red-300 border-red-500/40 text-[9px]">
-                            Vencido: {dataVenc?.toLocaleDateString('pt-BR')}
+                  <div key={v.id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col gap-2 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-white flex items-center gap-2 flex-wrap">
+                          <span>{v.descricao || 'Pedido'}</span>
+                          <Badge variant="outline" className={cn("text-[10px]", pendente <= 0.01 ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30")}>
+                            {pendente <= 0.01 ? 'Quitado' : pago > 0 ? 'Parcial' : 'Em Aberto'}
                           </Badge>
-                        )}
+                          {estaVencido && (
+                            <Badge className="bg-red-500/20 text-red-300 border-red-500/40 text-[9px]">
+                              Vencido: {dataVenc?.toLocaleDateString('pt-BR')}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          Data Compra: {new Date(v.dataPagamento || v.data || v.created_at).toLocaleDateString('pt-BR')} · Método: {v.metodo || 'fiado'}
+                          {dataVenc && !estaVencido && ` · Vencimento: ${dataVenc.toLocaleDateString('pt-BR')}`}
+                        </div>
                       </div>
-                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-                        Data Compra: {new Date(v.dataPagamento || v.data || v.created_at).toLocaleDateString('pt-BR')} · Método: {v.metodo || 'fiado'}
-                        {dataVenc && !estaVencido && ` · Vencimento: ${dataVenc.toLocaleDateString('pt-BR')}`}
+
+                      <div className="text-right shrink-0">
+                        <div className="font-bold font-mono text-sm text-white">
+                          R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+                        {pendente > 0 && pago > 0 && (
+                          <span className="text-[10px] text-rose-400 font-mono block">
+                            Resta: R$ {pendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    <div className="text-right shrink-0">
-                      <div className="font-bold font-mono text-sm text-white">
-                        R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    {/* ITENS DETALHADOS DENTRO DESTE PEDIDO (IMEI, COR, ETC.) */}
+                    {v.itens && Array.isArray(v.itens) && v.itens.length > 0 && (
+                      <div className="mt-1 pt-1.5 border-t border-slate-800/80 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 block">Itens deste pedido:</span>
+                        <div className="space-y-1">
+                          {v.itens.map((it: any, itIdx: number) => {
+                            const corCap = [it.capacidade, it.cor].filter(Boolean).join(' · ');
+                            return (
+                              <div key={itIdx} className="text-[11px] bg-slate-900/60 p-1.5 rounded-xl flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-white font-medium">{it.descricao || it.modelo}</span>
+                                  {corCap && <span className="text-[10px] text-slate-400 ml-1.5">({corCap})</span>}
+                                  {it.imei && <span className="text-[9px] text-amber-400 font-mono block">IMEI: {it.imei}</span>}
+                                </div>
+                                <span className="font-mono text-emerald-400 font-bold shrink-0">
+                                  R$ {Number(it.total || it.valorExibir || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      {pendente > 0 && pago > 0 && (
-                        <span className="text-[10px] text-rose-400 font-mono block">
-                          Resta: R$ {pendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      )}
-                    </div>
+                    )}
+
                   </div>
                 );
               })
