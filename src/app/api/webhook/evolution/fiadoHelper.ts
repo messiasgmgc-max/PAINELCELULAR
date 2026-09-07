@@ -80,7 +80,24 @@ export function consolidarFiadoCompleto(
   const aparelhosJaEmVendas = new Set<string>();
   const imeisJaEmVendas = new Set<string>();
 
-  // 1. Inicializa com devedores cadastrados
+  // 1. Mapeia de antemão todos os aparelhos e IMEIs que já constam em vendas do banco
+  // Isso impede que baixas avulsas de estoque antigas reabram débitos de aparelhos já quitados em vendas
+  (vendasBanco || []).forEach((v) => {
+    if (v.itens && Array.isArray(v.itens)) {
+      v.itens.forEach((it: any) => {
+        if (it.aparelhoId) aparelhosJaEmVendas.add(String(it.aparelhoId));
+        if (it.id) aparelhosJaEmVendas.add(String(it.id));
+        let imei = it.imei ? String(it.imei).trim() : '';
+        if (!imei && it.descricao) {
+          const mId = it.descricao.match(/(?:IMEI\/ID|ID|IMEI):\s*([A-Za-z0-9]+)/i);
+          if (mId) imei = mId[1];
+        }
+        if (imei) imeisJaEmVendas.add(imei.toLowerCase());
+      });
+    }
+  });
+
+  // 2. Inicializa com devedores cadastrados
   (devedoresCadastrados || []).forEach((d) => {
     const nomeLimpo = (d.nome || '').trim();
     if (!nomeLimpo) return;
@@ -93,7 +110,7 @@ export function consolidarFiadoCompleto(
     });
   });
 
-  // 2. Processa vendas da tabela vendas
+  // 3. Processa vendas da tabela vendas
   (vendasBanco || []).forEach((v) => {
     const tipoEntregaLower = String(v.tipoEntrega || '').toLowerCase();
     const descLower = String(v.descricao || '').toLowerCase();
@@ -134,9 +151,6 @@ export function consolidarFiadoCompleto(
             const mId = it.descricao.match(/(?:IMEI\/ID|ID|IMEI):\s*([A-Za-z0-9]+)/i);
             if (mId) imei = mId[1];
           }
-          if (it.aparelhoId) aparelhosJaEmVendas.add(String(it.aparelhoId));
-          if (it.id) aparelhosJaEmVendas.add(String(it.id));
-          if (imei) imeisJaEmVendas.add(imei.toLowerCase());
 
           itensFmt.push({
             descricao: it.descricao || it.modelo || 'Aparelho',
@@ -158,7 +172,7 @@ export function consolidarFiadoCompleto(
       mapaDevedores.get(chave)!.pedidos.push({
         id: v.id,
         descricao: v.descricao || 'Venda ATACADO',
-        data: v.dataPagamento || v.data || v.created_at || new Date().toISOString(),
+        data: v.dataPagamento || v.data || v.dataVencimento || new Date().toISOString(),
         valorTotal: total,
         valorPago: pago,
         saldoDevedor: devedor,
@@ -230,7 +244,7 @@ export function consolidarFiadoCompleto(
     mapaDevedores.get(chave)!.pedidos.push({
       id: a.id,
       descricao: `${a.marca || 'Apple'} ${a.modelo} (${[a.capacidade, a.cor].filter(Boolean).join(' ')})`,
-      data: matchBaixa[1] || a.created_at || new Date().toISOString(),
+      data: matchBaixa[1] || a.dataCadastro || new Date().toISOString(),
       valorTotal: valorVenda,
       valorPago: 0,
       saldoDevedor: valorVenda,
@@ -250,33 +264,41 @@ export function consolidarFiadoCompleto(
       totalAps += Math.max(1, p.itens.length);
     });
 
-    const cadastrado = (devedoresCadastrados || []).find(
+    const devCadastrado = (devedoresCadastrados || []).find(
       (d) => (d.nome || '').trim().toLowerCase() === chave
     );
-    const saldoCadastrado = Number(cadastrado?.saldo_devedor || 0);
-    const saldoFinal = Math.max(saldoCalculado, saldoCadastrado);
+    const saldoFinal = saldoCalculado > 0 ? saldoCalculado : Number(devCadastrado?.saldo_devedor || 0);
 
     if (saldoFinal > 0.01) {
       devedores.push({
         nome: entry.nome,
-        saldo: saldoFinal,
-        totalAparelhos: totalAps,
         telefone: entry.telefone,
         whatsapp: entry.whatsapp,
+        saldo: saldoFinal,
+        totalAparelhos: totalAps,
         pedidos: entry.pedidos,
       });
     }
   });
 
+  // Ordena por maior saldo devedor
   devedores.sort((a, b) => b.saldo - a.saldo);
 
   const totalFiadoEmAberto = devedores.reduce((acc, d) => acc + d.saldo, 0);
 
   const detalhesDevedoresFormatado = devedores.length > 0
-    ? devedores
-        .map((d) => `• *${d.nome}:* R$ ${d.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${d.totalAparelhos} aparelho${d.totalAparelhos > 1 ? 's' : ''} em aberto)`)
-        .join('\n')
-    : 'Nenhum lojista com débitos em aberto no momento.';
+    ? devedores.map((d) => {
+        const pedDet = d.pedidos
+          .map((p) => {
+            const itensTxt = p.itens
+              .map((it) => `    - ${it.descricao}: R$ ${Number(it.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`)
+              .join('\n');
+            return `  • Pedido ${p.id.toString().slice(0, 8)} (${p.descricao}): R$ ${Number(p.saldoDevedor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n${itensTxt}`;
+          })
+          .join('\n');
+        return `• ${d.nome}: R$ ${d.saldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${d.totalAparelhos} aparelhos em aberto)\n${pedDet}`;
+      }).join('\n\n')
+    : 'Nenhum lojista devedor no momento';
 
   return {
     totalFiadoEmAberto,
@@ -373,13 +395,13 @@ export async function buscarFiadoConsolidadoLoja(
   // 3. Busca vendas atacado / fiado / pendentes
   const { data: vendasBanco } = await supabase
     .from('vendas')
-    .select('id, clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento, created_at')
+    .select('id, clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento, dataVencimento')
     .eq('loja_id', lojaId);
 
   // 4. Busca aparelhos do estoque da loja
   const { data: aparelhos } = await supabase
     .from('aparelhos')
-    .select('id, modelo, marca, cor, capacidade, imei, preco, precoAtacado, observacoes, status, condicao, created_at')
+    .select('id, modelo, marca, cor, capacidade, imei, preco, precoAtacado, observacoes, status, condicao, dataCadastro')
     .eq('loja_id', lojaId);
 
   return consolidarFiadoCompleto(devedoresCadastrados, vendasBanco, aparelhos, nomeLoja, chavePix);
