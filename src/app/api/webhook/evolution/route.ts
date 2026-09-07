@@ -1648,7 +1648,7 @@ export async function POST(request: Request) {
     // ── BLOQUEIO DE SEGURANÇA: NÚMERO NÃO CADASTRADO EM NENHUMA LOJA (CHAT PRIVADO) ──
     if (!isGroup && !usuarioResolvido) {
       console.warn(`🔒 [Segurança] Acesso negado para telefone não cadastrado: ${authorPhone}`);
-      const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe* (ou *Técnicos & Vendedores*).\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://www.astrogeek.com.br/assinar* (ou *https://phonecenter.tech/assinar*)`;
+      const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe* (ou *Técnicos & Vendedores*).\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://app.phonecenter.tech/assinar*`;
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgBloqueio);
       return NextResponse.json({ status: 'unauthorized', message: 'Telefone não vinculado a nenhuma loja.' }, { status: 200 });
     }
