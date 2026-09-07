@@ -42,3 +42,12 @@ next-env.d.ts
 test.txt
 
 .env*
+
+# Desktop and Mobile build outputs
+/dist-electron
+/android/app/build
+/android/.gradle
+/android/build
+/ios/App/Pods
+/ios/App/App.xcarchive
+

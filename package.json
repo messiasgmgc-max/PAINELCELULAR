@@ -8,7 +8,13 @@
     "dev:debug": "NODE_OPTIONS='--inspect' next dev",
     "build": "next build",
     "start": "next start --port 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron:dev": "electron electron/main.js",
+    "electron:build": "electron-builder --win",
+    "mobile:sync": "cap sync",
+    "mobile:android:build": "cd android && ./gradlew assembleDebug",
+    "mobile:open:android": "cap open android",
+    "mobile:open:ios": "cap open ios"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "latest",
@@ -97,6 +103,14 @@
     "eslint-config-next": "15.2.4",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
-  }
+    "typescript": "^5",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-updater": "^6.3.9",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  },
+  "main": "electron/main.js"
 }

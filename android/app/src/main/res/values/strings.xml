@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Phone Center</string>
+    <string name="title_activity_main">Phone Center</string>
+    <string name="package_name">com.phonecenter.app</string>
+    <string name="custom_url_scheme">com.phonecenter.app</string>
+</resources>

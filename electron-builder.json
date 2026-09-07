@@ -1,0 +1,38 @@
+{
+  "appId": "com.phonecenter.desktop",
+  "productName": "Phone Center",
+  "copyright": "Copyright © 2026 Phone Center",
+  "directories": {
+    "output": "dist-electron",
+    "buildResources": "electron"
+  },
+  "files": [
+    "electron/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "artifactName": "PhoneCenter-Setup-${version}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Phone Center"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "messiasgmgc-max",
+    "repo": "PAINELCELULAR",
+    "releaseType": "release"
+  }
+}

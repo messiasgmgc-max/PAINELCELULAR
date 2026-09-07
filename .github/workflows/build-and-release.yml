@@ -1,0 +1,137 @@
+name: Build & Release Multiplataforma (.exe, .apk)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop-windows:
+    name: 🖥️ Build Windows (.exe + Auto-Update)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.15.4
+
+      - name: Instalar Dependências
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build Next.js & Electron
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm build
+          pnpm electron:build --publish always
+
+      - name: Upload Artefato Windows (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: phonecenter-windows-exe
+          path: |
+            dist-electron/*.exe
+            dist-electron/latest.yml
+
+  build-mobile-android:
+    name: 📱 Build Android (.apk)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9.15.4
+
+      - name: Instalar Dependências
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Sincronizar Capacitor Android
+        run: |
+          npx cap sync android || true
+
+      - name: Compilar APK Android
+        if: hashFiles('android/gradlew') != ''
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Artefato Android (.apk)
+        if: hashFiles('android/app/build/outputs/apk/debug/*.apk') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: phonecenter-android-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+  create-github-release:
+    name: 🚀 Publicar GitHub Release Automática
+    needs: [build-desktop-windows, build-mobile-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Download Artefatos Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: phonecenter-windows-exe
+          path: release-files/
+
+      - name: Download Artefatos Android
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: phonecenter-android-apk
+          path: release-files/
+
+      - name: Criar Release no GitHub
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          tag_name: ${{ github.ref_name == 'main' && format('v0.1.{0}', github.run_number) || github.ref_name }}
+          name: ${{ format('Phone Center Release {0}', github.ref_name == 'main' && format('v0.1.{0}', github.run_number) || github.ref_name) }}
+          body: |
+            ## 🚀 Nova Versão Disponível do Phone Center!
+            
+            Atualização automática gerada pelo pipeline de CI/CD.
+            
+            ### 📥 Downloads:
+            - **Windows (.exe Instalável):** Baixe o `PhoneCenter-Setup.exe` abaixo.
+            - **Android (.apk Instalável):** Baixe o `app-debug.apk` abaixo.
+            - **Auto-Update:** Os usuários com o app Windows já instalado receberão esta atualização automaticamente ao abrir o aplicativo.
+          files: release-files/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
