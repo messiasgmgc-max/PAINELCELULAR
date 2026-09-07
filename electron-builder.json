@@ -19,6 +19,8 @@
         ]
       }
     ],
+    "signAndEditExecutable": false,
+    "forceCodeSigning": false,
     "artifactName": "PhoneCenter-Setup-${version}.${ext}"
   },
   "nsis": {
