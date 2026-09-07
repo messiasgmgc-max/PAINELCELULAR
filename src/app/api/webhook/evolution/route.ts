@@ -4,7 +4,7 @@ import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConve
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
-import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
+import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL, PLANOS_SISTEMA } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
@@ -1162,7 +1162,7 @@ const bufferUltimaMensagemParticipante = new Map<string, { texto: string; timest
 // Histórico de respostas enviadas no grupo para evitar flood e repetição desnecessária
 const historicoRespostasGrupo = new Map<string, number>();
 
-// Sincronização assíncrona com tabela whatsapp_antiflood_cache para escala horizontal
+// Sincronização e leitura com a tabela whatsapp_antiflood_cache para escala horizontal e persistência pós-reinício
 async function persistirAntiFloodTimestamp(chave: string, timestamp: number) {
   try {
     await supabase.from('whatsapp_antiflood_cache').upsert({
@@ -1175,35 +1175,88 @@ async function persistirAntiFloodTimestamp(chave: string, timestamp: number) {
   }
 }
 
+async function obterAntiFloodTimestamp(chave: string): Promise<number | null> {
+  const emMemoria = historicoRespostasGrupo.get(chave);
+  if (emMemoria !== undefined) return emMemoria;
+  try {
+    const { data } = await supabase
+      .from('whatsapp_antiflood_cache')
+      .select('timestamp')
+      .eq('chave', chave)
+      .maybeSingle();
+    if (data?.timestamp) {
+      const ts = Number(data.timestamp);
+      historicoRespostasGrupo.set(chave, ts);
+      return ts;
+    }
+  } catch {
+    // Falha silenciosa
+  }
+  return null;
+}
+
 // ── AUXILIAR: Obter tipo do plano da loja ──
 async function obterPlanoLoja(lojaId: string): Promise<TipoPlano> {
   try {
     const { data: loja } = await supabase
       .from('lojas')
-      .select('plano_status')
+      .select('plano_tipo, plano_status, data_vencimento')
       .eq('id', lojaId)
       .maybeSingle();
-    return (loja as any)?.plano_tipo || 'pro';
+    const tipo = String((loja as any)?.plano_tipo || '').toLowerCase();
+    if (tipo === 'avancado' || tipo === 'intermediario' || tipo === 'entrada') {
+      return tipo as TipoPlano;
+    }
+    return 'entrada';
   } catch {
-    return 'pro';
+    return 'entrada';
   }
 }
 
-// ── AUXILIAR: Obter lojas para consulta de estoque (Grupos: todas as lojas ativas | Privado: loja da conversa) ──
+// ── AUXILIAR: Obter lojas para consulta de estoque (Grupos: apenas opt-in com plano Avançado | Privado: loja da conversa) ──
 async function obterLojasParaConsulta(
   lojaIdContexto: string | null,
   isGroup: boolean
 ): Promise<Array<{ id: string; nome: string }>> {
-  // 1. Em grupos: busca TODAS as lojas ativas cadastradas no sistema Phone Center
-  // Permitindo que o lojista veja opções de todas as lojas parceiras da rede
+  // 1. Em grupos:
+  // Apenas lojas que optaram ativamente por participar da rede multi-loja (opt-in)
+  // E possuem plano com o recurso 'escuta_multiloja' (Plano Avançado) têm seus estoques consultados.
   if (isGroup) {
     const { data: todasLojas } = await supabase
       .from('lojas')
-      .select('id, nome')
+      .select('id, nome, plano_tipo, config_atacado, configuracoes')
       .eq('ativo', true);
 
     if (todasLojas && todasLojas.length > 0) {
-      return todasLojas.map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
+      const permitidas = todasLojas.filter((l: any) => {
+        // Se for a própria loja vinculada ao bot/instância, sempre permite
+        if (lojaIdContexto && l.id === lojaIdContexto) return true;
+
+        const plano = String(l.plano_tipo || 'entrada').toLowerCase();
+        if (!verificarPermissaoRecursoPlano(plano, 'escuta_multiloja')) return false;
+
+        const configAtacado = l.config_atacado || {};
+        const configGeral = l.configuracoes || {};
+        return Boolean(
+          configAtacado.participar_rede_grupos ||
+          configAtacado.compartilhar_estoque_grupos ||
+          configGeral.participar_rede_grupos ||
+          configGeral.compartilhar_estoque_grupos
+        );
+      });
+
+      if (permitidas.length > 0) {
+        return permitidas.map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
+      }
+    }
+
+    if (lojaIdContexto) {
+      const { data: lojaPropria } = await supabase
+        .from('lojas')
+        .select('id, nome')
+        .eq('id', lojaIdContexto)
+        .maybeSingle();
+      if (lojaPropria) return [{ id: lojaPropria.id, nome: lojaPropria.nome || 'Loja' }];
     }
     return [];
   }
@@ -1222,13 +1275,7 @@ async function obterLojasParaConsulta(
     }
   }
 
-  // Se não foi identificado pelo ID no privado, busca todas as lojas ativas como fallback
-  const { data: todasLojas } = await supabase
-    .from('lojas')
-    .select('id, nome')
-    .eq('ativo', true);
-
-  return (todasLojas || []).map((l: any) => ({ id: l.id, nome: l.nome || 'Loja' }));
+  return [];
 }
 
 // ── AUXILIAR: Resposta Natural de Estoque / iPhone para Grupos e Privado ──
@@ -1466,13 +1513,13 @@ async function responderConsultaEstoqueNatural(
   // Anti-Flood em Grupos
   if (isGroup && remoteJid) {
     const floodKeyModelo = `${remoteJid}:${modeloAlvoFormatado}`;
-    const ultimoEnvioModelo = historicoRespostasGrupo.get(floodKeyModelo);
+    const ultimoEnvioModelo = await obterAntiFloodTimestamp(floodKeyModelo);
     if (ultimoEnvioModelo && agora - ultimoEnvioModelo < 30000) {
       return null;
     }
 
     const floodKeyParticipante = `${remoteJid}:${cleanSender}`;
-    const ultimoEnvioParticipante = historicoRespostasGrupo.get(floodKeyParticipante);
+    const ultimoEnvioParticipante = await obterAntiFloodTimestamp(floodKeyParticipante);
     if (ultimoEnvioParticipante && agora - ultimoEnvioParticipante < 20000) {
       return null;
     }
@@ -1895,6 +1942,17 @@ export async function POST(request: Request) {
       const planoAtualFormatado = (usuarioResolvido?.planoTipo || 'entrada').toUpperCase();
       const statusFormatado = usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo');
 
+      const pEntrada = PLANOS_SISTEMA.entrada;
+      const pInter = PLANOS_SISTEMA.intermediario;
+      const pAvancado = PLANOS_SISTEMA.avancado;
+
+      const vEntradaMensal = pEntrada.precos.mensal.valorMensal.toFixed(2).replace('.', ',');
+      const vEntradaAnual = pEntrada.precos.anual.valorMensal.toFixed(2).replace('.', ',');
+      const vInterMensal = pInter.precos.mensal.valorMensal.toFixed(2).replace('.', ',');
+      const vInterAnual = pInter.precos.anual.valorMensal.toFixed(2).replace('.', ',');
+      const vAvancadoMensal = pAvancado.precos.mensal.valorMensal.toFixed(2).replace('.', ',');
+      const vAvancadoAnual = pAvancado.precos.anual.valorMensal.toFixed(2).replace('.', ',');
+
       const msgPlanos = `📋 *Planos Phone Center — Gestão Inteligente para Lojistas*
 
 Olá, *${nomeUsuario}*! Sua loja (*${nomeLoja}*) atualmente está no:
@@ -1902,20 +1960,20 @@ Olá, *${nomeUsuario}*! Sua loja (*${nomeLoja}*) atualmente está no:
 
 Conheça os 3 planos disponíveis na nossa plataforma:
 
-1️⃣ *Plano Entrada* — R$ 99,90/mês (ou R$ 79,90 no anual):
+1️⃣ *Plano Entrada* — R$ ${vEntradaMensal}/mês (ou R$ ${vEntradaAnual} no anual):
 • Painel completo de estoque, vendas e produtos
 • Ordens de Serviço (OS) com garantia documentada
 • Leitor de código de barras e OCR de etiquetas com IA
 • Bot assistente no WhatsApp (!estoque, !vender, !cadastrar, !os)
 
-2️⃣ *Plano Intermediário* — R$ 189,00/mês (ou R$ 149,00 no anual) *(Mais Escolhido)*:
+2️⃣ *Plano Intermediário* — R$ ${vInterMensal}/mês (ou R$ ${vInterAnual} no anual) *(Mais Escolhido)*:
 • *Tudo do Entrada* +
 • Gestão milimétrica de fiado e devedores (!abater, !saldo)
 • Bot de cobrança automática com horários programados
 • Checagem de IMEI roubado / bloqueado (!checarimei)
 • Transmissão de listas de estoque para grupos (!broadcast)
 
-3️⃣ *Plano Avançado* — R$ 299,00/mês (ou R$ 239,00 no anual) *(Máxima Potência)*:
+3️⃣ *Plano Avançado* — R$ ${vAvancadoMensal}/mês (ou R$ ${vAvancadoAnual} no anual) *(Máxima Potência)*:
 • *Tudo do Intermediário* +
 • Escuta e busca em catálogo unificado multi-loja em grupos
 • Trilha de auditoria completa com registro de operadores
@@ -2935,6 +2993,16 @@ ${linhasDebito.join('\n')}
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
 
+      const planoLoja = await obterPlanoLoja(lojaId);
+      if (!verificarPermissaoRecursoPlano(planoLoja, 'consulta_imei')) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          '⚠️ *Recurso do Plano Intermediário:* A checagem de IMEI e bloqueios de operadoras está disponível a partir do plano *Intermediário*.\n\nDigite *!plano* para conhecer os planos e solicitar upgrade!'
+        );
+        return NextResponse.json({ status: 'ok', message: 'Recurso bloqueado pelo plano' }, { status: 200 });
+      }
+
       const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
       if (!perm.autorizado) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
@@ -2950,7 +3018,7 @@ ${linhasDebito.join('\n')}
           targetDestination,
           '⚠️ *IMEI incompleto ou inválido!*\nO IMEI deve conter pelo menos 14 a 15 dígitos numéricos.\nExemplo: *!checarimei 356829104829102*'
         );
-        return NextResponse.json({ status: 'ok' }, { status: 200 });
+        return NextResponse.json({ status: 'ok', message: 'IMEI inválido' }, { status: 200 });
       }
 
       const resultado = await verificarImeiRoubado(lojaId, imeiArg);
@@ -2999,6 +3067,16 @@ _Origem da verificação: Base de Segurança Phone Center & Validação GSMA._`;
       if (!lojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
+      const planoLoja = await obterPlanoLoja(lojaId);
+      if (!verificarPermissaoRecursoPlano(planoLoja, 'broadcast_grupos')) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          '⚠️ *Recurso do Plano Intermediário:* O broadcast de tabelas de estoque em grupos está disponível a partir do plano *Intermediário*.\n\nDigite *!plano* para conhecer os planos e solicitar upgrade!'
+        );
+        return NextResponse.json({ status: 'ok', message: 'Recurso bloqueado pelo plano' }, { status: 200 });
       }
 
       const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner']);
@@ -3088,34 +3166,23 @@ Digite: *!broadcast agora*`;
 
     // ── 15. COMANDOS BÁSICOS (!ajuda, !menu) ──
     if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
-      const menuAjuda = `📱 *PHONE CENTER BOT - INTELIGÊNCIA ARTIFICIAL*
+      const menuAjuda = `🤖 *Copiloto Phone Center — Assistente Inteligente*
 
-📸 *Reconhecimento Visual de Etiquetas (OCR):*
-• Envie uma foto da etiqueta/caixa do aparelho! Eu reconheço modelo, capacidade, IMEI, bateria e verifico o estoque na hora.
+Você pode falar comigo diretamente em linguagem natural ou utilizar atalhos rápidos:
 
-💳 *Assinatura do Sistema:*
-• *!plano* - Consulta status da assinatura, vencimento e opções de renovação
-• *!plano pagar* - Gera o PIX da mensalidade (1 mês proporcional)
-• *!plano pagar [3 meses | 6 meses | 1 ano]* - Gera o PIX para períodos estendidos
+💬 *Exemplos de como falar comigo:*
+• *Estoque & Preço:* "tem iphone 13?", "quanto tá o 15 pro?" ou mande a foto da etiqueta
+• *Vendas:* "vendi o 13 pro por 2500 pro Lucas" ou "fiz uma venda"
+• *Relatórios:* "quais vendas hoje?", "faturamento da semana" ou "histórico do atacado"
+• *Cobrança & Fiado:* "quem tá devendo?", "saldo devedor" ou "extrato do CL"
+• *Assinatura:* "quando vence meu plano?" ou "valores dos planos"
 
-⚡ *Comandos Operacionais de Estoque:*
-• *!estoque* - Consulta todos os aparelhos disponíveis (Modelo, Cor, Bateria)
-• *!estoque completo* - Exibe aparelhos com códigos e preços de atacado
-• *!vender [IMEI/Cód] [Valor] [Nome]* - Registra venda e baixa do estoque
-• *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]* - Entrada em novo aparelho
-• *!preco [IMEI/Cód] [Novo Valor]* - Atualiza preço no sistema
-
-🤝 *Gestão de Atacado & Fiado:*
-• *!abater [Lojista] [Valor]* - Registra abatimento no saldo devedor do lojista
-• *!saldo* ou *!devo* - Consulta débitos em aberto vinculados ao seu número
-
-🔒 *Segurança & Broadcast:*
-• *!checarimei [IMEI]* - Consulta restrições e bloqueios de IMEI
-• *!broadcast agora* - Transmissão de estoque para grupos cadastrados
-• *!broadcast* - Status dos grupos de broadcast configurados
-
-💬 *Atendimento Inteligente:*
-• Pergunte qualquer coisa em grupos ou privado (ex: *"tem 15pm?"*, *"tem iphone 11?"*) e eu respondo na hora!`;
+⚡ *Atalhos rápidos:*
+• *!estoque* - Ver aparelhos disponíveis
+• *!vender* - Baixar venda no sistema
+• *!cadastrar* - Cadastrar novo aparelho
+• *!extrato [lojista]* - Gerar comprovante com PIX
+• *!plano* - Ver assinatura e renovação`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
@@ -3282,22 +3349,104 @@ Digite: *!broadcast agora*`;
           const modeloStr = String(geminiPlan.params.modelo || geminiPlan.params.aparelho || '');
           const imeiStr = geminiPlan.params.imei ? String(geminiPlan.params.imei) : null;
           const formaPag = String(geminiPlan.params.formaPagamento || 'pix');
-
-          let aparelhoId: string | null = null;
-          if (imeiStr || modeloStr) {
-            let apQuery = supabase.from('aparelhos').select('id, custo, preco').eq('loja_id', lojaId).eq('ativo', true).neq('status', 'vendido');
-            if (imeiStr) apQuery = apQuery.eq('imei', imeiStr);
-            else apQuery = apQuery.ilike('modelo', `%${modeloStr}%`);
-            const { data: apFound } = await apQuery.limit(1).maybeSingle();
-            if (apFound) {
-              aparelhoId = apFound.id;
-              await supabase.from('aparelhos').update({ status: 'vendido', condicao: 'vendido' }).eq('id', apFound.id);
-            }
-          }
-
           const tipoEntregaResolvido = String(geminiPlan.params.tipoEntrega || '').toLowerCase().includes('atacado')
             ? 'Atacado / Lojista'
             : 'Varejo';
+
+          let aparelhoId: string | null = null;
+          let apFound: any = null;
+          if (imeiStr || modeloStr) {
+            let apQuery = supabase.from('aparelhos').select('id, marca, modelo, capacidade, custo, preco, status, condicao, imei').eq('loja_id', lojaId).eq('ativo', true).neq('status', 'vendido');
+            if (imeiStr) apQuery = apQuery.eq('imei', imeiStr);
+            else apQuery = apQuery.ilike('modelo', `%${modeloStr}%`);
+            const { data: found } = await apQuery.limit(1).maybeSingle();
+            if (found) {
+              apFound = found;
+              aparelhoId = found.id;
+            }
+          }
+
+          // Checagem de limite de aprovação manual da loja (proteção anti-fraude / valor alto)
+          const { data: lojaRow } = await supabase
+            .from('lojas')
+            .select('configuracoes')
+            .eq('id', lojaId)
+            .maybeSingle();
+
+          const limiteAprovacao = Number((lojaRow?.configuracoes as any)?.limite_aprovacao_manual || 0);
+
+          if (limiteAprovacao > 0 && valorNum > limiteAprovacao) {
+            try {
+              await supabase.from('acoes_pendentes_aprovacao').insert({
+                loja_id: lojaId,
+                tipo: 'venda',
+                payload: {
+                  aparelho_id: aparelhoId,
+                  modelo: modeloStr || apFound?.modelo,
+                  marca: apFound?.marca,
+                  capacidade: apFound?.capacidade,
+                  imei: imeiStr || apFound?.imei,
+                  valor: valorNum,
+                  compradorNome: compradorStr,
+                  pushName,
+                  authorPhone,
+                  targetDestination,
+                  instanceName,
+                  tipoEntrega: tipoEntregaResolvido,
+                  origem: 'whatsapp_ia',
+                },
+                status: 'pendente',
+                criado_por_telefone: authorPhone,
+                criado_em: new Date().toISOString(),
+              });
+            } catch (penErr) {
+              console.error('Erro ao inserir acoes_pendentes_aprovacao via IA:', penErr);
+            }
+
+            try {
+              await supabase.from('logs_sistema').insert({
+                loja_id: lojaId,
+                tipo_evento: 'aprovacao_pendente',
+                acao: `Venda retida para aprovação via IA: ${modeloStr}`,
+                detalhes: `Venda no valor de R$ ${valorNum.toFixed(2)} acima do limite de confirmação automática (R$ ${limiteAprovacao.toFixed(2)}).`,
+                ator_telefone: authorPhone,
+                ator_papel: 'staff',
+                valor_anterior: apFound ? { status: apFound.status, condicao: apFound.condicao } : null,
+                valor_novo: { status: 'pendente_aprovacao', valor: valorNum, limite: limiteAprovacao },
+                created_at: new Date().toISOString(),
+              });
+            } catch (logErr) {
+              console.warn('Falha silenciosa ao registrar log_sistema via IA:', logErr);
+            }
+
+            const msgRetida = `⚠️ *VENDA RETIDA PARA APROVAÇÃO MANUAL*
+
+📱 *Aparelho:* ${modeloStr || 'Celular'}
+💰 *Valor:* R$ ${valorNum.toFixed(2).replace('.', ',')}
+👤 *Comprador:* ${compradorStr} (${tipoEntregaResolvido})
+
+🔒 Este valor ultrapassa o limite de confirmação automática da loja (R$ ${limiteAprovacao.toFixed(2).replace('.', ',')}).
+A venda foi enviada para validação de um administrador no painel!`;
+
+            await enviarMensagemWhatsApp(instanceName, targetDestination, msgRetida);
+            return NextResponse.json({ status: 'ok', message: 'Venda IA pendente de aprovação manual.' }, { status: 200 });
+          }
+
+          // Se dentro do limite, baixa o aparelho no estoque oficial
+          if (apFound) {
+            await supabase.from('aparelhos').update({
+              status: 'vendido',
+              condicao: 'vendido',
+              ativo: false,
+              comprador: compradorStr,
+              precoVenda: valorNum,
+              dataVenda: new Date().toISOString(),
+            }).eq('id', apFound.id);
+          }
+
+          const custoNum = Number(apFound?.custo || 0);
+          const lucroNum = valorNum - custoNum;
+          const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
 
           const { data: novaVenda } = await supabase.from('vendas').insert({
             loja_id: lojaId,
@@ -3306,9 +3455,9 @@ Digite: *!broadcast agora*`;
             vendedor: `WhatsApp IA (${pushName})`,
             tipoEntrega: tipoEntregaResolvido,
             valor: valorNum,
-            custo: 0,
-            lucro: valorNum,
-            percentualLucro: 100,
+            custo: custoNum,
+            lucro: lucroNum,
+            percentualLucro: parseFloat(margemPercent) || 0,
             dataPagamento: new Date().toISOString(),
             status: 'pago',
             metodo: formaPag,
@@ -3323,12 +3472,30 @@ Digite: *!broadcast agora*`;
                 aparelhoId: aparelhoId,
                 descricao: `${modeloStr} - Vendido para ${compradorStr}`,
                 quantidade: 1,
-                valorInterno: 0,
+                valorInterno: custoNum,
                 valorExibir: valorNum,
                 desconto: 0,
+                total: valorNum,
               },
             ],
           }).select().single();
+
+          // Log de auditoria da venda pela IA
+          try {
+            await supabase.from('logs_sistema').insert({
+              loja_id: lojaId,
+              tipo_evento: 'venda',
+              acao: `Venda WhatsApp IA: ${modeloStr}`,
+              detalhes: `Aparelho ${modeloStr} vendido para ${compradorStr} por R$ ${valorNum.toFixed(2)} (${tipoEntregaResolvido})`,
+              ator_telefone: authorPhone,
+              ator_papel: 'staff',
+              valor_anterior: apFound ? { status: apFound.status, condicao: apFound.condicao } : null,
+              valor_novo: { status: 'vendido', condicao: 'vendido', comprador: compradorStr, precoVenda: valorNum },
+              created_at: new Date().toISOString(),
+            });
+          } catch (logErr) {
+            console.warn('Falha silenciosa ao registrar log_sistema via IA:', logErr);
+          }
 
           const textResposta = buildWhatsAppText('create_venda', {
             ...geminiPlan.params,

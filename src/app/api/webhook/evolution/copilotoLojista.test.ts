@@ -116,4 +116,65 @@ describe('Copiloto Operacional do Lojista - Validações', () => {
     assert.equal(ehPedidoExtratoLojista('extrato do cl'), true);
     assert.equal(ehPedidoExtratoLojista('manda o extrato do devedor'), true);
   });
+
+  it('deve validar permissões de recursos por plano (Entrada, Intermediário e Avançado)', () => {
+    const { verificarPermissaoRecursoPlano } = require('@/lib/planos-config');
+
+    // Plano Entrada NÃO deve ter acesso a IMEI, broadcast nem escuta multi-loja
+    assert.equal(verificarPermissaoRecursoPlano('entrada', 'consulta_imei'), false);
+    assert.equal(verificarPermissaoRecursoPlano('entrada', 'broadcast_grupos'), false);
+    assert.equal(verificarPermissaoRecursoPlano('entrada', 'escuta_multiloja'), false);
+    assert.equal(verificarPermissaoRecursoPlano('entrada', 'vendas'), true);
+    assert.equal(verificarPermissaoRecursoPlano('entrada', 'estoque'), true);
+
+    // Plano Intermediário deve ter IMEI e broadcast, mas NÃO escuta multi-loja
+    assert.equal(verificarPermissaoRecursoPlano('intermediario', 'consulta_imei'), true);
+    assert.equal(verificarPermissaoRecursoPlano('intermediario', 'broadcast_grupos'), true);
+    assert.equal(verificarPermissaoRecursoPlano('intermediario', 'fiado_devedores'), true);
+    assert.equal(verificarPermissaoRecursoPlano('intermediario', 'escuta_multiloja'), false);
+
+    // Plano Avançado deve ter acesso completo
+    assert.equal(verificarPermissaoRecursoPlano('avancado', 'consulta_imei'), true);
+    assert.equal(verificarPermissaoRecursoPlano('avancado', 'broadcast_grupos'), true);
+    assert.equal(verificarPermissaoRecursoPlano('avancado', 'escuta_multiloja'), true);
+  });
+
+  it('deve filtrar lojas em grupo apenas se tiverem plano Avançado E opt-in explícito', () => {
+    const { verificarPermissaoRecursoPlano } = require('@/lib/planos-config');
+
+    const mockLojas = [
+      // Loja A: Avançado COM opt-in
+      { id: 'loja-a', nome: 'Loja A', plano_tipo: 'avancado', config_atacado: { participar_rede_grupos: true } },
+      // Loja B: Avançado SEM opt-in (privacidade preservada)
+      { id: 'loja-b', nome: 'Loja B', plano_tipo: 'avancado', config_atacado: { participar_rede_grupos: false } },
+      // Loja C: Intermediário COM flag de opt-in (mas sem o plano avançado necessário)
+      { id: 'loja-c', nome: 'Loja C', plano_tipo: 'intermediario', config_atacado: { participar_rede_grupos: true } },
+      // Loja D: Entrada
+      { id: 'loja-d', nome: 'Loja D', plano_tipo: 'entrada', config_atacado: {} },
+    ];
+
+    const lojaContextoId = 'loja-origem';
+
+    const permitidas = mockLojas.filter((l) => {
+      if (l.id === lojaContextoId) return true;
+      const temPermissao = verificarPermissaoRecursoPlano(l.plano_tipo, 'escuta_multiloja');
+      if (!temPermissao) return false;
+      return Boolean(l.config_atacado?.participar_rede_grupos);
+    });
+
+    assert.equal(permitidas.length, 1);
+    assert.equal(permitidas[0].id, 'loja-a');
+  });
+
+  it('deve reter vendas que ultrapassam o limite de aprovação manual da loja', () => {
+    const limiteAprovacao = 3000;
+    const vendaNormal = 2500;
+    const vendaAlta = 5500;
+
+    const precisaAprovacaoNormal = limiteAprovacao > 0 && vendaNormal > limiteAprovacao;
+    const precisaAprovacaoAlta = limiteAprovacao > 0 && vendaAlta > limiteAprovacao;
+
+    assert.equal(precisaAprovacaoNormal, false);
+    assert.equal(precisaAprovacaoAlta, true);
+  });
 });

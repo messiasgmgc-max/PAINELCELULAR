@@ -1,4 +1,5 @@
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
+import { PLANOS_SISTEMA } from '@/lib/planos-config';
 
 export type GeminiCommandAction =
   | 'create_aparelho'
@@ -127,7 +128,6 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
     'gemini-2.0-flash',
     'gemini-1.5-flash',
     'gemini-2.5-flash-lite',
-    'gemini-3.5-flash',
     'gemini-3.7-flash',
     'gemini-flash-latest',
   ];
@@ -262,6 +262,10 @@ export async function responderConversaNaturalComGemini(
   const historicoAtacado = contexto?.historicoAtacadoMes || 'Nenhuma venda de atacado registrada neste mês.';
   const historicoRecente = contexto?.historicoVendasRecentes || 'Nenhuma venda recente registrada.';
 
+  const planosDescricaoPrecos = Object.values(PLANOS_SISTEMA)
+    .map((p) => `${p.nome} (R$ ${p.precos.mensal.valorMensal.toFixed(2).replace('.', ',')}/mês)`)
+    .join(', ');
+
   const systemPrompt = `Você é o COPILOTO OPERACIONAL E ASSISTENTE DA LOJA "${nomeLoja}" no sistema Phone Center.
 Quem fala com você no WhatsApp é ${nomeUsuario} (Papel: ${papelDescricao}).
 Você é o braço direito operacional do lojista: direto, prático, objetivo e sem enrolação.
@@ -279,7 +283,7 @@ Você é o braço direito operacional do lojista: direto, prático, objetivo e s
 
 DADOS OPERACIONAIS DA LOJA:
 - Plano: ${planoAtual} (${contexto?.planoStatus || 'ativo'}) | ${vencimentoInfo}
-- Planos disponíveis: Entrada (R$ 99,90/mês), Intermediário (R$ 189,00/mês), Avançado (R$ 299,00/mês).
+- Planos disponíveis: ${planosDescricaoPrecos}.
 - Estoque disponível (${contexto?.totalEstoque || 0} aparelhos):
 ${estoqueDescricao}
 - Fiado / Devedores a receber: R$ ${totalFiado}${devedoresDescricao}
@@ -320,7 +324,6 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
     'gemini-2.0-flash',
     'gemini-1.5-flash',
     'gemini-2.5-flash-lite',
-    'gemini-3.5-flash',
     'gemini-3.7-flash',
     'gemini-flash-latest',
     'gemini-flash-lite-latest',
