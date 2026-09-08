@@ -420,6 +420,79 @@ export interface UsuarioResolvido {
   isTrial?: boolean;
 }
 
+// ── AUXILIAR: Verificar se o Telefone Pertence ao Moderador Geral / Dono do Bot ──
+export function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
+  if (!telefone) return false;
+  const clean = String(telefone).replace(/\D/g, '');
+  if (!clean) return false;
+  return (
+    clean === '5531993586377' ||
+    clean === '553193586377' ||
+    clean === '31993586377' ||
+    clean === '3193586377' ||
+    clean.endsWith('31993586377') ||
+    clean.endsWith('3193586377')
+  );
+}
+
+// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Comandos / Normal / Off) ──
+const cacheModosChat = new Map<string, { modo: 'comandos' | 'normal' | 'off'; exp: number }>();
+
+async function obterModoChat(remoteJid: string): Promise<'comandos' | 'normal' | 'off'> {
+  if (!remoteJid) return 'normal';
+  const agora = Date.now();
+  const cached = cacheModosChat.get(remoteJid);
+  if (cached && agora < cached.exp) {
+    return cached.modo;
+  }
+  try {
+    const { data } = await supabase
+      .from('whatsapp_antiflood_cache')
+      .select('chave')
+      .ilike('chave', `chat_mode:${remoteJid}:%`)
+      .limit(1)
+      .maybeSingle();
+
+    if (data?.chave) {
+      const partes = data.chave.split(':');
+      const modoSalvo = partes[partes.length - 1];
+      if (modoSalvo === 'comandos' || modoSalvo === 'off' || modoSalvo === 'normal') {
+        cacheModosChat.set(remoteJid, { modo: modoSalvo, exp: agora + 300000 });
+        return modoSalvo;
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao obter modo do chat:', err);
+  }
+  cacheModosChat.set(remoteJid, { modo: 'normal', exp: agora + 300000 });
+  return 'normal';
+}
+
+async function definirModoChat(remoteJid: string, modo: 'comandos' | 'normal' | 'off'): Promise<boolean> {
+  if (!remoteJid) return false;
+  const agora = Date.now();
+  cacheModosChat.set(remoteJid, { modo, exp: agora + 300000 });
+  try {
+    await supabase
+      .from('whatsapp_antiflood_cache')
+      .delete()
+      .ilike('chave', `chat_mode:${remoteJid}:%`);
+
+    if (modo !== 'normal') {
+      await supabase
+        .from('whatsapp_antiflood_cache')
+        .upsert({
+          chave: `chat_mode:${remoteJid}:${modo}`,
+          timestamp: agora,
+        });
+    }
+    return true;
+  } catch (err) {
+    console.error('Erro ao salvar modo do chat:', err);
+    return false;
+  }
+}
+
 // ── AUXILIAR: Resolver Loja e Usuário a partir do Telefone de Quem Enviou ──
 async function resolverLojaEUsuarioPorTelefone(
   authorPhone: string,
@@ -430,6 +503,34 @@ async function resolverLojaEUsuarioPorTelefone(
 
   // Resolve loja vinculada à instância da Evolution API (ex: lucasimports)
   const lojaIdInstancia = instanceName ? await resolverLojaId(instanceName) : null;
+
+  // 0. Caso seja o Moderador Master / Dono do Bot (31993586377), concede acesso irrestrito
+  if (verificarSeModeradorOuDonoGeral(authorPhone)) {
+    let lojaAlvo: any = null;
+    if (lojaIdInstancia) {
+      const { data: l } = await supabase.from('lojas').select('id, nome, plano_status, data_vencimento').eq('id', lojaIdInstancia).maybeSingle();
+      lojaAlvo = l;
+    }
+    if (!lojaAlvo) {
+      const { data: lLucas } = await supabase.from('lojas').select('id, nome, plano_status, data_vencimento').ilike('nome', '%lucas%').limit(1).maybeSingle();
+      lojaAlvo = lLucas;
+    }
+    if (!lojaAlvo) {
+      const { data: lAtiva } = await supabase.from('lojas').select('id, nome, plano_status, data_vencimento').eq('ativo', true).limit(1).maybeSingle();
+      lojaAlvo = lAtiva;
+    }
+
+    return {
+      lojaId: lojaAlvo?.id || 'loja-master',
+      lojaNome: lojaAlvo?.nome || 'Lucas Imports',
+      usuarioNome: 'Lucas (Moderador Master)',
+      papel: 'owner',
+      planoTipo: 'pro',
+      planoStatus: 'vitalicio',
+      dataVencimento: undefined,
+      diasRestantes: 9999,
+    };
+  }
 
   // 1. Busca em whatsapp_permissoes (fonte prioritária de permissão no WhatsApp)
   try {
@@ -1849,6 +1950,9 @@ export async function POST(request: Request) {
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : senderPhone;
 
+    const ehModeradorMaster = verificarSeModeradorOuDonoGeral(authorPhone) || (isGroup && verificarSeModeradorOuDonoGeral(participantPhone));
+    const modoChat = await obterModoChat(remoteJid);
+
     // ── IDENTIFICAÇÃO MULTI-LOJA DO USUÁRIO PELO NÚMERO DO WHATSAPP ──
     const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName);
     if (usuarioResolvido?.lojaId) {
@@ -1856,10 +1960,10 @@ export async function POST(request: Request) {
     }
     const nomeLoja = usuarioResolvido?.lojaNome || 'Phone Center';
     const nomeUsuario = usuarioResolvido?.usuarioNome || pushName;
-    const papelUsuario = usuarioResolvido?.papel || 'staff';
+    const papelUsuario = ehModeradorMaster ? 'owner' : (usuarioResolvido?.papel || 'staff');
 
     // ── BLOQUEIO DE SEGURANÇA: NÚMERO NÃO CADASTRADO EM NENHUMA LOJA (CHAT PRIVADO) ──
-    if (!isGroup && !usuarioResolvido) {
+    if (!isGroup && !usuarioResolvido && !ehModeradorMaster) {
       console.warn(`🔒 [Segurança] Acesso negado para telefone não cadastrado: ${authorPhone}`);
       const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe* (ou *Técnicos & Vendedores*).\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://app.phonecenter.tech/assinar*`;
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgBloqueio);
@@ -1877,6 +1981,15 @@ export async function POST(request: Request) {
     );
 
     if (hasImage) {
+      if (modoChat === 'off') {
+        return NextResponse.json({ status: 'ok', message: 'Chat desativado via !config off.' }, { status: 200 });
+      }
+      if (modoChat === 'comandos') {
+        const caption = messageContent.imageMessage?.caption || '';
+        if (!caption.trim().startsWith('!')) {
+          return NextResponse.json({ status: 'ok', message: 'Imagem ignorada devido ao modo exclusivo de comandos.' }, { status: 200 });
+        }
+      }
       console.log(`📸 Imagem recebida de ${pushName} (${targetDestination}). Iniciando OCR Vision...`);
 
       let rawBase64 =
@@ -1975,6 +2088,20 @@ export async function POST(request: Request) {
     }
 
     const lowerText = textContent.toLowerCase().trim();
+    const ehComandoExplicito = textContent.trim().startsWith('!');
+
+    // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !config) ──
+    if (modoChat === 'off') {
+      // Se estiver desligado, só aceita comando !config para religar
+      if (!lowerText.startsWith('!config')) {
+        return NextResponse.json({ status: 'ok', message: 'Chat desativado via !config off.' }, { status: 200 });
+      }
+    } else if (modoChat === 'comandos') {
+      // Se estiver no modo apenas comandos, ignora qualquer mensagem que não comece com !
+      if (!ehComandoExplicito) {
+        return NextResponse.json({ status: 'ok', message: 'Chat configurado apenas para comandos (!). Mensagem ignorada.' }, { status: 200 });
+      }
+    }
 
     // ── 4.1. CONSULTA DE PLANOS DA PLATAFORMA PHONE CENTER ──
     const ehPerguntaPlanos =
@@ -2701,7 +2828,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       if (isGroup && !isLucas) {
         const lojaTelefone = (loja?.telefone || '').replace(/\D/g, '');
 
-        const isDono = lojaTelefone && participantPhone && (lojaTelefone.endsWith(participantPhone.slice(-8)) || participantPhone.endsWith(lojaTelefone.slice(-8)));
+        const isDono = ehModeradorMaster || (lojaTelefone && participantPhone && (lojaTelefone.endsWith(participantPhone.slice(-8)) || participantPhone.endsWith(lojaTelefone.slice(-8))));
 
         if (!isDono && lojaTelefone && lojaTelefone !== 'Não informado') {
           console.log(`[Segurança Multi-Tenant] Comando !estoque em grupo ignorado: ${participantPhone} não é o dono da loja ${loja?.nome}.`);
@@ -2767,6 +2894,300 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       const mensagemEstoque = cabecalho + linhasEstoque.join('\n') + rodape;
       await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemEstoque);
       return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens).` }, { status: 200 });
+    }
+
+    // ── 10.1. COMANDO: !buscar [modelo / termo] ──
+    if (lowerText.startsWith('!buscar') || lowerText.startsWith('!busca')) {
+      const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
+      if (!resolvedLojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('*')
+        .eq('id', resolvedLojaId)
+        .maybeSingle();
+
+      const nomeLojaExibicao = (loja?.nome || 'PHONE CENTER').trim().toUpperCase();
+
+      // Extrai o termo pesquisado após "!buscar" ou "!busca"
+      const termoBusca = textContent.replace(/^!(?:buscar|busca)\s*/i, '').trim();
+
+      if (!termoBusca || termoBusca.toLowerCase() === 'ajuda') {
+        const msgAjudaBusca = `🔍 *Busca Rápida de Aparelhos — ${nomeLojaExibicao}*
+
+Envie o modelo que deseja consultar no estoque:
+• *!buscar 15 pro max* (ou *!buscar 15pm*)
+• *!buscar 15 pro* (ou *!buscar 15p*)
+• *!buscar 13 128gb*
+• *!buscar 14 plus azul*
+• *!buscar 12 mini*
+• *!buscar xr*
+
+💡 O comando filtra por modelo, capacidade e cor em tempo real!`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgAjudaBusca);
+        return NextResponse.json({ status: 'ok', message: 'Ajuda de busca enviada.' }, { status: 200 });
+      }
+
+      // Consulta estoque ativo da loja
+      const { data: aparelhos, error: errEstoque } = await supabase
+        .from('aparelhos')
+        .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+        .eq('loja_id', resolvedLojaId)
+        .eq('ativo', true)
+        .neq('status', 'vendido')
+        .neq('condicao', 'vendido');
+
+      if (errEstoque || !aparelhos || aparelhos.length === 0) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          `🔍 *BUSCA DE APARELHOS - ${nomeLojaExibicao}*\n\nNenhum aparelho disponível em estoque no momento.`
+        );
+        return NextResponse.json({ status: 'ok', message: 'Estoque vazio.' }, { status: 200 });
+      }
+
+      // Parser inteligente de modelo de iPhone
+      const IPHONE_REGEX = /(?:iphone\s*|ip\s*)?(1[1-7]|xr|xs|se|16e)\s*(pro\s*max|promax|pmax|pmx|p\s*max|pm|pro\b|p\b|plus|\+|mini)?/i;
+      const modeloMatch = termoBusca.match(IPHONE_REGEX);
+
+      let aparelhosFiltrados: any[] = [];
+      let modeloIdentificado = '';
+
+      if (modeloMatch) {
+        const termoNumero = modeloMatch[1].toUpperCase();
+        const sufRaw = (modeloMatch[2] || '').toLowerCase().replace(/\s+/g, '');
+
+        let variante: 'PRO_MAX' | 'PRO' | 'PLUS' | 'MINI' | 'BASE_ONLY' | 'QUALQUER' = 'QUALQUER';
+
+        if (['pm', 'promax', 'pmax', 'pmx'].includes(sufRaw)) {
+          variante = 'PRO_MAX';
+          modeloIdentificado = `iPhone ${termoNumero} Pro Max`;
+        } else if (['p', 'pro'].includes(sufRaw)) {
+          variante = 'PRO';
+          modeloIdentificado = `iPhone ${termoNumero} Pro`;
+        } else if (['plus', '+', 'pl'].includes(sufRaw)) {
+          variante = 'PLUS';
+          modeloIdentificado = `iPhone ${termoNumero} Plus`;
+        } else if (sufRaw === 'mini') {
+          variante = 'MINI';
+          modeloIdentificado = `iPhone ${termoNumero} Mini`;
+        } else if (!sufRaw) {
+          variante = 'BASE_ONLY';
+          modeloIdentificado = termoNumero === '16E' ? 'iPhone 16e' : `iPhone ${termoNumero}`;
+        }
+
+        const numLower = termoNumero.toLowerCase();
+        const aparelhosDaGeracao = aparelhos.filter((a) => {
+          const mod = String(a.modelo || '').toLowerCase();
+          return new RegExp(`\\b${numLower}\\b`).test(mod) || mod.includes(`iphone ${numLower}`) || mod.includes(`ip ${numLower}`) || mod.startsWith(numLower);
+        });
+
+        if (variante === 'PRO_MAX') {
+          aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
+            const mod = String(a.modelo || '').toLowerCase();
+            return mod.includes('pro max') || mod.includes('promax') || mod.includes('pmax');
+          });
+        } else if (variante === 'PRO') {
+          aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
+            const mod = String(a.modelo || '').toLowerCase();
+            return (mod.includes('pro') || mod.includes(' pro ')) && !mod.includes('max') && !mod.includes('promax');
+          });
+        } else if (variante === 'PLUS') {
+          aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
+            const mod = String(a.modelo || '').toLowerCase();
+            return mod.includes('plus') || mod.includes('+');
+          });
+        } else if (variante === 'MINI') {
+          aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
+            const mod = String(a.modelo || '').toLowerCase();
+            return mod.includes('mini');
+          });
+        } else if (variante === 'BASE_ONLY') {
+          aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
+            const mod = String(a.modelo || '').toLowerCase();
+            return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('mini');
+          });
+        } else {
+          aparelhosFiltrados = aparelhosDaGeracao;
+        }
+
+        // Filtro de capacidade
+        const capMatch = termoBusca.match(/\b(64|128|256|512|1024|1\s*tb|1\s*tera)\s*(?:gb|gigas|g)?\b/i);
+        if (capMatch) {
+          const capAlvo = capMatch[1].toLowerCase().replace(/\s+/g, '');
+          const porCap = aparelhosFiltrados.filter((a) => String(a.capacidade || '').toLowerCase().includes(capAlvo));
+          if (porCap.length > 0) {
+            aparelhosFiltrados = porCap;
+          }
+        }
+
+        // Filtro de cor
+        const CORES_KEYWORDS: Record<string, string[]> = {
+          preto: ['preto', 'black', 'grafite', 'meia-noite', 'space gray', 'space grey', 'cinza espacial'],
+          branco: ['branco', 'white', 'prata', 'silver', 'estelar', 'starlight'],
+          azul: ['azul', 'blue', 'sierra', 'ultramarine', 'ultramarino', 'pacífico', 'pacific'],
+          roxo: ['roxo', 'purple', 'lilas', 'lilás', 'deep purple'],
+          dourado: ['dourado', 'gold', 'ouro'],
+          amarelo: ['amarelo', 'yellow'],
+          verde: ['verde', 'green', 'teal', 'alpino', 'alpine'],
+          vermelho: ['vermelho', 'red', 'product red'],
+          rosa: ['rosa', 'pink', 'rose'],
+          titanio_natural: ['natural', 'desert', 'deserto', 'titanium', 'titânio', 'cinza', 'gray', 'grey'],
+          laranja: ['laranja', 'orange', 'coral']
+        };
+
+        let corSolicitada: string[] | null = null;
+        for (const [, termos] of Object.entries(CORES_KEYWORDS)) {
+          if (termos.some((termo) => new RegExp(`\\b${termo}\\b`, 'i').test(termoBusca))) {
+            corSolicitada = termos;
+            break;
+          }
+        }
+
+        if (corSolicitada) {
+          const porCor = aparelhosFiltrados.filter((a) => {
+            const corAp = String(a.cor || '').toLowerCase();
+            return corSolicitada!.some((termo) => corAp.includes(termo));
+          });
+          if (porCor.length > 0) {
+            aparelhosFiltrados = porCor;
+          }
+        }
+      } else {
+        // Busca genérica por termos (ex: Xiaomi, Samsung, Motorola ou modelo específico)
+        const palavrasChave = termoBusca.toLowerCase().split(/\s+/).filter(Boolean);
+        aparelhosFiltrados = aparelhos.filter((a) => {
+          const textoAparelho = `${a.marca || ''} ${a.modelo || ''} ${a.capacidade || ''} ${a.cor || ''} ${a.codigo || ''} ${a.imei || ''}`.toLowerCase();
+          return palavrasChave.every((p) => textoAparelho.includes(p));
+        });
+        modeloIdentificado = termoBusca;
+      }
+
+      if (aparelhosFiltrados.length === 0) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          `🔍 *BUSCA DE APARELHOS - ${nomeLojaExibicao}*\n\n❌ Nenhum aparelho encontrado para: "*${termoBusca}*".\n\n💡 Envie *!estoque* para ver todos os itens disponíveis.`
+        );
+        return NextResponse.json({ status: 'ok', message: 'Nenhum resultado na busca.' }, { status: 200 });
+      }
+
+      // Ordenação e formatação idêntica ao padrão solicitado
+      aparelhosFiltrados.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
+
+      let ultimoModelo = '';
+      const linhasResultado: string[] = [];
+
+      aparelhosFiltrados.forEach((a) => {
+        const modNorm = normalizarModelo(a.modelo);
+        if (ultimoModelo && ultimoModelo !== modNorm) {
+          linhasResultado.push('');
+        }
+        ultimoModelo = modNorm;
+
+        const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
+        const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+        const batVal = a.saude_bateria || (a as any).saudeBateria;
+        const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
+        const bat = batNum ? `(${batNum}%)` : '';
+        const modCap = [modNorm, cap].filter(Boolean).join(' ');
+        const extras = [nomeCor, bat].filter(Boolean).join(' ');
+        const cod = a.codigo || (a.imei ? `...${String(a.imei).slice(-4)}` : `#${String(a.id).slice(0, 4)}`);
+        const precoAtacadoVal = a.preco_atacado || (a as any).precoAtacado || a.preco;
+        const atacadoFmt = precoAtacadoVal ? `R$ ${Number(precoAtacadoVal).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Consulte';
+
+        linhasResultado.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} | Cód: ${cod} | Atacado: ${atacadoFmt}`.replace(/\s+/g, ' ').trim());
+      });
+
+      const cabecalho = `🔍 *BUSCA DE APARELHOS - ${nomeLojaExibicao}*\nTotal encontrado: *${aparelhosFiltrados.length} ${aparelhosFiltrados.length === 1 ? 'aparelho' : 'aparelhos'}*\n\n`;
+      const rodape = `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`;
+      const mensagemBusca = cabecalho + linhasResultado.join('\n') + rodape;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemBusca);
+      return NextResponse.json({ status: 'ok', message: `Busca respondida (${aparelhosFiltrados.length} itens).` }, { status: 200 });
+    }
+
+    // ── 10.2. COMANDO: !config [comandos | normal | off | status] ──
+    if (lowerText.startsWith('!config')) {
+      const isDonoOuMaster = ehModeradorMaster || papelUsuario === 'owner';
+
+      if (!isDonoOuMaster) {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          '❌ *Acesso Restrito:* Apenas o moderador master ou o proprietário da loja tem permissão para alterar a configuração deste chat.'
+        );
+        return NextResponse.json({ status: 'ok', message: 'Sem permissão para !config.' }, { status: 200 });
+      }
+
+      const partes = textContent.trim().split(/\s+/);
+      const subComando = partes[1] ? partes[1].toLowerCase() : 'status';
+
+      if (subComando === 'comandos' || subComando === 'comando') {
+        await definirModoChat(remoteJid, 'comandos');
+        const msgConfig = `⚙️ *Configurações do Chat — Phone Center*
+
+✅ Modo atualizado com sucesso para: *APENAS COMANDOS*!
+
+🔇 O bot agora ignorará conversas paralelas, bate-papo e perguntas soltas neste chat.
+⚡ Ele responderá *exclusivamente* a comandos que comecem com *!* (ex: *!buscar*, *!estoque*, *!vender*, *!plano*, *!fiado*).
+
+💡 _Para retornar ao modo padrão com escuta inteligente envie:_ *!config normal*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgConfig);
+        return NextResponse.json({ status: 'ok', message: 'Modo comandos ativado.' }, { status: 200 });
+      }
+
+      if (subComando === 'normal' || subComando === 'padrao' || subComando === 'padrão') {
+        await definirModoChat(remoteJid, 'normal');
+        const msgConfig = `⚙️ *Configurações do Chat — Phone Center*
+
+✅ Modo atualizado com sucesso para: *PADRÃO (NORMAL)*!
+
+🤖 O bot atenderá a comandos operacionais e responderá consultas inteligentes e perguntas de clientes quando acionado.
+
+💡 _Para restringir este chat apenas a comandos envie:_ *!config comandos*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgConfig);
+        return NextResponse.json({ status: 'ok', message: 'Modo normal ativado.' }, { status: 200 });
+      }
+
+      if (subComando === 'off' || subComando === 'desativar' || subComando === 'pausar' || subComando === 'silencio') {
+        await definirModoChat(remoteJid, 'off');
+        const msgConfig = `⚙️ *Configurações do Chat — Phone Center*
+
+🛑 O bot foi *DESATIVADO* neste chat.
+
+Ele não responderá a nenhuma mensagem nem comando até ser reativado.
+
+💡 _Para religar o bot envie:_ *!config normal* ou *!config comandos*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgConfig);
+        return NextResponse.json({ status: 'ok', message: 'Bot desativado no chat.' }, { status: 200 });
+      }
+
+      // Exibição de Status / Ajuda do !config
+      const modoAtual = await obterModoChat(remoteJid);
+      const modoFormatado =
+        modoAtual === 'comandos'
+          ? '⚡ *APENAS COMANDOS* (ignora conversas paralelas, responde só comandos com !)'
+          : modoAtual === 'off'
+          ? '🛑 *DESATIVADO* (bot silenciado no chat)'
+          : '🤖 *PADRÃO (NORMAL)* (comandos + escuta inteligente)';
+
+      const msgStatus = `⚙️ *Configurações do Chat — Phone Center*
+
+📍 *Chat:* ${isGroup ? 'Grupo' : 'Privado'} (\`${remoteJid.slice(0, 18)}...\`)
+🎯 *Modo Atual:* ${modoFormatado}
+
+*Opções de configuração:*
+• *!config comandos* — O bot responde *somente* a comandos iniciados com ! (ideal para grupos movimentados)
+• *!config normal* — Modo padrão com comandos e escuta inteligente
+• *!config off* — Desativa o bot totalmente neste chat
+• *!config status* — Exibe esta tela de status`;
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgStatus);
+      return NextResponse.json({ status: 'ok', message: 'Status do !config enviado.' }, { status: 200 });
     }
 
     // ── 11. COMANDO: !abater [lojista] [valor] (Gestão de Fiado/Atacado) ──
@@ -3221,10 +3642,12 @@ Você pode falar comigo diretamente em linguagem natural ou utilizar atalhos rá
 
 ⚡ *Atalhos rápidos:*
 • *!estoque* - Ver aparelhos disponíveis
+• *!buscar [modelo]* - Buscar aparelho específico (ex: !buscar 15pm)
 • *!vender* - Baixar venda no sistema
 • *!cadastrar* - Cadastrar novo aparelho
 • *!extrato [lojista]* - Gerar comprovante com PIX
-• *!plano* - Ver assinatura e renovação`;
+• *!plano* - Ver assinatura e renovação
+• *!config* - Configurar modo do chat (comandos/normal/off)`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
@@ -4172,6 +4595,7 @@ ${respostaConversaIA.erroLog || 'Nenhum modelo Gemini respondeu com sucesso.'}
 
 💡 *Dica:* Enquanto nossa equipe técnica analisa, você pode utilizar os comandos operacionais do robô:
 • *!estoque* - Ver aparelhos disponíveis e valores
+• *!buscar [modelo]* - Localizar aparelho por modelo (ex: !buscar 15pm)
 • *!vender* - Registrar venda na hora
 • *!fiado* ou *!saldo* - Consultar devedores e recebíveis
 • *!plano* - Consultar vencimento e assinatura`;
