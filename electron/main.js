@@ -1,16 +1,28 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('path');
-const { autoUpdater } = require('electron-updater');
+
+let autoUpdater = null;
+try {
+  autoUpdater = require('electron-updater').autoUpdater;
+} catch (err) {
+  console.warn('[AutoUpdater] Módulo electron-updater não encontrado ou indisponível:', err?.message || err);
+}
 
 let mainWindow;
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 
 // Configuração do Auto Updater (GitHub Releases)
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
+if (autoUpdater) {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+}
 
 function setupAutoUpdater() {
+  if (!autoUpdater) {
+    console.log('[AutoUpdater] autoUpdater não inicializado.');
+    return;
+  }
   if (isDev) {
     console.log('[AutoUpdater] Modo de desenvolvimento - verificações de release desativadas.');
     return;
@@ -150,10 +162,10 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.handle('check-updates-manually', async () => {
-  if (!isDev) {
+  if (!isDev && autoUpdater) {
     return autoUpdater.checkForUpdates();
   }
-  return { status: 'dev_mode' };
+  return { status: 'disabled_or_dev' };
 });
 
 ipcMain.handle('get-app-version', () => {
