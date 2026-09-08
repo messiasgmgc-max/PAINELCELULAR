@@ -298,6 +298,14 @@ export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = 
       }
     }
 
+    // Se tem imei ou modelo diretamente no objeto do item
+    if (!imei && (primeiro.imei || primeiro.serial)) {
+      imei = String(primeiro.imei || primeiro.serial).trim();
+    }
+    if (!nomeAparelho && (primeiro.modelo || primeiro.nome)) {
+      nomeAparelho = String(primeiro.modelo || primeiro.nome).trim();
+    }
+
     // Se ainda não tem nome ou imei, extrai de primeiro.descricao
     if (primeiro.descricao) {
       const desc = String(primeiro.descricao).trim();
@@ -319,6 +327,16 @@ export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = 
           .trim();
       }
     }
+
+    // Procura IMEI nos outros itens se ainda não achou
+    if (!imei) {
+      for (const it of itens) {
+        if (it.imei || it.serial) {
+          imei = String(it.imei || it.serial).trim();
+          break;
+        }
+      }
+    }
   }
 
   // 2. Se ainda não achou, tenta extrair de venda.descricao
@@ -332,6 +350,8 @@ export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = 
     }
     nomeAparelho = descVenda
       .replace(/^Venda (?:VAREJO|ATACADO|PDV)\s*-\s*/i, '')
+      .replace(/^Importado(?:\s+MercadoPhone)?(?:\s+#\w+)?\s*-\s*/i, '')
+      .replace(/^Importado\s*-\s*Referencia\s+\S+\s*-\s*/i, '')
       .replace(/\((?:IMEI\/ID|IMEI|ID):[^\)]+\)/gi, '')
       .replace(/-\s*$/, '')
       .trim();

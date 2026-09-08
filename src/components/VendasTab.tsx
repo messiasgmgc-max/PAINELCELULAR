@@ -2097,34 +2097,45 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     const value = String(rawValue || '').trim();
     if (!value) return new Date().toISOString();
 
+    // Se já estiver em formato ISO ou YYYY-MM-DD HH:mm:ss
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      const isoLike = value.replace(' ', 'T');
+      const d = new Date(isoLike);
+      if (!Number.isNaN(d.getTime())) return d.toISOString();
+    }
+
+    // Formato BR DD/MM/YYYY ou DD/MM/YY
+    const matchBr = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (matchBr) {
+      let [, dd, mm, yyyy, hh = '12', min = '00', ss = '00'] = matchBr;
+      if (yyyy.length === 2) yyyy = '20' + yyyy;
+      const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
+      if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
     const nativeDate = new Date(value);
     if (!Number.isNaN(nativeDate.getTime())) {
       return nativeDate.toISOString();
     }
 
-    const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
-    if (!match) return new Date().toISOString();
-
-    const [, dd, mm, yyyy, hh = '00', min = '00', ss = '00'] = match;
-    const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
-    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+    return new Date().toISOString();
   };
 
   const mapImportedStatus = (rawStatus: string): 'pendente' | 'pago' | 'cancelado' => {
     const status = String(rawStatus || '').toLowerCase();
     if (status.includes('cancel')) return 'cancelado';
     if (status.includes('pend')) return 'pendente';
-    if (status.includes('concluido') || status.includes('concluído') || status.includes('pago')) return 'pago';
     return 'pago';
   };
 
   const mapImportedMetodo = (rawMetodo: string): Venda['metodo'] => {
     const metodo = String(rawMetodo || '').toLowerCase();
-    if (metodo.includes('credito')) return 'cartao_credito';
-    if (metodo.includes('debito')) return 'cartao_debito';
+    if (metodo.includes('credito') || metodo.includes('crédito')) return 'cartao_credito';
+    if (metodo.includes('debito') || metodo.includes('débito')) return 'cartao_debito';
     if (metodo.includes('boleto')) return 'boleto';
-    if (metodo.includes('dinheiro')) return 'dinheiro';
-    if (metodo.includes('pix')) return 'pix';
+    if (metodo.includes('dinheiro') || metodo.includes('especie') || metodo.includes('espécie')) return 'dinheiro';
+    if (metodo.includes('fiado') || metodo.includes('promissoria') || metodo.includes('promissória')) return 'fiado';
+    if (metodo.includes('trade') || metodo.includes('troca')) return 'trade_in';
     return 'pix';
   };
 
@@ -2167,7 +2178,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const handleImportVendas = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!usuario?.lojaId) {
-      alert('Sessao sem loja ativa para importar vendas.');
+      alert('Sessão sem loja ativa para importar vendas.');
       return;
     }
 
@@ -2178,7 +2189,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const importedRows = await parseImportFile(file);
 
       if (importedRows.length === 0) {
-        alert('Arquivo sem dados validos para importacao.');
+        alert('Arquivo sem dados válidos para importação.');
         return;
       }
 
@@ -2194,63 +2205,168 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           const cliente = String(item.clienteNome || '').trim().toLowerCase();
           const data = String(item.dataPagamento || '').slice(0, 10);
           const valor = Number(item.valor || 0).toFixed(2);
-          const ref = /Referencia\s+(\S+)/i.exec(String(item.descricao || ''))?.[1] || '';
+          const ref =
+            /Referencia\s+(\S+)/i.exec(String(item.descricao || ''))?.[1] ||
+            /#(\S+)/i.exec(String(item.descricao || ''))?.[1] ||
+            '';
           return `${ref}|${cliente}|${data}|${valor}`;
         })
       );
 
-      const chavesNoLote = new Set<string>();
-      const payload = importedRows
-        .map((row) => {
-          // Baseado no CSV enviado: _col1=id, _col2=cliente, _col3=vendedor, _col4=data, _col5=origem, _col6=valor, _col7=status
-          const clienteNome = findByAliases(row, ['cliente', 'clientenome', 'nomecliente', '_col2']);
-          const vendedor = findByAliases(row, ['vendedor', 'tecnico', '_col3']);
-          const dataPagamento = parseImportedDate(findByAliases(row, ['datapagamento', 'data', '_col4']));
-          const origem = findByAliases(row, ['origem', 'canal', 'metodo', 'formapagamento', '_col5']);
+      // Agrupa itens por Venda (suporta vendas multi-itens do MercadoPhone e linhas individuais)
+      const salesMap = new Map<string, {
+        clienteNome: string;
+        vendedor: string;
+        tipoEntrega: string;
+        itens: Array<{
+          id: string;
+          descricao: string;
+          modelo: string;
+          imei: string;
+          condicao: string;
+          bateria: string;
+          quantidade: number;
+          valorInterno: number;
+          valorExibir: number;
+          precoUnitario: number;
+          custoUnitario: number;
+          desconto: number;
+          tipoDesconto: 'R$';
+          total: number;
+          observacao: string;
+        }>;
+        valor: number;
+        custo: number;
+        dataPagamento: string;
+        status: 'pago' | 'pendente' | 'cancelado';
+        metodo: Venda['metodo'];
+        idOrigem: string;
+        origem: string;
+      }>();
+
+      importedRows.forEach((row, idx) => {
+        const idOrigem = findByAliases(row, ['id', 'numero', 'codigo', 'idorigem', '_col1']);
+        const clienteNome = findByAliases(row, ['cliente', 'clientenome', 'nomecliente', 'comprador', 'nome', '_col2']);
+        const dataPagamentoRaw = findByAliases(row, ['datapagamento', 'data', 'datavenda', 'created_at', '_col3', '_col4']);
+        const statusRaw = findByAliases(row, ['status', 'situacao', 'estado', '_col5', '_col7']);
+        const modelo = findByAliases(row, ['modelo', 'aparelho', 'descricao', 'produto', 'item', '_col7', '_col6']);
+        const imei = findByAliases(row, ['imei', 'serial', 'numeroserie', 'sn', '_col8']);
+        const condicao = findByAliases(row, ['condicao', 'estado_aparelho', '_col9']);
+        const origem = findByAliases(row, ['origem', 'canal', 'metodo', 'formapagamento', 'pagamento', '_col10', '_col5']);
+        const valor = parseCurrencyLike(findByAliases(row, ['valor', 'total', 'valorfinal', 'valortotal', 'preco', '_col11', '_col6']));
+        const custo = parseCurrencyLike(findByAliases(row, ['custo', 'desconto', '_col12']));
+        const vendedor = findByAliases(row, ['vendedor', 'tecnico', 'atendente', '_col13', '_col3']) || 'Padrão';
+        const bateria = findByAliases(row, ['bateria', 'saudebateria', '_col16']);
+
+        if (!clienteNome && !modelo) return;
+
+        const groupKey = idOrigem
+          ? `ID_${idOrigem}`
+          : `ROW_${idx}_${clienteNome.trim().toLowerCase()}_${dataPagamentoRaw}`;
+
+        const itemObj = {
+          id: `item-${Date.now()}-${idx + 1}`,
+          descricao: imei ? `${modelo || 'Aparelho'} (IMEI: ${imei})` : (modelo || 'Aparelho'),
+          modelo: modelo || '',
+          imei: imei || '',
+          condicao: condicao || '',
+          bateria: bateria ? `${bateria}%` : '',
+          quantidade: 1,
+          valorInterno: valor,
+          valorExibir: valor,
+          precoUnitario: valor,
+          custoUnitario: custo,
+          desconto: 0,
+          tipoDesconto: 'R$' as const,
+          total: valor,
+          observacao: [condicao, bateria ? `Bateria: ${bateria}%` : ''].filter(Boolean).join(' • '),
+        };
+
+        if (!salesMap.has(groupKey)) {
+          const dataPagamento = parseImportedDate(dataPagamentoRaw);
+          const status = mapImportedStatus(statusRaw);
           const metodo = mapImportedMetodo(origem);
-          const valor = parseCurrencyLike(findByAliases(row, ['valor', 'total', 'valorfinal', '_col6']));
-          const status = mapImportedStatus(findByAliases(row, ['status', 'situacao', '_col7']));
-          const idOrigem = findByAliases(row, ['id', 'numero', 'codigo', '_col1']);
 
-          const chave = `${idOrigem}|${clienteNome.trim().toLowerCase()}|${dataPagamento.slice(0, 10)}|${Number(valor || 0).toFixed(2)}`;
-          if (!clienteNome || !Number.isFinite(valor) || chavesExistentes.has(chave) || chavesNoLote.has(chave)) {
-            return null;
-          }
-
-          chavesNoLote.add(chave);
-
-          return {
-            clienteNome,
+          salesMap.set(groupKey, {
+            clienteNome: clienteNome || 'Cliente Não Informado',
             vendedor,
             tipoEntrega: 'Retirada',
-            itens: [],
+            itens: [itemObj],
             valor,
-            custo: 0,
-            lucro: valor,
-            percentualLucro: valor > 0 ? 100 : 0,
+            custo,
             dataPagamento,
             status,
             metodo,
-            descricao: idOrigem
-              ? `Importado - Referencia ${idOrigem}${origem ? ` - Origem ${origem}` : ''}`
-              : `Importado por arquivo${origem ? ` - Origem ${origem}` : ''}`,
-            garantia: '90 dias',
-            descontoTotal: 0,
-            loja_id: usuario.lojaId,
-          };
-        })
-        .filter((venda): venda is NonNullable<typeof venda> => Boolean(venda));
+            idOrigem,
+            origem,
+          });
+        } else {
+          const existing = salesMap.get(groupKey)!;
+          existing.itens.push(itemObj);
+        }
+      });
+
+      const chavesNoLote = new Set<string>();
+      const payload: any[] = [];
+
+      for (const sale of salesMap.values()) {
+        const idOrigem = sale.idOrigem;
+        const clienteNome = sale.clienteNome;
+        const dataPagamento = sale.dataPagamento;
+        const valor = sale.valor;
+        const custo = sale.custo;
+        const lucro = valor - custo;
+        const percentualLucro = valor > 0 ? Math.round(((valor - custo) / valor) * 100) : 0;
+
+        const chave = `${idOrigem}|${clienteNome.trim().toLowerCase()}|${dataPagamento.slice(0, 10)}|${Number(valor || 0).toFixed(2)}`;
+        if (!clienteNome || chavesExistentes.has(chave) || chavesNoLote.has(chave)) {
+          continue;
+        }
+
+        chavesNoLote.add(chave);
+
+        const resumoItens = sale.itens
+          .map((i) => (i.imei ? `${i.modelo} (IMEI: ${i.imei})` : i.modelo || 'Item'))
+          .join(', ');
+
+        const descricao = idOrigem
+          ? `Importado MercadoPhone #${idOrigem} - ${resumoItens}`
+          : `Importado - ${resumoItens}`;
+
+        payload.push({
+          clienteNome,
+          vendedor: sale.vendedor,
+          tipoEntrega: sale.tipoEntrega,
+          itens: sale.itens,
+          valor,
+          custo,
+          lucro,
+          percentualLucro,
+          dataPagamento,
+          status: sale.status,
+          metodo: sale.metodo,
+          descricao,
+          garantia: '90 dias',
+          descontoTotal: 0,
+          loja_id: usuario.lojaId,
+        });
+      }
 
       if (payload.length === 0) {
-        alert('Nenhuma linha nova para importar. Tudo ja estava cadastrado ou sem dados minimos.');
+        alert('Nenhuma venda nova para importar. Todas já estavam cadastradas no sistema.');
         return;
       }
 
-      const { error: insertError } = await supabase.from('vendas').insert(payload);
-      if (insertError) throw insertError;
+      // Inserção em lotes de 100 para evitar sobrecarga de payload
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < payload.length; i += BATCH_SIZE) {
+        const chunk = payload.slice(i, i + BATCH_SIZE);
+        const { error: insertError } = await supabase.from('vendas').insert(chunk);
+        if (insertError) throw insertError;
+      }
 
       await carregarVendas();
-      alert(`Importacao concluida: ${payload.length} vendas inseridas.`);
+      toast.success(`Importação concluída com sucesso: ${payload.length} vendas importadas!`);
     } catch (importError: any) {
       console.error('Erro ao importar vendas:', importError);
       alert(`Erro ao importar vendas: ${importError?.message || 'Falha desconhecida'}`);

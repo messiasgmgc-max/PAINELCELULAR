@@ -217,18 +217,32 @@ export function findByAliases(record: Record<string, string>, aliases: string[])
   return "";
 }
 
-export function parseCurrencyLike(value: string): number {
+export function parseCurrencyLike(value: any): number {
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
   if (!value) return 0;
 
-  const sanitized = value
-    .replace(/r\$/gi, "")
-    .replace(/\s+/g, "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^0-9.-]/g, "");
+  let str = String(value).trim().replace(/[R$\s]/g, "");
+  if (str.includes(".") && str.includes(",")) {
+    if (str.lastIndexOf(",") > str.lastIndexOf(".")) {
+      // Padrão Brasileiro: 1.750,50 -> 1750.50
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      // Padrão Internacional: 1,750.50 -> 1750.50
+      str = str.replace(/,/g, "");
+    }
+  } else if (str.includes(",")) {
+    str = str.replace(",", ".");
+  } else if (str.includes(".")) {
+    const parts = str.split(".");
+    if (parts.length > 2) {
+      str = str.replace(/\./g, "");
+    } else if (parts[1] && parts[1].length === 3 && parseFloat(parts[0]) > 0 && !str.includes(",")) {
+      str = str.replace(/\./g, "");
+    }
+  }
 
-  const parsed = Number(sanitized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const num = parseFloat(str);
+  return Number.isFinite(num) ? num : 0;
 }
 
 function downloadBlob(blob: Blob, fileName: string): void {
