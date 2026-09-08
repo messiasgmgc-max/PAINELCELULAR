@@ -96,12 +96,17 @@ function setupAutoUpdater() {
 }
 
 function createWindow() {
+  const iconPath = process.platform === 'win32'
+    ? path.join(__dirname, 'icon.ico')
+    : path.join(__dirname, 'icon.png');
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 1024,
     minHeight: 650,
     title: 'Phone Center — Sistema de Gestão',
+    icon: iconPath,
     backgroundColor: '#09090b',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
