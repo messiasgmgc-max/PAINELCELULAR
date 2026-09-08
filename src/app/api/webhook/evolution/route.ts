@@ -4013,6 +4013,9 @@ A venda foi enviada para validação de um administrador no painel!`;
       let detalhesDevedoresFormatado = '';
       let totalVendasHoje = 0;
       let analiticaVendas: ResumoVendasAgregado | null = null;
+      let resumoOSAbertas = '';
+      let resumoAgendamentosHoje = '';
+      let resumoGarantiasAtivas = '';
 
       if (lojaId) {
         // 1. Busca aparelhos detalhados do estoque com imei, codigo, custo e precos
@@ -4055,7 +4058,6 @@ A venda foi enviada para validação de um administrador no painel!`;
         }
 
         // 4. Busca Ordens de Serviço (OS) em aberto
-        let resumoOSAbertas = '';
         try {
           const { data: osRows } = await supabase
             .from('ordens_servico')
@@ -4075,7 +4077,6 @@ A venda foi enviada para validação de um administrador no painel!`;
         }
 
         // 5. Busca Agendamentos de Hoje
-        let resumoAgendamentosHoje = '';
         try {
           const hojeIso = new Date().toISOString().split('T')[0];
           const { data: agRows } = await supabase
@@ -4095,7 +4096,6 @@ A venda foi enviada para validação de um administrador no painel!`;
         }
 
         // 6. Busca Garantias Ativas
-        let resumoGarantiasAtivas = '';
         try {
           const { data: garRows } = await supabase
             .from('garantias')
