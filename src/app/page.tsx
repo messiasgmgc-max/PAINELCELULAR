@@ -248,9 +248,11 @@ export default function Home() {
                   className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-cover flex-shrink-0"
                 />
               ) : (
-                <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground flex-shrink-0">
-                  <Smartphone className="h-5 w-5 sm:h-6 sm:w-6" />
-                </div>
+                <img
+                  src="/logosnome.png"
+                  alt="Phone Center"
+                  className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl object-contain flex-shrink-0 bg-slate-900/50 p-1 border border-white/10"
+                />
               )}
               <div className="flex min-w-0 flex-col items-start">
                 <h1 className="text-base sm:text-xl font-bold truncate leading-none max-w-[42vw] sm:max-w-[28rem]">{headerNomeLoja || 'Phone Center'}</h1>

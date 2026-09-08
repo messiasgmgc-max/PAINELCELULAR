@@ -24,7 +24,9 @@ export const metadata: Metadata = {
   description: "Sistema completo de gestão para assistência técnica de celulares",
   manifest: "/manifest.json",
   icons: {
-    apple: "/apple-touch-icon.png",
+    icon: "/logosnome.png",
+    shortcut: "/logosnome.png",
+    apple: "/logosnome.png",
   },
 };
 

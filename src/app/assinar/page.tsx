@@ -217,13 +217,7 @@ export default function AssinarPage() {
       <nav className="w-full border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 shrink-0">
-              <Smartphone className="w-4 h-4 sm:w-5 sm:h-5" />
-            </div>
-            <div>
-              <span className="font-black text-sm sm:text-lg text-white tracking-tight">PHONE CENTER</span>
-              <span className="text-[9px] sm:text-[10px] text-blue-400 font-bold block leading-none">SISTEMA &amp; BOT WHATSAPP</span>
-            </div>
+            <img src="/logocnome.png" alt="Phone Center" className="h-8 sm:h-10 w-auto object-contain" />
           </div>
 
           <div className="flex items-center gap-2">

@@ -213,9 +213,7 @@ export default function LoginPage() {
             
             {/* LOGO & CABEÇALHO */}
             <div className="flex flex-col items-center text-center mb-6">
-              <div className="w-16 h-16 rounded-2xl bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-3 shadow-lg shadow-indigo-500/20">
-                <Smartphone className="w-8 h-8" />
-              </div>
+              <img src="/logocnome.png" alt="Phone Center" className="h-12 w-auto object-contain mb-4" />
               <h1 className="text-2xl font-bold text-white tracking-tight">
                 {modoPrimeiroAcesso
                   ? 'Primeiro Acesso'
