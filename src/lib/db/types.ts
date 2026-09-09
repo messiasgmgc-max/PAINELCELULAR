@@ -192,7 +192,7 @@ export interface Garantia {
 // Tipos para Vendas
 export interface VendaItem {
   id: string;
-  aparelhoId: string;
+  aparelhoId?: string;
   descricao: string;
   quantidade: number;
   valorInterno: number;
@@ -201,6 +201,7 @@ export interface VendaItem {
   tipoDesconto: 'R$' | '%';
   total: number;
   observacao: string;
+  imei?: string;
 }
 
 export interface AbatimentoFiado {

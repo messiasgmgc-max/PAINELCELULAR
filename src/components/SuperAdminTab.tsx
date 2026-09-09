@@ -2068,7 +2068,7 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => setVerComprovanteModal({ lojaNome, url: pag.comprovante_url, observacao: pag.observacao })}
+                                    onClick={() => setVerComprovanteModal({ lojaNome: nomeLoja, url: pag.comprovante_url, observacao: pag.observacao })}
                                     className="h-7 text-xs text-blue-400 hover:text-blue-300 p-1"
                                     title="Visualizar imagem do comprovante"
                                   >

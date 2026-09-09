@@ -9,6 +9,8 @@
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "electron:dev": "electron electron/main.js",
     "electron:build": "electron-builder --win",
     "mobile:sync": "cap sync",

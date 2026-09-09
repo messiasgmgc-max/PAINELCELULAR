@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
       diasGarantia: dados.diasGarantia,
       descricao: dados.descricao,
       historico: dados.historico || [],
-      ativo: true
+      ativo: true,
+      lojaId: dados.lojaId || ''
     });
 
     return NextResponse.json(novaGarantia, { status: 201 });

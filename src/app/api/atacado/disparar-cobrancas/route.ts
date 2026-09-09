@@ -201,7 +201,7 @@ export async function POST(request: Request) {
       try {
         const { data: vendasLojista } = await supabaseAdmin
           .from('vendas')
-          .select('id, descricao, itens, valor, valorPago, saldoDevedor, metodo, status, dataPagamento, dataVencimento')
+          .select('id, descricao, itens, valor, valorPago, saldoDevedor, metodo, status, dataPagamento, dataVencimento, created_at')
           .eq('loja_id', lojaId)
           .ilike('clienteNome', dev.nome.trim())
           .order('dataPagamento', { ascending: false });

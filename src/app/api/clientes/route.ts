@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
       estado: body.estado || "",
       cep: body.cep || "",
       ativo: body.ativo !== false,
+      lojaId: body.lojaId || "",
     });
 
     const response: ApiResponse<Cliente> = {

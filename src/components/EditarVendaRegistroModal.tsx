@@ -40,6 +40,10 @@ export interface VendaEditavelData {
   metodoPgto?: string;
   tipoVenda?: string;
   observacoes?: string;
+  valorPago?: number;
+  metodo?: string;
+  status?: string;
+  itens?: any[];
   raw?: any;
 }
 

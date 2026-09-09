@@ -52,7 +52,7 @@ export function usePecas() {
   }, [usuario?.lojaId]);
 
   // Criar nova peça
-  const criarPeca = useCallback(async (dados: Omit<Peca, "id" | "dataCadastro">) => {
+  const criarPeca = useCallback(async (dados: Omit<Peca, "id" | "dataCadastro" | "lojaId">) => {
     if (!usuario?.lojaId) return null;
     setLoading(true);
     setError(null);

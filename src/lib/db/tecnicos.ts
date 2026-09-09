@@ -53,6 +53,7 @@ export async function createTecnico(dados: Partial<Tecnico>): Promise<Tecnico> {
 
     const novoTecnico: Tecnico = {
       id: uuid(),
+      lojaId: dados.lojaId || '',
       nome: dados.nome || '',
       email: dados.email,
       telefone: dados.telefone || '',

@@ -127,7 +127,7 @@ export function VendaSearchCombobox({
       }
 
       // Descrição formatada do aparelho
-      let aparelhoFormatado = modeloExtraido;
+      let aparelhoFormatado: string = modeloExtraido || "";
       if (!aparelhoFormatado) {
         if (venda.itens && venda.itens.length > 0) {
           aparelhoFormatado = venda.itens.map((i) => i.descricao).join(", ");
@@ -168,7 +168,7 @@ export function VendaSearchCombobox({
         clienteTelefone,
         clienteCpf,
         aparelhoFormatado,
-        imei: imeiExtraido,
+        imei: imeiExtraido || "",
         modelo: modeloExtraido || aparelhoFormatado,
         dataVendaFormatada,
         diasGarantia,

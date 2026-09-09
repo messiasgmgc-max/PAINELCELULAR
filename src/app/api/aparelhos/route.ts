@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
       acessorios: body.acessorios || "",
       observacoes: body.observacoes || "",
       ativo: body.ativo !== false,
+      lojaId: body.lojaId || "",
     });
 
     const response: ApiResponse<Aparelho> = {

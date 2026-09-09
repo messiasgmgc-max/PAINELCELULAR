@@ -78,13 +78,13 @@ export function TaxasMaquininhaTab() {
   const [calcResultado, setCalcResultado] = useState<any>(null);
 
   const { config } = useStoreConfig();
-  const lojaIdAtual = usuario?.lojaId || usuario?.loja_id || usuario?.id;
+  const lojaIdAtual = usuario?.lojaId || usuario?.id;
   const [copiedWhatsApp, setCopiedWhatsApp] = useState(false);
 
   const handleCopyWhatsApp = () => {
     if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) return;
 
-    const nomeLoja = config?.nomeLoja || config?.nome || 'Phone Center';
+    const nomeLoja = config?.nomeLoja || 'Phone Center';
     const valorProdStr = parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',');
     const bandeiraStr = calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper / Outras';
 
@@ -140,7 +140,7 @@ export function TaxasMaquininhaTab() {
     ctx.fillRect(0, 0, width, totalHeight);
 
     // Store Header Info
-    const nomeLoja = (config?.nomeLoja || config?.nome || 'PHONE CENTER').toUpperCase();
+    const nomeLoja = (config?.nomeLoja || 'PHONE CENTER').toUpperCase();
     const valorProdStr = parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',');
     const bandeiraStr = calcBandeira === 'master' ? 'Master / Visa' : 'Elo / Hiper';
 

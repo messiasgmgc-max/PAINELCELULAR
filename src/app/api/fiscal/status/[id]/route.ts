@@ -3,9 +3,9 @@ import { supabaseAdmin } from '@/integrations/supabase/server';
 import { FocusNFeClient } from '@/lib/fiscal/focusNfeClient';
 import { obterDadosFiscaisLoja, salvarRegistroNotaFiscal } from '@/lib/fiscal/fiscalService';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const resolvedParams = await Promise.resolve(params);
+    const resolvedParams = await params;
     const vendaId = resolvedParams?.id;
     if (!vendaId) {
       return NextResponse.json({ sucesso: false, mensagem: 'ID não fornecido' }, { status: 400 });

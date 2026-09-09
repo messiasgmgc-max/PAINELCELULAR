@@ -8,10 +8,11 @@ import { ApiResponse } from '@/lib/db/types';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const tecnico = await getTecnicoById(params.id);
+    const { id } = await params;
+    const tecnico = await getTecnicoById(id);
 
     if (!tecnico) {
       const response: ApiResponse<any> = {
@@ -37,11 +38,12 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
-    const tecnico = await updateTecnico(params.id, body);
+    const tecnico = await updateTecnico(id, body);
 
     if (!tecnico) {
       const response: ApiResponse<any> = {
@@ -68,10 +70,11 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const deleted = await deleteTecnico(params.id);
+    const { id } = await params;
+    const deleted = await deleteTecnico(id);
 
     if (!deleted) {
       const response: ApiResponse<any> = {

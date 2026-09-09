@@ -182,7 +182,7 @@ function formatarDataSegura(dataStr: any): string {
 
 export function AtacadoTab() {
   const { usuario } = useAuth();
-  const { config } = useStoreConfig(usuario?.lojaId || usuario?.loja_id);
+  const { config } = useStoreConfig(usuario?.lojaId);
   const { aparelhos, loading, fetchAparelhos } = useAparelhos();
 
   const [busca, setBusca] = useState('');
@@ -944,8 +944,8 @@ export function AtacadoTab() {
       }
 
       await registrarLog({
-        lojaId: usuario?.lojaId || (usuario as any)?.loja_id,
-        tipoEvento: 'estoque',
+        loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipo_evento: 'estoque',
         acao: 'Venda de Atacado Revertida',
         detalhes: `Venda do aparelho ${venda.modelo} para ${venda.comprador} (R$ ${venda.valorVenda}) cancelada e devolvida ao estoque ativo.`,
       });
@@ -2455,7 +2455,7 @@ export function AtacadoTab() {
             setShowNovoClienteModal(false);
             setClienteParaEditar(null);
           }}
-          lojaId={usuario?.lojaId || usuario?.loja_id || ''}
+          lojaId={usuario?.lojaId || ''}
           clienteParaEditar={clienteParaEditar}
           vendas={vendasBanco}
           vendasAtacado={vendasAtacado}
@@ -2474,7 +2474,7 @@ export function AtacadoTab() {
           }}
           abrirScannerInicial={abrirScannerAtacado}
           aparelhosEstoque={aparelhosEstoqueAtivo as any}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || null}
           onSuccess={async () => {
             await fetchAparelhos();
             await fetchVendasBanco();
@@ -2499,7 +2499,7 @@ export function AtacadoTab() {
           isOpen={!!aparelhoSelecionadoVenda}
           onClose={() => setAparelhoSelecionadoVenda(null)}
           aparelho={aparelhoSelecionadoVenda}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || null}
           onSuccess={fetchAparelhos}
           tipoInicial="atacado"
         />
@@ -2511,7 +2511,7 @@ export function AtacadoTab() {
           isOpen={!!vendaParaEditar}
           onClose={() => setVendaParaEditar(null)}
           venda={vendaParaEditar}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || null}
           onSuccess={async () => {
             await fetchAparelhos();
             await fetchVendasBanco();
@@ -2528,7 +2528,7 @@ export function AtacadoTab() {
           lojistaNome={lojistaParaBaixa?.lojistaNome || ''}
           saldoDevedorTotal={lojistaParaBaixa?.saldoDevedorTotal || 0}
           vendasEmAberto={lojistaParaBaixa?.vendasEmAberto || []}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || null}
           onSuccess={async () => {
             await fetchAparelhos();
             await fetchVendasBanco();

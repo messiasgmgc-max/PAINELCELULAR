@@ -46,7 +46,8 @@ export async function POST(request: NextRequest) {
       aparelhoId: dados.aparelhoId,
       aparelhoDescricao: dados.aparelhoDescricao,
       status: dados.status || 'agendado',
-      observacoes: dados.observacoes
+      observacoes: dados.observacoes,
+      lojaId: dados.lojaId || ''
     });
 
     return NextResponse.json(novoAgendamento, { status: 201 });

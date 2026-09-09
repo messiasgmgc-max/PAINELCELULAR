@@ -1,4 +1,5 @@
 // Helper para gerar código de barras Code128 em formato SVG string para etiquetas e recibos
+import JsBarcode from 'jsbarcode';
 
 export function generateCode128SvgString(text: string, options?: { height?: number; width?: number; showText?: boolean }): string {
   const code = String(text || '').trim();
@@ -10,7 +11,6 @@ export function generateCode128SvgString(text: string, options?: { height?: numb
   // Usa JsBarcode em ambiente browser ou fallback limpo
   if (typeof window !== 'undefined') {
     try {
-      const JsBarcode = require('jsbarcode');
       const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       JsBarcode(svgNode, code, {
         format: 'CODE128',

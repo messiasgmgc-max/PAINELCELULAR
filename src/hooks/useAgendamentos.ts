@@ -53,7 +53,7 @@ export function useAgendamentos() {
     }
   }, [usuario?.lojaId]);
 
-  const criarAgendamento = useCallback(async (dados: Omit<Agendamento, 'id' | 'dataCadastro' | 'ativo'>) => {
+  const criarAgendamento = useCallback(async (dados: Omit<Agendamento, 'id' | 'dataCadastro' | 'ativo' | 'lojaId'>) => {
     try {
       const payload = {
         ...dados,

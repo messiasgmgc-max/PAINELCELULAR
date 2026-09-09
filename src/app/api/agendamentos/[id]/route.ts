@@ -3,10 +3,11 @@ import { getAgendamentoById, updateAgendamento, deleteAgendamento } from '@/lib/
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const agendamento = getAgendamentoById(params.id);
+    const { id } = await params;
+    const agendamento = getAgendamentoById(id);
 
     if (!agendamento) {
       return NextResponse.json(
@@ -26,11 +27,12 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const dados = await request.json();
-    const agendamentoAtualizado = updateAgendamento(params.id, dados);
+    const agendamentoAtualizado = updateAgendamento(id, dados);
 
     if (!agendamentoAtualizado) {
       return NextResponse.json(
@@ -50,10 +52,11 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const deleted = deleteAgendamento(params.id);
+    const { id } = await params;
+    const deleted = deleteAgendamento(id);
 
     if (!deleted) {
       return NextResponse.json(

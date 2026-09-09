@@ -13,6 +13,7 @@ import { GlassCard } from '@/components/GlassCard';
 import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, GripVertical, Camera, MessageCircle, Printer, FileText, FileCheck } from 'lucide-react';
+import type { OrdemServico, PecaUtilizada } from '@/lib/db/types';
 
 const STATUS_MAP: Record<string, { label: string; emoji: string; color: string }> = {
   aguardando_pecas: { label: 'Aguardando Peças', emoji: '📦', color: 'bg-yellow-100 text-yellow-800' },

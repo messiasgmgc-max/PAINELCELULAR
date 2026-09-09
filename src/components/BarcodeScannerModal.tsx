@@ -43,7 +43,7 @@ const createSafeScanner = (elementId: string) => {
 
 const stopScannerInstance = async (
   scannerInstance: Html5Qrcode | null,
-  startPromise?: Promise<void> | null
+  startPromise?: Promise<unknown> | null
 ) => {
   if (!scannerInstance) return;
   try {
@@ -70,7 +70,7 @@ export function BarcodeScannerModal({
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
-  const startPromiseRef = useRef<Promise<void> | null>(null);
+  const startPromiseRef = useRef<Promise<unknown> | null>(null);
   const keyBufferRef = useRef<string>('');
   const keyTimeoutRef = useRef<any>(null);
   const modalContainerRef = useRef<HTMLDivElement>(null);

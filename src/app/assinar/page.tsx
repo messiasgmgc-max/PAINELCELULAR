@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { 
   CheckCircle2, 
   Sparkles, 
@@ -221,12 +222,12 @@ export default function AssinarPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <a
+            <Link
               href="/login"
               className="text-xs font-semibold text-slate-300 hover:text-white px-2.5 py-2 rounded-xl transition"
             >
               Entrar
-            </a>
+            </Link>
             <a
               href="#formulario"
               className="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl shadow-md shadow-blue-600/20 transition"
@@ -552,12 +553,12 @@ export default function AssinarPage() {
               )}
 
               <div className="pt-4 flex flex-col gap-3">
-                <a
+                <Link
                   href="/login"
                   className="w-full px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm shadow-lg shadow-blue-600/20 transition text-center"
                 >
                   Entrar no Painel 🚀
-                </a>
+                </Link>
                 <a
                   href={WHATSAPP_SUPORTE_URL}
                   target="_blank"

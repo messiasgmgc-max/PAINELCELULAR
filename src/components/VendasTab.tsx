@@ -988,10 +988,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       const valorVenda = Number(parsedData.valorTotal || parsedData.aparelho?.preco || 0);
       const custoVenda = Number(parsedData.aparelho?.custo || aparelhoFinal?.custo || 0);
-      const metodoPgto: Venda['metodo'] = parsedData.formaPagamento === 'pix' ? 'pix' :
-                                         parsedData.formaPagamento === 'cartao_credito' ? 'cartao_credito' :
-                                         parsedData.formaPagamento === 'cartao_debito' ? 'cartao_debito' :
-                                         parsedData.formaPagamento === 'dinheiro' ? 'dinheiro' : 'outros';
+      const METODOS_VENDA: Venda['metodo'][] = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'boleto', 'fiado', 'trade_in'];
+      const metodoPgto: Venda['metodo'] = METODOS_VENDA.includes(parsedData.formaPagamento as Venda['metodo'])
+        ? (parsedData.formaPagamento as Venda['metodo'])
+        : 'dinheiro';
 
       const condicaoTexto = (parsedData.aparelho?.condicao || aparelhoFinal?.condicao) === 'novo' ? 'Lacrado' : 'Seminovo';
       const cartItem: VendaItem = {
@@ -1574,8 +1574,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
         // 4. Registra auditoria
         await registrarLog({
-          lojaId: usuario?.lojaId || (usuario as any)?.loja_id,
-          tipoEvento: 'venda',
+          loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+          tipo_evento: 'venda',
           acao: 'Venda Cancelada / Excluída',
           detalhes: `Venda #${id.slice(-6).toUpperCase()} (${venda?.clienteNome || 'Cliente'}) no valor de R$ ${venda?.valor || 0} cancelada e aparelhos devolvidos ao estoque.`,
         });
@@ -2753,8 +2753,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       key={`${emoji}-${index}`}
                       className="sale-success-emoji"
                       style={{
-                        ['--emoji-x' as '--emoji-x']: `${12 + index * 14}`,
-                        ['--emoji-delay' as '--emoji-delay']: `${index * 70}`,
+                        ['--emoji-x' as const]: `${12 + index * 14}`,
+                        ['--emoji-delay' as const]: `${index * 70}`,
                       } as React.CSSProperties}
                     >
                       {emoji}
@@ -2765,11 +2765,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       key={index}
                       className="sale-confetti"
                       style={{
-                        ['--confetti-x' as '--confetti-x']: `${6 + index * 5}`,
-                        ['--confetti-delay' as '--confetti-delay']: `${index * 32}`,
-                        ['--confetti-rotate' as '--confetti-rotate']: `${(index % 6) * 24}`,
-                        ['--confetti-drift' as '--confetti-drift']: `${(index % 2 === 0 ? 1 : -1) * (28 + index * 3)}`,
-                        ['--confetti-hue' as '--confetti-hue']: `${200 + (index % 5) * 22}`,
+                        ['--confetti-x' as const]: `${6 + index * 5}`,
+                        ['--confetti-delay' as const]: `${index * 32}`,
+                        ['--confetti-rotate' as const]: `${(index % 6) * 24}`,
+                        ['--confetti-drift' as const]: `${(index % 2 === 0 ? 1 : -1) * (28 + index * 3)}`,
+                        ['--confetti-hue' as const]: `${200 + (index % 5) * 22}`,
                       } as React.CSSProperties}
                     />
                   ))}
@@ -2921,7 +2921,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       <div className="flex gap-2 min-w-0 md:col-span-2 xl:col-span-1">
                         <ProdutoCombobox
                           aparelhos={aparelhos}
-                          value={posItem.aparelhoId}
+                          value={posItem.aparelhoId || ''}
                           onChange={(aparelhoId) => {
                             const aparelho = aparelhos.find(a => a.id === aparelhoId);
                             const custo = resolveAparelhoCusto(aparelho);
@@ -4404,7 +4404,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           isOpen={!!vendaRegistroParaEditar}
           onClose={() => setVendaRegistroParaEditar(null)}
           venda={vendaRegistroParaEditar}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || null}
           onSuccess={async () => {
             await carregarVendas();
             await fetchAparelhos();
@@ -4419,7 +4419,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           onClose={() => setShowVincularVendidoModal(false)}
           aparelhos={aparelhos}
           clientes={clientes}
-          lojaId={usuario?.lojaId || usuario?.loja_id || null}
+          lojaId={usuario?.lojaId || null}
           onSuccess={async () => {
             await carregarVendas();
             await fetchAparelhos();

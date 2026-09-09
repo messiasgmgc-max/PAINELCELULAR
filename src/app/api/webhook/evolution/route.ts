@@ -408,7 +408,7 @@ function obterVariantesTelefone(rawPhone: string): string[] {
   return Array.from(variants);
 }
 
-export interface UsuarioResolvido {
+interface UsuarioResolvido {
   lojaId: string;
   lojaNome: string;
   usuarioNome: string;
@@ -421,7 +421,7 @@ export interface UsuarioResolvido {
 }
 
 // ── AUXILIAR: Verificar se o Telefone Pertence ao Moderador Geral / Dono do Bot ──
-export function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
+function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
   if (!telefone) return false;
   const clean = String(telefone).replace(/\D/g, '');
   if (!clean) return false;
@@ -3061,7 +3061,7 @@ Envie o modelo que deseja consultar no estoque:
         const palavrasChave = termoBusca.toLowerCase().split(/\s+/).filter(Boolean);
         aparelhosFiltrados = aparelhos.filter((a) => {
           const textoAparelho = `${a.marca || ''} ${a.modelo || ''} ${a.capacidade || ''} ${a.cor || ''} ${a.codigo || ''} ${a.imei || ''}`.toLowerCase();
-          return palavrasChave.every((p) => textoAparelho.includes(p));
+          return palavrasChave.every((p: string) => textoAparelho.includes(p));
         });
         modeloIdentificado = termoBusca;
       }

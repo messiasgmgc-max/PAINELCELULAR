@@ -68,7 +68,7 @@ export function AparelhosTab() {
     tipo_perfume: "Eau de Parfum",
     tipo_acessorio: "Capinha",
     quantidade: "1",
-    condicao: "seminovo" as "novo" | "seminovo" | "usado" | "danificado",
+    condicao: "seminovo" as "novo" | "seminovo" | "usado" | "danificado" | "vendido",
     saudeBateria: "",
     preco: "",
     precoAtacado: "",
@@ -923,6 +923,7 @@ export function AparelhosTab() {
       custo: custoNumerico,
       saude_bateria: formData.saudeBateria,
       saudeBateria: formData.saudeBateria,
+      clienteId: formData.clienteId || undefined,
       ativo: true,
     };
 

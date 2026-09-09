@@ -114,9 +114,16 @@ async function parsePdfRecords(file: File): Promise<Record<string, string>[]> {
   const pdfModule = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const arrayBuffer = await file.arrayBuffer();
 
+  // pdf.js 6 exige um worker explícito; sem isso o getDocument falha no browser.
+  if (!pdfModule.GlobalWorkerOptions.workerSrc) {
+    pdfModule.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/legacy/build/pdf.worker.mjs",
+      import.meta.url
+    ).toString();
+  }
+
   const loadingTask = pdfModule.getDocument({
     data: new Uint8Array(arrayBuffer),
-    disableWorker: true,
   });
 
   const pdf = await loadingTask.promise;

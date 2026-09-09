@@ -96,8 +96,9 @@ export function ExtratoFiadoLojistaModal({
 
   let diasAtraso = 0;
   let estaEmAtraso = false;
-  if (dataVencimentoMaisAntiga && dataVencimentoMaisAntiga.getTime() < agora.getTime() && saldoDevedor > 0.01) {
-    const diffMs = agora.getTime() - dataVencimentoMaisAntiga.getTime();
+  const vencimentoMaisAntigoMs: number | null = dataVencimentoMaisAntiga ? (dataVencimentoMaisAntiga as Date).getTime() : null;
+  if (vencimentoMaisAntigoMs !== null && vencimentoMaisAntigoMs < agora.getTime() && saldoDevedor > 0.01) {
+    const diffMs = agora.getTime() - vencimentoMaisAntigoMs;
     diasAtraso = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     estaEmAtraso = diasAtraso > 0;
   }

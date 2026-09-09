@@ -1,5 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { verificarPermissaoRecursoPlano } from '@/lib/planos-config';
+import { processarAnaliticaVendas } from './vendasAnalyticsHelper';
+import { parseGeminiPlan } from './commandExecutor';
 
 function obterVariantesTelefone(rawPhone: string): string[] {
   const digits = String(rawPhone || '').replace(/\D/g, '');
@@ -118,7 +121,6 @@ describe('Copiloto Operacional do Lojista - Validações', () => {
   });
 
   it('deve validar permissões de recursos por plano (Entrada, Intermediário e Avançado)', () => {
-    const { verificarPermissaoRecursoPlano } = require('@/lib/planos-config');
 
     // Plano Entrada NÃO deve ter acesso a IMEI, broadcast nem escuta multi-loja
     assert.equal(verificarPermissaoRecursoPlano('entrada', 'consulta_imei'), false);
@@ -140,7 +142,6 @@ describe('Copiloto Operacional do Lojista - Validações', () => {
   });
 
   it('deve filtrar lojas em grupo apenas se tiverem plano Avançado E opt-in explícito', () => {
-    const { verificarPermissaoRecursoPlano } = require('@/lib/planos-config');
 
     const mockLojas = [
       // Loja A: Avançado COM opt-in
@@ -167,7 +168,6 @@ describe('Copiloto Operacional do Lojista - Validações', () => {
   });
 
   it('deve calcular corretamente lucro, custo total e margem nas vendas agregadas', () => {
-    const { processarAnaliticaVendas } = require('./vendasAnalyticsHelper');
 
     const vendasMock = [
       {
@@ -228,7 +228,6 @@ describe('Copiloto Operacional do Lojista - Validações', () => {
   });
 
   it('deve interpretar plano de update_venda para alteração de valor ou custo', () => {
-    const { parseGeminiPlan } = require('./commandExecutor');
 
     const planoJson = JSON.stringify({
       type: 'command',

@@ -3,10 +3,11 @@ import { getGarantiaById, updateGarantia, deleteGarantia } from '@/lib/db/garant
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const garantia = getGarantiaById(params.id);
+    const { id } = await params;
+    const garantia = getGarantiaById(id);
 
     if (!garantia) {
       return NextResponse.json(
@@ -26,11 +27,12 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const dados = await request.json();
-    const garantiaAtualizada = updateGarantia(params.id, dados);
+    const garantiaAtualizada = updateGarantia(id, dados);
 
     if (!garantiaAtualizada) {
       return NextResponse.json(
@@ -50,10 +52,11 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const deleted = deleteGarantia(params.id);
+    const { id } = await params;
+    const deleted = deleteGarantia(id);
 
     if (!deleted) {
       return NextResponse.json(

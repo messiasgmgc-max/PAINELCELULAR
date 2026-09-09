@@ -6,12 +6,12 @@ import {
 } from "@/lib/db/pecas";
 
 interface Params {
-  id: string;
+  params: Promise<{ id: string }>;
 }
 
-export async function GET(request: NextRequest, { params }: { params: Params }) {
+export async function GET(request: NextRequest, { params }: Params) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const peca = await getPecaById(id);
 
     if (!peca) {
@@ -39,9 +39,9 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
   }
 }
 
-export async function PUT(request: NextRequest, { params }: { params: Params }) {
+export async function PUT(request: NextRequest, { params }: Params) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const dados = await request.json();
 
     const pecaAtualizada = await updatePeca(id, dados);
@@ -71,9 +71,9 @@ export async function PUT(request: NextRequest, { params }: { params: Params }) 
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: Params }) {
+export async function DELETE(request: NextRequest, { params }: Params) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const deletado = await deletePeca(id);
 
     if (!deletado) {

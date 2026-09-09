@@ -51,7 +51,7 @@ export function useGarantias() {
     }
   }, [usuario?.lojaId]);
 
-  const criarGarantia = useCallback(async (dados: Omit<Garantia, 'id' | 'dataCadastro'>) => {
+  const criarGarantia = useCallback(async (dados: Omit<Garantia, 'id' | 'dataCadastro' | 'lojaId'>) => {
     try {
       const payload = {
         ...dados,

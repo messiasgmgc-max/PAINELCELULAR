@@ -77,6 +77,7 @@ export async function createOrdemServico(dados: Partial<OrdemServico>): Promise<
 
     const novaOrdem: OrdemServico = {
       id: uuid(),
+      lojaId: dados.lojaId || '',
       numeroOS,
       clienteId: dados.clienteId || '',
       clienteNome: dados.clienteNome || '',
