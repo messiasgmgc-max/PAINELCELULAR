@@ -194,11 +194,13 @@ export async function analyzeImageWithGemini(
       geminiMime = 'image/jpeg';
     }
 
-    // Tenta modelos com suporte a visão multimodal
+    // Modelos com visão, na ordem medida contra esta chave. Os antigos
+    // (gemini-2.5-flash, 2.0-flash, 1.5-flash) respondem 404 aqui: toda foto de
+    // etiqueta gastava 3 requisições perdidas antes de chegar num que funciona.
     const modelosParaTestar = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-3.7-flash',
+      'gemini-3.5-flash-lite',
       'gemini-flash-latest',
     ];
 

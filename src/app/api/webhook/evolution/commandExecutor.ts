@@ -1,5 +1,6 @@
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { PLANOS_SISTEMA } from '@/lib/planos-config';
+import { MODELOS_GEMINI, MODELOS_GROQ, TIMEOUT_IA_MS, SEM_THINKING } from './modelosIA';
 
 export type GeminiCommandAction =
   | 'create_aparelho'
@@ -178,16 +179,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
   "perguntaClarificacao": "pergunta_se_confianca_media"
 }`;
 
-  const modelosGemini = [
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-3.6-flash',
-    'gemini-3.7-flash',
-    'gemini-3.8-flash',
-    'gemini-flash-latest',
-    'gemini-flash-lite-latest',
-  ];
+  const modelosGemini = MODELOS_GEMINI;
 
   // 1. Tenta executar via Google Gemini
   if (apiKey) {
@@ -198,7 +190,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(6000),
+            signal: AbortSignal.timeout(TIMEOUT_IA_MS),
             body: JSON.stringify({
               contents: [
                 {
@@ -210,6 +202,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
               ],
               generationConfig: {
                 responseMimeType: 'application/json',
+                thinkingConfig: SEM_THINKING,
               },
             }),
           }
@@ -234,12 +227,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
   // 2. FALLBACK GROQ (se o Gemini estiver fora do ar ou com quota excedida 429)
   const groqApiKey = process.env.GROQ_API_KEY;
   if (groqApiKey) {
-    const modelosGroq = [
-      'qwen/qwen3.8-27b',
-      'openai/gpt-oss-120b',
-      'openai/gpt-oss-20b',
-      'groq/compound-mini',
-    ];
+    const modelosGroq = MODELOS_GROQ;
     for (const groqModel of modelosGroq) {
       try {
         const resGroq = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -248,7 +236,7 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
             'Authorization': `Bearer ${groqApiKey}`,
             'Content-Type': 'application/json',
           },
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(TIMEOUT_IA_MS),
           body: JSON.stringify({
             model: groqModel,
             messages: [
@@ -474,16 +462,7 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
 
 
 
-  const modelosGemini = [
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-3.6-flash',
-    'gemini-3.7-flash',
-    'gemini-3.8-flash',
-    'gemini-flash-latest',
-    'gemini-flash-lite-latest',
-  ];
+  const modelosGemini = MODELOS_GEMINI;
 
   const errosColetados: string[] = [];
 
@@ -534,7 +513,7 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(6000),
+            signal: AbortSignal.timeout(TIMEOUT_IA_MS),
             body: JSON.stringify({
               contents: contentsPayload,
             }),
@@ -569,12 +548,7 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
   // 2. FALLBACK GROQ (se o Gemini falhar por 429 quota excedida ou indisponibilidade)
   const groqApiKey = process.env.GROQ_API_KEY;
   if (groqApiKey) {
-    const modelosGroq = [
-      'qwen/qwen3.8-27b',
-      'openai/gpt-oss-120b',
-      'openai/gpt-oss-20b',
-      'groq/compound-mini',
-    ];
+    const modelosGroq = MODELOS_GROQ;
     
     // Monta mensagens para o Groq
     const groqMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -600,7 +574,7 @@ COMO RESPONDER ÀS DÚVIDAS (SEMPRE CURTO, 2 A 4 LINHAS):
             'Authorization': `Bearer ${groqApiKey}`,
             'Content-Type': 'application/json',
           },
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(TIMEOUT_IA_MS),
           body: JSON.stringify({
             model: groqModel,
             messages: groqMessages,
