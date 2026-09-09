@@ -29,7 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
+import { formatarSaudeBateria, cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
 
 interface AparelhoAuditoria {
   id: string;
@@ -45,6 +45,8 @@ interface AparelhoAuditoria {
   ativo?: boolean;
   preco?: number;
   observacoes?: string;
+  saude_bateria?: string;
+  saudeBateria?: string;
 }
 
 interface ItemEscaneado {
@@ -572,7 +574,9 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
           const imeiStr = aparelho.imei ? ` | IMEI: ${aparelho.imei}` : '';
           const capStr = aparelho.capacidade ? ` ${aparelho.capacidade}` : '';
           const corStr = aparelho.cor ? ` ${aparelho.cor}` : '';
-          txt += `• *${aparelho.marca || ''} ${aparelho.modelo}*${capStr}${corStr} (ID: ${cod}${imeiStr})\n`;
+          const bateria = formatarSaudeBateria(aparelho);
+          const batStr = bateria ? ` 🔋 ${bateria}` : '';
+          txt += `• *${aparelho.marca || ''} ${aparelho.modelo}*${capStr}${corStr}${batStr} (ID: ${cod}${imeiStr})\n`;
         });
         txt += `\n`;
       });
@@ -669,6 +673,11 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
                     valorInterno: 0,
                     valorExibir: precoNum,
                     total: precoNum,
+                    // Preserva o que a venda apagaria, para o histórico e para
+                    // um eventual "desfazer venda" devolver o aparelho certo.
+                    imei: aparelho.imei || '',
+                    bateria: formatarSaudeBateria(aparelho),
+                    condicaoOriginal: aparelho.condicao || '',
                   }],
                   loja_id: (aparelho as any).loja_id || (aparelho as any).lojaId || null
                 }]);
@@ -885,6 +894,9 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
                         {item.aparelhoEncontrado ? (
                           <p className="text-[11px] text-emerald-400 font-semibold truncate mt-0.5">
                             ✓ {item.aparelhoEncontrado.modelo} ({item.aparelhoEncontrado.imei || item.aparelhoEncontrado.codigo || 'OK'})
+                            {formatarSaudeBateria(item.aparelhoEncontrado) && (
+                              <span className="text-cyan-400 font-bold"> · 🔋 {formatarSaudeBateria(item.aparelhoEncontrado)}</span>
+                            )}
                           </p>
                         ) : (
                           <p className="text-[11px] text-amber-400 font-medium truncate mt-0.5">
@@ -1048,6 +1060,9 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
                                   <span>{item.modelo}</span>
                                   {item.capacidade && <span className="text-[10px] text-slate-400">{item.capacidade}</span>}
                                   {item.cor && <span className="text-[10px] text-slate-400">· {item.cor}</span>}
+                                  {formatarSaudeBateria(item) && (
+                                    <span className="text-[10px] font-bold text-cyan-400">🔋 {formatarSaudeBateria(item)}</span>
+                                  )}
                                 </div>
                                 <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
                                   IMEI/Cod: {item.codigo || item.imei || item.numeroSerie || item.id}
@@ -1145,7 +1160,12 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
                   {aparelhosFaltantes.map((aparelho) => (
                     <div key={aparelho.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
                       <div className="min-w-0">
-                        <p className="font-bold text-white truncate">{aparelho.modelo}</p>
+                        <p className="font-bold text-white truncate flex items-center gap-2">
+                          <span className="truncate">{aparelho.modelo}</span>
+                          {formatarSaudeBateria(aparelho) && (
+                            <span className="text-[10px] font-bold text-cyan-400 shrink-0">🔋 {formatarSaudeBateria(aparelho)}</span>
+                          )}
+                        </p>
                         <p className="text-[11px] text-slate-400 font-mono">
                           IMEI/Código: {aparelho.imei || aparelho.codigo || aparelho.numeroSerie || aparelho.id}
                         </p>

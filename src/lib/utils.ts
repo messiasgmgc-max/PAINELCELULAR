@@ -36,6 +36,30 @@ export function canViewFinancials(usuario: any): boolean {
   return checkIsStoreAdmin(usuario);
 }
 
+/**
+ * Saude da bateria de um aparelho, pronta para exibir (ex.: "92%").
+ *
+ * O valor e gravado na coluna `saude_bateria`, mas parte do codigo le
+ * `saudeBateria` (que nao existe no banco), e o conteudo vem em formatos
+ * variados: "92%", "84", "100% (Lacrado)". Aqui isso vira um numero seguido de
+ * %, ou string vazia quando nao ha informacao.
+ */
+export function formatarSaudeBateria(aparelho: any): string {
+  if (!aparelho) return '';
+
+  const bruto = aparelho.saude_bateria ?? aparelho.saudeBateria ?? aparelho.bateria ?? '';
+  const texto = String(bruto).trim();
+  if (!texto) return '';
+
+  const numero = texto.match(/\d{1,3}/);
+  if (!numero) return '';
+
+  const valor = Number(numero[0]);
+  if (!Number.isFinite(valor) || valor <= 0 || valor > 100) return '';
+
+  return `${valor}%`;
+}
+
 export function getAparelhoCodigo(aparelho: any): string {
   if (!aparelho) return '';
   
