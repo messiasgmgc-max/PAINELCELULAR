@@ -1,12 +1,21 @@
 import { NextResponse, after } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini, MensagemHistorico } from './commandExecutor';
+import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConversaNaturalComGemini, MensagemHistorico, GeminiCommandAction, parseRespostaSimples } from './commandExecutor';
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL, PLANOS_SISTEMA } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { autenticarWebhook, registrarMensagemComoProcessada } from './security';
+import { exigirConfirmacaoPorValor, montarDadosLojaParaPrompt } from './contextoLoja';
+import {
+  chavePendencia,
+  interpretarConfirmacao,
+  limparPendencia,
+  mesclarParams,
+  obterPendencia,
+  salvarPendencia,
+} from './pendencias';
 import {
   bloquearAtalhoForaDoPlano,
   capabilitiesDisponiveis,
@@ -3711,17 +3720,127 @@ Digite: *!broadcast agora*`;
     // montada no prompt a partir do registro de capacidades, já filtrada.
     const capsDisponiveis = capabilitiesDisponiveis(planoLoja, papelCapability);
 
+    const ctxCapability: ContextoCapability = {
+      supabase,
+      lojaId: lojaId || '',
+      nomeLoja: nomeLojaGemini || nomeLoja,
+      plano: planoLoja,
+      papel: papelCapability,
+      telefone: authorPhone,
+      pushName: nomeUsuario || pushName,
+      isGroup,
+      delegates: {
+        listarEstoque: async (termo: string) => {
+          const lojasParaBusca = await obterLojasParaConsulta(lojaId, isGroup);
+          if (lojasParaBusca.length <= 1) return null;
+          return await responderConsultaEstoqueNatural(
+            termo || textContent,
+            pushName,
+            lojaId,
+            instanceName,
+            isGroup,
+            participantPhone || senderPhone,
+            remoteJid
+          );
+        },
+        consultarImei: async (imei: string) => {
+          const checagem = await verificarImeiRoubado(lojaId || '', imei);
+          if (checagem.bloqueado) {
+            return (
+              `\u{1F6A8} *IMEI ${imei} \u2014 ALERTA!*\n\n` +
+              `${checagem.motivo || 'Aparelho consta como bloqueado/roubado.'}\n\n` +
+              `\u26A0\uFE0F N\u00e3o recomendamos prosseguir com a negocia\u00e7\u00e3o.`
+            );
+          }
+          return `\u2705 *IMEI ${imei} \u2014 Sem restri\u00e7\u00f5es*\n\nNenhum bloqueio encontrado (${checagem.origem}).`;
+        },
+      },
+    };
+
+    /** Executa uma capacidade e responde ao lojista. */
+    const executarEResponder = async (action: string, params: Record<string, unknown>) => {
+      const resultado = await executarCapability(action, ctxCapability, params);
+      if (resultado.resposta) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, sanitizarTextoWhatsApp(resultado.resposta));
+      }
+      return resultado;
+    };
+
+    const chavePend = chavePendencia(remoteJid, authorPhone || senderPhone);
+    const pendencia = lojaId ? await obterPendencia(supabase, chavePend) : null;
+
+    // ── 13.1 RESPOSTA A UM PEDIDO DE CONFIRMAÇÃO ──
+    if (pendencia?.tipo === 'confirmacao') {
+      const decisao = interpretarConfirmacao(textContent);
+
+      if (decisao === 'sim') {
+        await limparPendencia(supabase, chavePend);
+        await executarEResponder(pendencia.action, pendencia.params);
+        return NextResponse.json({ status: 'ok', message: 'Ação confirmada e executada.' }, { status: 200 });
+      }
+
+      if (decisao === 'nao') {
+        await limparPendencia(supabase, chavePend);
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '\u{1F44D} Ok, cancelei. Nada foi registrado.');
+        return NextResponse.json({ status: 'ok', message: 'Ação cancelada pelo lojista.' }, { status: 200 });
+      }
+      // 'indefinido': o lojista mudou de assunto; segue o fluxo normal.
+    }
+
     const rawPlan = await gerarPlanoComGemini(textContent, {
       nome: nomeLojaGemini,
       lojaId: lojaId || undefined,
       secaoAcoes: montarSecaoAcoesPrompt(capsDisponiveis),
+      dadosLoja: lojaId ? await montarDadosLojaParaPrompt(supabase, lojaId) : undefined,
+      pendencia:
+        pendencia?.tipo === 'faltando_dados'
+          ? { action: pendencia.action, params: pendencia.params, campoFaltante: pendencia.resumo }
+          : undefined,
     });
-    const geminiPlan = parseGeminiPlan(rawPlan || '');
+    let geminiPlan = parseGeminiPlan(rawPlan || '');
+
+    // Cortesia ("bom dia", "valeu") não depende de dado nenhum da loja. Sem isto
+    // cada saudação custava uma segunda chamada de IA mais a bateria de
+    // consultas de estoque, vendas, fiado, OS e agenda da seção 14.
+    if (!geminiPlan && !isGroup) {
+      const social = parseRespostaSimples(rawPlan || '');
+      if (social) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, sanitizarTextoWhatsApp(social.texto));
+        return NextResponse.json({ status: 'ok', message: 'Resposta social direta (1 chamada de IA).' }, { status: 200 });
+      }
+    }
+
+    // ── 13.2 COMPLETA A AÇÃO QUE ESTAVA AGUARDANDO UM DADO ──
+    // "2500" sozinho não vira plano nenhum; junto da ação pendente, vira a venda.
+    if (pendencia?.tipo === 'faltando_dados') {
+      const mesmaAcao = geminiPlan?.action === pendencia.action;
+      const semIntencaoNova = !geminiPlan || geminiPlan.confianca !== 'alta';
+
+      if (mesmaAcao || semIntencaoNova) {
+        geminiPlan = {
+          type: 'command',
+          action: pendencia.action as GeminiCommandAction,
+          params: mesclarParams(pendencia.params, geminiPlan?.params || {}),
+          confianca: 'alta',
+        };
+      } else {
+        // Mudou de assunto: a pendência antiga não serve mais.
+        await limparPendencia(supabase, chavePend);
+      }
+    }
 
     if (geminiPlan) {
-      // Funil de confiança - Nível Médio: pergunta objetiva de volta
+      // Funil de confiança - Nível Médio: pergunta objetiva e guarda a ação
       if (geminiPlan.confianca === 'media' && geminiPlan.perguntaClarificacao) {
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `❓ ${geminiPlan.perguntaClarificacao}`);
+        if (lojaId) {
+          await salvarPendencia(supabase, chavePend, lojaId, {
+            tipo: 'faltando_dados',
+            action: geminiPlan.action,
+            params: geminiPlan.params,
+            resumo: geminiPlan.perguntaClarificacao,
+          });
+        }
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `\u2753 ${geminiPlan.perguntaClarificacao}`);
         return NextResponse.json({ status: 'ok', message: 'Pergunta de clarificação enviada via IA.' }, { status: 200 });
       }
 
@@ -3738,59 +3857,37 @@ Digite: *!broadcast agora*`;
               await enviarMensagemWhatsApp(
                 instanceName,
                 targetDestination,
-                '⚠️ *Acesso Restrito:* Este comando operacional é restrito à equipe autorizada da loja.'
+                '\u26A0\uFE0F *Acesso Restrito:* Este comando operacional \u00e9 restrito \u00e0 equipe autorizada da loja.'
               );
               return NextResponse.json({ status: 'error', message: 'Acesso negado para comando IA de escrita' }, { status: 200 });
             }
           }
 
-          const ctxCapability: ContextoCapability = {
+          // ── 13.3 CONFIRMAÇÃO PARA VALOR ACIMA DO LIMITE DA LOJA ──
+          // O limite já existia na config, mas só o !vender respeitava: vendas
+          // registradas pela IA passavam direto.
+          const pedido = await exigirConfirmacaoPorValor(
             supabase,
             lojaId,
-            nomeLoja: nomeLojaGemini || nomeLoja,
-            plano: planoLoja,
-            papel: papelCapability,
-            telefone: authorPhone,
-            pushName: nomeUsuario || pushName,
-            isGroup,
-            delegates: {
-              listarEstoque: async (termo: string) => {
-                const lojasParaBusca = await obterLojasParaConsulta(lojaId, isGroup);
-                if (lojasParaBusca.length <= 1) return null;
-                return await responderConsultaEstoqueNatural(
-                  termo || textContent,
-                  pushName,
-                  lojaId,
-                  instanceName,
-                  isGroup,
-                  participantPhone || senderPhone,
-                  remoteJid
-                );
-              },
-              consultarImei: async (imei: string) => {
-                const checagem = await verificarImeiRoubado(lojaId, imei);
-                if (checagem.bloqueado) {
-                  return (
-                    `🚨 *IMEI ${imei} — ALERTA!*
+            capability.escrita,
+            capability.titulo,
+            geminiPlan.params
+          );
+          if (pedido) {
+            await salvarPendencia(supabase, chavePend, lojaId, {
+              tipo: 'confirmacao',
+              action: geminiPlan.action,
+              params: geminiPlan.params,
+              resumo: pedido,
+            });
+            await enviarMensagemWhatsApp(instanceName, targetDestination, pedido);
+            return NextResponse.json({ status: 'ok', message: 'Confirmação solicitada ao lojista.' }, { status: 200 });
+          }
 
-` +
-                    `${checagem.motivo || 'Aparelho consta como bloqueado/roubado.'}
-
-` +
-                    `⚠️ Não recomendamos prosseguir com a negociação.`
-                  );
-                }
-                return `✅ *IMEI ${imei} — Sem restrições*
-
-Nenhum bloqueio encontrado (${checagem.origem}).`;
-              },
-            },
-          };
-
-          const resultado = await executarCapability(geminiPlan.action, ctxCapability, geminiPlan.params);
+          await limparPendencia(supabase, chavePend);
+          const resultado = await executarEResponder(geminiPlan.action, geminiPlan.params);
 
           if (resultado.resposta) {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, sanitizarTextoWhatsApp(resultado.resposta));
             return NextResponse.json(
               { status: resultado.ok ? 'ok' : 'blocked', message: `Capacidade ${geminiPlan.action}: ${resultado.ok ? 'executada' : resultado.motivo}` },
               { status: 200 }

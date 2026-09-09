@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
   Capability,
   descreverAparelho,
@@ -21,18 +22,45 @@ async function localizarAparelhos(
   identificador: string,
   imei?: string
 ) {
-  let query = supabase.from('aparelhos').select(COLUNAS_APARELHO).eq('loja_id', lojaId).eq('ativo', true);
-
+  // IMEI e código são identificadores exatos: resolvem sem ambiguidade.
   if (imei) {
-    query = query.eq('imei', imei);
-  } else if (/^\d{6,}$/.test(identificador)) {
-    query = query.or(`imei.eq.${identificador},codigo.eq.${identificador}`);
-  } else {
-    query = query.ilike('modelo', `%${identificador}%`);
+    const { data } = await supabase
+      .from('aparelhos')
+      .select(COLUNAS_APARELHO)
+      .eq('loja_id', lojaId)
+      .eq('ativo', true)
+      .eq('imei', imei)
+      .limit(5);
+    return (data || []) as Record<string, unknown>[];
   }
 
-  const { data } = await query.limit(10);
-  return (data || []) as Record<string, unknown>[];
+  if (/^\d{6,}$/.test(identificador)) {
+    const { data } = await supabase
+      .from('aparelhos')
+      .select(COLUNAS_APARELHO)
+      .eq('loja_id', lojaId)
+      .eq('ativo', true)
+      .or(`imei.eq.${identificador},codigo.eq.${identificador}`)
+      .limit(5);
+    return (data || []) as Record<string, unknown>[];
+  }
+
+  // Para texto livre, um ilike erra em "15pm", "13pro" e erro de digitação.
+  // Traz o estoque e ranqueia com o casamento tolerante.
+  const { data } = await supabase
+    .from('aparelhos')
+    .select(COLUNAS_APARELHO)
+    .eq('loja_id', lojaId)
+    .eq('ativo', true)
+    .limit(400);
+
+  const itens = (data || []) as Record<string, unknown>[];
+  const ranking = ranquear(identificador, itens, descreverAparelho);
+  const { escolhido, ambiguos } = melhorOuAmbiguo(ranking);
+
+  if (escolhido) return [escolhido];
+  if (ambiguos.length > 0) return ambiguos.slice(0, 10);
+  return [];
 }
 
 function listarCandidatos(itens: Record<string, unknown>[]): string {
@@ -63,16 +91,18 @@ export const capabilitiesEstoque: Capability[] = [
         if (resposta) return resposta;
       }
 
-      let query = ctx.supabase
+      const { data } = await ctx.supabase
         .from('aparelhos')
         .select(COLUNAS_APARELHO)
         .eq('loja_id', ctx.lojaId)
-        .eq('ativo', true);
+        .eq('ativo', true)
+        .order('modelo')
+        .limit(termo ? 400 : 30);
 
-      if (termo) query = query.ilike('modelo', `%${termo}%`);
-
-      const { data } = await query.order('modelo').limit(30);
-      const itens = (data || []) as Record<string, unknown>[];
+      let itens = (data || []) as Record<string, unknown>[];
+      if (termo) {
+        itens = ranquear(termo, itens, descreverAparelho).slice(0, 30).map((c) => c.item);
+      }
 
       if (itens.length === 0) {
         return termo

@@ -38,6 +38,36 @@ export interface GeminiCommandPlan {
   perguntaClarificacao?: string;
 }
 
+/**
+ * Resposta social devolvida direto pelo extrator, sem precisar da segunda
+ * chamada ao copiloto. Cobre saudação, agradecimento e despedida — que não
+ * dependem de nenhum dado da loja e antes custavam duas chamadas de IA mais uma
+ * bateria de consultas ao banco.
+ */
+export interface GeminiRespostaSimples {
+  type: 'resposta';
+  texto: string;
+}
+
+export function parseRespostaSimples(raw: string): GeminiRespostaSimples | null {
+  try {
+    if (!raw || typeof raw !== 'string') return null;
+
+    const text = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const primeira = text.indexOf('{');
+    const ultima = text.lastIndexOf('}');
+    if (primeira === -1 || ultima === -1 || ultima < primeira) return null;
+
+    const parsed = JSON.parse(text.slice(primeira, ultima + 1));
+    if (!parsed || parsed.type !== 'resposta') return null;
+
+    const texto = String(parsed.texto || '').trim();
+    return texto ? { type: 'resposta', texto } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseGeminiPlan(raw: string): GeminiCommandPlan | null {
   try {
     if (!raw || typeof raw !== 'string') return null;
@@ -103,7 +133,15 @@ const ACOES_PADRAO = `AÇÕES OPERACIONAIS REAIS (action):
 
 export async function gerarPlanoComGemini(
   textContent: string,
-  contextoLoja?: { nome?: string; lojaId?: string; secaoAcoes?: string }
+  contextoLoja?: {
+    nome?: string;
+    lojaId?: string;
+    secaoAcoes?: string;
+    /** Ação que ficou aguardando um dado; a mensagem atual pode ser a resposta. */
+    pendencia?: { action: string; params: Record<string, unknown>; campoFaltante?: string };
+    /** Dados reais da loja, para resolver apelidos e abreviações. */
+    dadosLoja?: string;
+  }
 ): Promise<string | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || !textContent || !textContent.trim()) {
@@ -113,6 +151,18 @@ Sua função é interpretar a mensagem em linguagem natural enviada no WhatsApp 
 
 ${contextoLoja?.secaoAcoes || ACOES_PADRAO}
 
+${contextoLoja?.dadosLoja ? `DADOS REAIS DESTA LOJA (use para resolver apelidos e abreviações do lojista;
+sempre devolva o nome/modelo COMPLETO como está cadastrado):
+${contextoLoja.dadosLoja}
+` : ''}
+${contextoLoja?.pendencia ? `CONTINUAÇÃO DE UMA AÇÃO EM ANDAMENTO:
+Você já havia entendido a ação "${contextoLoja.pendencia.action}" com os dados
+${JSON.stringify(contextoLoja.pendencia.params)}${contextoLoja.pendencia.campoFaltante ? ` e pediu ao lojista: "${contextoLoja.pendencia.campoFaltante}"` : ''}.
+Se a mensagem atual for a resposta a esse pedido (mesmo curta, como "2500" ou "pix"),
+responda com action "${contextoLoja.pendencia.action}", confianca "alta" e params
+contendo APENAS os campos novos que a mensagem trouxe. Se for assunto diferente,
+ignore esta seção e interprete a mensagem normalmente.
+` : ''}
 FUNIL DE CONFIANÇA (confianca):
 1. "alta": Quando a intenção for clara E for uma ação operacional acima com dados suficientes:
    - "create_venda": Precisa de modelo/aparelho, comprador e valor. (tipoEntrega, imei e formaPagamento são opcionais).
@@ -166,10 +216,19 @@ FUNIL DE CONFIANÇA (confianca):
      Ex: "agenda um cliente pra troca de tela" -> confianca: "media", campoFaltante: "cliente e data", perguntaClarificacao: "Qual o nome do cliente e para qual data/hora devo agendar?"
    Nesse caso, NUNCA invente dados fictícios. Defina "campoFaltante" e uma "perguntaClarificacao" direta, simples e amigável.
 
-3. "baixa": IMPORTANTE! Quando a mensagem NÃO for uma ordem de cadastro/venda/preço/abatimento acima, for uma pergunta, dúvida, consulta sobre vendas (hoje, semana, mês, atacado, varejo), histórico, relatórios, estoque, planos, faturamento, fiado, devedores, saudação ou conversa geral.
-   Ex: "quais vendas feitas hoje?", "historico de atacado", "extrato de vendas", "qual faturamento da semana?", "bom dia", "quais OS abertas?", "tem agendamento amanhã?" -> confianca: "baixa"
+3. "baixa": IMPORTANTE! Quando a mensagem for pergunta, dúvida ou consulta que dependa dos DADOS da loja (vendas do dia/semana/mês, histórico, relatórios, estoque, planos, faturamento, fiado, devedores, OS, agenda).
+   Ex: "quais vendas feitas hoje?", "historico de atacado", "qual faturamento da semana?", "quais OS abertas?", "tem agendamento amanhã?" -> confianca: "baixa"
+   Nesses casos NÃO invente números: outro especialista, com os dados em mãos, responderá.
 
-FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
+4. "social": Use type "resposta" quando a mensagem for APENAS cortesia ou papo que não
+   depende de nenhum dado da loja: saudação, agradecimento, despedida, elogio, "tudo bem?",
+   "beleza", "valeu", "bom dia". Responda você mesmo, em 1 ou 2 frases curtas, cordial e
+   objetivo, como o assistente da loja, e ofereça ajuda.
+   Formato: {"type": "resposta", "texto": "Bom dia! Como posso ajudar hoje?"}
+   ATENÇÃO: se a mensagem pedir QUALQUER informação da loja, não use "resposta" — use
+   confianca "baixa".
+
+FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito), um dos dois:
 {
   "type": "command",
   "action": "create_venda",
@@ -177,7 +236,9 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (JSON estrito):
   "confianca": "alta" | "media" | "baixa",
   "campoFaltante": "nome_do_campo_se_houver",
   "perguntaClarificacao": "pergunta_se_confianca_media"
-}`;
+}
+ou, apenas para cortesia/papo sem consulta de dados:
+{ "type": "resposta", "texto": "..." }`;
 
   const modelosGemini = MODELOS_GEMINI;
 

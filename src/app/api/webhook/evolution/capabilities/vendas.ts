@@ -1,3 +1,4 @@
+import { melhorOuAmbiguo, ranquear } from '../matching';
 import { Capability, dataBr, descreverAparelho, moeda, numero, texto } from './core';
 
 const METODOS_VALIDOS = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'boleto', 'fiado', 'trade_in'];
@@ -66,15 +67,28 @@ export const capabilitiesVendas: Capability[] = [
       if (valor <= 0) return `⚠️ Por quanto o *${modelo}* foi vendido?`;
 
       // Localiza o aparelho para dar baixa no estoque e capturar o custo real.
-      let query = ctx.supabase
-        .from('aparelhos')
-        .select('id, marca, modelo, capacidade, cor, imei, preco, custo')
-        .eq('loja_id', ctx.lojaId)
-        .eq('ativo', true);
-      query = imei ? query.eq('imei', imei) : query.ilike('modelo', `%${modelo}%`);
-
-      const { data: encontrados } = await query.limit(5);
-      const candidatos = (encontrados || []) as Record<string, unknown>[];
+      // Com IMEI é exato; sem, ranqueia o estoque tolerando "15pm", "13pro" etc.
+      let candidatos: Record<string, unknown>[];
+      if (imei) {
+        const { data } = await ctx.supabase
+          .from('aparelhos')
+          .select('id, marca, modelo, capacidade, cor, imei, preco, custo')
+          .eq('loja_id', ctx.lojaId)
+          .eq('ativo', true)
+          .eq('imei', imei)
+          .limit(5);
+        candidatos = (data || []) as Record<string, unknown>[];
+      } else {
+        const { data } = await ctx.supabase
+          .from('aparelhos')
+          .select('id, marca, modelo, capacidade, cor, imei, preco, custo')
+          .eq('loja_id', ctx.lojaId)
+          .eq('ativo', true)
+          .limit(400);
+        const ranking = ranquear(modelo, (data || []) as Record<string, unknown>[], descreverAparelho);
+        const { escolhido, ambiguos } = melhorOuAmbiguo(ranking);
+        candidatos = escolhido ? [escolhido] : ambiguos.slice(0, 5);
+      }
 
       if (candidatos.length > 1 && !imei) {
         const lista = candidatos
