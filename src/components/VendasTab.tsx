@@ -2127,7 +2127,36 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     { key: 'status', label: 'Status' },
   ];
 
-  const parseImportedDate = (rawValue: string): string => {
+  const REGEX_DATA_BARRA = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+
+  /**
+   * Descobre se um arquivo com datas "a/b/aaaa" está em DD/MM (brasileiro) ou
+   * MM/DD (americano), olhando o conjunto inteiro em vez de cada linha isolada.
+   *
+   * Existe porque um arquivo em MM/DD foi importado como DD/MM e trocou o dia
+   * pelo mês em ~850 vendas. Quando os dois componentes são <= 12 a linha
+   * sozinha é ambígua e o erro passa silencioso: 08/05 vira 05/08 sem nada
+   * parecer errado. Basta uma linha com componente > 12 para desfazer o empate.
+   */
+  const detectarOrdemDataArquivo = (valores: string[]): 'dia-mes' | 'mes-dia' | 'ambiguo' => {
+    let primeiroMaiorQue12 = 0;
+    let segundoMaiorQue12 = 0;
+
+    for (const bruto of valores) {
+      const m = String(bruto || '').trim().match(REGEX_DATA_BARRA);
+      if (!m) continue;
+      const a = Number(m[1]);
+      const b = Number(m[2]);
+      if (a > 12 && b <= 12) primeiroMaiorQue12 += 1;
+      if (b > 12 && a <= 12) segundoMaiorQue12 += 1;
+    }
+
+    if (primeiroMaiorQue12 > 0 && segundoMaiorQue12 === 0) return 'dia-mes';
+    if (segundoMaiorQue12 > 0 && primeiroMaiorQue12 === 0) return 'mes-dia';
+    return 'ambiguo';
+  };
+
+  const parseImportedDate = (rawValue: string, ordem: 'dia-mes' | 'mes-dia' | 'ambiguo' = 'dia-mes'): string => {
     const value = String(rawValue || '').trim();
     if (!value) return new Date().toISOString();
 
@@ -2138,11 +2167,23 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       if (!Number.isNaN(d.getTime())) return d.toISOString();
     }
 
-    // Formato BR DD/MM/YYYY ou DD/MM/YY
-    const matchBr = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-    if (matchBr) {
-      let [, dd, mm, yyyy, hh = '12', min = '00', ss = '00'] = matchBr;
-      if (yyyy.length === 2) yyyy = '20' + yyyy;
+    const matchBarra = value.match(REGEX_DATA_BARRA);
+    if (matchBarra) {
+      const [, a, b, anoBruto, hh = '12', min = '00', ss = '00'] = matchBarra;
+      const yyyy = anoBruto.length === 2 ? `20${anoBruto}` : anoBruto;
+
+      // Um componente > 12 só pode ser o dia: decide a linha sozinha, mesmo que
+      // o arquivo inteiro seja ambíguo.
+      let dd = a;
+      let mm = b;
+      if (Number(b) > 12 && Number(a) <= 12) {
+        dd = b;
+        mm = a;
+      } else if (Number(a) <= 12 && Number(b) <= 12 && ordem === 'mes-dia') {
+        dd = b;
+        mm = a;
+      }
+
       const parsed = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
       if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
     }
@@ -2278,6 +2319,20 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         origem: string;
       }>();
 
+      // Decide DD/MM vs MM/DD olhando o arquivo inteiro, antes de converter
+      // linha a linha: sozinha, "08/05" não diz qual é o dia.
+      const ordemDataArquivo = detectarOrdemDataArquivo(
+        importedRows.map((row) =>
+          findByAliases(row, ['datapagamento', 'data', 'datavenda', 'created_at', '_col3', '_col4'])
+        )
+      );
+
+      if (ordemDataArquivo === 'mes-dia') {
+        toast.info('Datas do arquivo estão no formato americano (MM/DD). Convertendo para DD/MM.');
+      } else if (ordemDataArquivo === 'ambiguo') {
+        console.warn('[Importação] Não foi possível determinar a ordem das datas; assumindo DD/MM.');
+      }
+
       importedRows.forEach((row, idx) => {
         const idOrigem = findByAliases(row, ['id', 'numero', 'codigo', 'idorigem', '_col1']);
         const clienteNome = findByAliases(row, ['cliente', 'clientenome', 'nomecliente', 'comprador', 'nome', '_col2']);
@@ -2317,7 +2372,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         };
 
         if (!salesMap.has(groupKey)) {
-          const dataPagamento = parseImportedDate(dataPagamentoRaw);
+          const dataPagamento = parseImportedDate(dataPagamentoRaw, ordemDataArquivo);
           const status = mapImportedStatus(statusRaw);
           const metodo = mapImportedMetodo(origem);
 
