@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
@@ -285,6 +285,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [filtroStatus, setFiltroStatus] = useState<string>('');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('');
   const [filtroVendedor, setFiltroVendedor] = useState<string>('');
+  // Abre filtrando só o mês corrente: com milhares de vendas, carregar tudo de
+  // cara deixa a tabela pesada e enterra o que o lojista precisa ver no dia a dia.
+  const [filtroPeriodo, setFiltroPeriodo] = useState<'mes' | 'todos'>('mes');
   const [filtroDataInicio, setFiltroDataInicio] = useState('');
   const [filtroDataFim, setFiltroDataFim] = useState('');
   const [ordenarPor, setOrdenarPor] = useState<'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo'>('data');
@@ -811,37 +814,46 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     showImportarPedidoModal,
   ]);
 
-  const carregarVendas = async () => {
-    const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
-    try {
-      setLoading(true);
+  // O PostgREST devolve no máximo 1000 linhas por requisição. Sem paginar, uma
+  // loja com mais de 1000 vendas simplesmente não via as excedentes.
+  const TAMANHO_PAGINA_VENDAS = 1000;
+
+  const buscarTodasVendasPaginado = async (aplicarFiltroLoja: boolean, targetLojaId?: string) => {
+    const todas: Venda[] = [];
+
+    for (let pagina = 0; ; pagina += 1) {
       let query = supabase
         .from('vendas')
         .select('*')
-        .order('dataPagamento', { ascending: false });
+        .order('dataPagamento', { ascending: false })
+        .range(pagina * TAMANHO_PAGINA_VENDAS, (pagina + 1) * TAMANHO_PAGINA_VENDAS - 1);
 
-      if (targetLojaId) {
+      if (aplicarFiltroLoja && targetLojaId) {
         query = query.or(`loja_id.eq.${targetLojaId},loja_id.is.null`);
       }
 
       const { data, error } = await query;
-      
-      if (error) {
+      if (error) throw error;
+
+      const lote = data || [];
+      todas.push(...lote);
+
+      if (lote.length < TAMANHO_PAGINA_VENDAS) break;
+    }
+
+    return todas;
+  };
+
+  const carregarVendas = async () => {
+    const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
+    try {
+      setLoading(true);
+      try {
+        setVendas(await buscarTodasVendasPaginado(true, targetLojaId));
+      } catch (error) {
         console.warn('Filtro por loja_id falhou em vendas, buscando sem filtro:', error);
-        const resFallback = await supabase
-          .from('vendas')
-          .select('*')
-          .order('dataPagamento', { ascending: false });
-
-        if (resFallback.data) {
-          setVendas(resFallback.data);
-          return;
-        }
-        throw error;
+        setVendas(await buscarTodasVendasPaginado(false));
       }
-
-      const vendasData = data || [];
-      setVendas(vendasData);
     } catch (error) {
       console.error('Erro ao carregar vendas:', error);
     } finally {
@@ -1807,8 +1819,27 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     return false;
   };
 
+  // Um intervalo de datas explícito nos Filtros Avançados tem precedência sobre
+  // o seletor de período, para os dois não brigarem entre si.
+  const inicioDoMesAtual = useMemo(() => {
+    const agora = new Date();
+    return new Date(agora.getFullYear(), agora.getMonth(), 1, 0, 0, 0, 0);
+  }, []);
+
+  const dentroDoPeriodo = useCallback(
+    (venda: Venda) => {
+      if (filtroPeriodo === 'todos') return true;
+      if (filtroDataInicio || filtroDataFim) return true;
+      const data = getVendaDataExibicao(venda);
+      return data.getTime() >= inicioDoMesAtual.getTime();
+    },
+    [filtroPeriodo, filtroDataInicio, filtroDataFim, inicioDoMesAtual]
+  );
+
   const vendasFiltradas = useMemo(() => {
     const vendasBase = vendas.filter((venda) => {
+      if (!dentroDoPeriodo(venda)) return false;
+
       // Filtro por Canal de Venda (Varejo x Dados Pendentes x Atacado x Todos)
       const isAtacado = isAtacadoVenda(venda);
       const isPendente = !isAtacado && verificarVendaDadosPendentes(venda, clientes);
@@ -1891,21 +1922,24 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     });
 
     return sorted;
-  }, [vendas, filtroCanal, filtroBusca, filtroStatus, filtroMetodo, filtroVendedor, filtroDataInicio, filtroDataFim, ordenarPor, direcaoOrdenacao, clientes, aparelhos]);
+  }, [vendas, filtroCanal, filtroBusca, filtroStatus, filtroMetodo, filtroVendedor, filtroDataInicio, filtroDataFim, ordenarPor, direcaoOrdenacao, clientes, aparelhos, dentroDoPeriodo]);
 
   const contagemCanais = useMemo(() => {
     let varejo = 0;
     let pendentes = 0;
     let atacado = 0;
+    let total = 0;
     vendas.forEach((v) => {
+      if (!dentroDoPeriodo(v)) return;
+      total++;
       const isAtacado = isAtacadoVenda(v);
       const isPendente = !isAtacado && verificarVendaDadosPendentes(v, clientes);
       if (isPendente) pendentes++;
       else if (isAtacado) atacado++;
       else varejo++;
     });
-    return { varejo, pendentes, atacado, total: vendas.length };
-  }, [vendas, clientes]);
+    return { varejo, pendentes, atacado, total };
+  }, [vendas, clientes, dentroDoPeriodo]);
 
   const handleNovoClienteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3432,11 +3466,37 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-base sm:text-lg font-bold">Vendas Registradas</h3>
-                <p className="text-xs sm:text-sm text-muted-foreground">{vendasFiltradas.length} de {vendas.length} vendas registradas</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  {vendasFiltradas.length} de {contagemCanais.total} vendas
+                  {filtroPeriodo === 'mes' ? ' neste mês' : ' registradas'}
+                  {filtroPeriodo === 'mes' && vendas.length > contagemCanais.total && (
+                    <span className="text-slate-500"> · {vendas.length} no total</span>
+                  )}
+                </p>
               </div>
 
               {/* Ações Rápidas de Filtro */}
               <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 p-1 bg-slate-900/90 border border-slate-800 rounded-xl">
+                  {[
+                    { id: 'mes' as const, label: 'Este mês' },
+                    { id: 'todos' as const, label: 'Todo o período' },
+                  ].map((opcao) => (
+                    <button
+                      key={opcao.id}
+                      type="button"
+                      onClick={() => setFiltroPeriodo(opcao.id)}
+                      className={cn(
+                        'px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer',
+                        filtroPeriodo === opcao.id
+                          ? 'bg-cyan-500 text-slate-950'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                      )}
+                    >
+                      {opcao.label}
+                    </button>
+                  ))}
+                </div>
                 {(filtroBusca || filtroStatus || filtroMetodo || filtroVendedor || filtroDataInicio || filtroDataFim || ordenarPor !== 'data' || direcaoOrdenacao !== 'desc') && (
                   <Button
                     type="button"
