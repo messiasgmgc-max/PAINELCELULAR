@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
@@ -2830,71 +2830,79 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   return (
     <div className="panel-shell relative min-h-[calc(100dvh-12.625rem)] sm:min-h-[calc(100dvh-13.125rem)] space-y-4 sm:space-y-6 pb-40 sm:pb-6">
         {/* Header com Botão */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-2">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Vendas</h1>
             <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Controle de vendas e faturamento</p>
           </div>
-          <div className="scroll-row w-full pb-1">
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".csv,.xls,.xlsx"
-              onChange={handleImportVendas}
-              className="hidden"
-            />
+
+          {/* Fica FORA do dropdown de propósito: dentro dele o Radix desmonta o
+              input ao fechar o menu, e importInputRef.current?.click() vira no-op. */}
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".csv,.xls,.xlsx"
+            onChange={handleImportVendas}
+            className="hidden"
+          />
+
+          {/* Antes eram 6 botões numa fileira que não quebrava linha: estourava a
+              largura e só dava para alcançar os últimos rolando de lado. As ações
+              secundárias foram para um menu, como nas outras abas. */}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end">
             <Button
-              variant="outline"
-              onClick={handleExportVendas}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Exportar
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleOpenImportVendas}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
-            >
-              <Upload className="mr-1.5 h-4 w-4" />
-              Importar CSV
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setShowImportarPedidoModal(true)}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
-            >
-              <FileInput className="mr-1.5 h-4 w-4" />
-              Importar Pedido
-            </Button>
-            <Button 
               onClick={() => {
                 openPOSModal();
                 if (editingId) setEditingId(null);
               }}
-              className="btn-ios h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap cursor-pointer"
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 h-9 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap cursor-pointer"
             >
-              + Nova Venda
+              <Plus className="h-4 w-4" />
+              Nova Venda
             </Button>
+
             <Button
               variant="outline"
               onClick={() => setShowVincularVendidoModal(true)}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-bold gap-1.5 cursor-pointer"
+              className="h-9 text-xs sm:text-sm whitespace-nowrap border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-bold gap-1.5 cursor-pointer"
               title="Vincular aparelho já baixado do estoque a um cliente para gerar notinha"
             >
               <Repeat className="h-4 w-4 text-amber-400" />
               Vincular Já Vendido
             </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleOpenDeleteAllModal}
-              disabled={vendas.length === 0}
-              className="h-9 text-xs sm:text-sm shrink-0 whitespace-nowrap"
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Apagar Todas
-            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="h-9 text-xs sm:text-sm whitespace-nowrap gap-1.5 cursor-pointer">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Importar / Exportar
+                  <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onClick={handleExportVendas}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar vendas
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleOpenImportVendas}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Importar CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowImportarPedidoModal(true)}>
+                  <FileInput className="mr-2 h-4 w-4" />
+                  Importar pedido
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleOpenDeleteAllModal}
+                  disabled={vendas.length === 0}
+                  className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Apagar todas
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

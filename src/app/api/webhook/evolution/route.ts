@@ -8,6 +8,7 @@ import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { autenticarWebhook, registrarMensagemComoProcessada } from './security';
 import { exigirConfirmacaoPorValor, montarDadosLojaParaPrompt } from './contextoLoja';
+import { avaliarRuidoDeGrupo } from './ruido';
 import {
   chavePendencia,
   interpretarConfirmacao,
@@ -3169,13 +3170,30 @@ Envie o modelo que deseja consultar no estoque:
 
     // ── 10.2. COMANDO: !config [comandos | normal | off | status] ──
     if (lowerText.startsWith('!config')) {
-      const isDonoOuMaster = ehModeradorMaster || papelUsuario === 'owner';
+      // O papel vindo de resolverLojaEUsuarioPorTelefone usa igualdade exata de
+      // telefone e cai para 'staff' no fallback por instância, então o próprio
+      // dono era barrado aqui enquanto !abater e !fiado funcionavam — estes
+      // usam verificarPermissaoWhatsApp, que compara de forma tolerante (DDI,
+      // DDD e nono dígito). Alinhamos as duas regras.
+      let isDonoOuMaster = ehModeradorMaster || papelUsuario === 'owner';
+
+      if (!isDonoOuMaster && lojaId) {
+        const permConfig = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner']);
+        isDonoOuMaster = permConfig.autorizado;
+      }
 
       if (!isDonoOuMaster) {
+        const numeroVisivel = authorPhone || senderPhone || 'desconhecido';
         await enviarMensagemWhatsApp(
           instanceName,
           targetDestination,
-          '❌ *Acesso Restrito:* Apenas o moderador master ou o proprietário da loja tem permissão para alterar a configuração deste chat.'
+          `❌ *Acesso Restrito:* alterar a configuração deste chat é permitido apenas ao dono da loja.
+
+` +
+            `📱 Seu número chegou aqui como *${numeroVisivel}*.
+
+` +
+            `Se você é o dono, cadastre este número em *Configurações > Equipe* com o papel *Proprietário* e tente de novo.`
         );
         return NextResponse.json({ status: 'ok', message: 'Sem permissão para !config.' }, { status: 200 });
       }
@@ -3367,6 +3385,23 @@ Ele não responderá a nenhuma mensagem nem comando até ser reativado.
       if (!lojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar a sua loja para consultar o fiado.");
         return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      // Carteira de fiado é dado sensível (nome, telefone e dívida de terceiros).
+      // O gate de atalho cobre !fiado, mas !devedores não é atalho de nenhuma
+      // capacidade e passava direto — em grupo, qualquer participante fazia o
+      // bot publicar a carteira inteira.
+      const permFiado = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner']);
+      if (!permFiado.autorizado || (isGroup && permFiado.papel === 'nao_configurado' && !ehModeradorMaster)) {
+        console.warn('[Fiado] Consulta bloqueada', { authorPhone, remoteJid, isGroup, papel: permFiado.papel });
+        if (!isGroup) {
+          await enviarMensagemWhatsApp(
+            instanceName,
+            targetDestination,
+            '⚠️ *Acesso Restrito:* a carteira de fiado é visível apenas ao dono da loja.'
+          );
+        }
+        return NextResponse.json({ status: 'error', message: 'Acesso negado ao fiado consolidado.' }, { status: 200 });
       }
 
       const fiadoConsolidado = await buscarFiadoConsolidadoLoja(supabase, lojaId);
@@ -3757,10 +3792,17 @@ Digite: *!broadcast agora*`;
       },
     };
 
-    /** Executa uma capacidade e responde ao lojista. */
+    /**
+     * Executa uma capacidade e responde ao lojista.
+     *
+     * Em grupo, uma recusa (sem permissão, fora do plano) NÃO é publicada: a
+     * mensagem quase sempre nasce de uma classificação errada da IA sobre um
+     * papo qualquer, e a recusa vira um pitch de plano ou um "acesso restrito"
+     * no meio da conversa dos outros.
+     */
     const executarEResponder = async (action: string, params: Record<string, unknown>) => {
       const resultado = await executarCapability(action, ctxCapability, params);
-      if (resultado.resposta) {
+      if (resultado.resposta && (resultado.ok || !isGroup)) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, sanitizarTextoWhatsApp(resultado.resposta));
       }
       return resultado;
@@ -3770,7 +3812,7 @@ Digite: *!broadcast agora*`;
     const pendencia = lojaId ? await obterPendencia(supabase, chavePend) : null;
 
     // ── 13.1 RESPOSTA A UM PEDIDO DE CONFIRMAÇÃO ──
-    if (pendencia?.tipo === 'confirmacao') {
+    if (pendencia?.tipo === 'confirmacao' && !isGroup) {
       const decisao = interpretarConfirmacao(textContent);
 
       if (decisao === 'sim') {
@@ -3785,6 +3827,17 @@ Digite: *!broadcast agora*`;
         return NextResponse.json({ status: 'ok', message: 'Ação cancelada pelo lojista.' }, { status: 200 });
       }
       // 'indefinido': o lojista mudou de assunto; segue o fluxo normal.
+    }
+
+    // Em grupo, descarta ruído ANTES de gastar uma chamada de IA. O modelo é
+    // obrigado a devolver JSON de comando, então "kkk" ou um xingamento vinham
+    // classificados como ação operacional.
+    if (isGroup) {
+      const avaliacao = avaliarRuidoDeGrupo(textContent);
+      if (avaliacao.ehRuido) {
+        console.log(`[Grupo] Mensagem ignorada (${avaliacao.motivo}): ${textContent.slice(0, 40)}`);
+        return NextResponse.json({ status: 'ok', message: `Ruído em grupo ignorado: ${avaliacao.motivo}.` }, { status: 200 });
+      }
     }
 
     const rawPlan = await gerarPlanoComGemini(textContent, {
@@ -3812,7 +3865,7 @@ Digite: *!broadcast agora*`;
 
     // ── 13.2 COMPLETA A AÇÃO QUE ESTAVA AGUARDANDO UM DADO ──
     // "2500" sozinho não vira plano nenhum; junto da ação pendente, vira a venda.
-    if (pendencia?.tipo === 'faltando_dados') {
+    if (pendencia?.tipo === 'faltando_dados' && !isGroup) {
       const mesmaAcao = geminiPlan?.action === pendencia.action;
       const semIntencaoNova = !geminiPlan || geminiPlan.confianca !== 'alta';
 
@@ -3832,6 +3885,13 @@ Digite: *!broadcast agora*`;
     if (geminiPlan) {
       // Funil de confiança - Nível Médio: pergunta objetiva e guarda a ação
       if (geminiPlan.confianca === 'media' && geminiPlan.perguntaClarificacao) {
+        // Em grupo, "faltou um dado" quase sempre significa que a mensagem não
+        // era um comando. Perguntar de volta polui a conversa — e a pendência
+        // gravada faria a PRÓXIMA mensagem qualquer ("kkk", "ok") virar uma
+        // ação de confiança alta.
+        if (isGroup) {
+          return NextResponse.json({ status: 'ok', message: 'Intenção incompleta em grupo: ignorada.' }, { status: 200 });
+        }
         if (lojaId) {
           await salvarPendencia(supabase, chavePend, lojaId, {
             tipo: 'faltando_dados',
@@ -3849,17 +3909,37 @@ Digite: *!broadcast agora*`;
         const capability = obterCapability(geminiPlan.action);
 
         if (capability && lojaId) {
-          // Ações de escrita continuam passando pela checagem de equipe da loja,
-          // além do gate de papel do próprio registro.
-          if (capability.escrita) {
+          // Escrita sempre passa pela checagem de equipe. Em GRUPO, leitura
+          // também: capacidades como list_clientes, list_devedores e
+          // list_vendas despejam dados reais da loja, e sem esta checagem
+          // qualquer participante desconhecido conseguiria publicá-los no grupo
+          // só mandando uma frase que a IA classificasse errado.
+          if (capability.escrita || isGroup) {
             const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
-            if (!perm.autorizado) {
-              await enviarMensagemWhatsApp(
-                instanceName,
-                targetDestination,
-                '\u26A0\uFE0F *Acesso Restrito:* Este comando operacional \u00e9 restrito \u00e0 equipe autorizada da loja.'
-              );
-              return NextResponse.json({ status: 'error', message: 'Acesso negado para comando IA de escrita' }, { status: 200 });
+            // verificarPermissaoWhatsApp falha ABERTA quando a loja ainda não
+            // cadastrou ninguém ('nao_configurado'), o que preserva lojas
+            // antigas em produção. Em grupo esse fail-open anula o gate, então
+            // ali exigimos vínculo de verdade.
+            const liberado =
+              perm.autorizado && !(isGroup && perm.papel === 'nao_configurado' && !ehModeradorMaster);
+            if (!liberado) {
+              console.warn('[IA] Ação bloqueada por permissão', {
+                action: geminiPlan.action,
+                escrita: capability.escrita,
+                authorPhone,
+                remoteJid,
+                textContent: textContent.slice(0, 80),
+              });
+              // Em grupo não respondemos: a recusa pública quase sempre é fruto
+              // de classificação errada e só polui a conversa.
+              if (!isGroup) {
+                await enviarMensagemWhatsApp(
+                  instanceName,
+                  targetDestination,
+                  '\u26A0\uFE0F *Acesso Restrito:* Este comando operacional \u00e9 restrito \u00e0 equipe autorizada da loja.'
+                );
+              }
+              return NextResponse.json({ status: 'error', message: 'Acesso negado para comando IA' }, { status: 200 });
             }
           }
 
@@ -3895,11 +3975,17 @@ Digite: *!broadcast agora*`;
           }
         }
 
-        // Se for grupo, envia resposta do comando estruturado
+        // Chegar aqui significa que NADA foi executado: a capacidade não
+        // existe, a loja não foi identificada ou a execução não produziu
+        // resposta. Antes, o grupo recebia um buildWhatsAppText otimista
+        // ("✅ Venda Registrada com Sucesso!") de uma venda que nunca existiu.
         if (isGroup) {
-          const textResposta = buildWhatsAppText(geminiPlan.action, geminiPlan.params, senderPhone);
-          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-          return NextResponse.json({ status: 'ok', message: 'Comando IA executado com alta confiança em grupo.' }, { status: 200 });
+          console.warn('[IA] Plano de alta confiança sem execução; silenciado em grupo', {
+            action: geminiPlan.action,
+            temCapability: Boolean(capability),
+            lojaId,
+          });
+          return NextResponse.json({ status: 'ok', message: 'Plano sem execução: ignorado em grupo.' }, { status: 200 });
         }
 
 

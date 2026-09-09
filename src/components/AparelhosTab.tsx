@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2 } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
@@ -19,7 +19,8 @@ import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
-import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue } from "@/lib/utils";
+import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue, formatarSaudeBateria } from "@/lib/utils";
+import { devolverAparelhoAoEstoque } from "@/lib/devolucaoEstoque";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -92,6 +93,8 @@ export function AparelhosTab() {
   });
 
   const [saidas, setSaidas] = useState<any[]>([]);
+  const [saidaParaDevolver, setSaidaParaDevolver] = useState<any | null>(null);
+  const [devolvendoSaida, setDevolvendoSaida] = useState(false);
   const [filtroSaidaTipo, setFiltroSaidaTipo] = useState<'todos' | 'varejo' | 'atacado' | 'outro'>('todos');
   const [buscaSaida, setBuscaSaida] = useState('');
 
@@ -102,6 +105,32 @@ export function AparelhosTab() {
     fetchClientes();
   }, [fetchAparelhos, fetchClientes]);
 
+  /** Devolve ao estoque um aparelho listado no Histórico de Saídas. */
+  const confirmarDevolucaoAoEstoque = async () => {
+    if (!saidaParaDevolver) return;
+    setDevolvendoSaida(true);
+    try {
+      const resultado = await devolverAparelhoAoEstoque(supabase, {
+        aparelhoId: saidaParaDevolver.id,
+        lojaId: usuario?.lojaId || (usuario as any)?.loja_id || null,
+      });
+
+      if (!resultado.ok) {
+        toast.error(resultado.mensagem);
+        return;
+      }
+
+      toast.success(resultado.mensagem);
+      setSaidaParaDevolver(null);
+      await fetchAparelhos();
+    } catch (erro: any) {
+      console.error('Erro ao devolver aparelho ao estoque:', erro);
+      toast.error('Não foi possível devolver: ' + (erro?.message || 'falha no servidor'));
+    } finally {
+      setDevolvendoSaida(false);
+    }
+  };
+
   useEffect(() => {
     const historicoSaidas = aparelhos
       .filter((aparelho: any) => aparelho.ativo === false)
@@ -111,9 +140,15 @@ export function AparelhosTab() {
           || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
           || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
 
-        let dataSaida = matchBaixa?.[1] || aparelho.dataCadastro || new Date().toISOString();
-        if (/^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataSaida)) {
+        // A data de saída só é confiável quando existe a marca BAIXA_ESTOQUE.
+        // Antes caía para dataCadastro, e a tela exibia a data de ENTRADA
+        // rotulada como saída — o que fazia baixas antigas parecerem recentes.
+        let dataSaida: string | null = matchBaixa?.[1] || null;
+        if (dataSaida && /^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataSaida)) {
           dataSaida += ':00:00';
+        }
+        if (dataSaida && Number.isNaN(new Date(dataSaida).getTime())) {
+          dataSaida = null;
         }
 
         const motivoLower = (matchBaixa?.[2] || '').toLowerCase();
@@ -130,11 +165,17 @@ export function AparelhosTab() {
         return {
           ...aparelho,
           dataSaida,
+          dataEntrada: aparelho.dataCadastro || null,
           motivoSaida: matchBaixa?.[2] || (aparelho.condicao === 'vendido' ? 'Venda de Aparelho' : 'Baixa de estoque'),
           tipoSaida,
         };
       })
-      .sort((a, b) => new Date(b.dataSaida).getTime() - new Date(a.dataSaida).getTime());
+      .sort((a, b) => {
+        // Sem data de saída conhecida, usa a de entrada só para ordenar —
+        // nunca para exibir.
+        const chave = (x: any) => new Date(x.dataSaida || x.dataEntrada || 0).getTime();
+        return chave(b) - chave(a);
+      });
 
     setSaidas(historicoSaidas);
   }, [aparelhos]);
@@ -3112,6 +3153,9 @@ export function AparelhosTab() {
 
                           <p className="text-xs text-slate-400">
                             IMEI: <strong className="text-slate-300">{item.imei || 'N/A'}</strong>
+                            {formatarSaudeBateria(item) && (
+                              <span className="ml-3 font-bold text-cyan-400">🔋 {formatarSaudeBateria(item)}</span>
+                            )}
                             {item.cliente && (
                               <span className="ml-3 text-slate-300">
                                 Destino / Comprador: <strong className="text-white">{item.cliente}</strong>
@@ -3131,9 +3175,50 @@ export function AparelhosTab() {
                         </div>
 
                         <div className="text-right shrink-0 min-w-[180px] space-y-1.5">
-                          <p className="text-xs text-slate-400">{new Date(item.dataSaida).toLocaleDateString('pt-BR')} {new Date(item.dataSaida).toLocaleTimeString('pt-BR')}</p>
-                          <div className="flex items-center gap-2 justify-end">
+                          <div className="text-[11px] leading-snug">
+                            <p className="text-slate-500">
+                              Entrada:{' '}
+                              <span className="text-slate-300 font-medium">
+                                {item.dataEntrada ? new Date(item.dataEntrada).toLocaleDateString('pt-BR') : '—'}
+                              </span>
+                            </p>
+                            <p className="text-slate-500">
+                              Saída:{' '}
+                              <span className="text-slate-200 font-bold">
+                                {item.dataSaida
+                                  ? `${new Date(item.dataSaida).toLocaleDateString('pt-BR')} ${new Date(item.dataSaida).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                                  : 'não registrada'}
+                              </span>
+                            </p>
+                            {item.dataEntrada && item.dataSaida && (
+                              <p className="text-slate-500">
+                                Ficou em estoque:{' '}
+                                <span className="text-slate-300 font-medium">
+                                  {Math.max(
+                                    0,
+                                    Math.round(
+                                      (new Date(item.dataSaida).getTime() - new Date(item.dataEntrada).getTime()) /
+                                        86400000
+                                    )
+                                  )}{' '}
+                                  dia(s)
+                                </span>
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 justify-end flex-wrap">
                             <Badge variant="outline">{item.condicao}</Badge>
+                            {/* Devolver pode apagar a venda correspondente, então
+                                fica sob a mesma trava do "Editar Custo". */}
+                            {canViewFinancials(usuario) && (
+                              <button
+                                onClick={() => setSaidaParaDevolver(item)}
+                                title="Devolver este aparelho para o estoque"
+                                className="text-[11px] font-bold px-2 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer flex items-center gap-1"
+                              >
+                                <Undo2 className="w-3 h-3" /> Devolver
+                              </button>
+                            )}
                             {canViewFinancials(usuario) && (
                               <button
                                 onClick={() => {
@@ -3167,6 +3252,78 @@ export function AparelhosTab() {
                     ))
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* MODAL — DEVOLVER AO ESTOQUE (a partir do Histórico de Saídas) */}
+      {saidaParaDevolver && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-5 shadow-2xl space-y-4 text-white">
+              <div className="flex items-center gap-2.5 border-b border-white/10 pb-3">
+                <Undo2 className="h-5 w-5 text-emerald-400" />
+                <h3 className="text-base font-bold">Devolver ao estoque</h3>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                <p className="text-sm font-bold">
+                  {saidaParaDevolver.marca} {saidaParaDevolver.modelo}
+                  {saidaParaDevolver.capacidade ? ` ${saidaParaDevolver.capacidade}` : ''}
+                </p>
+                <p className="text-xs text-slate-400">
+                  IMEI: {saidaParaDevolver.imei || 'N/A'}
+                  {formatarSaudeBateria(saidaParaDevolver) && (
+                    <span className="ml-2 text-cyan-400 font-bold">🔋 {formatarSaudeBateria(saidaParaDevolver)}</span>
+                  )}
+                </p>
+                {saidaParaDevolver.cliente && (
+                  <p className="text-xs text-slate-400">
+                    Havia saído para: <strong className="text-slate-200">{saidaParaDevolver.cliente}</strong>
+                  </p>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-300 space-y-1.5">
+                <p className="flex items-start gap-1.5">
+                  <PackageCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>O aparelho volta a aparecer no estoque como disponível.</span>
+                </p>
+                {saidaParaDevolver.tipoSaida !== 'outro' && (
+                  <p className="text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
+                    Esta saída veio de uma venda. O aparelho sai dessa venda — se ele era o
+                    único item, a venda inteira é removida do faturamento.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2 justify-end pt-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setSaidaParaDevolver(null)}
+                  disabled={devolvendoSaida}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={confirmarDevolucaoAoEstoque}
+                  disabled={devolvendoSaida}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                >
+                  {devolvendoSaida ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Devolvendo...
+                    </>
+                  ) : (
+                    <>
+                      <Undo2 className="mr-2 h-4 w-4" /> Devolver ao estoque
+                    </>
+                  )}
+                </Button>
               </div>
             </div>
           </div>
