@@ -51,3 +51,6 @@ test.txt
 /ios/App/Pods
 /ios/App/App.xcarchive
 
+
+# Backups gerados pelo script de correcao de datas
+backup-datas-vendas-*.json

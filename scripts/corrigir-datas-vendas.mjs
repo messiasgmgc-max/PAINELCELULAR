@@ -22,9 +22,11 @@ import process from 'node:process';
 
 const [, , caminhoCsv, nomeLoja, ...flags] = process.argv;
 const APLICAR = flags.includes('--aplicar');
+const RESTAURAR = caminhoCsv === '--restaurar';
 
-if (!caminhoCsv || !nomeLoja) {
+if (!RESTAURAR && (!caminhoCsv || !nomeLoja)) {
   console.error('Uso: node scripts/corrigir-datas-vendas.mjs <arquivo.csv> "<Nome da Loja>" [--aplicar]');
+  console.error('     node scripts/corrigir-datas-vendas.mjs --restaurar <backup.json>');
   process.exit(1);
 }
 
@@ -72,6 +74,23 @@ function dataComRollover(ano, mes, dia) {
   const m = total - a * 12;
   const d = new Date(Date.UTC(a, m, dia));
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+if (RESTAURAR) {
+  const backup = JSON.parse(fs.readFileSync(nomeLoja, 'utf8'));
+  console.log(`Restaurando ${backup.vendas.length} datas do backup de ${backup.gerado_em}...`);
+  let n = 0;
+  for (const v of backup.vendas) {
+    await api(`/rest/v1/vendas?id=eq.${v.id}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ dataPagamento: `${v.dataPagamento_anterior}T15:00:00+00:00` }),
+    });
+    n += 1;
+    if (n % 100 === 0) console.log(`  ${n}/${backup.vendas.length}`);
+  }
+  console.log(`Restauradas ${n} vendas.`);
+  process.exit(0);
 }
 
 const linhas = lerCsv(fs.readFileSync(caminhoCsv, 'utf8'));
@@ -161,6 +180,23 @@ if (!APLICAR) {
   process.exit(0);
 }
 
+// Backup antes de gravar: guarda a data atual de cada venda tocada, para
+// permitir reverter com --restaurar caso algo saia errado.
+const arquivoBackup = `backup-datas-vendas-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+fs.writeFileSync(
+  arquivoBackup,
+  JSON.stringify(
+    {
+      loja: loja.nome.trim(),
+      gerado_em: new Date().toISOString(),
+      vendas: correcoes.map((c) => ({ id: c.id, dataPagamento_anterior: c.de, dataPagamento_nova: c.para })),
+    },
+    null,
+    2
+  )
+);
+console.log(`\nBackup salvo em ${arquivoBackup} (${correcoes.length} registros).`);
+
 console.log(`\nAplicando ${correcoes.length} correções...`);
 let feitas = 0;
 for (const c of correcoes) {
@@ -173,3 +209,4 @@ for (const c of correcoes) {
   if (feitas % 100 === 0) console.log(`  ${feitas}/${correcoes.length}`);
 }
 console.log(`Concluído: ${feitas} vendas corrigidas.`);
+console.log(`Para reverter: node scripts/corrigir-datas-vendas.mjs --restaurar ${arquivoBackup}`);
