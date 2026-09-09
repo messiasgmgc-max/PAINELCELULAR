@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
@@ -26,6 +26,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
 import { cn, getAparelhoCodigo, obterDataHoraVenda, getVendaDataExibicao, extrairAparelhoEImeiDaVenda } from '@/lib/utils';
+import { condicaoParaDevolucao, limparObservacoesDeVenda } from '@/lib/vendasDevolucao';
 import { toast } from 'sonner';
 import { registrarLog } from '@/lib/logger';
 import { generateReciboA4Html } from '@/lib/reciboA4';
@@ -477,6 +478,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [carrinho, setCart] = useState<VendaItem[]>([]);
   const [posPagamento, setPosPagamento] = useState<PosPagamentoState>(() => createInitialPosPagamento());
   const [vendaRegistroParaEditar, setVendaRegistroParaEditar] = useState<VendaEditavelData | null>(null);
+  const [vendaParaDesfazer, setVendaParaDesfazer] = useState<Venda | null>(null);
+  const [desfazendoVenda, setDesfazendoVenda] = useState(false);
 
   const formatCurrencyField = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -1055,6 +1058,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       // 4. Dar baixa no aparelho no estoque imediatamente
       if (aparelhoFinal?.id) {
+        await registrarCondicaoOriginalDosItens(vendaCriada?.id, [aparelhoFinal.id]);
         await supabase
           .from('aparelhos')
           .update({ ativo: false, condicao: 'vendido' })
@@ -1242,6 +1246,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       const aparelhosIds = carrinho.map(item => item.aparelhoId).filter(Boolean);
       if (aparelhosIds.length > 0) {
+        // A baixa sobrescreve `condicao` com 'vendido'. Guardamos a condição
+        // original na própria venda para que desfazê-la devolva o aparelho ao
+        // estoque como ele estava — um lacrado não pode voltar como seminovo.
+        await registrarCondicaoOriginalDosItens(vendaSalva?.id, aparelhosIds);
+
         const { error: erroEstoque } = await supabase
           .from('aparelhos')
           .update({ ativo: false, condicao: 'vendido' }) 
@@ -1538,66 +1547,128 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     openPOSModal();
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja cancelar e excluir esta venda? (Os aparelhos voltarão ao estoque ativo)')) {
-      try {
-        // 1. Pega os dados da venda para recuperar os aparelhos
-        const { data: venda, error: erroBusca } = await supabase
-          .from('vendas')
-          .select('*, itens')
-          .eq('id', id)
-          .single();
+  /**
+   * Salva na venda a condição em que cada aparelho estava antes da baixa.
+   *
+   * A baixa grava `condicao: 'vendido'` por cima do valor original, então sem
+   * este registro não há como devolver o aparelho ao estoque no estado certo.
+   */
+  const registrarCondicaoOriginalDosItens = async (
+    vendaId: string | undefined,
+    aparelhosIds: Array<string | undefined | null>
+  ) => {
+    const ids = aparelhosIds.filter((id): id is string => Boolean(id));
+    if (!vendaId || ids.length === 0) return;
+    try {
+      const { data: aparelhosAtuais } = await supabase
+        .from('aparelhos')
+        .select('id, condicao')
+        .in('id', ids);
 
-        if (erroBusca) throw erroBusca;
+      const porId = new Map((aparelhosAtuais || []).map((a) => [a.id, a.condicao]));
 
-        // 2. Exclui a venda da tabela vendas
-        const { error: erroDelete } = await supabase.from('vendas').delete().eq('id', id);
-        if (erroDelete) throw erroDelete;
+      const { data: vendaAtual } = await supabase
+        .from('vendas')
+        .select('itens')
+        .eq('id', vendaId)
+        .maybeSingle();
 
-        // 3. Devolve os aparelhos ao estoque com status disponível e observações limpas
-        if (venda?.itens && venda.itens.length > 0) {
-          const aparelhosIds = venda.itens.map((item: any) => item.aparelhoId).filter(Boolean);
-          
-          if (aparelhosIds.length > 0) {
-            const { data: aparsToClean } = await supabase
-              .from('aparelhos')
-              .select('id, observacoes')
-              .in('id', aparelhosIds);
+      const itensAtuais = Array.isArray(vendaAtual?.itens) ? vendaAtual.itens : [];
+      if (itensAtuais.length === 0) return;
 
-            for (const apar of aparsToClean || []) {
-              const obsLimpa = String(apar.observacoes || '')
-                .replace(/BAIXA_ESTOQUE:[^\n|]+(?:\|\s*)?/gi, '')
-                .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
-                .trim();
+      const itensComCondicao = itensAtuais.map((item: any) => {
+        const original = porId.get(item.aparelhoId);
+        return original ? { ...item, condicaoOriginal: original } : item;
+      });
 
-              await supabase
-                .from('aparelhos')
-                .update({ 
-                  ativo: true, 
-                  condicao: 'seminovo', 
-                  status: 'disponivel', 
-                  cliente: null,
-                  observacoes: obsLimpa || null 
-                })
-                .eq('id', apar.id);
-            }
-          }
+      await supabase.from('vendas').update({ itens: itensComCondicao }).eq('id', vendaId);
+    } catch (err) {
+      // Não impede a venda: no pior caso o desfazer usa o palpite padrão.
+      console.warn('Não foi possível registrar a condição original dos itens:', err);
+    }
+  };
+
+  /**
+   * Desfaz a venda: devolve os aparelhos ao estoque e remove o registro.
+   * Usada tanto pelo botão da linha quanto pelo menu de ações.
+   */
+  const desfazerVenda = async (venda: Venda) => {
+    setDesfazendoVenda(true);
+    try {
+      const { data: vendaBanco, error: erroBusca } = await supabase
+        .from('vendas')
+        .select('*, itens')
+        .eq('id', venda.id)
+        .single();
+      if (erroBusca) throw erroBusca;
+
+      const itens = Array.isArray(vendaBanco?.itens) ? vendaBanco.itens : [];
+      const itensComAparelho = itens.filter((i: any) => i?.aparelhoId);
+
+      // Devolve cada aparelho na condição em que estava, limpando as marcas
+      // que a venda deixou nas observações.
+      let devolvidos = 0;
+      if (itensComAparelho.length > 0) {
+        const ids = itensComAparelho.map((i: any) => i.aparelhoId);
+        const { data: aparelhosVenda } = await supabase
+          .from('aparelhos')
+          .select('id, observacoes')
+          .in('id', ids);
+
+        const observacoesPorId = new Map((aparelhosVenda || []).map((a) => [a.id, a.observacoes]));
+
+        for (const item of itensComAparelho) {
+          if (!observacoesPorId.has(item.aparelhoId)) continue;
+
+          const obsLimpa = limparObservacoesDeVenda(observacoesPorId.get(item.aparelhoId));
+
+          const { error: erroUpdate } = await supabase
+            .from('aparelhos')
+            .update({
+              ativo: true,
+              condicao: condicaoParaDevolucao(item),
+              status: 'disponivel',
+              cliente: null,
+              clienteId: null,
+              observacoes: obsLimpa,
+            })
+            .eq('id', item.aparelhoId);
+
+          if (!erroUpdate) devolvidos += 1;
         }
-
-        // 4. Registra auditoria
-        await registrarLog({
-          loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
-          tipo_evento: 'venda',
-          acao: 'Venda Cancelada / Excluída',
-          detalhes: `Venda #${id.slice(-6).toUpperCase()} (${venda?.clienteNome || 'Cliente'}) no valor de R$ ${venda?.valor || 0} cancelada e aparelhos devolvidos ao estoque.`,
-        });
-
-        toast.success('Venda excluída e aparelhos devolvidos ao estoque com sucesso.');
-        await carregarVendas();
-      } catch (error: any) {
-        console.error('Erro ao excluir venda:', error);
-        toast.error('Erro ao excluir venda: ' + (error?.message || 'Falha no servidor'));
       }
+
+      const { error: erroDelete } = await supabase.from('vendas').delete().eq('id', venda.id);
+      if (erroDelete) throw erroDelete;
+
+      await registrarLog({
+        loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipo_evento: 'venda',
+        acao: 'Venda Desfeita',
+        detalhes:
+          `Venda #${venda.id.slice(-6).toUpperCase()} (${vendaBanco?.clienteNome || 'Cliente'}) ` +
+          `no valor de R$ ${vendaBanco?.valor || 0} desfeita. ` +
+          `${devolvidos} aparelho(s) devolvido(s) ao estoque.`,
+      });
+
+      const semAparelho = itensComAparelho.length - devolvidos;
+      toast.success(
+        devolvidos > 0
+          ? `Venda desfeita. ${devolvidos} aparelho(s) de volta ao estoque.`
+          : 'Venda desfeita.',
+        semAparelho > 0
+          ? { description: `${semAparelho} item(ns) não estavam mais no estoque e foram ignorados.` }
+          : undefined
+      );
+
+      setVendaParaDesfazer(null);
+      await carregarVendas();
+      await fetchAparelhos();
+    } catch (error: any) {
+      console.error('Erro ao desfazer venda:', error);
+      toast.error('Erro ao desfazer venda: ' + (error?.message || 'Falha no servidor'));
+    } finally {
+      setDesfazendoVenda(false);
     }
   };
 
@@ -1689,10 +1760,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
-  const handleCancelarVenda = async (venda: Venda) => {
-    if (!window.confirm(`Tem certeza que deseja CANCELAR a venda ${venda.id.slice(-6).toUpperCase()}? Os itens serão devolvidos ao estoque.`)) return;
-    await handleDelete(venda.id); // Reutiliza a lógica de exclusão que já devolve itens ao estoque
-    toast.info(`Venda ${venda.id.slice(-6).toUpperCase()} cancelada e itens devolvidos ao estoque.`);
+  // Cancelar e desfazer são a mesma operação; abre a confirmação detalhada.
+  const handleCancelarVenda = (venda: Venda) => {
+    setVendaParaDesfazer(venda);
   };
 
   const handleTrocarItem = (venda: Venda) => {
@@ -3856,7 +3926,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         </Badge>
                       </td>
                       <td className="py-3 px-2 text-right">
-                        <div className="flex gap-2 justify-end">
+                        <div className="flex gap-1 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Desfazer venda e devolver ao estoque"
+                            onClick={() => setVendaParaDesfazer(venda)}
+                            className="h-8 w-8 p-0 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                          >
+                            <Undo2 className="h-4 w-4" />
+                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -3925,8 +4004,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 onClick={() => handleCancelarVenda(venda)}
                                 className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
                               >
-                                <XCircle className="mr-2 h-4 w-4" />
-                                Cancelar Venda
+                                <Undo2 className="mr-2 h-4 w-4" />
+                                Desfazer Venda
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -3950,6 +4029,100 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             </div>
           </div>
         </GlassCard>
+
+      {/* Modal de Confirmação — Desfazer Venda */}
+      {isClient && vendaParaDesfazer && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[80]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
+              <h3 className="modal-title flex items-center gap-2 text-amber-400 font-bold">
+                <Undo2 className="w-5 h-5" /> Desfazer Venda
+              </h3>
+              <button
+                type="button"
+                onClick={() => setVendaParaDesfazer(null)}
+                disabled={desfazendoVenda}
+                className="text-slate-400 hover:text-white disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body space-y-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                <p className="text-sm font-bold text-white">
+                  Venda #{vendaParaDesfazer.id.slice(-6).toUpperCase()}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {vendaParaDesfazer.clienteNome} ·{' '}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaDesfazer.valor)}
+                  {' · '}
+                  {getVendaDataExibicao(vendaParaDesfazer).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+
+              {(() => {
+                const itensComAparelho = (vendaParaDesfazer.itens || []).filter((i) => i.aparelhoId);
+                if (itensComAparelho.length === 0) {
+                  return (
+                    <p className="text-xs text-slate-400">
+                      Esta venda não tem aparelho vinculado ao estoque; nada será devolvido.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <PackageCheck className="w-3.5 h-3.5" />
+                      Volta{itensComAparelho.length > 1 ? 'm' : ''} ao estoque:
+                    </p>
+                    <ul className="space-y-1">
+                      {itensComAparelho.map((item) => (
+                        <li key={item.id} className="text-xs text-slate-300 pl-5">
+                          • {item.descricao}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+
+              <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
+                O registro desta venda será removido do histórico e deixará de contar no
+                faturamento. Esta ação não pode ser desfeita.
+              </p>
+            </div>
+
+            <div className="flex gap-2 justify-end p-4 border-t border-white/10">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setVendaParaDesfazer(null)}
+                disabled={desfazendoVenda}
+              >
+                Voltar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => desfazerVenda(vendaParaDesfazer)}
+                disabled={desfazendoVenda}
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold"
+              >
+                {desfazendoVenda ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Desfazendo...
+                  </>
+                ) : (
+                  <>
+                    <Undo2 className="mr-2 h-4 w-4" /> Desfazer e devolver ao estoque
+                  </>
+                )}
+              </Button>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
 
       {/* Modal Prompt de Reenvio de Notinha pós Edição */}
       {isClient && showReenviarNotinhaPrompt && vendaEditadaNotinha && createPortal(
