@@ -6,49 +6,51 @@ import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsH
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL, PLANOS_SISTEMA } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
+import { autenticarWebhook, registrarMensagemComoProcessada } from './security';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
 // ── MEMÓRIA DE CONVERSA RECENTE DO COPILOTO (JANELA DE 3 MINUTOS) ──
-// Se passar de 3 minutos sem interação, o histórico expira e retorna ao padrão (nova conversa)
-interface SessaoConversa {
-  mensagens: MensagemHistorico[];
-  ultimoTimestamp: number;
-}
-
+// Persistida no banco: em ambiente serverless cada requisição pode cair numa
+// instância diferente, então um cache em memória fazia o bot esquecer o
+// contexto de forma aleatória no meio da conversa.
 const TEMPO_EXPIRACAO_CONVERSA_MS = 3 * 60 * 1000; // 3 minutos (180.000 ms)
-const cacheConversaRecente = new Map<string, SessaoConversa>();
+const MAX_TURNOS_HISTORICO = 10;
 
-function obterHistoricoConversaRecente(chave: string): MensagemHistorico[] {
-  const agora = Date.now();
-  const sessao = cacheConversaRecente.get(chave);
-  if (!sessao) return [];
+async function obterHistoricoConversaRecente(chave: string): Promise<MensagemHistorico[]> {
+  try {
+    const { data } = await supabase
+      .from('whatsapp_conversa_historico')
+      .select('mensagens, atualizado_em')
+      .eq('chave', chave)
+      .maybeSingle();
 
-  if (agora - sessao.ultimoTimestamp > TEMPO_EXPIRACAO_CONVERSA_MS) {
-    cacheConversaRecente.delete(chave);
+    if (!data?.atualizado_em) return [];
+
+    const idade = Date.now() - new Date(data.atualizado_em).getTime();
+    if (idade > TEMPO_EXPIRACAO_CONVERSA_MS) return [];
+
+    return Array.isArray(data.mensagens) ? (data.mensagens as MensagemHistorico[]) : [];
+  } catch (err) {
+    console.warn('[Histórico] Falha ao ler conversa recente:', err);
     return [];
   }
-
-  return [...sessao.mensagens];
 }
 
-function registrarMensagemHistoricoConversa(chave: string, role: 'user' | 'model', text: string): void {
-  const agora = Date.now();
-  let sessao = cacheConversaRecente.get(chave);
+async function registrarTurnosHistoricoConversa(
+  chave: string,
+  novosTurnos: MensagemHistorico[]
+): Promise<void> {
+  try {
+    const anteriores = await obterHistoricoConversaRecente(chave);
+    const mensagens = [...anteriores, ...novosTurnos].slice(-MAX_TURNOS_HISTORICO);
 
-  if (!sessao || (agora - sessao.ultimoTimestamp > TEMPO_EXPIRACAO_CONVERSA_MS)) {
-    sessao = { mensagens: [], ultimoTimestamp: agora };
+    await supabase
+      .from('whatsapp_conversa_historico')
+      .upsert({ chave, mensagens, atualizado_em: new Date().toISOString() }, { onConflict: 'chave' });
+  } catch (err) {
+    console.warn('[Histórico] Falha ao gravar conversa recente:', err);
   }
-
-  sessao.ultimoTimestamp = agora;
-  sessao.mensagens.push({ role, text });
-
-  // Mantém no máximo os últimos 10 turnos para evitar estouro de tokens
-  if (sessao.mensagens.length > 10) {
-    sessao.mensagens = sessao.mensagens.slice(-10);
-  }
-
-  cacheConversaRecente.set(chave, sessao);
 }
 
 // Instancia cliente do Supabase com Service Role Key para bypass de RLS no backend
@@ -79,7 +81,7 @@ function getCleanEvolutionUrl(): string {
 }
 
 const EVOLUTION_URL = getCleanEvolutionUrl();
-const EVOLUTION_API_KEY = (process.env.EVOLUTION_API_KEY || '806DF49FA0E9-4088-B016-1CB736FAF449').trim();
+const EVOLUTION_API_KEY = (process.env.EVOLUTION_API_KEY || '').trim();
 const DEFAULT_INSTANCE = (process.env.EVOLUTION_INSTANCE_NAME || 'lucasimports').trim();
 
 // ── AUXILIAR: Formatar Data com Segurança ──
@@ -1869,6 +1871,12 @@ async function responderConsultaEstoqueNatural(
 // ── POST: Processamento Principal do Webhook ──
 export async function POST(request: Request) {
   try {
+    const auth = autenticarWebhook(request);
+    if (!auth.autorizado) {
+      console.warn(`🔒 [Segurança] Webhook recusado: ${auth.motivo}`);
+      return NextResponse.json({ error: auth.motivo }, { status: 401 });
+    }
+
     const rawBody = await request.text();
     if (!rawBody || rawBody.trim() === '') {
       return NextResponse.json({ message: 'Payload vazio recebido.' }, { status: 200 });
@@ -1940,6 +1948,17 @@ export async function POST(request: Request) {
     // Ignora chamadas de status broadcast ou mensagens enviadas pelo próprio bot (fromMe)
     if (key.fromMe || remoteJid.includes('status@broadcast')) {
       return NextResponse.json({ status: 'ok', message: 'Mensagem própria ou broadcast ignorada.' }, { status: 200 });
+    }
+
+    // ── IDEMPOTÊNCIA: a Evolution reentrega o webhook em timeout/erro ──
+    // Sem esta trava um retry registra a mesma venda duas vezes.
+    const jaProcessada = !(await registrarMensagemComoProcessada(supabase, key.id, {
+      lojaId,
+      remoteJid,
+    }));
+    if (jaProcessada) {
+      console.log(`♻️ [Idempotência] Mensagem ${key.id} já processada; reentrega ignorada.`);
+      return NextResponse.json({ status: 'ok', message: 'Mensagem já processada anteriormente.' }, { status: 200 });
     }
 
     const isGroup = remoteJid.endsWith('@g.us');
@@ -4539,7 +4558,7 @@ A venda foi enviada para validação de um administrador no painel!`;
 
       // Recupera histórico recente de até 3 minutos do usuário no chat privado
       const chaveSessao = `${remoteJid}:${authorPhone || senderPhone}`;
-      const historicoChat = obterHistoricoConversaRecente(chaveSessao);
+      const historicoChat = await obterHistoricoConversaRecente(chaveSessao);
 
       const respostaConversaIA = await responderConversaNaturalComGemini(textContent, {
         nomeLoja,
@@ -4572,8 +4591,10 @@ A venda foi enviada para validação de um administrador no painel!`;
 
       if (respostaConversaIA.sucesso && respostaConversaIA.resposta) {
         // Registra a mensagem do usuário e da IA na memória de 3 minutos
-        registrarMensagemHistoricoConversa(chaveSessao, 'user', textContent);
-        registrarMensagemHistoricoConversa(chaveSessao, 'model', respostaConversaIA.resposta);
+        await registrarTurnosHistoricoConversa(chaveSessao, [
+          { role: 'user', text: textContent },
+          { role: 'model', text: respostaConversaIA.resposta },
+        ]);
 
         await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA.resposta);
         return NextResponse.json({ status: 'ok', message: `Resposta do copiloto enviada via IA (${respostaConversaIA.modeloUsado}).` }, { status: 200 });
