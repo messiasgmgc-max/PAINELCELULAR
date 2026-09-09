@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   Capability,
   descreverAparelho,
@@ -15,7 +16,7 @@ const COLUNAS_APARELHO = 'id, marca, modelo, capacidade, cor, imei, codigo, prec
  * desambiguação em vez de alterar vários registros de uma vez.
  */
 async function localizarAparelhos(
-  supabase: Capability extends never ? never : Parameters<Capability['executar']>[0]['supabase'],
+  supabase: SupabaseClient,
   lojaId: string,
   identificador: string,
   imei?: string

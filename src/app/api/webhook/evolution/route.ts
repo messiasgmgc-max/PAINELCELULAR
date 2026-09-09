@@ -7,6 +7,16 @@ import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL, PLANOS_SISTEMA } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { autenticarWebhook, registrarMensagemComoProcessada } from './security';
+import {
+  bloquearAtalhoForaDoPlano,
+  capabilitiesDisponiveis,
+  executarCapability,
+  montarMenuAjuda,
+  montarSecaoAcoesPrompt,
+  obterCapability,
+  type ContextoCapability,
+  type PapelUsuario,
+} from './capabilities';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -2109,6 +2119,25 @@ export async function POST(request: Request) {
     const lowerText = textContent.toLowerCase().trim();
     const ehComandoExplicito = textContent.trim().startsWith('!');
 
+    // Plano e papel resolvidos uma única vez: valem tanto para os atalhos
+    // !comando quanto para as ações que a IA executa.
+    const planoLoja: TipoPlano = ehModeradorMaster
+      ? 'avancado'
+      : lojaId
+        ? await obterPlanoLoja(lojaId)
+        : 'entrada';
+    const papelCapability: PapelUsuario = (papelUsuario as PapelUsuario) || 'staff';
+
+    // Antes, atalhos como !abater e !fiado executavam sem checar o plano: uma
+    // loja do Entrada usava recursos do Intermediário só evitando a IA.
+    if (ehComandoExplicito) {
+      const bloqueio = bloquearAtalhoForaDoPlano(lowerText, planoLoja, papelCapability);
+      if (bloqueio) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, bloqueio);
+        return NextResponse.json({ status: 'blocked', message: 'Atalho fora do plano da loja.' }, { status: 200 });
+      }
+    }
+
     // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !config) ──
     if (modoChat === 'off') {
       // Se estiver desligado, só aceita comando !config para religar
@@ -3475,7 +3504,6 @@ ${linhasDebito.join('\n')}
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
 
-      const planoLoja = await obterPlanoLoja(lojaId);
       if (!verificarPermissaoRecursoPlano(planoLoja, 'consulta_imei')) {
         await enviarMensagemWhatsApp(
           instanceName,
@@ -3551,7 +3579,6 @@ _Origem da verificação: Base de Segurança Phone Center & Validação GSMA._`;
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
 
-      const planoLoja = await obterPlanoLoja(lojaId);
       if (!verificarPermissaoRecursoPlano(planoLoja, 'broadcast_grupos')) {
         await enviarMensagemWhatsApp(
           instanceName,
@@ -3648,25 +3675,11 @@ Digite: *!broadcast agora*`;
 
     // ── 15. COMANDOS BÁSICOS (!ajuda, !menu) ──
     if (lowerText.startsWith('!ajuda') || lowerText.startsWith('!menu')) {
-      const menuAjuda = `🤖 *Copiloto Phone Center — Assistente Inteligente*
-
-Você pode falar comigo diretamente em linguagem natural ou utilizar atalhos rápidos:
-
-💬 *Exemplos de como falar comigo:*
-• *Estoque & Preço:* "tem iphone 13?", "quanto tá o 15 pro?" ou mande a foto da etiqueta
-• *Vendas:* "vendi o 13 pro por 2500 pro Lucas" ou "fiz uma venda"
-• *Relatórios:* "quais vendas hoje?", "faturamento da semana" ou "histórico do atacado"
-• *Cobrança & Fiado:* "quem tá devendo?", "saldo devedor" ou "extrato do CL"
-• *Assinatura:* "quando vence meu plano?" ou "valores dos planos"
-
-⚡ *Atalhos rápidos:*
-• *!estoque* - Ver aparelhos disponíveis
-• *!buscar [modelo]* - Buscar aparelho específico (ex: !buscar 15pm)
-• *!vender* - Baixar venda no sistema
-• *!cadastrar* - Cadastrar novo aparelho
-• *!extrato [lojista]* - Gerar comprovante com PIX
-• *!plano* - Ver assinatura e renovação
-• *!config* - Configurar modo do chat (comandos/normal/off)`;
+      // O menu é gerado a partir do registro de capacidades, então lista
+      // exatamente o que o plano da loja libera — e nada além disso.
+      const menuAjuda =
+        montarMenuAjuda(planoLoja, papelCapability) +
+        `\n\n⚙️ *Outros:* *!plano* (assinatura) · *!config* (modo do chat) · *!ajuda*`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
@@ -3694,9 +3707,14 @@ Você pode falar comigo diretamente em linguagem natural ou utilizar atalhos rá
       nomeLojaGemini = lojaInfo?.nome;
     }
 
+    // O plano da loja define quais ações a IA sequer conhece: a lista vai
+    // montada no prompt a partir do registro de capacidades, já filtrada.
+    const capsDisponiveis = capabilitiesDisponiveis(planoLoja, papelCapability);
+
     const rawPlan = await gerarPlanoComGemini(textContent, {
       nome: nomeLojaGemini,
       lojaId: lojaId || undefined,
+      secaoAcoes: montarSecaoAcoesPrompt(capsDisponiveis),
     });
     const geminiPlan = parseGeminiPlan(rawPlan || '');
 
@@ -3709,18 +3727,12 @@ Você pode falar comigo diretamente em linguagem natural ou utilizar atalhos rá
 
       // Funil de confiança - Nível Alto: executa / confirma
       if (geminiPlan.confianca === 'alta') {
-        const acoesDeEscrita = [
-          'create_venda',
-          'create_aparelho',
-          'update_preco',
-          'abater_divida',
-          'create_os',
-          'create_cliente',
-        ];
+        const capability = obterCapability(geminiPlan.action);
 
-        // Se for ação que escreve dados ou move valores, valida permissão
-        if (acoesDeEscrita.includes(geminiPlan.action)) {
-          if (lojaId) {
+        if (capability && lojaId) {
+          // Ações de escrita continuam passando pela checagem de equipe da loja,
+          // além do gate de papel do próprio registro.
+          if (capability.escrita) {
             const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
             if (!perm.autorizado) {
               await enviarMensagemWhatsApp(
@@ -3731,699 +3743,58 @@ Você pode falar comigo diretamente em linguagem natural ou utilizar atalhos rá
               return NextResponse.json({ status: 'error', message: 'Acesso negado para comando IA de escrita' }, { status: 200 });
             }
           }
-        }
 
-        // Execução real de consulta de estoque pela IA
-        if (geminiPlan.action === 'list_estoque') {
-          const lojasParaBusca = await obterLojasParaConsulta(lojaId, isGroup);
-          const lojaIds = lojasParaBusca.map((l) => l.id);
-          const mapLojas = new Map(lojasParaBusca.map((l) => [l.id, l.nome]));
-          const modeloBuscado = String(geminiPlan.params.modelo || '').trim();
-
-          const { data: aparelhos } = await supabase
-            .from('aparelhos')
-            .select('id, loja_id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
-            .in('loja_id', lojaIds)
-            .eq('ativo', true)
-            .neq('condicao', 'vendido')
-            .neq('status', 'vendido');
-
-          let filtrados = aparelhos || [];
-          if (modeloBuscado) {
-            const modLower = modeloBuscado.toLowerCase();
-            filtrados = filtrados.filter((a) => {
-              const m = String(a.modelo || '').toLowerCase();
-              return m.includes(modLower) || modLower.includes(m);
-            });
-          }
-
-          if (filtrados.length === 0) {
-            const msgSemEstoque = modeloBuscado
-              ? `🔍 No momento o *${modeloBuscado}* está esgotado por aqui, mas estamos sempre recebendo novidades! Quer dar uma olhada em outro modelo? 😊`
-              : `📋 Não encontramos aparelhos disponíveis em estoque no momento.`;
-            await enviarMensagemWhatsApp(instanceName, targetDestination, msgSemEstoque);
-            return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado (vazio).' }, { status: 200 });
-          }
-
-          if (isGroup) {
-            const aparelhosPorLoja = new Map<string, any[]>();
-            filtrados.forEach((ap) => {
-              const nomeLoja = (mapLojas.get(ap.loja_id) || 'Phone Center').toUpperCase().trim();
-              const lista = aparelhosPorLoja.get(nomeLoja) || [];
-              lista.push(ap);
-              aparelhosPorLoja.set(nomeLoja, lista);
-            });
-
-            const blocosLojas: string[] = [];
-            aparelhosPorLoja.forEach((itensLoja, nomeLoja) => {
-              const linhasLoja: string[] = [];
-              linhasLoja.push(`*${nomeLoja}*`);
-
-              itensLoja.slice(0, 6).forEach((a) => {
-                const modNorm = normalizarModelo(a.modelo);
-                const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
-                const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-                const batVal = a.saude_bateria || (a as any).saudeBateria;
-                const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
-                const bat = batNum ? `(${batNum}%)` : '';
-                const modCap = [modNorm, cap].filter(Boolean).join(' ');
-                const extras = [nomeCor, bat].filter(Boolean).join(' ');
-                const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
-                const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-
-                linhasLoja.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
-              });
-
-              if (itensLoja.length > 6) {
-                linhasLoja.push(`_... e mais ${itensLoja.length - 6} opções_`);
-              }
-
-              blocosLojas.push(linhasLoja.join('\n'));
-            });
-
-            const msgEstoqueFinal = `📦 *Temos ${filtrados.length} unidade(s) disponível(is)${modeloBuscado ? ` de ${modeloBuscado}` : ''}:*\n\n${blocosLojas.join('\n\n')}`;
-            await enviarMensagemWhatsApp(instanceName, targetDestination, msgEstoqueFinal);
-            return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado com sucesso.' }, { status: 200 });
-          }
-
-          const linhas: string[] = [];
-          filtrados.slice(0, 8).forEach((a) => {
-            const modNorm = normalizarModelo(a.modelo);
-            const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
-            const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-            const batVal = a.saude_bateria || (a as any).saudeBateria;
-            const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
-            const bat = batNum ? `(${batNum}%)` : '';
-            const modCap = [modNorm, cap].filter(Boolean).join(' ');
-            const extras = [nomeCor, bat].filter(Boolean).join(' ');
-            const precoValor = a.preco_atacado || (a as any).precoAtacado || a.preco;
-            const precoFinal = precoValor ? `- R$ ${Number(precoValor).toFixed(2).replace('.', ',')}` : '';
-            linhas.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} ${precoFinal}`.replace(/\s+/g, ' ').trim());
-          });
-
-          const msgEstoqueFinal = `📦 *Temos ${filtrados.length} unidade(s) disponível(is)${modeloBuscado ? ` de ${modeloBuscado}` : ''}:*\n\n${linhas.join('\n')}\n\nQual desses você gostaria de saber mais ou reservar? 😊`;
-          await enviarMensagemWhatsApp(instanceName, targetDestination, msgEstoqueFinal);
-          return NextResponse.json({ status: 'ok', message: 'Estoque IA consultado com sucesso.' }, { status: 200 });
-        }
-
-        // Execução real de venda pela IA
-        if (geminiPlan.action === 'create_venda' && lojaId) {
-          const valorNum = Number(geminiPlan.params.valor || geminiPlan.params.preco || 0);
-          const compradorStr = String(geminiPlan.params.comprador || geminiPlan.params.cliente || 'Consumidor');
-          const modeloStr = String(geminiPlan.params.modelo || geminiPlan.params.aparelho || '');
-          const imeiStr = geminiPlan.params.imei ? String(geminiPlan.params.imei) : null;
-          const formaPag = String(geminiPlan.params.formaPagamento || 'pix');
-          const tipoEntregaResolvido = String(geminiPlan.params.tipoEntrega || '').toLowerCase().includes('atacado')
-            ? 'Atacado / Lojista'
-            : 'Varejo';
-
-          let aparelhoId: string | null = null;
-          let apFound: any = null;
-          if (imeiStr || modeloStr) {
-            let apQuery = supabase.from('aparelhos').select('id, marca, modelo, capacidade, custo, preco, status, condicao, imei').eq('loja_id', lojaId).eq('ativo', true).neq('status', 'vendido');
-            if (imeiStr) apQuery = apQuery.eq('imei', imeiStr);
-            else apQuery = apQuery.ilike('modelo', `%${modeloStr}%`);
-            const { data: found } = await apQuery.limit(1).maybeSingle();
-            if (found) {
-              apFound = found;
-              aparelhoId = found.id;
-            }
-          }
-
-          // Checagem de limite de aprovação manual da loja (proteção anti-fraude / valor alto)
-          const { data: lojaRow } = await supabase
-            .from('lojas')
-            .select('configuracoes')
-            .eq('id', lojaId)
-            .maybeSingle();
-
-          const limiteAprovacao = Number((lojaRow?.configuracoes as any)?.limite_aprovacao_manual || 0);
-
-          if (limiteAprovacao > 0 && valorNum > limiteAprovacao) {
-            try {
-              await supabase.from('acoes_pendentes_aprovacao').insert({
-                loja_id: lojaId,
-                tipo: 'venda',
-                payload: {
-                  aparelho_id: aparelhoId,
-                  modelo: modeloStr || apFound?.modelo,
-                  marca: apFound?.marca,
-                  capacidade: apFound?.capacidade,
-                  imei: imeiStr || apFound?.imei,
-                  valor: valorNum,
-                  compradorNome: compradorStr,
+          const ctxCapability: ContextoCapability = {
+            supabase,
+            lojaId,
+            nomeLoja: nomeLojaGemini || nomeLoja,
+            plano: planoLoja,
+            papel: papelCapability,
+            telefone: authorPhone,
+            pushName: nomeUsuario || pushName,
+            isGroup,
+            delegates: {
+              listarEstoque: async (termo: string) => {
+                const lojasParaBusca = await obterLojasParaConsulta(lojaId, isGroup);
+                if (lojasParaBusca.length <= 1) return null;
+                return await responderConsultaEstoqueNatural(
+                  termo || textContent,
                   pushName,
-                  authorPhone,
-                  targetDestination,
+                  lojaId,
                   instanceName,
-                  tipoEntrega: tipoEntregaResolvido,
-                  origem: 'whatsapp_ia',
-                },
-                status: 'pendente',
-                criado_por_telefone: authorPhone,
-                criado_em: new Date().toISOString(),
-              });
-            } catch (penErr) {
-              console.error('Erro ao inserir acoes_pendentes_aprovacao via IA:', penErr);
-            }
-
-            try {
-              await supabase.from('logs_sistema').insert({
-                loja_id: lojaId,
-                tipo_evento: 'aprovacao_pendente',
-                acao: `Venda retida para aprovação via IA: ${modeloStr}`,
-                detalhes: `Venda no valor de R$ ${valorNum.toFixed(2)} acima do limite de confirmação automática (R$ ${limiteAprovacao.toFixed(2)}).`,
-                ator_telefone: authorPhone,
-                ator_papel: 'staff',
-                valor_anterior: apFound ? { status: apFound.status, condicao: apFound.condicao } : null,
-                valor_novo: { status: 'pendente_aprovacao', valor: valorNum, limite: limiteAprovacao },
-                created_at: new Date().toISOString(),
-              });
-            } catch (logErr) {
-              console.warn('Falha silenciosa ao registrar log_sistema via IA:', logErr);
-            }
-
-            const msgRetida = `⚠️ *VENDA RETIDA PARA APROVAÇÃO MANUAL*
-
-📱 *Aparelho:* ${modeloStr || 'Celular'}
-💰 *Valor:* R$ ${valorNum.toFixed(2).replace('.', ',')}
-👤 *Comprador:* ${compradorStr} (${tipoEntregaResolvido})
-
-🔒 Este valor ultrapassa o limite de confirmação automática da loja (R$ ${limiteAprovacao.toFixed(2).replace('.', ',')}).
-A venda foi enviada para validação de um administrador no painel!`;
-
-            await enviarMensagemWhatsApp(instanceName, targetDestination, msgRetida);
-            return NextResponse.json({ status: 'ok', message: 'Venda IA pendente de aprovação manual.' }, { status: 200 });
-          }
-
-          // Se dentro do limite, baixa o aparelho no estoque oficial
-          if (apFound) {
-            await supabase.from('aparelhos').update({
-              status: 'vendido',
-              condicao: 'vendido',
-              ativo: false,
-              comprador: compradorStr,
-              precoVenda: valorNum,
-              dataVenda: new Date().toISOString(),
-            }).eq('id', apFound.id);
-          }
-
-          const custoNum = Number(apFound?.custo || 0);
-          const lucroNum = valorNum - custoNum;
-          const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
-
-          const { data: novaVenda } = await supabase.from('vendas').insert({
-            loja_id: lojaId,
-            lojaId: lojaId,
-            clienteNome: compradorStr,
-            vendedor: `WhatsApp IA (${pushName})`,
-            tipoEntrega: tipoEntregaResolvido,
-            valor: valorNum,
-            custo: custoNum,
-            lucro: lucroNum,
-            percentualLucro: parseFloat(margemPercent) || 0,
-            dataPagamento: new Date().toISOString(),
-            status: 'pago',
-            metodo: formaPag,
-            valorPago: valorNum,
-            saldoDevedor: 0,
-            descricao: `Venda registrada via WhatsApp IA - ${modeloStr} (${tipoEntregaResolvido})`,
-            garantia: '3 Meses (Garantia Legal)',
-            descontoTotal: 0,
-            itens: [
-              {
-                id: Date.now().toString(),
-                aparelhoId: aparelhoId,
-                descricao: `${modeloStr} - Vendido para ${compradorStr}`,
-                quantidade: 1,
-                valorInterno: custoNum,
-                valorExibir: valorNum,
-                desconto: 0,
-                total: valorNum,
+                  isGroup,
+                  participantPhone || senderPhone,
+                  remoteJid
+                );
               },
-            ],
-          }).select().single();
+              consultarImei: async (imei: string) => {
+                const checagem = await verificarImeiRoubado(lojaId, imei);
+                if (checagem.bloqueado) {
+                  return (
+                    `🚨 *IMEI ${imei} — ALERTA!*
 
-          // Log de auditoria da venda pela IA
-          try {
-            await supabase.from('logs_sistema').insert({
-              loja_id: lojaId,
-              tipo_evento: 'venda',
-              acao: `Venda WhatsApp IA: ${modeloStr}`,
-              detalhes: `Aparelho ${modeloStr} vendido para ${compradorStr} por R$ ${valorNum.toFixed(2)} (${tipoEntregaResolvido})`,
-              ator_telefone: authorPhone,
-              ator_papel: 'staff',
-              valor_anterior: apFound ? { status: apFound.status, condicao: apFound.condicao } : null,
-              valor_novo: { status: 'vendido', condicao: 'vendido', comprador: compradorStr, precoVenda: valorNum },
-              created_at: new Date().toISOString(),
-            });
-          } catch (logErr) {
-            console.warn('Falha silenciosa ao registrar log_sistema via IA:', logErr);
-          }
+` +
+                    `${checagem.motivo || 'Aparelho consta como bloqueado/roubado.'}
 
-          const textResposta = buildWhatsAppText('create_venda', {
-            ...geminiPlan.params,
-            id: novaVenda?.id || 'Confirmada',
-            valor: valorNum,
-            modelo: modeloStr,
-            comprador: compradorStr,
-            tipoEntrega: tipoEntregaResolvido,
-          }, senderPhone);
-          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-          return NextResponse.json({ status: 'ok', message: 'Venda IA registrada no banco.' }, { status: 200 });
-        }
+` +
+                    `⚠️ Não recomendamos prosseguir com a negociação.`
+                  );
+                }
+                return `✅ *IMEI ${imei} — Sem restrições*
 
-        // Execução real de alteração/edição de venda pela IA
-        if (geminiPlan.action === 'update_venda' && lojaId) {
-          const novoValorNum = Number(geminiPlan.params.novoValor || geminiPlan.params.valor || 0);
-          const novoCustoNum = Number(geminiPlan.params.novoCusto || geminiPlan.params.custo || 0);
-          const compradorStr = String(geminiPlan.params.comprador || geminiPlan.params.cliente || '').trim();
-          const modeloStr = String(geminiPlan.params.modelo || geminiPlan.params.aparelho || '').trim();
+Nenhum bloqueio encontrado (${checagem.origem}).`;
+              },
+            },
+          };
 
-          // Busca a venda mais recente da loja que corresponda ao comprador ou modelo
-          let queryVenda = supabase
-            .from('vendas')
-            .select('id, clienteNome, valor, custo, lucro, itens, status, saldoDevedor, valorPago')
-            .eq('loja_id', lojaId)
-            .order('created_at', { ascending: false });
+          const resultado = await executarCapability(geminiPlan.action, ctxCapability, geminiPlan.params);
 
-          if (compradorStr) {
-            queryVenda = queryVenda.ilike('clienteNome', `%${compradorStr}%`);
-          } else if (modeloStr) {
-            queryVenda = queryVenda.ilike('descricao', `%${modeloStr}%`);
-          }
-
-          const { data: vendasEncontradas } = await queryVenda.limit(1);
-
-          if (vendasEncontradas && vendasEncontradas.length > 0) {
-            const vendaAlvo = vendasEncontradas[0];
-            const valorFinal = novoValorNum > 0 ? novoValorNum : Number(vendaAlvo.valor || 0);
-            const custoFinal = novoCustoNum > 0 ? novoCustoNum : Number(vendaAlvo.custo || 0);
-            const lucroFinal = Math.max(0, valorFinal - custoFinal);
-            const margemFinal = valorFinal > 0 ? ((lucroFinal / valorFinal) * 100).toFixed(1) : '0';
-
-            const payloadUpdate: any = {
-              lucro: lucroFinal,
-              percentualLucro: parseFloat(margemFinal) || 0,
-            };
-
-            if (novoValorNum > 0) {
-              payloadUpdate.valor = novoValorNum;
-              if (vendaAlvo.status === 'pago') {
-                payloadUpdate.valorPago = novoValorNum;
-                payloadUpdate.saldoDevedor = 0;
-              } else {
-                const pago = Number(vendaAlvo.valorPago || 0);
-                payloadUpdate.saldoDevedor = Math.max(0, novoValorNum - pago);
-              }
-            }
-
-            if (novoCustoNum > 0) {
-              payloadUpdate.custo = novoCustoNum;
-            }
-
-            if (vendaAlvo.itens && Array.isArray(vendaAlvo.itens) && vendaAlvo.itens.length > 0) {
-              payloadUpdate.itens = vendaAlvo.itens.map((it: any) => ({
-                ...it,
-                ...(novoValorNum > 0 ? { total: novoValorNum, valorExibir: novoValorNum, valorUnitario: novoValorNum } : {}),
-                ...(novoCustoNum > 0 ? { custoUnitario: novoCustoNum, valorInterno: novoCustoNum } : {}),
-                lucroUnitario: lucroFinal,
-              }));
-            }
-
-            await supabase.from('vendas').update(payloadUpdate).eq('id', vendaAlvo.id);
-
-            // Se a venda tiver aparelhoId nos itens, atualiza também na tabela 'aparelhos'
-            const apId = vendaAlvo.itens?.[0]?.aparelhoId;
-            if (apId) {
-              const apUpdate: any = {};
-              if (novoValorNum > 0) {
-                apUpdate.preco = novoValorNum;
-                apUpdate.preco_atacado = novoValorNum;
-              }
-              if (novoCustoNum > 0) {
-                apUpdate.custo = novoCustoNum;
-              }
-              if (Object.keys(apUpdate).length > 0) {
-                await supabase.from('aparelhos').update(apUpdate).eq('id', apId);
-              }
-            }
-
-            // Log de auditoria da alteração
-            try {
-              await supabase.from('logs_sistema').insert({
-                loja_id: lojaId,
-                tipo_evento: 'venda',
-                acao: `Venda Editada via WhatsApp IA: ${vendaAlvo.clienteNome || modeloStr}`,
-                detalhes: `Venda ID ${vendaAlvo.id} alterada. Novo Valor: R$ ${valorFinal.toFixed(2)}, Novo Custo: R$ ${custoFinal.toFixed(2)}`,
-                ator_telefone: authorPhone,
-                ator_papel: 'staff',
-                valor_anterior: { valor: vendaAlvo.valor, custo: vendaAlvo.custo },
-                valor_novo: { valor: valorFinal, custo: custoFinal, lucro: lucroFinal },
-                created_at: new Date().toISOString(),
-              });
-            } catch (logErr) {
-              console.warn('Falha silenciosa ao registrar log_sistema na alteração de venda:', logErr);
-            }
-
-            const textResposta = buildWhatsAppText('update_venda', {
-              ...geminiPlan.params,
-              comprador: vendaAlvo.clienteNome || compradorStr || 'Cliente',
-              modelo: modeloStr || 'Venda',
-              novoValor: novoValorNum > 0 ? novoValorNum : undefined,
-              novoCusto: novoCustoNum > 0 ? novoCustoNum : undefined,
-            }, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Venda IA atualizada no banco.' }, { status: 200 });
-          } else {
-            const textResposta = `⚠️ Não encontrei nenhuma venda recente para ${compradorStr || modeloStr || 'os dados informados'} para editar.`;
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Venda alvo não encontrada.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de cadastro de aparelho pela IA
-        if (geminiPlan.action === 'create_aparelho' && lojaId) {
-          const precoNum = Number(geminiPlan.params.preco || 0);
-          const modeloStr = String(geminiPlan.params.modelo || 'iPhone');
-          const capStr = geminiPlan.params.capacidade ? String(geminiPlan.params.capacidade) : null;
-          const corStr = geminiPlan.params.cor ? String(geminiPlan.params.cor) : null;
-          const imeiStr = geminiPlan.params.imei ? String(geminiPlan.params.imei) : null;
-
-          const { data: novoAp } = await supabase.from('aparelhos').insert({
-            loja_id: lojaId,
-            lojaId: lojaId,
-            marca: String(geminiPlan.params.marca || 'Apple'),
-            modelo: modeloStr,
-            capacidade: capStr,
-            cor: corStr,
-            preco: precoNum,
-            imei: imeiStr,
-            condicao: String(geminiPlan.params.condicao || 'seminovo'),
-            status: 'disponivel',
-            ativo: true,
-            dataCadastro: new Date().toISOString(),
-            observacoes: `Cadastrado via WhatsApp IA (${pushName})`,
-          }).select().single();
-
-          const textResposta = buildWhatsAppText('create_aparelho', {
-            ...geminiPlan.params,
-            id: novoAp?.id || 'Cadastrado',
-          }, senderPhone);
-          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-          return NextResponse.json({ status: 'ok', message: 'Aparelho IA cadastrado no banco.' }, { status: 200 });
-        }
-
-        // Execução real de atualização de preço pela IA
-        if (geminiPlan.action === 'update_preco' && lojaId) {
-          const novoPrecoNum = Number(geminiPlan.params.novoPreco || geminiPlan.params.preco || 0);
-          const aparelhoIdent = String(geminiPlan.params.aparelho || geminiPlan.params.modelo || geminiPlan.params.imei || '');
-
-          if (aparelhoIdent && novoPrecoNum > 0) {
-            let upQuery = supabase.from('aparelhos').update({ preco: novoPrecoNum }).eq('loja_id', lojaId);
-            if (geminiPlan.params.imei) {
-              upQuery = upQuery.eq('imei', String(geminiPlan.params.imei));
-            } else {
-              upQuery = upQuery.ilike('modelo', `%${aparelhoIdent}%`);
-            }
-            await upQuery;
-          }
-
-          const textResposta = buildWhatsAppText('update_preco', geminiPlan.params, senderPhone);
-          await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-          return NextResponse.json({ status: 'ok', message: 'Preço IA atualizado.' }, { status: 200 });
-        }
-
-        // Execução real de abatimento de dívida pela IA
-        if (geminiPlan.action === 'abater_divida' && lojaId) {
-          const clienteStr = String(geminiPlan.params.cliente || '');
-          const valorAbate = Number(geminiPlan.params.valor || 0);
-
-          if (clienteStr && valorAbate > 0) {
-            const { data: devedores } = await supabase
-              .from('lojistas_devedores')
-              .select('*')
-              .eq('loja_id', lojaId)
-              .eq('ativo', true)
-              .ilike('nome', `%${clienteStr}%`)
-              .limit(1);
-
-            if (devedores && devedores.length > 0) {
-              const devedor = devedores[0];
-              const saldoAnterior = Number(devedor.saldo_devedor || 0);
-              const novoSaldo = Math.max(0, Number((saldoAnterior - valorAbate).toFixed(2)));
-
-              await supabase
-                .from('lojistas_devedores')
-                .update({
-                  saldo_devedor: novoSaldo,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', devedor.id);
-
-              const textResposta = `✅ *ABATIMENTO REGISTRADO PELA IA!*
-
-👤 *Lojista:* ${devedor.nome}
-💵 *Valor Abatido:* R$ ${valorAbate.toFixed(2).replace('.', ',')}
-💰 *Novo Saldo:* R$ ${novoSaldo.toFixed(2).replace('.', ',')}`;
-
-              await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-              return NextResponse.json({ status: 'ok', message: 'Abatimento IA registrado.' }, { status: 200 });
-            }
-          }
-        }
-
-        // Execução real de criação de OS pela IA
-        if (geminiPlan.action === 'create_os' && lojaId) {
-          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
-          const defeitoStr = String(geminiPlan.params.defeito || '').trim();
-          const aparelhoModeloStr = String(geminiPlan.params.aparelhoModelo || '').trim();
-          const tecnicoStr = String(geminiPlan.params.tecnico || '').trim();
-
-          if (clienteNomeStr && defeitoStr) {
-            const { data: novaOS } = await supabase.from('ordens_servico').insert({
-              loja_id: lojaId,
-              clienteNome: clienteNomeStr,
-              aparelhoModelo: aparelhoModeloStr || 'Não informado',
-              defeito: defeitoStr,
-              status: 'aguardando',
-              tecnico: tecnicoStr || null,
-              observacoes: `OS criada via WhatsApp IA por ${pushName}`,
-              dataEntrada: new Date().toISOString(),
-              ativo: true,
-            }).select().single();
-
-            const textResposta = buildWhatsAppText('create_os', {
-              ...geminiPlan.params,
-              clienteNome: clienteNomeStr,
-              defeito: defeitoStr,
-              aparelhoModelo: aparelhoModeloStr,
-              id: (novaOS as any)?.numeroOS || (novaOS as any)?.id || 'Criada',
-            }, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'OS IA criada.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de consulta de OS pela IA
-        if (geminiPlan.action === 'list_os' && lojaId) {
-          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
-          const statusStr = String(geminiPlan.params.status || '').trim();
-          const numeroOSStr = String(geminiPlan.params.numeroOS || '').trim();
-
-          let osQuery = supabase.from('ordens_servico').select('id, numeroOS, clienteNome, aparelhoModelo, defeito, status, dataEntrada').eq('loja_id', lojaId).eq('ativo', true);
-          if (clienteNomeStr) osQuery = osQuery.ilike('clienteNome', `%${clienteNomeStr}%`);
-          if (statusStr) osQuery = osQuery.eq('status', statusStr);
-          if (numeroOSStr) osQuery = (osQuery as any).eq('numeroOS', parseInt(numeroOSStr, 10));
-          osQuery = (osQuery as any).order('dataEntrada', { ascending: false }).limit(10);
-
-          const { data: osList } = await osQuery;
-
-          if (osList && osList.length > 0) {
-            const osFmt = osList.map((os: any) => `• OS #${os.numeroOS || '?'} — ${os.clienteNome} | ${os.aparelhoModelo || '-'} | ${os.defeito || '-'} | Status: ${os.status || '-'}`).join('\n');
-            const textResposta = `🔧 *Ordens de Serviço (${osList.length}):*\n\n${osFmt}`;
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Lista OS IA enviada.' }, { status: 200 });
-          } else {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, '🔧 Nenhuma OS encontrada com os filtros informados.');
-            return NextResponse.json({ status: 'ok', message: 'Sem OS IA.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de atualização de status de OS pela IA
-        if (geminiPlan.action === 'update_os' && lojaId) {
-          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
-          const numeroOSStr = String(geminiPlan.params.numeroOS || '').trim();
-          const novoStatusStr = String(geminiPlan.params.novoStatus || '').trim();
-
-          if (novoStatusStr) {
-            let upOsQuery = supabase.from('ordens_servico').update({ status: novoStatusStr, updated_at: new Date().toISOString() }).eq('loja_id', lojaId);
-            if (numeroOSStr) upOsQuery = (upOsQuery as any).eq('numeroOS', parseInt(numeroOSStr, 10));
-            else if (clienteNomeStr) upOsQuery = (upOsQuery as any).ilike('clienteNome', `%${clienteNomeStr}%`);
-
-            await upOsQuery;
-
-            const textResposta = buildWhatsAppText('update_os', {
-              ...geminiPlan.params,
-              clienteNome: clienteNomeStr,
-              novoStatus: novoStatusStr,
-            }, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'OS IA atualizada.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de criação de cliente pela IA
-        if (geminiPlan.action === 'create_cliente' && lojaId) {
-          const nomeStr = String(geminiPlan.params.nome || '').trim();
-          const telefoneStr = String(geminiPlan.params.telefone || '').trim();
-
-          if (nomeStr) {
-            const { data: novoCliente } = await supabase.from('clientes').insert({
-              loja_id: lojaId,
-              nome: nomeStr,
-              telefone: telefoneStr || null,
-              email: geminiPlan.params.email ? String(geminiPlan.params.email) : null,
-              cpf: geminiPlan.params.cpf ? String(geminiPlan.params.cpf) : null,
-              dataCadastro: new Date().toISOString(),
-              ativo: true,
-            }).select().single();
-
-            const textResposta = buildWhatsAppText('create_cliente', {
-              ...geminiPlan.params,
-              nome: nomeStr,
-              telefone: telefoneStr,
-              id: (novoCliente as any)?.id || 'Criado',
-            }, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Cliente IA criado.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de consulta de clientes pela IA
-        if (geminiPlan.action === 'list_clientes' && lojaId) {
-          const nomeStr = String(geminiPlan.params.nome || '').trim();
-          const telefoneStr = String(geminiPlan.params.telefone || '').trim();
-
-          let cliQuery = supabase.from('clientes').select('id, nome, telefone, email').eq('loja_id', lojaId).eq('ativo', true);
-          if (nomeStr) cliQuery = cliQuery.ilike('nome', `%${nomeStr}%`);
-          if (telefoneStr) cliQuery = cliQuery.ilike('telefone', `%${telefoneStr}%`);
-          cliQuery = cliQuery.limit(10) as any;
-
-          const { data: clientes } = await cliQuery;
-
-          if (clientes && clientes.length > 0) {
-            const textResposta = buildWhatsAppText('list_clientes', clientes, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Clientes IA listados.' }, { status: 200 });
-          } else {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, '👥 Nenhum cliente encontrado com esses dados.');
-            return NextResponse.json({ status: 'ok', message: 'Sem clientes IA.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de criação de agendamento pela IA
-        if (geminiPlan.action === 'create_agendamento' && lojaId) {
-          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
-          const dataStr = String(geminiPlan.params.data || '').trim();
-          const horaStr = String(geminiPlan.params.hora || '').trim();
-          const tipoServicoStr = String(geminiPlan.params.tipoServico || '').trim();
-
-          if (clienteNomeStr && dataStr) {
-            const { data: novoAg } = await supabase.from('agendamentos').insert({
-              loja_id: lojaId,
-              clienteNome: clienteNomeStr,
-              data: dataStr,
-              hora: horaStr || null,
-              tipoServico: tipoServicoStr || 'Serviço geral',
-              aparelhoModelo: geminiPlan.params.aparelhoModelo ? String(geminiPlan.params.aparelhoModelo) : null,
-              observacoes: `Agendamento criado via WhatsApp IA por ${pushName}`,
-              status: 'agendado',
-              ativo: true,
-            }).select().single();
-
-            const textResposta = buildWhatsAppText('create_agendamento', {
-              ...geminiPlan.params,
-              clienteNome: clienteNomeStr,
-              data: dataStr,
-              hora: horaStr,
-              tipoServico: tipoServicoStr,
-              id: (novoAg as any)?.id || 'Criado',
-            }, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Agendamento IA criado.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de consulta de agendamentos pela IA
-        if (geminiPlan.action === 'list_agendamentos' && lojaId) {
-          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
-          const dataParamStr = String(geminiPlan.params.data || '').trim().toLowerCase();
-
-          const hoje = new Date().toISOString().split('T')[0];
-          const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-          const dataFiltro = dataParamStr === 'hoje' ? hoje : dataParamStr === 'amanhã' || dataParamStr === 'amanha' ? amanha : null;
-
-          let agQuery = supabase.from('agendamentos').select('id, clienteNome, data, hora, tipoServico, aparelhoModelo, status').eq('loja_id', lojaId).eq('ativo', true);
-          if (dataFiltro) agQuery = agQuery.eq('data', dataFiltro);
-          if (clienteNomeStr) agQuery = agQuery.ilike('clienteNome', `%${clienteNomeStr}%`);
-          agQuery = (agQuery as any).order('data', { ascending: true }).limit(10);
-
-          const { data: agList } = await agQuery;
-
-          if (agList && agList.length > 0) {
-            const textResposta = buildWhatsAppText('list_agendamentos', agList, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Agendamentos IA listados.' }, { status: 200 });
-          } else {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, '📅 Nenhum agendamento encontrado.');
-            return NextResponse.json({ status: 'ok', message: 'Sem agendamentos IA.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de consulta de garantias pela IA
-        if (geminiPlan.action === 'list_garantias' && lojaId) {
-          const clienteNomeStr = String(geminiPlan.params.clienteNome || '').trim();
-          const aparelhoModeloStr = String(geminiPlan.params.aparelhoModelo || '').trim();
-          const statusGarStr = String(geminiPlan.params.status || '').trim();
-
-          let garQuery = supabase.from('garantias').select('id, clienteNome, aparelhoModelo, dataInicio, dataFim, status, diasGarantia').eq('loja_id', lojaId).eq('ativo', true);
-          if (clienteNomeStr) garQuery = garQuery.ilike('clienteNome', `%${clienteNomeStr}%`);
-          if (aparelhoModeloStr) garQuery = garQuery.ilike('aparelhoModelo', `%${aparelhoModeloStr}%`);
-          if (statusGarStr) garQuery = garQuery.eq('status', statusGarStr);
-          garQuery = (garQuery as any).order('dataInicio', { ascending: false }).limit(10);
-
-          const { data: garList } = await garQuery;
-
-          if (garList && garList.length > 0) {
-            const textResposta = buildWhatsAppText('list_garantias', garList, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Garantias IA listadas.' }, { status: 200 });
-          } else {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, '🛡️ Nenhuma garantia encontrada com esses filtros.');
-            return NextResponse.json({ status: 'ok', message: 'Sem garantias IA.' }, { status: 200 });
-          }
-        }
-
-        // Execução real de consulta de peças pela IA
-        if (geminiPlan.action === 'list_pecas' && lojaId) {
-          const nomeStr = String(geminiPlan.params.nome || '').trim();
-          const categoriaStr = String(geminiPlan.params.categoria || '').trim();
-
-          let pecasQuery = supabase.from('pecas').select('id, nome, categoria, quantidade, preco, descricao').eq('loja_id', lojaId);
-          if (nomeStr) pecasQuery = pecasQuery.ilike('nome', `%${nomeStr}%`);
-          if (categoriaStr) pecasQuery = pecasQuery.ilike('categoria', `%${categoriaStr}%`);
-          pecasQuery = pecasQuery.order('nome').limit(15) as any;
-
-          const { data: pecasList } = await pecasQuery;
-
-          if (pecasList && pecasList.length > 0) {
-            const textResposta = buildWhatsAppText('list_pecas', pecasList, senderPhone);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, textResposta);
-            return NextResponse.json({ status: 'ok', message: 'Peças IA listadas.' }, { status: 200 });
-          } else {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, `🔩 Nenhuma peça encontrada${nomeStr ? ` para "${nomeStr}"` : ''}.`);
-            return NextResponse.json({ status: 'ok', message: 'Sem peças IA.' }, { status: 200 });
+          if (resultado.resposta) {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, sanitizarTextoWhatsApp(resultado.resposta));
+            return NextResponse.json(
+              { status: resultado.ok ? 'ok' : 'blocked', message: `Capacidade ${geminiPlan.action}: ${resultado.ok ? 'executada' : resultado.motivo}` },
+              { status: 200 }
+            );
           }
         }
 

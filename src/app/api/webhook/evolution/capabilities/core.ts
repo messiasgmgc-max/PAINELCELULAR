@@ -281,3 +281,37 @@ export function montarMenuAjuda(plano: TipoPlano, papel: PapelUsuario): string {
 
   return texto;
 }
+
+/**
+ * Dado um texto que começa com "!", devolve a mensagem de bloqueio quando o
+ * atalho corresponde a uma capacidade fora do plano da loja — e `null` quando
+ * pode seguir.
+ *
+ * Existe porque os atalhos !comando têm caminho próprio no webhook: sem esta
+ * checagem uma loja do Entrada usava recursos do Intermediário apenas evitando
+ * a linguagem natural.
+ */
+export function bloquearAtalhoForaDoPlano(
+  texto: string,
+  plano: TipoPlano,
+  papel: PapelUsuario
+): string | null {
+  const comando = texto.trim().split(/\s+/)[0]?.toLowerCase();
+  if (!comando || !comando.startsWith('!')) return null;
+
+  const cap = todasCapabilities().find((c) => c.atalho && c.atalho.toLowerCase() === comando);
+  if (!cap) return null;
+
+  if (!verificarPermissaoRecursoPlano(plano, cap.recurso)) {
+    return mensagemUpgrade(cap);
+  }
+
+  if (!cap.papeis.includes(papel)) {
+    return (
+      `⚠️ *Acesso restrito:* o comando *${comando}* é liberado apenas para ` +
+      `${cap.papeis.filter((p) => p !== 'nenhum').join(' / ')} da loja.`
+    );
+  }
+
+  return null;
+}

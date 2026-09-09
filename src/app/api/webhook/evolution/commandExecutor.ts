@@ -79,17 +79,12 @@ export function parseGeminiPlan(raw: string): GeminiCommandPlan | null {
   }
 }
 
-export async function gerarPlanoComGemini(
-  textContent: string,
-  contextoLoja?: { nome?: string; lojaId?: string }
-): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || !textContent || !textContent.trim()) {
-    return null;
-  }  const systemPrompt = `Você é o assistente inteligente de gestão da loja de celulares/eletrônicos "${contextoLoja?.nome || 'Phone Center'}".
-Sua função é interpretar a mensagem em linguagem natural enviada no WhatsApp e convertê-la estritamente em um comando operacional estruturado JSON (GeminiCommandPlan).
-
-AÇÕES OPERACIONAIS REAIS (action):
+/**
+ * Lista de ações usada apenas como fallback: normalmente o webhook injeta
+ * `secaoAcoes`, gerado a partir do registro de capacidades e já filtrado pelo
+ * plano da loja.
+ */
+const ACOES_PADRAO = `AÇÕES OPERACIONAIS REAIS (action):
 - "create_venda": registrar venda/baixa de aparelho (params: modelo, comprador, valor, imei, codigo, formaPagamento, tipoEntrega ['Atacado' | 'Varejo']).
 - "update_venda": editar/alterar valores de uma venda já registrada (params: comprador, modelo, novoValor, novoCusto, valor, custo).
 - "create_aparelho": cadastrar novo aparelho no estoque (params: marca, modelo, capacidade, cor, preco, imei, condicao).
@@ -103,7 +98,19 @@ AÇÕES OPERACIONAIS REAIS (action):
 - "create_agendamento": criar novo agendamento (params: clienteNome, data, hora, tipoServico, aparelhoModelo, observacoes).
 - "list_agendamentos": consultar agendamentos (params: data, clienteNome, status).
 - "list_garantias": consultar garantias (params: clienteNome, aparelhoModelo, status ['ativa' | 'expirada' | 'acionada']).
-- "list_pecas": consultar estoque de peças (params: nome, categoria).
+- "list_pecas": consultar estoque de peças (params: nome, categoria).`;
+
+export async function gerarPlanoComGemini(
+  textContent: string,
+  contextoLoja?: { nome?: string; lojaId?: string; secaoAcoes?: string }
+): Promise<string | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || !textContent || !textContent.trim()) {
+    return null;
+  }  const systemPrompt = `Você é o assistente inteligente de gestão da loja de celulares/eletrônicos "${contextoLoja?.nome || 'Phone Center'}".
+Sua função é interpretar a mensagem em linguagem natural enviada no WhatsApp e convertê-la estritamente em um comando operacional estruturado JSON (GeminiCommandPlan).
+
+${contextoLoja?.secaoAcoes || ACOES_PADRAO}
 
 FUNIL DE CONFIANÇA (confianca):
 1. "alta": Quando a intenção for clara E for uma ação operacional acima com dados suficientes:
