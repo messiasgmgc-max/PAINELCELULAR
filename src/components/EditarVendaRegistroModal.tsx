@@ -149,8 +149,9 @@ export function EditarVendaRegistroModal({
           obsBase ? `Obs: ${obsBase}` : ''
         ].filter(Boolean).join(' | ');
 
+        // Só preço, custo, cliente e observações: ativo/status/data_saida/motivo_saida ficam como estão.
         const { error: errAparelho } = await supabase
-          .from('aparelhos')
+          .from('aparelhos') // estoque-guard: sem-ciclo
           .update({
             preco: valorVendaNum,
             preco_atacado: valorVendaNum,

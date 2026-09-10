@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/hooks/useAuth";
+import { estaNoEstoque } from "@/lib/estoque/ciclo";
 import { toast } from "sonner";
 import { LogsTab } from "@/components/LogsTab";
 
@@ -350,8 +351,7 @@ export default function SuperAdminTab() {
 
       if (aparelhosData) {
         aparelhosData.forEach((a: any) => {
-          const isVendido = a.condicao === 'vendido' || (a as any).status === 'vendido';
-          const isAtivo = a.ativo !== false && !isVendido;
+          const isAtivo = estaNoEstoque(a);
           if (isAtivo) {
             const targetId = a.loja_id ? String(a.loja_id) : primaryLojaId;
             if (targetId && stats[targetId]) {

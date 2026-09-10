@@ -62,6 +62,10 @@ import { getAparelhoCodigo, cn, parseMonetaryValue } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Aparelho } from '@/lib/db/types';
 import { registrarLog } from '@/lib/logger';
+import { estaNoEstoque, patchRestauracao } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
+import { condicaoAoDevolver } from '@/lib/vendasDevolucao';
+import { devolverAparelhoAoEstoque } from '@/lib/devolucaoEstoque';
 import { EditarValoresAtacadoModal } from '@/components/EditarValoresAtacadoModal';
 import { MarcarVendidoModal } from '@/components/MarcarVendidoModal';
 import { VendaLoteAtacadoModal } from '@/components/VendaLoteAtacadoModal';
@@ -389,11 +393,7 @@ export function AtacadoTab() {
 
   // ── 1. Aparelhos Ativos Disponíveis no Estoque ──
   const aparelhosEstoqueAtivo = useMemo(() => {
-    return aparelhos.filter((a: any) => {
-      if (a.ativo === false) return false;
-      if (a.condicao === 'vendido' || a.status === 'vendido') return false;
-      return true;
-    });
+    return aparelhos.filter((a: any) => estaNoEstoque(a));
   }, [aparelhos]);
 
   // Valor total de estoque a preço de atacado
@@ -410,7 +410,8 @@ export function AtacadoTab() {
 
     aparelhos.forEach((a: any) => {
       if (a.ativo === true && a.status === 'disponivel') return;
-      if (a.status !== 'vendido' && a.condicao !== 'vendido' && a.ativo !== false) return;
+      // Histórico de vendas: só o que foi vendido. 'baixado' não é venda; condicao='vendido' é legado.
+      if (a.status !== 'vendido' && a.condicao !== 'vendido') return;
 
       const obs = String(a.observacoes || '');
       const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
@@ -912,35 +913,115 @@ export function AtacadoTab() {
     const toastId = toast.loading('Revertendo venda e restaurando estoque...');
 
     try {
-      const obsLimpa = String(venda.raw?.observacoes || '')
+      const limparObsVenda = (observacoes: unknown) => String(observacoes || '')
         .replace(/BAIXA_ESTOQUE:[^\n]+(?:\n|$)/gi, '')
         .replace(/Venda (?:ATACADO|VAREJO)[^\n|]*(?:\|\s*)?/gi, '')
         .trim();
 
-      const { error: errApar } = await supabase
-        .from('aparelhos')
-        .update({
-          ativo: true,
-          condicao: 'seminovo',
-          status: 'disponivel',
-          cliente: null,
-          observacoes: obsLimpa || null,
-        })
-        .eq('id', venda.aparelhoId);
+      // Linha montada a partir de um aparelho: a venda é localizada pelo aparelho nos itens.
+      // Linha vinda só da tabela vendas (sem aparelhoId, ex.: lote): usa a própria venda e os
+      // aparelhos dos itens dela — nunca procura por aparelhoId indefinido.
+      let vendaParaDeletar: { id: string; itens?: any } | undefined;
+      if (venda.aparelhoId) {
+        const { data: vendasRelacionadas } = await supabase
+          .from('vendas')
+          .select('id, itens');
 
-      if (errApar) throw errApar;
+        vendaParaDeletar = vendasRelacionadas?.find(vb =>
+          (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
+          (vb as any).aparelhoId === venda.aparelhoId
+        );
+      } else if (venda.vendaId) {
+        vendaParaDeletar = { id: venda.vendaId, itens: venda.raw?.itens };
+      }
 
-      const { data: vendasRelacionadas } = await supabase
-        .from('vendas')
-        .select('id, itens');
+      const itensBrutos = vendaParaDeletar?.itens;
+      const itensVenda: any[] = Array.isArray(itensBrutos) ? itensBrutos : [];
+      const aparelhoIds: string[] = venda.aparelhoId
+        ? [venda.aparelhoId]
+        : Array.from(new Set<string>(itensVenda.map((it: any) => it?.aparelhoId).filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)));
 
-      const vendaParaDeletar = vendasRelacionadas?.find(vb => 
-        (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
-        (vb as any).aparelhoId === venda.aparelhoId
+      // Venda em lote: estornar um aparelho tira só o item dele e recalcula os totais.
+      // Apagar a venda inteira deixaria os outros aparelhos vendidos sem venda e sem fiado.
+      const outrosAparelhosNaVenda = Boolean(
+        venda.aparelhoId && itensVenda.some((it: any) => it?.aparelhoId && it.aparelhoId !== venda.aparelhoId)
       );
+      if (venda.aparelhoId && outrosAparelhosNaVenda) {
+        const resultadoLote = await devolverAparelhoAoEstoque(supabase, {
+          aparelhoId: venda.aparelhoId,
+          lojaId: usuario?.lojaId || null,
+          usuarioId: usuario?.id || null,
+          usuarioNome: usuario?.nome || null,
+        });
+        if (!resultadoLote.ok) throw new Error(resultadoLote.mensagem);
+
+        await registrarLog({
+          loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+          tipo_evento: 'estoque',
+          acao: 'Item de Venda de Atacado Estornado',
+          detalhes: `${venda.modelo} saiu da venda em lote para ${venda.comprador} e voltou ao estoque; os demais itens seguem vendidos.`,
+        });
+        toast.success(`${venda.modelo} voltou ao estoque. A venda do lote foi recalculada sem ele.`, { id: toastId });
+        await fetchAparelhos();
+        await fetchVendasBanco();
+        return;
+      }
+
+      let restaurados = 0;
+      if (aparelhoIds.length > 0) {
+        const { data: aparelhosDaVenda, error: errLeitura } = await supabase
+          .from('aparelhos')
+          .select('id, condicao, observacoes')
+          .in('id', aparelhoIds);
+
+        if (errLeitura) throw errLeitura;
+
+        const loteMovimentacao = gerarLoteId();
+        let auditoriaIncompleta = false;
+
+        for (const aparelhoVenda of aparelhosDaVenda || []) {
+          const itemVenda = itensVenda.find((it: any) => it?.aparelhoId === aparelhoVenda.id);
+          // Vender não mexe mais em `condicao`: a atual é o estado físico e fica. Só o
+          // legado, baixado quando a venda gravava 'vendido' ali, é reparado com o que a venda registrou.
+          const condicaoReparada = condicaoAoDevolver(aparelhoVenda.condicao, {
+            condicaoOriginal: itemVenda?.condicaoOriginal,
+            condicao: itemVenda?.condicao,
+          });
+
+          const resultado = await aplicarMudancaEstoque(supabase, {
+            ids: [aparelhoVenda.id],
+            patch: {
+              cliente: null,
+              observacoes: limparObsVenda(aparelhoVenda.observacoes) || null,
+              ...(condicaoReparada ? { condicao: condicaoReparada } : {}),
+              ...patchRestauracao(),
+            },
+            tipo: 'restauracao',
+            origem: 'atacado',
+            loteId: loteMovimentacao,
+            lojaId: usuario?.lojaId || null,
+            usuarioId: usuario?.id,
+            usuarioNome: usuario?.nome,
+            observacao: `Estorno da venda de atacado para ${venda.comprador}`,
+            filtroElegivel: (estado) => !estaNoEstoque(estado),
+          });
+
+          restaurados += resultado.afetados;
+          if (!resultado.auditoriaRegistrada) auditoriaIncompleta = true;
+        }
+
+        if (auditoriaIncompleta) {
+          toast.warning('Venda estornada, mas a movimentação não foi gravada por completo no histórico do estoque.', { duration: 8000 });
+        }
+      }
+
+      if (aparelhoIds.length === 0) {
+        throw new Error('Não achei aparelhos vinculados a esta venda; nada foi estornado.');
+      }
 
       if (vendaParaDeletar?.id) {
-        await supabase.from('vendas').delete().eq('id', vendaParaDeletar.id);
+        const { error: errDelete } = await supabase.from('vendas').delete().eq('id', vendaParaDeletar.id);
+        if (errDelete) throw errDelete;
       }
 
       await registrarLog({
@@ -950,7 +1031,12 @@ export function AtacadoTab() {
         detalhes: `Venda do aparelho ${venda.modelo} para ${venda.comprador} (R$ ${venda.valorVenda}) cancelada e devolvida ao estoque ativo.`,
       });
 
-      toast.success(`⚡ Venda cancelada! ${venda.modelo} retornou ao estoque ativo.`, { id: toastId });
+      toast.success(
+        restaurados > 0
+          ? `⚡ Venda cancelada! ${venda.modelo} retornou ao estoque ativo.`
+          : `Venda cancelada. ${venda.modelo} já estava no estoque.`,
+        { id: toastId }
+      );
       await fetchAparelhos();
       await fetchVendasBanco();
     } catch (err: any) {

@@ -27,6 +27,8 @@ import {
   type ContextoCapability,
   type PapelUsuario,
 } from './capabilities';
+import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -1023,9 +1025,10 @@ async function processarResultadoVisionEtiqueta(
   if (imei && imei.length >= 4) {
     const qImei = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
-    const { data: porImei } = await qImei.or(`imei.eq.${imei},imei.ilike.%${imei}%`).limit(1);
+    const { data: porImei } = await qImei.or(`imei.eq.${imei},imei.ilike.%${imei}%`).limit(5);
     if (porImei && porImei.length > 0) {
-      aparelhoEncontrado = porImei[0];
+      // O mesmo IMEI pode ter um registro antigo já vendido: o que está no estoque vem primeiro.
+      aparelhoEncontrado = porImei.find((a) => estaNoEstoque(a)) || porImei[0];
     }
   }
 
@@ -1033,7 +1036,10 @@ async function processarResultadoVisionEtiqueta(
   if (!aparelhoEncontrado && codigoEtiqueta) {
     const qCod = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
-    const { data: porCod } = await qCod.or(`codigo.eq.${codigoEtiqueta},codigoUnico.eq.${codigoEtiqueta},id.eq.${codigoEtiqueta}`).limit(1);
+    // `codigoUnico` não existe e `id` é uuid: qualquer um dos dois derrubava a consulta inteira.
+    const filtrosCodigo = [`codigo.eq.${codigoEtiqueta}`];
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(codigoEtiqueta)) filtrosCodigo.push(`id.eq.${codigoEtiqueta}`);
+    const { data: porCod } = await qCod.or(filtrosCodigo.join(',')).limit(1);
     if (porCod && porCod.length > 0) {
       aparelhoEncontrado = porCod[0];
     }
@@ -1044,7 +1050,7 @@ async function processarResultadoVisionEtiqueta(
     let qMod = supabase.from('aparelhos').select('*').ilike('modelo', `%${modeloLido}%`).eq('loja_id', lojaId);
     if (capacidadeLida) qMod = qMod.ilike('capacidade', `%${capacidadeLida}%`);
 
-    const { data: porMod } = await qMod.eq('ativo', true).neq('status', 'vendido').limit(2);
+    const { data: porMod } = await qMod.eq('ativo', true).not('status', 'in', '(vendido,baixado)').limit(2);
     if (porMod && porMod.length === 1) {
       aparelhoEncontrado = porMod[0];
     }
@@ -1052,18 +1058,17 @@ async function processarResultadoVisionEtiqueta(
 
   // ── CASO A: Aparelho LOCALIZADO no Banco de Dados ──
   if (aparelhoEncontrado) {
-    const isVendido =
-      aparelhoEncontrado.condicao === 'vendido' ||
-      aparelhoEncontrado.status === 'vendido' ||
-      aparelhoEncontrado.ativo === false;
+    // Vendido ou baixado (inclui o legado com condicao='vendido'): já saiu do estoque.
+    const saiuDoEstoque = !estaNoEstoque(aparelhoEncontrado);
 
-    // Se já foi vendido, busca histórico na tabela 'vendas'
-    if (isVendido) {
+    // Se já saiu do estoque, busca histórico na tabela 'vendas'
+    if (saiuDoEstoque) {
       const qVenda = supabase.from('vendas').select('*').eq('loja_id', lojaId);
 
       const { data: vendas } = await qVenda
-        .or(`aparelho_id.eq.${aparelhoEncontrado.id},imei.eq.${aparelhoEncontrado.imei || imei}`)
-        .order('created_at', { ascending: false })
+        // `vendas` não tem aparelho_id, imei nem created_at: o aparelho fica dentro de itens.
+        .contains('itens', [{ aparelhoId: aparelhoEncontrado.id }])
+        .order('dataPagamento', { ascending: false })
         .limit(1);
 
       const venda = vendas?.[0];
@@ -1220,6 +1225,8 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
   if (entries.length === 0) return 0;
 
   let cadastradosOuAtualizados = 0;
+  // Todos os cadastros desta lista compartilham o lote na auditoria.
+  const loteImportacao = gerarLoteId();
 
   for (const [modelKey, prices] of entries) {
     if (prices.length === 0) continue;
@@ -1229,34 +1236,58 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
 
     const [modelName, capacity, cor] = modelKey.split('|');
 
-    const { data: existentes } = await supabase
+    // Só conta o que está no estoque. Vendidos e baixados agora mantêm a
+    // condição física, então o filtro por condicao sozinho passaria a incluí-los.
+    let consultaExistentes = supabase
       .from('aparelhos')
       .select('id')
       .ilike('modelo', modelName)
       .eq('loja_id', lojaId)
-      .eq('condicao', 'seminovo');
+      .eq('condicao', 'seminovo')
+      .eq('ativo', true)
+      .not('status', 'in', '(vendido,baixado)');
+    // Sem isso, o preço de um 128GB preto sobrescrevia todas as capacidades e cores do modelo.
+    if (capacity && capacity !== 'N/A') consultaExistentes = consultaExistentes.ilike('capacidade', capacity);
+    if (cor && cor !== 'Padrão') consultaExistentes = consultaExistentes.ilike('cor', cor);
+    const { data: existentes } = await consultaExistentes;
 
     if (existentes && existentes.length > 0) {
+      // Só o preço: as observações guardam o ID da etiqueta que a remontagem usa para casar.
       await supabase
-        .from('aparelhos')
-        .update({
-          preco: basePrice,
-          observacoes: `Atualizado via WhatsApp (${senderName})`,
-        })
-        .ilike('modelo', modelName)
+        .from('aparelhos') // estoque-guard: sem-ciclo
+        .update({ preco: basePrice })
+        .in('id', existentes.map((e: { id: string }) => e.id))
         .eq('loja_id', lojaId);
     } else {
-      await supabase.from('aparelhos').insert({
+      // estoque-guard: auditado
+      const { data: inserido, error: erroCadastro } = await supabase.from('aparelhos').insert({
         loja_id: lojaId,
         marca: modelName.toUpperCase().includes('IPHONE') ? 'Apple' : 'Smartphone',
         modelo: modelName,
         capacidade: capacity,
         cor,
         condicao: 'seminovo',
+        status: 'disponivel',
         preco: basePrice,
         ativo: true,
         observacoes: `Importado de lista WhatsApp (${senderName})`,
-      });
+      }).select('id, loja_id, ativo, status, condicao').single();
+
+      if (erroCadastro) {
+        console.warn(`[Lista de preços] Falha ao cadastrar ${modelName}:`, erroCadastro.message);
+      } else if (inserido) {
+        const entrada = await registrarEntradaEstoque(supabase, {
+          aparelhos: [inserido],
+          origem: 'bot_whatsapp',
+          loteId: loteImportacao,
+          lojaId,
+          usuarioNome: senderName,
+          observacao: 'Importado de lista de preços via WhatsApp',
+        });
+        if (!entrada.auditoriaRegistrada) {
+          console.warn('[Estoque] Cadastro da lista de preços sem auditoria completa:', entrada.erroAuditoria);
+        }
+      }
     }
 
     cadastradosOuAtualizados++;
@@ -1612,13 +1643,14 @@ async function responderConsultaEstoqueNatural(
   // 4. CONSULTA GERAL DE ESTOQUE (Sem modelo específico: "quantos tem?", "qual o estoque?", "o que tem disponível?")
   if (!modeloMatch && (isPerguntaGeralEstoque || isPerguntaQuantidade) && !isGroup) {
     const lojaIds = lojasParaConsulta.map((l) => l.id);
-    const { data: todosAparelhos } = await supabase
+    const { data: estoqueGeralBruto } = await supabase
       .from('aparelhos')
       .select('id, loja_id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, status, condicao')
       .in('loja_id', lojaIds)
       .eq('ativo', true)
-      .neq('condicao', 'vendido')
-      .neq('status', 'vendido');
+      .not('status', 'in', '(vendido,baixado)');
+    // estaNoEstoque também descarta o legado com condicao='vendido'.
+    const todosAparelhos = (estoqueGeralBruto || []).filter(estaNoEstoque);
 
     if (!todosAparelhos || todosAparelhos.length === 0) {
       return `No momento nosso estoque está zerado, mas estamos com reposição a caminho! 📦✨`;
@@ -1694,13 +1726,14 @@ async function responderConsultaEstoqueNatural(
   const lojaIds = lojasParaConsulta.map((l) => l.id);
   const mapLojas = new Map(lojasParaConsulta.map((l) => [l.id, l.nome]));
 
-  const { data: aparelhos } = await supabase
+  const { data: aparelhosBrutos } = await supabase
     .from('aparelhos')
     .select('id, loja_id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
     .in('loja_id', lojaIds)
     .eq('ativo', true)
-    .neq('condicao', 'vendido')
-    .neq('status', 'vendido');
+    .not('status', 'in', '(vendido,baixado)');
+  // estaNoEstoque também descarta o legado com condicao='vendido'.
+  const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
   if (!aparelhos || aparelhos.length === 0) {
     if (isGroup) return null;
@@ -2270,19 +2303,21 @@ ${isVitalicio ? '🎉 Sua loja possui acesso vitalício permanente liberado pelo
 
       const qApar = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
-      const { data: aparelhos } = await qApar
-        .or(`imei.eq.${termoBusca},imei.ilike.%${termoBusca}%,codigo.eq.${termoBusca},id.eq.${termoBusca}`)
-        .limit(1);
+      // `id` é uuid: comparar com um IMEI derrubava a consulta e o aparelho nunca era achado.
+      const filtrosVenda = [`imei.eq.${termoBusca}`, `imei.ilike.%${termoBusca}%`, `codigo.eq.${termoBusca}`];
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(termoBusca)) filtrosVenda.push(`id.eq.${termoBusca}`);
+      const { data: aparelhos } = await qApar.or(filtrosVenda.join(',')).limit(5);
 
-      const aparelho = aparelhos?.[0];
+      // O mesmo IMEI pode ter um registro antigo já vendido: o que está no estoque vem primeiro.
+      const aparelho = aparelhos?.find((a) => estaNoEstoque(a)) || aparelhos?.[0];
 
       if (!aparelho) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Não encontrei nenhum aparelho com o código ou IMEI "${termoBusca}". Verifique se o identificador está correto!`);
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
-      if (aparelho.status === 'vendido' || aparelho.condicao === 'vendido' || aparelho.ativo === false) {
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ O aparelho *${aparelho.modelo}* (IMEI: ${aparelho.imei}) já consta como vendido no sistema!`);
+      if (!estaNoEstoque(aparelho)) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ O aparelho *${aparelho.modelo}* (IMEI: ${aparelho.imei}) já consta como ${aparelho.status === 'baixado' ? 'baixado' : 'vendido'} no sistema!`);
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
@@ -2352,24 +2387,45 @@ A venda foi enviada para validação de um administrador no painel!`;
         return NextResponse.json({ status: 'ok', message: 'Venda pendente de aprovação manual.' }, { status: 200 });
       }
 
-      // 1. Atualiza o aparelho para vendido
-      await supabase.from('aparelhos').update({
-        condicao: 'vendido',
-        status: 'vendido',
-        ativo: false,
-        comprador: compradorNome,
-        precoVenda: valorNum,
-        dataVenda: new Date().toISOString(),
-      }).eq('id', aparelho.id);
+      // 1. Tira o aparelho do estoque como vendido. A tabela não tem colunas
+      // comprador/precoVenda/dataVenda: o comprador vai em `cliente` (como no
+      // painel); valor e data ficam na venda e em data_saida.
+      const resultadoBaixa = await aplicarMudancaEstoque(supabase, {
+        ids: [aparelho.id],
+        patch: { ...patchSaida('vendido', 'venda'), cliente: compradorNome },
+        tipo: 'venda',
+        origem: 'bot_whatsapp',
+        lojaId,
+        usuarioNome: nomeUsuario || pushName,
+        observacao: `Venda via WhatsApp para ${compradorNome} por R$ ${valorNum.toFixed(2)}`,
+        filtroElegivel: estaNoEstoque,
+      }).catch((erroBaixa: unknown) => {
+        console.error('❌ Erro ao dar baixa no aparelho vendido via WhatsApp:', erroBaixa);
+        return null;
+      });
+
+      if (!resultadoBaixa) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Não consegui dar baixa no aparelho *${aparelho.modelo}*. A venda não foi registrada; tente novamente.`);
+        return NextResponse.json({ status: 'error', message: 'Falha ao dar baixa no aparelho.' }, { status: 200 });
+      }
+
+      if (resultadoBaixa.afetados === 0) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ O aparelho *${aparelho.modelo}* (IMEI: ${aparelho.imei}) já saiu do estoque. A venda não foi registrada.`);
+        return NextResponse.json({ status: 'ok' }, { status: 200 });
+      }
+
+      if (!resultadoBaixa.auditoriaRegistrada) {
+        console.warn('[Estoque] Venda via !vender baixou o aparelho sem auditoria completa:', resultadoBaixa.erroAuditoria);
+      }
 
       // 2. Insere na tabela 'vendas'
       const custoNum = Number(aparelho.custo || aparelho.precoCusto || 0);
       const lucroNum = valorNum - custoNum;
       const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
 
-      await supabase.from('vendas').insert({
+      // `vendas` não tem coluna lojaId: com ela o insert falhava sempre, em silêncio.
+      const { error: erroVenda } = await supabase.from('vendas').insert({
         loja_id: lojaId,
-        lojaId: lojaId,
         clienteNome: compradorNome,
         vendedor: `WhatsApp (${pushName})`,
         tipoEntrega: 'Varejo',
@@ -2409,6 +2465,36 @@ A venda foi enviada para validação de um administrador no painel!`;
         ],
       });
 
+      if (erroVenda) {
+        console.error('❌ Venda via !vender não foi gravada; desfazendo a baixa do aparelho:', erroVenda);
+        // Sem a venda, a baixa não tem lastro: o aparelho volta para o estoque no mesmo lote.
+        const revertido = await aplicarMudancaEstoque(supabase, {
+          ids: [aparelho.id],
+          loteId: resultadoBaixa.loteId,
+          patch: {
+            ...patchRestauracao(),
+            status: aparelho.status === 'manutencao' ? 'manutencao' : 'disponivel',
+            cliente: aparelho.cliente ?? null,
+          },
+          tipo: 'restauracao',
+          origem: 'bot_whatsapp',
+          lojaId,
+          usuarioNome: nomeUsuario || pushName,
+          observacao: 'Venda via WhatsApp não gravada; baixa desfeita.',
+          filtroElegivel: (estado) => !estaNoEstoque(estado),
+        })
+          .then((r) => r.afetados > 0)
+          .catch((erroReversao: unknown) => {
+            console.error('❌ Falha ao desfazer a baixa do !vender:', erroReversao);
+            return false;
+          });
+        const situacao = revertido
+          ? 'O aparelho continua no estoque.'
+          : '⚠️ O aparelho saiu do estoque sem a venda: confira no painel.';
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Não consegui registrar a venda do *${aparelho.modelo}* (${erroVenda.message}). ${situacao}`);
+        return NextResponse.json({ status: 'error', message: 'Falha ao registrar a venda.' }, { status: 200 });
+      }
+
       // 3. Log de auditoria estruturado
       try {
         await supabase.from('logs_sistema').insert({
@@ -2426,7 +2512,7 @@ A venda foi enviada para validação de um administrador no painel!`;
           },
           valor_novo: {
             status: 'vendido',
-            condicao: 'vendido',
+            ativo: false,
             comprador: compradorNome,
             precoVenda: valorNum,
           },
@@ -2507,12 +2593,24 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
         observacoes: `Cadastrado via WhatsApp IA (${pushName})`,
       };
 
+      // estoque-guard: auditado
       const { data: inserido, error: errCad } = await supabase.from('aparelhos').insert(novoAparelho).select().single();
 
       if (errCad) {
         console.error('❌ Erro ao cadastrar aparelho via WhatsApp:', errCad);
         await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Erro ao cadastrar aparelho: ${errCad.message}`);
         return NextResponse.json({ status: 'error' }, { status: 500 });
+      }
+
+      const entradaCad = await registrarEntradaEstoque(supabase, {
+        aparelhos: inserido ? [inserido] : [],
+        origem: 'bot_whatsapp',
+        lojaId,
+        usuarioNome: nomeUsuario || pushName,
+        observacao: 'Cadastro via WhatsApp (!cadastrar)',
+      });
+      if (!entradaCad.auditoriaRegistrada) {
+        console.warn('[Estoque] Aparelho cadastrado via !cadastrar sem auditoria completa:', entradaCad.erroAuditoria);
       }
 
       try {
@@ -2580,17 +2678,18 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
       const qP = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
 
-      const { data: apars } = await qP
-        .or(`imei.eq.${ident},imei.ilike.%${ident}%,codigo.eq.${ident},id.eq.${ident}`)
-        .limit(1);
+      const filtrosPreco = [`imei.eq.${ident}`, `imei.ilike.%${ident}%`, `codigo.eq.${ident}`];
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ident)) filtrosPreco.push(`id.eq.${ident}`);
+      const { data: apars } = await qP.or(filtrosPreco.join(',')).limit(5);
 
-      const apar = apars?.[0];
+      const apar = apars?.find((a) => estaNoEstoque(a)) || apars?.[0];
 
       if (!apar) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Aparelho não encontrado para o identificador "${ident}".`);
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
+      // estoque-guard: sem-ciclo
       await supabase.from('aparelhos').update({ preco: novoValor }).eq('id', apar.id);
 
       try {
@@ -2895,13 +2994,14 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       }
 
       // Consulta estritamente os aparelhos DESTA LOJA (zero fallbacks para outras lojas!)
-      const { data: aparelhos } = await supabase
+      const { data: aparelhosBrutos } = await supabase
         .from('aparelhos')
         .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
         .eq('loja_id', resolvedLojaId)
         .eq('ativo', true)
-        .neq('status', 'vendido')
-        .neq('condicao', 'vendido');
+        .not('status', 'in', '(vendido,baixado)');
+      // estaNoEstoque também descarta o legado com condicao='vendido'.
+      const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
       if (!aparelhos || aparelhos.length === 0) {
         const nomeLoja = (loja?.nome || 'PHONE CENTER').trim();
@@ -2990,13 +3090,14 @@ Envie o modelo que deseja consultar no estoque:
       }
 
       // Consulta estoque ativo da loja
-      const { data: aparelhos, error: errEstoque } = await supabase
+      const { data: aparelhosBrutos, error: errEstoque } = await supabase
         .from('aparelhos')
         .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
         .eq('loja_id', resolvedLojaId)
         .eq('ativo', true)
-        .neq('status', 'vendido')
-        .neq('condicao', 'vendido');
+        .not('status', 'in', '(vendido,baixado)');
+      // estaNoEstoque também descarta o legado com condicao='vendido'.
+      const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
       if (errEstoque || !aparelhos || aparelhos.length === 0) {
         await enviarMensagemWhatsApp(
@@ -3658,13 +3759,14 @@ _Origem da verificação: Base de Segurança Phone Center & Validação GSMA._`;
           return NextResponse.json({ status: 'ok' }, { status: 200 });
         }
 
-        const { data: aparelhos } = await supabase
+        const { data: aparelhosBrutos } = await supabase
           .from('aparelhos')
-          .select('marca, modelo, capacidade, cor, preco_atacado, precoAtacado, preco, saude_bateria')
+          .select('marca, modelo, capacidade, cor, preco_atacado, precoAtacado, preco, saude_bateria, status, condicao')
           .eq('loja_id', lojaId)
           .eq('ativo', true)
-          .neq('condicao', 'vendido')
-          .neq('status', 'vendido');
+          .not('status', 'in', '(vendido,baixado)');
+        // estaNoEstoque também descarta o legado com condicao='vendido'.
+        const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
         if (!aparelhos || aparelhos.length === 0) {
           await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ O estoque da loja está vazio no momento. Nada a transmitir.');
@@ -4015,13 +4117,15 @@ Digite: *!broadcast agora*`;
 
       if (lojaId) {
         // 1. Busca aparelhos detalhados do estoque com imei, codigo, custo e precos
-        const { data: aps } = await supabase
+        const { data: apsBrutos } = await supabase
           .from('aparelhos')
-          .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saudeBateria, saude_bateria, condicao')
+          .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saude_bateria, status, condicao')
           .eq('loja_id', lojaId)
           .eq('ativo', true)
-          .neq('status', 'vendido')
+          .not('status', 'in', '(vendido,baixado)')
           .limit(80);
+        // estaNoEstoque também descarta o legado com condicao='vendido'.
+        const aps = (apsBrutos || []).filter(estaNoEstoque);
 
         if (aps && aps.length > 0) {
           totalEstoque = aps.length;
@@ -4029,7 +4133,7 @@ Digite: *!broadcast agora*`;
           modelosEstoque = Array.from(setModelos);
 
           detalhesEstoqueFormatado = aps.map((a) => {
-            const bat = a.saudeBateria || a.saude_bateria ? ` (Bat: ${a.saudeBateria || a.saude_bateria})` : '';
+            const bat = a.saude_bateria ? ` (Bat: ${a.saude_bateria})` : '';
             const preco = a.preco || a.precoAtacado ? ` - R$ ${(a.preco || a.precoAtacado).toLocaleString('pt-BR')}` : '';
             const custo = a.custo ? ` [Custo: R$ ${Number(a.custo).toLocaleString('pt-BR')}]` : '';
             const imeiStr = a.imei ? ` | IMEI: ${a.imei}` : '';

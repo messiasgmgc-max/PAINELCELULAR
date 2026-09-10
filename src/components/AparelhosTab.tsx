@@ -25,7 +25,7 @@ import { ConfirmarAcaoEstoqueModal, type AcaoConfirmacao, type LinhaResumo } fro
 import { useStoreConfig } from "@/hooks/useStoreConfig";
 import { registrarLog } from "@/lib/logger";
 import { estaNoEstoque, patchRestauracao, patchSaida } from "@/lib/estoque/ciclo";
-import { aplicarMudancaEstoque } from "@/lib/estoque/movimentacoes";
+import { aplicarMudancaEstoque, registrarEntradaEstoque } from "@/lib/estoque/movimentacoes";
 import {
   executarPlanoRemontagem,
   planejarRemontagem,
@@ -133,6 +133,8 @@ export function AparelhosTab() {
       const resultado = await devolverAparelhoAoEstoque(supabase, {
         aparelhoId: saidaParaDevolver.id,
         lojaId: usuario?.lojaId || (usuario as any)?.loja_id || null,
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
       });
 
       if (!resultado.ok) {
@@ -788,7 +790,8 @@ export function AparelhosTab() {
               descricao: item.raw,
               observacoes: montarObservacaoMercadoPhone(item, item.idEtiqueta),
               ativo: true,
-            } as any);
+              // A entrada é registrada por executarPlanoRemontagem, no lote da importação.
+            } as any, { registrarEntrada: false });
             return criado as any;
           },
           dadosCadastrais: (item, aparelho) => {
@@ -926,7 +929,11 @@ export function AparelhosTab() {
     };
 
     if (editingId) {
-      await atualizarAparelho(editingId, payload);
+      // Editar dados não mexe no ciclo de vida: sem `ativo`, um aparelho vendido
+      // ou baixado continua fora do estoque em vez de voltar por causa de uma edição.
+      const dadosEdicao: Partial<typeof payload> = { ...payload };
+      delete dadosEdicao.ativo;
+      await atualizarAparelho(editingId, dadosEdicao);
     } else {
       await criarAparelho(payload);
     }
@@ -936,10 +943,10 @@ export function AparelhosTab() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("Tem certeza que deseja deletar este aparelho?")) {
+    if (confirm("Dar baixa neste aparelho? Ele sai do estoque e continua no histórico.")) {
       const sucesso = await deletarAparelho(id);
       if (sucesso) {
-        alert("Aparelho removido do estoque com sucesso.");
+        toast.success("Aparelho baixado do estoque.");
       }
       await fetchAparelhos();
     }
@@ -1392,12 +1399,31 @@ export function AparelhosTab() {
       console.log("🚀 Iniciando cadastro em massa...", aparelhosParaCriar);
 
       try {
-        // Realiza o insert de todos os aparelhos em uma única chamada ao banco
-        const { error: bulkError } = await supabase
-          .from('aparelhos')
-          .insert(aparelhosParaCriar);
+        // Realiza o insert de todos os aparelhos em uma única chamada ao banco.
+        // Cadastro: as linhas criadas são registradas logo abaixo com registrarEntradaEstoque.
+        const { data: criados, error: bulkError } = await supabase
+          .from('aparelhos') // estoque-guard: auditado
+          .insert(aparelhosParaCriar)
+          .select('id, loja_id, ativo, status, condicao');
 
         if (bulkError) throw bulkError;
+
+        // Os aparelhos já existem: falha na auditoria só avisa, não vira "erro ao cadastrar".
+        try {
+          const entrada = await registrarEntradaEstoque(supabase, {
+            aparelhos: criados || [],
+            origem: 'manual',
+            lojaId: usuario?.lojaId || null,
+            usuarioId: usuario?.id || null,
+            usuarioNome: usuario?.nome || null,
+            observacao: 'Cadastro em massa por lista de fornecedor',
+          });
+          if (!entrada.auditoriaRegistrada) throw new Error(entrada.erroAuditoria || 'auditoria incompleta');
+        } catch (erroAuditoria: any) {
+          toast.warning('Aparelhos cadastrados, mas a entrada no estoque não foi gravada inteira na auditoria. Avise o suporte.', {
+            description: erroAuditoria?.message,
+          });
+        }
 
         alert(`Sucesso! ${aparelhosParaCriar.length} aparelhos foram cadastrados de uma vez.`);
       } catch (err: any) {

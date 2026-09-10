@@ -43,6 +43,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useUpgrade, AvaliacaoUpgradeItem, VistoriaUpgradeItem } from '@/hooks/useUpgrade';
 import { useMotoboys } from '@/hooks/useMotoboys';
 import { supabase } from '@/lib/supabaseClient';
+import { registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { 
   calcularAvaliacaoUpgrade, 
   TABELA_BASE_UPGRADE_PADRAO, 
@@ -1673,8 +1674,9 @@ export function CalculadoraUpgradeTab() {
                         variant="outline"
                         onClick={async () => {
                           try {
-                            // Cadastra no estoque geral (aparelhos)
-                            await supabase.from('aparelhos').insert([{
+                            // Cadastra no estoque geral (aparelhos) e registra a entrada na auditoria
+                            // estoque-guard: auditado
+                            const { data: aparelhoCriado, error: erroCadastro } = await supabase.from('aparelhos').insert([{
                               modelo: vistoria.modelo,
                               capacidade: vistoria.capacidade,
                               cor: vistoria.cor || 'Preto',
@@ -1688,7 +1690,22 @@ export function CalculadoraUpgradeTab() {
                               ativo: true,
                               loja_id: targetLojaId,
                               observacoes: `Coleta ${vistoria.protocolo} por ${vistoria.motoboy_nome}`
-                            }]);
+                            }]).select('id, loja_id, ativo, status, condicao').single();
+                            if (erroCadastro) throw erroCadastro;
+
+                            const entrada = await registrarEntradaEstoque(supabase, {
+                              aparelhos: aparelhoCriado ? [aparelhoCriado] : [],
+                              origem: 'manual',
+                              lojaId: targetLojaId,
+                              usuarioId: usuario?.id ?? null,
+                              usuarioNome: usuario?.nome ?? null,
+                              observacao: `Entrada da coleta ${vistoria.protocolo} (motoboy ${vistoria.motoboy_nome})`,
+                            });
+                            if (!entrada.auditoriaRegistrada) {
+                              toast.warning(
+                                `Aparelho cadastrado, mas a entrada não foi registrada no histórico do estoque${entrada.erroAuditoria ? `: ${entrada.erroAuditoria}` : '.'}`
+                              );
+                            }
                             toast.success(`Aparelho ${vistoria.modelo} cadastrado no Estoque Geral com sucesso!`);
                           } catch (err: any) {
                             toast.error('Erro ao adicionar ao estoque: ' + err.message);

@@ -30,6 +30,11 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { formatarSaudeBateria, cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import { estaNoEstoque, patchSaida } from '@/lib/estoque/ciclo';
+import type { EstadoCicloAparelho, PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
+import type { ResultadoMudancaEstoque } from '@/lib/estoque/movimentacoes';
 
 interface AparelhoAuditoria {
   id: string;
@@ -113,6 +118,7 @@ export function ConferenciaEstoqueModal({
   lojaId,
   onEstoqueAtualizado,
 }: ConferenciaEstoqueModalProps) {
+  const { usuario } = useAuth();
   const [etapa, setEtapa] = useState<'escaneamento' | 'relatorio'>('escaneamento');
   const [modoConferencia, setModoConferencia] = useState<'scanner' | 'manual'>('scanner');
   const [buscaManual, setBuscaManual] = useState('');
@@ -599,94 +605,194 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
     setSalvandoAjustes(true);
     try {
       let alterados = 0;
+      let auditoriaIncompleta = false;
+      const falhas: string[] = [];
 
+      // Todas as escritas deste salvamento compartilham um lote: a conferência
+      // inteira pode ser auditada (e desfeita) de uma vez.
+      const contexto = {
+        loteId: gerarLoteId(),
+        lojaId: lojaId || usuario?.lojaId || null,
+        usuarioId: usuario?.id ?? null,
+        usuarioNome: usuario?.nome ?? null,
+      };
+
+      const porAcao: Record<Exclude<AcaoFaltante, 'manter'>, AparelhoAuditoria[]> = {
+        vendido: [],
+        atacado: [],
+        remover: [],
+        manutencao: [],
+      };
       for (const aparelho of aparelhosFaltantes) {
         const acao = acoesFaltantes[aparelho.id];
         if (!acao || acao === 'manter') continue;
+        porAcao[acao].push(aparelho);
+      }
 
-        let payload: any = {};
-
-        if (acao === 'vendido') {
-          payload = { ativo: false, condicao: 'vendido', status: 'vendido', observacoes: `Baixa automática na conferência de estoque: Marcado como Vendido em ${new Date().toLocaleDateString('pt-BR')}` };
-        } else if (acao === 'manutencao') {
-          const dataIso = new Date().toISOString();
-          const tagManut = `[MANUTENCAO:status=com_tecnico|tecnico_nome=Oficina / Técnico Responsável|data=${dataIso}|motivo=Encaminhado na conferência de estoque]`;
-          const obsAtual = aparelho.observacoes || '';
-          payload = {
-            status: 'manutencao',
-            tecnico_nome: 'Oficina / Técnico Responsável',
-            motivo_manutencao: 'Encaminhado na conferência de estoque',
-            data_manutencao: dataIso,
-            observacoes: obsAtual ? `${obsAtual}\n${tagManut}` : tagManut,
-          };
-        } else if (acao === 'atacado') {
-          payload = { ativo: false, condicao: 'vendido', status: 'vendido', observacoes: `Vendido no atacado (Baixa na conferência de estoque em ${new Date().toLocaleDateString('pt-BR')})` };
-        } else if (acao === 'remover') {
-          payload = { ativo: false, observacoes: `Removido do estoque por extravio/perda na conferência em ${new Date().toLocaleDateString('pt-BR')}` };
+      const contabilizar = (resultado: ResultadoMudancaEstoque) => {
+        alterados += resultado.afetados;
+        if (!resultado.auditoriaRegistrada) {
+          auditoriaIncompleta = true;
+          console.warn('[Conferência] Ajuste aplicado sem auditoria completa:', resultado.erroAuditoria);
         }
+      };
 
-        if (Object.keys(payload).length > 0) {
-          let { error } = await supabase
-            .from('aparelhos')
-            .update(payload)
-            .eq('id', aparelho.id);
+      // Registra em vendas, com dados de cliente pendentes, o aparelho que saiu como venda.
+      const registrarVendaConferencia = async (aparelho: AparelhoAuditoria, acao: 'vendido' | 'atacado') => {
+        try {
+          const dataIso = new Date().toISOString();
+          const precoNum = aparelho.preco || 0;
+          await supabase.from('vendas').insert([{
+            clienteNome: acao === 'atacado' ? 'Venda Atacado (Conferência)' : 'Venda Varejo (Conferência)',
+            tipoEntrega: acao === 'atacado' ? 'Atacado / Lojista' : 'Varejo',
+            valor: precoNum,
+            custo: 0,
+            lucro: precoNum,
+            percentualLucro: 100,
+            dataPagamento: dataIso,
+            status: 'pago',
+            metodo: 'dinheiro',
+            saldoDevedor: 0,
+            valorPago: precoNum,
+            dados_cliente_pendente: acao === 'vendido',
+            descricao: `Baixa na conferência de estoque: ${aparelho.modelo}`,
+            itens: [{
+              id: `${Date.now()}_${aparelho.id}`,
+              aparelhoId: aparelho.id,
+              descricao: `${aparelho.marca || ''} ${aparelho.modelo} (ID: ${getAparelhoCodigo(aparelho as any)})`,
+              quantidade: 1,
+              valorInterno: 0,
+              valorExibir: precoNum,
+              total: precoNum,
+              // Preserva dados do aparelho para o histórico e para um eventual
+              // "desfazer venda" devolver o aparelho certo.
+              imei: aparelho.imei || '',
+              bateria: formatarSaudeBateria(aparelho),
+              condicaoOriginal: aparelho.condicao || '',
+            }],
+            loja_id: (aparelho as any).loja_id || (aparelho as any).lojaId || null
+          }]);
+        } catch (errV) {
+          console.warn('Registro de venda na conferência:', errV);
+        }
+      };
 
-          if (error) {
-            delete payload.tecnico_nome;
-            delete payload.motivo_manutencao;
-            delete payload.data_manutencao;
-            delete payload.status;
-            const resFallback = await supabase
-              .from('aparelhos')
-              .update(payload)
-              .eq('id', aparelho.id);
-            error = resFallback.error;
+      const dataBr = new Date().toLocaleDateString('pt-BR');
+      const saidas: Array<{
+        acao: 'vendido' | 'atacado' | 'remover';
+        patch: PatchCiclo;
+        tipo: TipoMovimentacao;
+        observacao: string;
+      }> = [
+        {
+          acao: 'vendido',
+          patch: { ...patchSaida('vendido', 'venda'), observacoes: `Baixa automática na conferência de estoque: Marcado como Vendido em ${dataBr}` },
+          tipo: 'venda',
+          observacao: 'Conferência de estoque: saída como venda (varejo)',
+        },
+        {
+          acao: 'atacado',
+          patch: { ...patchSaida('vendido', 'venda'), observacoes: `Vendido no atacado (Baixa na conferência de estoque em ${dataBr})` },
+          tipo: 'venda',
+          observacao: 'Conferência de estoque: saída como venda no atacado',
+        },
+        {
+          acao: 'remover',
+          patch: { ...patchSaida('baixado', 'baixa_manual'), observacoes: `Removido do estoque por extravio/perda na conferência em ${dataBr}` },
+          tipo: 'baixa',
+          observacao: 'Conferência de estoque: baixa por extravio/perda',
+        },
+      ];
+
+      for (const saida of saidas) {
+        const grupo = porAcao[saida.acao];
+        if (grupo.length === 0) continue;
+
+        // Fatias do tamanho das do módulo (150): cada chamada grava a fatia inteira ou
+        // nada, e as vendas da fatia são registradas logo em seguida. Com o grupo numa
+        // chamada só, uma falha na 2ª fatia deixaria a 1ª fora do estoque sem venda.
+        for (let inicio = 0; inicio < grupo.length; inicio += 150) {
+          const fatia = grupo.slice(inicio, inicio + 150);
+          const idsAlterados = new Set<string>();
+          try {
+            const resultado = await aplicarMudancaEstoque(supabase, {
+              ...contexto,
+              ids: fatia.map((a) => a.id),
+              patch: saida.patch,
+              tipo: saida.tipo,
+              origem: 'conferencia',
+              observacao: saida.observacao,
+              // Quem já saiu do estoque entre a contagem e o salvamento fica intocado.
+              filtroElegivel: (estado) => {
+                const elegivel = estaNoEstoque(estado);
+                if (elegivel && estado.id) idsAlterados.add(String(estado.id));
+                return elegivel;
+              },
+            });
+            contabilizar(resultado);
+          } catch (errGrupo: any) {
+            console.error(`Erro ao aplicar "${saida.acao}" na conferência:`, errGrupo);
+            falhas.push(`${saida.acao} (${fatia.length}): ${errGrupo?.message || 'falha no servidor'}`);
+            continue;
           }
 
-          if (!error) {
-            alterados += 1;
-
-            // Se for vendido ou atacado, registra também em vendas com dados pendentes
-            if (acao === 'vendido' || acao === 'atacado') {
-              try {
-                const dataIso = new Date().toISOString();
-                const precoNum = aparelho.preco || 0;
-                await supabase.from('vendas').insert([{
-                  clienteNome: acao === 'atacado' ? 'Venda Atacado (Conferência)' : 'Venda Varejo (Conferência)',
-                  tipoEntrega: acao === 'atacado' ? 'Atacado / Lojista' : 'Varejo',
-                  valor: precoNum,
-                  custo: 0,
-                  lucro: precoNum,
-                  percentualLucro: 100,
-                  dataPagamento: dataIso,
-                  status: 'pago',
-                  metodo: 'dinheiro',
-                  saldoDevedor: 0,
-                  valorPago: precoNum,
-                  dados_cliente_pendente: acao === 'vendido',
-                  descricao: `Baixa na conferência de estoque: ${aparelho.modelo}`,
-                  itens: [{
-                    id: `${Date.now()}_${aparelho.id}`,
-                    aparelhoId: aparelho.id,
-                    descricao: `${aparelho.marca || ''} ${aparelho.modelo} (ID: ${getAparelhoCodigo(aparelho as any)})`,
-                    quantidade: 1,
-                    valorInterno: 0,
-                    valorExibir: precoNum,
-                    total: precoNum,
-                    // Preserva o que a venda apagaria, para o histórico e para
-                    // um eventual "desfazer venda" devolver o aparelho certo.
-                    imei: aparelho.imei || '',
-                    bateria: formatarSaudeBateria(aparelho),
-                    condicaoOriginal: aparelho.condicao || '',
-                  }],
-                  loja_id: (aparelho as any).loja_id || (aparelho as any).lojaId || null
-                }]);
-              } catch (errV) {
-                console.warn('Registro de venda na conferência:', errV);
-              }
+          if (saida.acao === 'vendido' || saida.acao === 'atacado') {
+            for (const aparelho of fatia) {
+              if (idsAlterados.has(aparelho.id)) await registrarVendaConferencia(aparelho, saida.acao);
             }
           }
         }
+      }
+
+      // Manutenção não tira o aparelho do estoque (continua sendo da loja): sem
+      // data_saida. Um aparelho por vez porque as observações de cada um mudam.
+      for (const aparelho of porAcao.manutencao) {
+        const dataIso = new Date().toISOString();
+        const tagManut = `[MANUTENCAO:status=com_tecnico|tecnico_nome=Oficina / Técnico Responsável|data=${dataIso}|motivo=Encaminhado na conferência de estoque]`;
+        const obsAtual = aparelho.observacoes || '';
+        const observacoes = obsAtual ? `${obsAtual}\n${tagManut}` : tagManut;
+        const opcoesBase = {
+          ...contexto,
+          ids: [aparelho.id],
+          tipo: 'saida' as const,
+          origem: 'conferencia' as const,
+          observacao: 'Conferência de estoque: encaminhado para manutenção',
+          filtroElegivel: (estado: EstadoCicloAparelho) => estaNoEstoque(estado),
+        };
+
+        try {
+          let resultado: ResultadoMudancaEstoque;
+          try {
+            resultado = await aplicarMudancaEstoque(supabase, {
+              ...opcoesBase,
+              patch: {
+                status: 'manutencao',
+                tecnico_nome: 'Oficina / Técnico Responsável',
+                motivo_manutencao: 'Encaminhado na conferência de estoque',
+                data_manutencao: dataIso,
+                observacoes,
+              },
+            });
+          } catch (errColunas) {
+            // Banco sem as colunas de técnico: grava ao menos o status e a tag nas observações.
+            console.warn('Manutenção na conferência sem colunas de técnico:', errColunas);
+            resultado = await aplicarMudancaEstoque(supabase, {
+              ...opcoesBase,
+              patch: { status: 'manutencao', observacoes },
+            });
+          }
+          contabilizar(resultado);
+        } catch (errManut: any) {
+          console.error('Erro ao encaminhar para manutenção na conferência:', errManut);
+          falhas.push(`manutenção de ${aparelho.modelo}: ${errManut?.message || 'falha no servidor'}`);
+        }
+      }
+
+      if (falhas.length > 0) {
+        toast.error(`Alguns ajustes não foram aplicados: ${falhas.join(' | ')}`, { duration: 10000 });
+      }
+      if (auditoriaIncompleta) {
+        toast.warning('Ajustes aplicados, mas parte do histórico de movimentações do estoque não foi gravada.');
       }
 
       // Copia automaticamente o texto das saídas para a área de transferência!

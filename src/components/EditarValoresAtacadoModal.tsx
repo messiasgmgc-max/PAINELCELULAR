@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { cn, parseMonetaryValue } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
+import { estaNoEstoque } from '@/lib/estoque/ciclo';
 
 interface EditarValoresAtacadoModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export function EditarValoresAtacadoModal({
 
   // Inicializa mapa de edições com valores atuais do estoque
   const aparelhosAtivos = useMemo(() => {
-    return aparelhos.filter((a) => a.ativo !== false && a.condicao !== 'vendido');
+    return aparelhos.filter((a) => estaNoEstoque(a as any));
   }, [aparelhos]);
 
   // Filtro por texto
@@ -135,8 +136,8 @@ export function EditarValoresAtacadoModal({
         
         // Tenta atualizar com precoAtacado (camelCase)
         let { error } = await supabase
-          .from('aparelhos')
-          .update({ 
+          .from('aparelhos') // estoque-guard: sem-ciclo
+          .update({
             precoAtacado: novoPrecoAtacado,
             preco_atacado: novoPrecoAtacado 
           })
@@ -145,13 +146,13 @@ export function EditarValoresAtacadoModal({
         // Se der erro de coluna não encontrada, tenta individualmente
         if (error) {
           const res1 = await supabase
-            .from('aparelhos')
+            .from('aparelhos') // estoque-guard: sem-ciclo
             .update({ precoAtacado: novoPrecoAtacado })
             .eq('id', id);
 
           if (res1.error) {
             const res2 = await supabase
-              .from('aparelhos')
+              .from('aparelhos') // estoque-guard: sem-ciclo
               .update({ preco_atacado: novoPrecoAtacado })
               .eq('id', id);
             error = res2.error;

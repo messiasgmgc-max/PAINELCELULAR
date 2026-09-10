@@ -568,7 +568,7 @@ export function EtiquetasTab() {
         const atual = Number((aparelho as any).etiquetas_impressas || (aparelho as any).etiquetasImpressas || 0);
         const novoValor = atual + Math.max(1, quantidadePorItem);
         await supabase
-          .from('aparelhos')
+          .from('aparelhos') // estoque-guard: sem-ciclo
           .update({ etiquetas_impressas: novoValor })
           .eq('id', aparelho.id);
       }

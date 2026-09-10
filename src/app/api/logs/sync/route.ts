@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
+import { estaNoEstoque } from '@/lib/estoque/ciclo';
 
 export async function POST(request: Request) {
   try {
@@ -102,8 +103,14 @@ async function executarSincronizacao(lojaId?: string) {
       if (!refsExistentes.has(refKey)) {
         refsExistentes.add(refKey);
 
-        const isVendido = a.status === 'vendido' || a.status === 'saida';
-        const acao = isVendido ? 'Saída / Venda de Aparelho' : 'Entrada no Estoque';
+        // 'baixado' não é venda: separa as duas saídas. condicao='vendido' é legado.
+        const foiVendido = a.status === 'vendido' || a.status === 'saida' || a.condicao === 'vendido';
+        const foiBaixado = !foiVendido && !estaNoEstoque(a);
+        const acao = foiVendido
+          ? 'Saída / Venda de Aparelho'
+          : foiBaixado
+            ? 'Saída / Baixa de Aparelho'
+            : 'Entrada no Estoque';
         const comprador = a.comprador_atacado || a.comprador || '';
         const preco = a.preco_venda ? `por R$ ${Number(a.preco_venda).toFixed(2).replace('.', ',')}` : '';
 

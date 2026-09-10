@@ -207,7 +207,7 @@ export function BaixaFiadoModal({
               obsApar = obsApar.replace(/Pgto:\s*fiado(?:\s*\([^)]*\))?/gi, `Pgto: fiado (quitado)`);
             }
             await supabase
-              .from('aparelhos')
+              .from('aparelhos') // estoque-guard: sem-ciclo
               .update({ observacoes: obsApar })
               .eq('id', venda.aparelhoId);
           }

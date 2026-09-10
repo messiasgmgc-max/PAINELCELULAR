@@ -22,6 +22,9 @@ import { cn, getAparelhoCodigo, obterDataHoraVenda } from '@/lib/utils';
 import { Aparelho, Cliente } from '@/lib/db/types';
 import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
+import { useAuth } from '@/hooks/useAuth';
+import { estaNoEstoque, patchSaida } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
 
 interface VincularVendidoModalProps {
   isOpen: boolean;
@@ -53,10 +56,11 @@ export function VincularVendidoModal({
   const [salvando, setSalvando] = useState(false);
 
   const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
+  const { usuario } = useAuth();
 
-  // Lista de aparelhos com status vendido ou inativo (que foram dados baixa)
+  // Aparelhos que já saíram do estoque (vendidos ou baixados), inclusive o legado com condicao='vendido'
   const aparelhosVendidos = useMemo(() => {
-    return aparelhos.filter(a => a.ativo === false || a.condicao === 'vendido' || (a as any).status === 'vendido');
+    return aparelhos.filter(a => !estaNoEstoque({ ativo: a.ativo, status: a.status, condicao: a.condicao }));
   }, [aparelhos]);
 
   const filtrados = useMemo(() => {
@@ -116,9 +120,9 @@ export function VincularVendidoModal({
       const lucroNum = valorNum - custoNum;
       const dataIso = obterDataHoraVenda(dataVenda);
 
-      // 1. Atualiza cliente na tabela de aparelhos
+      // 1. Atualiza cliente na tabela de aparelhos (só cliente: não mexe no ciclo de vida)
       await supabase
-        .from('aparelhos')
+        .from('aparelhos') // estoque-guard: sem-ciclo
         .update({
           cliente: clienteNome.trim(),
           clienteId: clienteId || null,
@@ -179,7 +183,32 @@ export function VincularVendidoModal({
       if (errVenda) {
         console.warn('Fallback inserção:', errVenda);
         const { lojaId: _l, ...comp } = novaVenda;
-        await supabase.from('vendas').insert([comp]);
+        const { error: errFallback } = await supabase.from('vendas').insert([comp]);
+        if (errFallback) throw errFallback;
+      }
+
+      // 3. Com a venda gravada, o aparelho baixado passa a constar como vendido.
+      // Quem já consta como vendido (inclusive o legado com condicao='vendido') fica como está.
+      try {
+        const dataVendaDate = new Date(dataIso);
+        const resultadoEstoque = await aplicarMudancaEstoque(supabase, {
+          ids: [aparelhoSelecionado.id],
+          patch: patchSaida('vendido', 'venda', Number.isNaN(dataVendaDate.getTime()) ? new Date() : dataVendaDate),
+          tipo: 'venda',
+          origem: 'venda',
+          lojaId: lojaId || usuario?.lojaId || null,
+          usuarioId: usuario?.id,
+          usuarioNome: usuario?.nome,
+          observacao: `Venda vinculada a ${clienteNome.trim()}`,
+          filtroElegivel: (estado) =>
+            !estaNoEstoque(estado) && estado.status !== 'vendido' && estado.condicao !== 'vendido',
+        });
+        if (!resultadoEstoque.auditoriaRegistrada) {
+          toast.warning('Venda vinculada, mas a movimentação não foi gravada no histórico do estoque.', { duration: 8000 });
+        }
+      } catch (errEstoque) {
+        console.error('Não foi possível marcar o aparelho como vendido no estoque:', errEstoque);
+        toast.warning('Venda vinculada, mas o aparelho não foi marcado como vendido no estoque. Confira no estoque.', { duration: 8000 });
       }
 
       await upsertComprador(clienteNome.trim(), 'cliente');

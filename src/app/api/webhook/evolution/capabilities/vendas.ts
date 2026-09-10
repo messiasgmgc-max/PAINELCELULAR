@@ -1,5 +1,10 @@
+import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import { Capability, dataBr, descreverAparelho, moeda, numero, texto } from './core';
+
+/** ativo=true não basta: há registros ativos com status 'vendido'/'baixado' (inconsistência antiga). */
+const noEstoque = (aparelho: Record<string, unknown>) => estaNoEstoque(aparelho as EstadoCicloAparelho);
 
 const METODOS_VALIDOS = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'boleto', 'fiado', 'trade_in'];
 
@@ -72,20 +77,20 @@ export const capabilitiesVendas: Capability[] = [
       if (imei) {
         const { data } = await ctx.supabase
           .from('aparelhos')
-          .select('id, marca, modelo, capacidade, cor, imei, preco, custo')
+          .select('id, marca, modelo, capacidade, cor, imei, preco, custo, ativo, status, condicao')
           .eq('loja_id', ctx.lojaId)
           .eq('ativo', true)
           .eq('imei', imei)
           .limit(5);
-        candidatos = (data || []) as Record<string, unknown>[];
+        candidatos = ((data || []) as Record<string, unknown>[]).filter(noEstoque);
       } else {
         const { data } = await ctx.supabase
           .from('aparelhos')
-          .select('id, marca, modelo, capacidade, cor, imei, preco, custo')
+          .select('id, marca, modelo, capacidade, cor, imei, preco, custo, ativo, status, condicao')
           .eq('loja_id', ctx.lojaId)
           .eq('ativo', true)
           .limit(400);
-        const ranking = ranquear(modelo, (data || []) as Record<string, unknown>[], descreverAparelho);
+        const ranking = ranquear(modelo, ((data || []) as Record<string, unknown>[]).filter(noEstoque), descreverAparelho);
         const { escolhido, ambiguos } = melhorOuAmbiguo(ranking);
         candidatos = escolhido ? [escolhido] : ambiguos.slice(0, 5);
       }
@@ -145,12 +150,27 @@ export const capabilitiesVendas: Capability[] = [
       if (error) throw error;
 
       // Baixa do estoque só quando o aparelho foi identificado com segurança.
+      // A venda já foi gravada: falha na baixa vira aviso, sem desfazer a venda.
+      let baixado = false;
       if (aparelho?.id) {
-        await ctx.supabase
-          .from('aparelhos')
-          .update({ ativo: false, condicao: 'vendido', status: 'vendido', cliente: comprador })
-          .eq('id', aparelho.id as string)
-          .eq('loja_id', ctx.lojaId);
+        try {
+          const resultado = await aplicarMudancaEstoque(ctx.supabase, {
+            ids: [aparelho.id as string],
+            patch: { ...patchSaida('vendido', 'venda'), cliente: comprador },
+            tipo: 'venda',
+            origem: 'bot_whatsapp',
+            lojaId: ctx.lojaId,
+            usuarioNome: ctx.pushName,
+            observacao: `Venda via WhatsApp para ${comprador}`,
+            filtroElegivel: estaNoEstoque,
+          });
+          baixado = resultado.afetados > 0;
+          if (!resultado.auditoriaRegistrada) {
+            console.warn('[Estoque] Venda via WhatsApp baixou o aparelho sem auditoria completa:', resultado.erroAuditoria);
+          }
+        } catch (err) {
+          console.error('[Estoque] Venda registrada via WhatsApp, mas a baixa do aparelho falhou:', err);
+        }
       }
 
       return (
@@ -159,7 +179,11 @@ export const capabilitiesVendas: Capability[] = [
         `👤 ${comprador}\n` +
         `💰 ${moeda(valor)}${custo > 0 ? ` | Lucro: ${moeda(lucro)}` : ''}\n` +
         `💳 ${metodo.replace('_', ' ')} · ${tipoEntrega}\n` +
-        (aparelho?.id ? '📦 Aparelho baixado do estoque.' : '⚠️ Aparelho não localizado no estoque; venda registrada sem baixa.')
+        (baixado
+          ? '📦 Aparelho baixado do estoque.'
+          : aparelho?.id
+            ? '⚠️ Venda registrada, mas o aparelho não foi baixado do estoque. Confira no painel.'
+            : '⚠️ Aparelho não localizado no estoque; venda registrada sem baixa.')
       );
     },
   },

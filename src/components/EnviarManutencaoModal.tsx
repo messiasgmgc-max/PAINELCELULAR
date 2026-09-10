@@ -6,6 +6,11 @@ import { useTecnicos } from "@/hooks/useTecnicos";
 import { montarTagManutencao } from "@/lib/manutencao";
 import { getAparelhoCodigo } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
+import { estaNoEstoque } from "@/lib/estoque/ciclo";
+import type { PatchCiclo } from "@/lib/estoque/ciclo";
+import { aplicarMudancaEstoque } from "@/lib/estoque/movimentacoes";
+import type { ResultadoMudancaEstoque } from "@/lib/estoque/movimentacoes";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +44,7 @@ export function EnviarManutencaoModal({
   onSuccess,
 }: EnviarManutencaoModalProps) {
   const { tecnicos, fetchTecnicos } = useTecnicos();
+  const { usuario } = useAuth();
   const [tecnicoSelecionadoId, setTecnicoSelecionadoId] = useState<string>("");
   const [outroTecnicoNome, setOutroTecnicoNome] = useState<string>("");
   const [isOutroTecnico, setIsOutroTecnico] = useState(false);
@@ -132,41 +138,58 @@ export function EnviarManutencaoModal({
         observacoes: novaObservacao,
       };
 
-      // Tenta atualizar no Supabase com resiliência a colunas
+      // Envio para manutenção não tira o aparelho do estoque (continua sendo da
+      // loja): sem data_saida. Passa pelo módulo de estoque para gravar a
+      // movimentação; o laço só descarta colunas de técnico que o banco não tenha.
       let lastError: any = null;
-      let sucesso = false;
+      let resultado: ResultadoMudancaEstoque | null = null;
 
       for (let tentativa = 0; tentativa < 4; tentativa++) {
-        const res = await supabase.from("aparelhos").update(payload).eq("id", aparelho.id);
-        if (!res.error) {
-          sucesso = true;
+        try {
+          resultado = await aplicarMudancaEstoque(supabase, {
+            ids: [aparelho.id],
+            patch: payload as PatchCiclo,
+            tipo: "saida",
+            origem: "manutencao",
+            lojaId: (aparelho as any).loja_id || aparelho.lojaId || usuario?.lojaId || null,
+            usuarioId: usuario?.id ?? null,
+            usuarioNome: usuario?.nome ?? null,
+            observacao: `Enviado para manutenção com ${finalTecnicoNome}: ${motivo.trim()}`,
+            filtroElegivel: (estado) => estaNoEstoque(estado),
+          });
           break;
+        } catch (err: any) {
+          lastError = err;
+          const errorText = String(err?.message || "");
+          const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
+          const col = columnMatch?.[1];
+
+          // status e observacoes nunca saem do payload: sem eles o envio se perde.
+          if (col && col !== "status" && col !== "observacoes" && Object.prototype.hasOwnProperty.call(payload, col)) {
+            delete payload[col];
+            continue;
+          }
+
+          delete payload.tecnico_id;
+          delete payload.tecnico_nome;
+          delete payload.data_manutencao;
+          delete payload.motivo_manutencao;
         }
-
-        lastError = res.error;
-        const errorText = `${res.error.message || ""} ${res.error.details || ""}`;
-        const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
-        const col = columnMatch?.[1];
-
-        if (col && Object.prototype.hasOwnProperty.call(payload, col)) {
-          delete payload[col];
-          continue;
-        }
-
-        // Se falhou por 'status' ou campos customizados, garante salvar na observacao
-        delete payload.tecnico_id;
-        delete payload.tecnico_nome;
-        delete payload.data_manutencao;
-        delete payload.motivo_manutencao;
       }
 
-      if (!sucesso) {
-        // Fallback garantido: apenas observacoes
-        const fallbackRes = await supabase
-          .from("aparelhos")
-          .update({ observacoes: novaObservacao })
-          .eq("id", aparelho.id);
-        if (fallbackRes.error) throw fallbackRes.error;
+      if (!resultado) throw lastError || new Error("Falha ao registrar o envio para manutenção.");
+
+      if (resultado.afetados === 0) {
+        toast.error(`${aparelho.modelo} não está mais no estoque (vendido ou baixado). Nada foi alterado.`, { id: toastId });
+        await onSuccess();
+        onClose();
+        return;
+      }
+
+      if (!resultado.auditoriaRegistrada) {
+        toast.warning(
+          `Envio registrado, mas o histórico de movimentação do estoque não foi gravado${resultado.erroAuditoria ? `: ${resultado.erroAuditoria}` : "."}`
+        );
       }
 
       toast.success(

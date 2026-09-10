@@ -1,4 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
   Capability,
@@ -10,6 +12,17 @@ import {
 
 /** Colunas seguras para exibir um aparelho no WhatsApp. */
 const COLUNAS_APARELHO = 'id, marca, modelo, capacidade, cor, imei, codigo, preco, custo, condicao, status, ativo';
+
+/** ativo=true não basta: há registros ativos com status 'vendido'/'baixado' (inconsistência antiga). */
+const noEstoque = (aparelho: Record<string, unknown>) => estaNoEstoque(aparelho as EstadoCicloAparelho);
+
+/**
+ * `condicao` é estado físico e nunca recebe 'vendido' (isso é `status`).
+ * Descarta o valor quando a IA ou o usuário o mandam como condição.
+ */
+function condicaoFisica(valor: string): string {
+  return valor.trim().toLowerCase() === 'vendido' ? '' : valor;
+}
 
 /**
  * Localiza UM aparelho a partir de identificadores livres (imei, código ou
@@ -31,7 +44,7 @@ async function localizarAparelhos(
       .eq('ativo', true)
       .eq('imei', imei)
       .limit(5);
-    return (data || []) as Record<string, unknown>[];
+    return ((data || []) as Record<string, unknown>[]).filter(noEstoque);
   }
 
   if (/^\d{6,}$/.test(identificador)) {
@@ -42,7 +55,7 @@ async function localizarAparelhos(
       .eq('ativo', true)
       .or(`imei.eq.${identificador},codigo.eq.${identificador}`)
       .limit(5);
-    return (data || []) as Record<string, unknown>[];
+    return ((data || []) as Record<string, unknown>[]).filter(noEstoque);
   }
 
   // Para texto livre, um ilike erra em "15pm", "13pro" e erro de digitação.
@@ -54,7 +67,7 @@ async function localizarAparelhos(
     .eq('ativo', true)
     .limit(400);
 
-  const itens = (data || []) as Record<string, unknown>[];
+  const itens = ((data || []) as Record<string, unknown>[]).filter(noEstoque);
   const ranking = ranquear(identificador, itens, descreverAparelho);
   const { escolhido, ambiguos } = melhorOuAmbiguo(ranking);
 
@@ -99,7 +112,7 @@ export const capabilitiesEstoque: Capability[] = [
         .order('modelo')
         .limit(termo ? 400 : 30);
 
-      let itens = (data || []) as Record<string, unknown>[];
+      let itens = ((data || []) as Record<string, unknown>[]).filter(noEstoque);
       if (termo) {
         itens = ranquear(termo, itens, descreverAparelho).slice(0, 30).map((c) => c.item);
       }
@@ -162,7 +175,6 @@ export const capabilitiesEstoque: Capability[] = [
 
       const registro = {
         loja_id: ctx.lojaId,
-        lojaId: ctx.lojaId,
         marca: texto(params, 'marca') || 'Apple',
         modelo,
         capacidade: texto(params, 'capacidade') || null,
@@ -170,15 +182,27 @@ export const capabilitiesEstoque: Capability[] = [
         preco,
         custo: numero(params, 'custo') || 0,
         imei: imei || null,
-        condicao: texto(params, 'condicao') || 'seminovo',
+        condicao: condicaoFisica(texto(params, 'condicao')) || 'seminovo',
         status: 'disponivel',
         ativo: true,
         dataCadastro: new Date().toISOString(),
         observacoes: `Cadastrado via WhatsApp por ${ctx.pushName}`,
       };
 
-      const { error } = await ctx.supabase.from('aparelhos').insert(registro);
+      // estoque-guard: auditado
+      const { data: inserido, error } = await ctx.supabase.from('aparelhos').insert(registro).select('id, loja_id, ativo, status, condicao').single();
       if (error) throw error;
+
+      const entrada = await registrarEntradaEstoque(ctx.supabase, {
+        aparelhos: inserido ? [inserido] : [],
+        origem: 'bot_whatsapp',
+        lojaId: ctx.lojaId,
+        usuarioNome: ctx.pushName,
+        observacao: 'Cadastro via WhatsApp',
+      });
+      if (!entrada.auditoriaRegistrada) {
+        console.warn('[Estoque] Aparelho cadastrado via WhatsApp sem auditoria completa:', entrada.erroAuditoria);
+      }
 
       return (
         `✅ *Aparelho cadastrado!*\n\n` +
@@ -227,7 +251,7 @@ export const capabilitiesEstoque: Capability[] = [
       const precoAnterior = Number(alvo.preco || 0);
 
       const { error } = await ctx.supabase
-        .from('aparelhos')
+        .from('aparelhos') // estoque-guard: sem-ciclo
         .update({ preco: novoPreco })
         .eq('id', alvo.id as string)
         .eq('loja_id', ctx.lojaId);
@@ -264,7 +288,8 @@ export const capabilitiesEstoque: Capability[] = [
       const alteracoes: Record<string, unknown> = {};
       const cor = texto(params, 'cor');
       const capacidade = texto(params, 'capacidade');
-      const condicao = texto(params, 'condicao');
+      const condicaoInformada = texto(params, 'condicao');
+      const condicao = condicaoFisica(condicaoInformada);
       const novoImei = texto(params, 'novoImei');
       const custo = numero(params, 'custo');
 
@@ -275,6 +300,9 @@ export const capabilitiesEstoque: Capability[] = [
       if (custo > 0) alteracoes.custo = custo;
 
       if (Object.keys(alteracoes).length === 0) {
+        if (condicaoInformada) {
+          return '⚠️ *vendido* não é condição do aparelho. Para registrar a venda use *!vender*; para tirar do estoque, peça a remoção.';
+        }
         return '⚠️ O que devo alterar nesse aparelho? (cor, capacidade, condição, custo ou IMEI)';
       }
 
@@ -289,7 +317,7 @@ export const capabilitiesEstoque: Capability[] = [
 
       const alvo = candidatos[0];
       const { error } = await ctx.supabase
-        .from('aparelhos')
+        .from('aparelhos') // estoque-guard: sem-ciclo
         .update(alteracoes)
         .eq('id', alvo.id as string)
         .eq('loja_id', ctx.lojaId);
@@ -330,15 +358,27 @@ export const capabilitiesEstoque: Capability[] = [
       const alvo = candidatos[0];
       const motivo = texto(params, 'motivo') || 'baixa manual';
 
-      const { error } = await ctx.supabase
-        .from('aparelhos')
-        .update({
-          ativo: false,
+      const resultado = await aplicarMudancaEstoque(ctx.supabase, {
+        ids: [alvo.id as string],
+        patch: {
+          ...patchSaida('baixado', 'baixa_manual'),
           observacoes: `Baixa via WhatsApp por ${ctx.pushName}: ${motivo}`,
-        })
-        .eq('id', alvo.id as string)
-        .eq('loja_id', ctx.lojaId);
-      if (error) throw error;
+        },
+        tipo: 'baixa',
+        origem: 'bot_whatsapp',
+        lojaId: ctx.lojaId,
+        usuarioNome: ctx.pushName,
+        observacao: `Baixa via WhatsApp: ${motivo}`,
+        camposAuditados: ['observacoes'],
+        filtroElegivel: estaNoEstoque,
+      });
+
+      if (resultado.afetados === 0) {
+        return `⚠️ *${descreverAparelho(alvo)}* já não está no estoque. Nada foi alterado.`;
+      }
+      if (!resultado.auditoriaRegistrada) {
+        console.warn('[Estoque] Baixa via WhatsApp aplicada sem auditoria completa:', resultado.erroAuditoria);
+      }
 
       return `✅ *${descreverAparelho(alvo)}* removido do estoque.\n📝 Motivo: ${motivo}`;
     },

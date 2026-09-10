@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { condicaoParaDevolucao, limparObservacoesDeVenda } from './vendasDevolucao';
+import { estaNoEstoque, patchRestauracao } from './estoque/ciclo';
+import { aplicarMudancaEstoque } from './estoque/movimentacoes';
+import { condicaoAoDevolver, limparObservacoesDeVenda } from './vendasDevolucao';
 
 /**
  * Devolver ao estoque um aparelho listado no Histórico de Saídas.
@@ -11,6 +13,9 @@ import { condicaoParaDevolucao, limparObservacoesDeVenda } from './vendasDevoluc
  *
  * O aparelho não guarda o id da venda, então ela é localizada pelo `aparelhoId`
  * dentro do JSONB `itens`.
+ *
+ * A reativação passa por aplicarMudancaEstoque (tipo 'restauracao', origem
+ * 'devolucao'), que valida o ciclo de vida e grava a movimentação.
  */
 
 export interface ItemVenda {
@@ -124,6 +129,12 @@ export interface ResultadoDevolucao {
   ok: boolean;
   mensagem: string;
   vendaAjustada: AcaoNaVenda['tipo'];
+  /**
+   * false quando o aparelho voltou ao estoque mas a trilha em
+   * `movimentacoes_estoque` não foi gravada inteira. A operação não é desfeita;
+   * quem chama deve avisar o usuário (a `mensagem` já traz o aviso).
+   */
+  auditoriaRegistrada: boolean;
 }
 
 /** Colunas necessárias para recalcular a venda sem perder invariantes. */
@@ -141,17 +152,21 @@ async function localizarVendaDoAparelho(
   supabase: SupabaseClient,
   aparelhoId: string,
   lojaId: string | null
-): Promise<VendaParaRecalculo | null> {
+): Promise<VendaParaRecalculo | null | 'varias'> {
   const base = () => {
     let q = supabase.from('vendas').select(COLUNAS_VENDA);
     if (lojaId) q = q.eq('loja_id', lojaId);
     return q;
   };
 
-  const { data, error } = await base().contains('itens', [{ aparelhoId }]).limit(5);
+  const { data, error } = await base().contains('itens', [{ aparelhoId }]).limit(2);
 
   if (!error) {
-    return ((data || []) as VendaParaRecalculo[])[0] || null;
+    const encontradas = (data || []) as VendaParaRecalculo[];
+    // Mais de uma venda cobra este aparelho (recompra, lançamento duplicado):
+    // escolher uma às cegas poderia apagar a venda legítima.
+    if (encontradas.length > 1) return 'varias';
+    return encontradas[0] || null;
   }
 
   // `contains` exige que `itens` seja jsonb. Se a coluna for json ou text em
@@ -162,31 +177,78 @@ async function localizarVendaDoAparelho(
   const { data: todas, error: erroVarredura } = await base().limit(5000);
   if (erroVarredura) throw erroVarredura;
 
-  return (
-    ((todas || []) as VendaParaRecalculo[]).find((v) =>
-      (Array.isArray(v.itens) ? v.itens : []).some((i) => i?.aparelhoId === aparelhoId)
-    ) || null
+  const comAparelho = ((todas || []) as VendaParaRecalculo[]).filter((v) =>
+    (Array.isArray(v.itens) ? v.itens : []).some((i) => i?.aparelhoId === aparelhoId)
   );
+  if (comAparelho.length > 1) return 'varias';
+  return comAparelho[0] || null;
+}
+
+/**
+ * Quem está devolvendo, para a auditoria. Sem dados do chamador, tenta a sessão
+ * do próprio cliente Supabase (no servidor com service role não há sessão, e a
+ * movimentação fica sem usuário).
+ */
+async function identificarUsuario(
+  supabase: SupabaseClient,
+  params: { usuarioId?: string | null; usuarioNome?: string | null }
+): Promise<{ id: string | null; nome: string | null }> {
+  if (params.usuarioId || params.usuarioNome) {
+    return { id: params.usuarioId || null, nome: params.usuarioNome || null };
+  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    const user = data?.session?.user;
+    if (!user) return { id: null, nome: null };
+    const nome = (user.user_metadata?.nome as string | undefined) || user.email?.split('@')[0] || null;
+    return { id: user.id, nome };
+  } catch {
+    return { id: null, nome: null };
+  }
 }
 
 export async function devolverAparelhoAoEstoque(
   supabase: SupabaseClient,
-  params: { aparelhoId: string; lojaId: string | null }
+  params: {
+    aparelhoId: string;
+    lojaId: string | null;
+    /** Quem pediu a devolução, para a auditoria. */
+    usuarioId?: string | null;
+    usuarioNome?: string | null;
+  }
 ): Promise<ResultadoDevolucao> {
   const { aparelhoId, lojaId } = params;
 
-  const { data: aparelho, error: erroAparelho } = await supabase
+  let leitura = supabase
     .from('aparelhos')
-    .select('id, marca, modelo, observacoes, condicao')
-    .eq('id', aparelhoId)
-    .maybeSingle();
+    .select('id, loja_id, marca, modelo, observacoes, ativo, status, condicao')
+    .eq('id', aparelhoId);
+  if (lojaId) leitura = leitura.eq('loja_id', lojaId);
+  const { data: aparelho, error: erroAparelho } = await leitura.maybeSingle();
 
   if (erroAparelho) throw erroAparelho;
   if (!aparelho) {
-    return { ok: false, mensagem: 'Aparelho não encontrado.', vendaAjustada: 'nenhuma' };
+    return { ok: false, mensagem: 'Aparelho não encontrado.', vendaAjustada: 'nenhuma', auditoriaRegistrada: true };
   }
 
-  const vendaAlvo = await localizarVendaDoAparelho(supabase, aparelhoId, lojaId);
+  const nome = `${aparelho.marca || ''} ${aparelho.modelo || ''}`.trim() || 'Aparelho';
+
+  // Checado ANTES de mexer na venda: um aparelho que já voltou (clique duplo,
+  // outra aba) não pode apagar a venda de novo nem gerar outra restauração.
+  if (estaNoEstoque(aparelho)) {
+    return { ok: false, mensagem: `${nome} já está no estoque.`, vendaAjustada: 'nenhuma', auditoriaRegistrada: true };
+  }
+
+  const localizada = await localizarVendaDoAparelho(supabase, aparelhoId, lojaId);
+  if (localizada === 'varias') {
+    return {
+      ok: false,
+      mensagem: `${nome} aparece em mais de uma venda. Ajuste pelo histórico de vendas para não apagar a venda errada.`,
+      vendaAjustada: 'nenhuma',
+      auditoriaRegistrada: true,
+    };
+  }
+  const vendaAlvo = localizada;
 
   const itemDaVenda = vendaAlvo
     ? (Array.isArray(vendaAlvo.itens) ? vendaAlvo.itens : []).find((i) => i?.aparelhoId === aparelhoId)
@@ -206,27 +268,41 @@ export async function devolverAparelhoAoEstoque(
     if (error) throw error;
   }
 
-  // A condição original fica no item da venda; o aparelho já foi sobrescrito
-  // com 'vendido' na baixa. condicaoParaDevolucao ignora 'vendido', então o
-  // segundo candidato entra como fallback de verdade.
-  const { error: erroUpdate } = await supabase
-    .from('aparelhos')
-    .update({
-      ativo: true,
-      condicao: condicaoParaDevolucao({
-        condicaoOriginal: itemDaVenda?.condicaoOriginal,
-        condicao: itemDaVenda?.condicao || aparelho.condicao,
-      }),
-      status: 'disponivel',
+  // A condição física do aparelho é mantida. Só registros antigos, em que a
+  // baixa gravou condicao='vendido', recebem a condição guardada no item da venda.
+  const condicaoReparada = condicaoAoDevolver(aparelho.condicao, {
+    condicaoOriginal: itemDaVenda?.condicaoOriginal,
+    condicao: itemDaVenda?.condicao,
+  });
+
+  const usuario = await identificarUsuario(supabase, params);
+
+  const resultado = await aplicarMudancaEstoque(supabase, {
+    ids: [aparelhoId],
+    patch: {
       cliente: null,
       clienteId: null,
       observacoes: limparObservacoesDeVenda(aparelho.observacoes),
-    })
-    .eq('id', aparelhoId);
+      ...(condicaoReparada ? { condicao: condicaoReparada } : {}),
+      ...patchRestauracao(),
+    },
+    tipo: 'restauracao',
+    origem: 'devolucao',
+    lojaId,
+    usuarioId: usuario.id,
+    usuarioNome: usuario.nome,
+    observacao:
+      acao.tipo === 'excluir'
+        ? `Devolução ao estoque; venda ${acao.vendaId} removida.`
+        : acao.tipo === 'atualizar'
+          ? `Devolução ao estoque; item retirado da venda ${acao.vendaId}.`
+          : 'Devolução ao estoque de aparelho sem venda vinculada.',
+    // Cliente e observações são sobrescritos aqui: ficam no antes/depois.
+    camposAuditados: ['cliente', 'clienteId', 'observacoes'],
+    // Revalida no estado lido na escrita: quem voltou por outro caminho fica intocado.
+    filtroElegivel: (estado) => !estaNoEstoque(estado),
+  });
 
-  if (erroUpdate) throw erroUpdate;
-
-  const nome = `${aparelho.marca || ''} ${aparelho.modelo || ''}`.trim() || 'Aparelho';
   const complemento =
     acao.tipo === 'excluir'
       ? ' A venda correspondente foi removida.'
@@ -234,5 +310,25 @@ export async function devolverAparelhoAoEstoque(
         ? ' O item saiu da venda e os totais foram recalculados.'
         : '';
 
-  return { ok: true, mensagem: `${nome} voltou para o estoque.${complemento}`, vendaAjustada: acao.tipo };
+  let aviso = '';
+  if (!resultado.auditoriaRegistrada) {
+    console.warn('[Devolução] Aparelho devolvido, mas a auditoria não foi gravada inteira:', resultado.erroAuditoria);
+    aviso = ' Atenção: a auditoria da devolução não foi gravada inteira. Avise o suporte.';
+  }
+
+  if (resultado.afetados === 0) {
+    return {
+      ok: true,
+      mensagem: `${nome} já tinha voltado para o estoque.${complemento}`,
+      vendaAjustada: acao.tipo,
+      auditoriaRegistrada: resultado.auditoriaRegistrada,
+    };
+  }
+
+  return {
+    ok: true,
+    mensagem: `${nome} voltou para o estoque.${complemento}${aviso}`,
+    vendaAjustada: acao.tipo,
+    auditoriaRegistrada: resultado.auditoriaRegistrada,
+  };
 }

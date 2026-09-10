@@ -26,10 +26,11 @@ function normalizar(valor: unknown): string {
 /**
  * Decide em que condição o aparelho volta ao estoque.
  *
- * A baixa da venda grava `condicao: 'vendido'` por cima do valor original, então
- * a condição verdadeira só existe no que foi guardado na venda. A versão antiga
- * do "cancelar venda" devolvia tudo como 'seminovo' fixo — um iPhone lacrado
- * voltava ao estoque como seminovo, mudando a faixa de preço do aparelho.
+ * A baixa da venda gravava 'vendido' na coluna `condicao`, por cima do valor original
+ * (regra antiga, anterior ao ciclo de vida em src/lib/estoque/ciclo.ts), então
+ * nesses registros a condição verdadeira só existe no que foi guardado na venda.
+ * A versão antiga do "cancelar venda" devolvia tudo como 'seminovo' fixo — um
+ * iPhone lacrado voltava ao estoque como seminovo, mudando a faixa de preço.
  *
  * Ordem de confiança: o que a venda registrou, o que veio no item, e só então o
  * palpite padrão.
@@ -53,6 +54,25 @@ export function condicaoParaDevolucao(item: ItemVendaDevolucao | null | undefine
   }
 
   return 'seminovo';
+}
+
+/**
+ * Decide se a devolução precisa gravar `condicao` e com qual valor.
+ *
+ * Pelo ciclo de vida, vender não mexe mais em `condicao`: o valor atual do
+ * aparelho É o estado físico, e reescrevê-lo na devolução só perderia
+ * informação (um 'lacrado' viraria 'novo'). Só registros antigos, baixados
+ * quando a venda ainda gravava `condicao='vendido'`, precisam de reparo — sem
+ * ele voltariam ao estoque ainda contados como fora dele (estaNoEstoque).
+ *
+ * Retorna `undefined` quando a condição atual deve ser mantida.
+ */
+export function condicaoAoDevolver(
+  condicaoAtual: unknown,
+  item: ItemVendaDevolucao | null | undefined
+): CondicaoAparelho | undefined {
+  if (normalizar(condicaoAtual) !== 'vendido') return undefined;
+  return condicaoParaDevolucao(item);
 }
 
 /**

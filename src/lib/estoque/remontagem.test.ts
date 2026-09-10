@@ -148,6 +148,22 @@ describe('Remontagem legítima', () => {
     assert.ok(!plano.atualizar.some((u) => u.aparelho.id === 'ap-0'));
   });
 
+  it('não reativa o legado ambíguo (desativado com a condição antiga de venda)', async () => {
+    const aparelhos = [aparelho(0, { ativo: false, status: 'disponivel', condicao: 'vendido' }), aparelho(1)];
+    const plano = planejarRemontagem({ itens: [itemPara(0), itemPara(1)], aparelhos, obterCodigo });
+
+    assert.equal(plano.conflitosVendidos.length, 1);
+    assert.ok(!plano.atualizar.some((u) => u.aparelho.id === 'ap-0'));
+
+    // Nem um plano adulterado faz o executor mexer nele.
+    const fake = criarSupabaseFake({ aparelhos });
+    const adulterado = { ...plano, atualizar: [{ item: itemPara(0), aparelho: aparelhos[0], reativa: true }] };
+    await executarPlanoRemontagem(fake.client, adulterado, { incluirBaixa: false }, dependencias(fake));
+    const linha = fake.tabelas.aparelhos.find((a) => a.id === 'ap-0');
+    assert.equal(linha?.ativo, false);
+    assert.equal(linha?.condicao, 'vendido');
+  });
+
   it('reativa aparelho baixado que a lista confirma estar na loja', () => {
     const aparelhos = [aparelho(0, { ativo: false, status: 'baixado' }), aparelho(1)];
     const plano = planejarRemontagem({ itens: [itemPara(0), itemPara(1)], aparelhos, obterCodigo });

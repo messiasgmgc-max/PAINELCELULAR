@@ -26,6 +26,9 @@ import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
 import { useAuth } from '@/hooks/useAuth';
 import { logVenda, logEstoque } from '@/lib/logger';
+import { estaNoEstoque, patchRestauracao, patchSaida } from '@/lib/estoque/ciclo';
+import type { OrigemMovimentacao, PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
 
 interface MarcarVendidoModalProps {
   isOpen: boolean;
@@ -151,19 +154,48 @@ export function MarcarVendidoModal({
         aparelho.imei ? `IMEI: ${aparelho.imei}` : ''
       ].filter(Boolean).join(' | ');
 
-      // 1. Atualiza aparelho no Supabase
-      const { error: errAparelho } = await supabase
-        .from('aparelhos')
-        .update({
-          ativo: false,
-          condicao: 'vendido',
-          status: 'vendido',
-          cliente: compradorFinal,
-          observacoes: obsBaixa,
-        })
-        .eq('id', aparelho.id);
+      // 1. Tira o aparelho do estoque pelo módulo de ciclo de vida (grava a movimentação).
+      // A condição física não é tocada: 'vendido' vai só em status.
+      const dataVendaDate = new Date(dataIso);
+      const dataSaida = Number.isNaN(dataVendaDate.getTime()) ? new Date() : dataVendaDate;
+      const camposDaVenda = { cliente: compradorFinal, observacoes: obsBaixa };
 
-      if (errAparelho) throw errAparelho;
+      let patchAparelho: PatchCiclo;
+      let tipoMovimentacao: TipoMovimentacao;
+      let origemMovimentacao: OrigemMovimentacao;
+      if (tipoVenda === 'manutencao') {
+        // Continua sendo da loja: sem ativo=false e sem data_saida.
+        patchAparelho = { status: 'manutencao', ...camposDaVenda };
+        tipoMovimentacao = 'saida';
+        origemMovimentacao = 'manutencao';
+      } else if (tipoVenda === 'perda') {
+        patchAparelho = { ...patchSaida('baixado', 'perda', dataSaida), ...camposDaVenda };
+        tipoMovimentacao = 'baixa';
+        origemMovimentacao = 'manual';
+      } else {
+        patchAparelho = { ...patchSaida('vendido', 'venda', dataSaida), ...camposDaVenda };
+        tipoMovimentacao = 'venda';
+        origemMovimentacao = tipoVenda === 'atacado' ? 'atacado' : 'venda';
+      }
+
+      const resultadoEstoque = await aplicarMudancaEstoque(supabase, {
+        ids: [aparelho.id],
+        patch: patchAparelho,
+        tipo: tipoMovimentacao,
+        origem: origemMovimentacao,
+        lojaId: lojaId || usuario?.lojaId || null,
+        usuarioId: usuario?.id,
+        usuarioNome: usuario?.nome,
+        observacao: `Saída ${tipoVenda.toUpperCase()} para ${compradorFinal}`,
+        filtroElegivel: estaNoEstoque,
+      });
+
+      if (resultadoEstoque.afetados === 0) {
+        throw new Error('este aparelho não está mais no estoque (já foi vendido ou baixado). Atualize a lista.');
+      }
+      if (!resultadoEstoque.auditoriaRegistrada) {
+        toast.warning('Saída registrada, mas a movimentação não foi gravada no histórico do estoque.', { duration: 8000 });
+      }
 
       const isDadosPendente = tipoVenda === 'varejo' && (
         dadosPendente || 
@@ -197,6 +229,8 @@ export function MarcarVendidoModal({
           {
             id: Date.now().toString(),
             aparelhoId: aparelho.id,
+            // Estado físico antes da venda, para um estorno devolver o aparelho como estava.
+            condicaoOriginal: aparelho.condicao,
             descricao: `${aparelho.marca} ${aparelho.modelo} - ${aparelho.capacidade || ''} ${aparelho.cor || ''} (IMEI/ID: ${aparelho.imei || getAparelhoCodigo(aparelho)})`,
             quantidade: 1,
             valorInterno: custoNum,
@@ -236,6 +270,30 @@ export function MarcarVendidoModal({
         const resFallback = await supabase.from('vendas').insert([payloadCompativel]);
         if (resFallback.error) {
           console.error('Falha no fallback de inserção na tabela vendas:', resFallback.error);
+          // Sem a venda, a saída não tem lastro: o aparelho volta como estava.
+          const reversao = await aplicarMudancaEstoque(supabase, {
+            ids: [aparelho.id],
+            loteId: resultadoEstoque.loteId,
+            patch: {
+              ...patchRestauracao(),
+              status: aparelho.status === 'manutencao' ? 'manutencao' : 'disponivel',
+              cliente: aparelho.cliente ?? null,
+              observacoes: aparelho.observacoes ?? null,
+            },
+            tipo: 'restauracao',
+            origem: origemMovimentacao,
+            lojaId: lojaId || usuario?.lojaId || null,
+            usuarioId: usuario?.id,
+            usuarioNome: usuario?.nome,
+            observacao: 'Venda não gravada: saída desfeita.',
+          }).catch((erroReversao) => {
+            console.error('Falha ao desfazer a saída sem venda:', erroReversao);
+            return null;
+          });
+          throw new Error(
+            `a venda não foi gravada (${resFallback.error.message}). ` +
+              (reversao && reversao.afetados > 0 ? 'O aparelho continua no estoque.' : 'Confira o aparelho no estoque.')
+          );
         }
       }
 

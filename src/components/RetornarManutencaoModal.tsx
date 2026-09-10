@@ -5,6 +5,11 @@ import { Aparelho } from "@/lib/db/types";
 import { extrairDadosManutencao, montarTagRetornoManutencao } from "@/lib/manutencao";
 import { getAparelhoCodigo, parseMonetaryValue } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
+import { estaNoEstoque } from "@/lib/estoque/ciclo";
+import type { PatchCiclo } from "@/lib/estoque/ciclo";
+import { aplicarMudancaEstoque } from "@/lib/estoque/movimentacoes";
+import type { ResultadoMudancaEstoque } from "@/lib/estoque/movimentacoes";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +35,7 @@ export function RetornarManutencaoModal({
   const [novaSaudeBateria, setNovaSaudeBateria] = useState<string>("");
   const [solucao, setSolucao] = useState<string>("");
   const [salvando, setSalvando] = useState(false);
+  const { usuario } = useAuth();
 
   const dadosManut = aparelho ? extrairDadosManutencao(aparelho) : null;
 
@@ -68,9 +74,9 @@ export function RetornarManutencaoModal({
       const obsAtual = aparelho.observacoes || "";
       const novaObservacao = obsAtual ? `${obsAtual}\n${tagRetorno}` : tagRetorno;
 
+      // condicao é estado físico e não é tocada aqui: o retorno só muda o ciclo de vida.
       const payload: Record<string, any> = {
         status: "disponivel",
-        condicao: aparelho.condicao === "vendido" ? "seminovo" : (aparelho.condicao || "seminovo"),
         ativo: true,
         custo: novoCustoFinal,
         tecnico_id: null,
@@ -84,44 +90,64 @@ export function RetornarManutencaoModal({
         payload.saude_bateria = novaSaudeBateria.trim().endsWith("%") ? novaSaudeBateria.trim() : `${novaSaudeBateria.trim()}%`;
       }
 
-      // Atualização com resiliência
+      // Atualização com resiliência a colunas opcionais, sempre pelo módulo de estoque.
       let lastError: any = null;
-      let sucesso = false;
+      let resultado: ResultadoMudancaEstoque | null = null;
+      const camposObrigatorios = ["status", "ativo", "custo", "observacoes"];
 
       for (let tentativa = 0; tentativa < 4; tentativa++) {
-        const res = await supabase.from("aparelhos").update(payload).eq("id", aparelho.id);
-        if (!res.error) {
-          sucesso = true;
+        try {
+          resultado = await aplicarMudancaEstoque(supabase, {
+            ids: [aparelho.id],
+            patch: payload as PatchCiclo,
+            tipo: "restauracao",
+            origem: "manutencao",
+            lojaId: (aparelho as any).loja_id || aparelho.lojaId || usuario?.lojaId || null,
+            usuarioId: usuario?.id ?? null,
+            usuarioNome: usuario?.nome ?? null,
+            observacao: `Retorno da manutenção${dadosManut?.tecnicoNome ? ` (${dadosManut.tecnicoNome})` : ""}`,
+            // Só volta quem está em manutenção ou ainda no estoque; vendido/baixado fica intocado.
+            filtroElegivel: (estado) => estado.status === "manutencao" || estaNoEstoque(estado),
+          });
           break;
+        } catch (err: any) {
+          lastError = err;
+          const errorText = String(err?.message || "");
+          const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
+          const col = columnMatch?.[1];
+
+          if (col && !camposObrigatorios.includes(col) && Object.prototype.hasOwnProperty.call(payload, col)) {
+            delete payload[col];
+            continue;
+          }
+
+          delete payload.tecnico_id;
+          delete payload.tecnico_nome;
+          delete payload.data_manutencao;
+          delete payload.motivo_manutencao;
         }
-
-        lastError = res.error;
-        const errorText = `${res.error.message || ""} ${res.error.details || ""}`;
-        const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
-        const col = columnMatch?.[1];
-
-        if (col && Object.prototype.hasOwnProperty.call(payload, col)) {
-          delete payload[col];
-          continue;
-        }
-
-        delete payload.tecnico_id;
-        delete payload.tecnico_nome;
-        delete payload.data_manutencao;
-        delete payload.motivo_manutencao;
-        delete payload.status;
       }
 
-      if (!sucesso) {
-        const fallbackRes = await supabase
-          .from("aparelhos")
-          .update({
-            ativo: true,
-            custo: novoCustoFinal,
-            observacoes: novaObservacao,
-          })
-          .eq("id", aparelho.id);
-        if (fallbackRes.error) throw fallbackRes.error;
+      if (!resultado) throw lastError || new Error("Falha ao registrar o retorno da manutenção.");
+
+      if (resultado.afetados === 0) {
+        toast.error(`${aparelho.modelo} não está mais em manutenção nem no estoque (vendido ou baixado). Nada foi alterado.`, { id: toastId });
+        await onSuccess();
+        onClose();
+        return;
+      }
+
+      if (!resultado.auditoriaRegistrada) {
+        toast.warning(
+          `Retorno registrado, mas o histórico de movimentação do estoque não foi gravado${resultado.erroAuditoria ? `: ${resultado.erroAuditoria}` : "."}`
+        );
+      }
+
+      if (aparelho.condicao === "vendido") {
+        toast.warning(
+          `${aparelho.modelo} tem a condição física antiga "vendido" e continuará fora da lista de estoque. Edite o aparelho e informe a condição real (novo, seminovo, usado...).`,
+          { duration: 9000 }
+        );
       }
 
       toast.success(

@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
+import { NovoAparelhoRapidoModal } from '@/components/vendas/components/NovoAparelhoRapidoModal';
+import { desfazerCadastroRapido, type PayloadCadastroRapido } from '@/lib/pdv/cadastroRapido';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
 import { VincularVendidoModal } from '@/components/VincularVendidoModal';
@@ -25,8 +27,10 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
-import { cn, getAparelhoCodigo, obterDataHoraVenda, getVendaDataExibicao, extrairAparelhoEImeiDaVenda } from '@/lib/utils';
-import { condicaoParaDevolucao, limparObservacoesDeVenda } from '@/lib/vendasDevolucao';
+import { cn, canViewFinancials, getAparelhoCodigo, obterDataHoraVenda, getVendaDataExibicao, extrairAparelhoEImeiDaVenda } from '@/lib/utils';
+import { condicaoAoDevolver, limparObservacoesDeVenda } from '@/lib/vendasDevolucao';
+import { estaNoEstoque, patchRestauracao, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { toast } from 'sonner';
 import { registrarLog } from '@/lib/logger';
 import { generateReciboA4Html } from '@/lib/reciboA4';
@@ -75,6 +79,32 @@ const POS_MODAL_CLOSE_MS = 220;
 const SALE_SUCCESS_MS = 1350;
 const SALE_EMOJIS = ['🎉', '🥳', '💰', '✨', '🚀', '🔥'];
 
+/**
+ * O aparelho conta como estoque disponível? (`Aparelho` é interface sem index
+ * signature, por isso a conversão para o tipo do helper do ciclo.)
+ */
+const aparelhoNoEstoque = (a: Aparelho): boolean => estaNoEstoque(a as unknown as EstadoCicloAparelho);
+
+/**
+ * A venda só baixa o que ainda não está marcado como vendido: salvar de novo uma
+ * venda já baixada não pode sobrescrever a data de saída nem duplicar a movimentação.
+ * Vale também para o legado (ativo=false com a condição antiga de venda), que já saiu
+ * do estoque. Um aparelho 'baixado' vinculado a uma venda passa a constar como vendido.
+ */
+const aindaNaoVendido = (estado: EstadoCicloAparelho): boolean =>
+  estaNoEstoque(estado) || (estado.ativo === false && estado.status === 'baixado');
+
+/** A mudança no estoque já foi aplicada; só avisa que a trilha de auditoria ficou incompleta. */
+function avisarAuditoriaPendente(
+  resultado: { auditoriaRegistrada: boolean; erroAuditoria?: string },
+  acao: string
+) {
+  if (resultado.auditoriaRegistrada) return;
+  toast.warning(`${acao}, mas a auditoria do estoque não foi gravada inteira. Avise o suporte.`, {
+    description: resultado.erroAuditoria,
+  });
+}
+
 const createInitialPosPagamento = (): PosPagamentoState => ({
   metodo: 'dinheiro',
   parcelas: 1,
@@ -91,10 +121,12 @@ function ProdutoCombobox({
   aparelhos,
   value,
   onChange,
+  onCadastrarNovo,
 }: {
   aparelhos: Aparelho[];
   value: string;
   onChange: (aparelhoId: string) => void;
+  onCadastrarNovo?: (termo: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -118,9 +150,10 @@ function ProdutoCombobox({
     }
   }, [open]);
 
+  // Com a opção marcada entram também os que já saíram do estoque (vendidos ou baixados).
   const disponiveis = buscarVendidosSemCliente
-    ? aparelhos.filter(a => a.ativo !== false || a.condicao === 'vendido' || (a as any).status === 'vendido')
-    : aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+    ? aparelhos
+    : aparelhos.filter(aparelhoNoEstoque);
   const selecionado = aparelhos.find(a => a.id === value);
 
   const filtrados = disponiveis.filter(a => {
@@ -205,15 +238,28 @@ function ProdutoCombobox({
 
           <div className="overflow-y-auto divide-y divide-white/5 text-xs font-mono flex-1 max-h-64">
             {filtrados.length === 0 ? (
-              <div className="p-4 text-center text-muted-foreground text-xs font-sans">
-                Nenhum aparelho encontrado com "{searchTerm}".
+              <div className="p-4 text-center text-muted-foreground text-xs font-sans space-y-2">
+                <p>Nenhum aparelho encontrado com "{searchTerm}".</p>
+                {onCadastrarNovo && searchTerm.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCadastrarNovo(searchTerm.trim());
+                      setOpen(false);
+                      setSearchTerm('');
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-2 text-xs font-semibold text-blue-300 hover:bg-blue-500/25"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Cadastrar "{searchTerm.trim()}"
+                  </button>
+                )}
               </div>
             ) : (
               filtrados.map((a) => {
                 const imei = a.imei || a.numeroSerie || '';
                 const isSelected = a.id === value;
                 const cod = getAparelhoCodigo(a);
-                const jaBaixado = a.condicao === 'vendido' || (a as any).status === 'vendido' || a.ativo === false;
+                const jaBaixado = !aparelhoNoEstoque(a);
                 return (
                   <div
                     key={a.id}
@@ -276,7 +322,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const { usuario } = useAuth();
   const { config } = useStoreConfig();
   const { clientes, fetchClientes, criarCliente } = useClientes();
-  const { aparelhos, fetchAparelhos, criarAparelho, loading: loadingAparelhos, error: erroAparelhos } = useAparelhos();
+  const { aparelhos, fetchAparelhos, criarAparelho } = useAparelhos();
   const { tecnicos, fetchTecnicos } = useTecnicos();
 
   const [vendas, setVendas] = useState<Venda[]>([]);
@@ -302,6 +348,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showNovoCliente, setShowNovoCliente] = useState(false);
   const [showNovoAparelho, setShowNovoAparelho] = useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  // A câmera do PDV é uma instância só (o leitor usa um id fixo): o alvo diz para onde vai a leitura.
+  const [scannerAlvo, setScannerAlvo] = useState<'item' | 'novoAparelho'>('item');
+  const [codigoParaCadastro, setCodigoParaCadastro] = useState<{ valor: string; seq: number } | null>(null);
+  const [cadastroRapidoInicial, setCadastroRapidoInicial] = useState<{ identificador?: string; modelo?: string } | null>(null);
 
   // Estados de Trade-In / Aparelho na Troca
   interface TradeInVendaInfo {
@@ -405,7 +455,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       }));
       toast.success(`📱 ${aparelhoEncontrado.modelo} selecionado para a venda!`);
     } else {
-      toast.error(`Código de barras "${codeScanned}" não encontrado no estoque.`);
+      toast.error(`Código "${codeScanned}" não encontrado no estoque.`, {
+        duration: 8000,
+        action: { label: 'Cadastrar agora', onClick: () => abrirCadastroRapido({ identificador: codeScanned.trim() }) },
+      });
     }
   };
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
@@ -509,7 +562,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   // Estados para formulários rápidos
   const [novoClienteData, setNovoClienteData] = useState({ nome: '', email: '', telefone: '', cpf: '' });
-  const [novoAparelhoData, setNovoAparelhoData] = useState({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' as const });
 
   const isTypingField = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false;
@@ -593,28 +645,79 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     if (showPOS && !closingPOS) handleFinalizarVenda();
   };
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!showPOS && !showNovoCliente && !showNovoAparelho) return;
+  // Atalhos do PDV. O handler é refeito a cada render (via ref) para nunca usar carrinho,
+  // cliente e pagamentos de um render antigo. Esc fecha só o que está por cima e Enter
+  // com um popup aberto nunca finaliza a venda.
+  const atalhosPdvRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  const ultimaTeclaPdvRef = useRef(0);
+  const enterLiberadoApartirDeRef = useRef(0);
+  atalhosPdvRef.current = (event: KeyboardEvent) => {
+    if (!showPOS && !showNovoCliente && !showNovoAparelho && !showImportarPedidoModal) return;
+    const subModalAberto = showNovoCliente || showNovoAparelho || showImportarPedidoModal || showBarcodeScanner;
 
-      if (event.key === 'Escape') {
+    if (event.key === 'Escape') {
+      if (showBarcodeScanner) {
         event.preventDefault();
-        if (showPOS) closePOSModal();
-        if (showNovoCliente) setShowNovoCliente(false);
-        if (showNovoAparelho) setShowNovoAparelho(false);
-    if (showImportarPedidoModal) setShowImportarPedidoModal(false);
+        setShowBarcodeScanner(false);
+        setScannerAlvo('item');
         return;
       }
-
-      if (showPOS && event.key === 'Enter' && !event.shiftKey && !isTypingField(event.target)) {
-        event.preventDefault();
-        handleShortcutFinalize();
+      // O cadastro rápido trata o próprio Esc (pede confirmação se houver dados).
+      if (showNovoAparelho) return;
+      event.preventDefault();
+      if (showImportarPedidoModal) {
+        setShowImportarPedidoModal(false);
+        return;
       }
-    };
+      if (showNovoCliente) {
+        setShowNovoCliente(false);
+        return;
+      }
+      if (showPOS) closePOSModal();
+      return;
+    }
 
+    if (event.key === 'F4' && showPOS && !subModalAberto) {
+      event.preventDefault();
+      abrirCadastroRapido();
+      return;
+    }
+
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      ultimaTeclaPdvRef.current = Date.now();
+      return;
+    }
+
+    // Enter só finaliza quando é intencional: sem modificador nem repetição, fora de campos e
+    // botões, e não colado em outras teclas (o leitor USB digita o código e manda Enter) nem
+    // logo depois de fechar um popup (o foco cai no body).
+    const alvoInterativo =
+      event.target instanceof Element && Boolean(event.target.closest('button, a, [role="button"], [role="dialog"]'));
+    const agora = Date.now();
+    if (
+      showPOS &&
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.repeat &&
+      !subModalAberto &&
+      !isTypingField(event.target) &&
+      !alvoInterativo &&
+      agora - ultimaTeclaPdvRef.current > 300 &&
+      agora > enterLiberadoApartirDeRef.current
+    ) {
+      event.preventDefault();
+      handleShortcutFinalize();
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => atalhosPdvRef.current(event);
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showPOS, closingPOS]);
+  }, []);
 
   useEffect(() => {
     if (!showPOS) return;
@@ -954,7 +1057,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       }
 
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
-        const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+        const disponiveis = aparelhos.filter(aparelhoNoEstoque);
         aparelhoFinal = disponiveis.find(a => 
           (parsedData.aparelho?.imei && a.imei && a.imei.toLowerCase() === parsedData.aparelho.imei.toLowerCase()) ||
           (`${a.marca} ${a.modelo}`.toLowerCase().includes(parsedData.aparelho.modelo.toLowerCase()))
@@ -974,29 +1077,42 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           custo: Number(parsedData.aparelho.custo || 0),
           condicao: parsedData.aparelho.condicao || 'seminovo',
           ativo: true,
+          status: 'disponivel',
           loja_id: usuario?.lojaId || null
         };
 
         const { data: novoAp, error: errAp } = await supabase
-          .from('aparelhos')
+          .from('aparelhos') // estoque-guard: auditado
           .insert([apPayload])
           .select()
           .maybeSingle();
 
+        let aparelhoCriado: Aparelho | null = null;
         if (errAp) {
           delete apPayload.saude_bateria;
           delete apPayload.codigo;
           const { data: retryAp } = await supabase
-            .from('aparelhos')
+            .from('aparelhos') // estoque-guard: auditado
             .insert([apPayload])
             .select()
             .maybeSingle();
-          if (retryAp) {
-            aparelhoFinal = retryAp as Aparelho;
-            await fetchAparelhos();
-          }
+          if (retryAp) aparelhoCriado = retryAp as Aparelho;
         } else if (novoAp) {
-          aparelhoFinal = novoAp as Aparelho;
+          aparelhoCriado = novoAp as Aparelho;
+        }
+
+        if (aparelhoCriado) {
+          aparelhoFinal = aparelhoCriado;
+          // Entrada registrada antes da baixa, para a trilha mostrar cadastro -> venda.
+          const entrada = await registrarEntradaEstoque(supabase, {
+            aparelhos: [aparelhoCriado as unknown as EstadoCicloAparelho],
+            origem: 'venda',
+            lojaId: usuario?.lojaId || null,
+            usuarioId: usuario?.id || null,
+            usuarioNome: usuario?.nome || null,
+            observacao: 'Cadastrado automaticamente pela venda gerada por IA.',
+          });
+          avisarAuditoriaPendente(entrada, 'Aparelho cadastrado');
           await fetchAparelhos();
         }
       }
@@ -1059,10 +1175,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       // 4. Dar baixa no aparelho no estoque imediatamente
       if (aparelhoFinal?.id) {
         await registrarCondicaoOriginalDosItens(vendaCriada?.id, [aparelhoFinal.id]);
-        await supabase
-          .from('aparelhos')
-          .update({ ativo: false, condicao: 'vendido' })
-          .eq('id', aparelhoFinal.id);
+        await darBaixaPorVenda([aparelhoFinal.id], vendaCriada?.id, 'Venda gerada por IA', dataPagamentoIso);
         await fetchAparelhos();
       }
 
@@ -1118,7 +1231,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       // Tenta encontrar e pré-selecionar o aparelho do estoque por Código/ID, IMEI ou Modelo
       let matchedStockId = '';
-      const disponiveis = aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+      const disponiveis = aparelhos.filter(aparelhoNoEstoque);
       const codAi = String(parsed.aparelho?.codigo || '').toLowerCase().replace(/\D/g, '');
       if (codAi) {
         const apMatch = disponiveis.find(a => getAparelhoCodigo(a).includes(codAi));
@@ -1223,6 +1336,29 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         loja_id: usuario?.lojaId || null
       };
 
+      // Outro terminal pode ter vendido um aparelho do carrinho depois que a lista foi
+      // carregada. Só bloqueia quem estava no estoque aqui e já saiu no banco: aparelho já
+      // baixado escolhido de propósito (vincular venda antiga) continua permitido.
+      if (!editingId) {
+        const idsParaConferir = carrinho
+          .map((item) => item.aparelhoId)
+          .filter((id): id is string => Boolean(id))
+          .filter((id) => estaNoEstoque(aparelhos.find((a) => a.id === id) as unknown as EstadoCicloAparelho | undefined));
+        if (idsParaConferir.length > 0) {
+          const { data: estadoAtual, error: erroEstado } = await supabase
+            .from('aparelhos')
+            .select('id, modelo, ativo, status, condicao')
+            .in('id', idsParaConferir);
+          if (erroEstado) throw erroEstado;
+          const jaSairam = (estadoAtual || []).filter((a) => !estaNoEstoque(a));
+          if (jaSairam.length > 0) {
+            throw new Error(
+              `${jaSairam.map((a) => a.modelo).join(', ')} já saiu do estoque (vendido em outro terminal?). Remova do carrinho e atualize a lista.`
+            );
+          }
+        }
+      }
+
       let vendaSalva = null;
 
       if (editingId) {
@@ -1244,19 +1380,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         vendaSalva = data;
       }
 
-      const aparelhosIds = carrinho.map(item => item.aparelhoId).filter(Boolean);
+      const aparelhosIds = carrinho
+        .map(item => item.aparelhoId)
+        .filter((id): id is string => Boolean(id));
       if (aparelhosIds.length > 0) {
-        // A baixa sobrescreve `condicao` com 'vendido'. Guardamos a condição
-        // original na própria venda para que desfazê-la devolva o aparelho ao
-        // estoque como ele estava — um lacrado não pode voltar como seminovo.
+        // Guardamos a condição física original na própria venda para que
+        // desfazê-la devolva o aparelho ao estoque como ele estava — um lacrado
+        // não pode voltar como seminovo (baixas antigas gravavam 'vendido' em `condicao`).
         await registrarCondicaoOriginalDosItens(vendaSalva?.id, aparelhosIds);
-
-        const { error: erroEstoque } = await supabase
-          .from('aparelhos')
-          .update({ ativo: false, condicao: 'vendido' }) 
-          .in('id', aparelhosIds);
-          
-        if (erroEstoque) console.error('Erro ao dar baixa no estoque:', erroEstoque);
+        await darBaixaPorVenda(aparelhosIds, vendaSalva?.id, editingId ? 'Venda PDV editada' : 'Venda PDV', dataPagamentoFinalIso);
         await fetchAparelhos();
       }
 
@@ -1265,7 +1397,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       if (temPagamentoTradeIn && tradeInVenda && tradeInVenda.valor > 0) {
         try {
           const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
-          await supabase.from('aparelhos').insert([{
+          const observacaoTroca = `Recebido como Trade-In na venda #${vendaSalva?.id ? String(vendaSalva.id).slice(-6).toUpperCase() : 'NOVA'}`;
+          // estoque-guard: auditado
+          const { data: aparelhoTroca, error: erroTroca } = await supabase.from('aparelhos').insert([{
             modelo: tradeInVenda.modelo,
             capacidade: tradeInVenda.capacidade,
             cor: tradeInVenda.cor || 'Preto',
@@ -1278,8 +1412,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             status: 'disponivel',
             ativo: true,
             loja_id: targetLojaId || null,
-            observacoes: `Recebido como Trade-In na venda #${vendaSalva?.id ? String(vendaSalva.id).slice(-6).toUpperCase() : 'NOVA'}`
-          }]);
+            observacoes: observacaoTroca
+          }]).select('id, loja_id, ativo, status, condicao').single();
 
           if (tradeInVenda.avaliacaoId) {
             await supabase.from('avaliacoes_upgrade').update({
@@ -1288,7 +1422,21 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             }).eq('id', tradeInVenda.avaliacaoId);
           }
 
-          toast.success(`Aparelho na troca (${tradeInVenda.modelo}) entrou no Estoque Geral!`);
+          if (erroTroca || !aparelhoTroca) {
+            console.warn('Aviso ao registrar aparelho de troca no estoque:', erroTroca);
+            toast.error(`Não foi possível dar entrada no aparelho da troca (${tradeInVenda.modelo}) no estoque.`);
+          } else {
+            const entrada = await registrarEntradaEstoque(supabase, {
+              aparelhos: [aparelhoTroca as EstadoCicloAparelho],
+              origem: 'venda',
+              lojaId: targetLojaId || null,
+              usuarioId: usuario?.id || null,
+              usuarioNome: usuario?.nome || null,
+              observacao: observacaoTroca,
+            });
+            avisarAuditoriaPendente(entrada, 'Aparelho da troca cadastrado');
+            toast.success(`Aparelho na troca (${tradeInVenda.modelo}) entrou no Estoque Geral!`);
+          }
           await fetchAparelhos();
         } catch (errTradeIn) {
           console.warn('Aviso ao registrar aparelho de troca no estoque:', errTradeIn);
@@ -1482,7 +1630,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       }, SALE_SUCCESS_MS);
     } catch (error) {
       console.error('Erro ao salvar venda:', error);
-      toast.error('Nao foi possivel salvar a venda.');
+      toast.error('Nao foi possivel salvar a venda.', { description: (error as { message?: string })?.message });
     } finally {
       setSavingVenda(false);
     }
@@ -1548,10 +1696,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   /**
-   * Salva na venda a condição em que cada aparelho estava antes da baixa.
+   * Salva na venda a condição física em que cada aparelho estava ao ser vendido.
    *
-   * A baixa grava `condicao: 'vendido'` por cima do valor original, então sem
-   * este registro não há como devolver o aparelho ao estoque no estado certo.
+   * A baixa não mexe mais em `condicao`, mas baixas antigas gravavam 'vendido'
+   * por cima do valor original — nesses registros só a venda sabe o estado certo
+   * para devolver o aparelho ao estoque. Por isso 'vendido' nunca é gravado como
+   * condição original: ao reeditar uma venda antiga, apagaria o valor verdadeiro.
    */
   const registrarCondicaoOriginalDosItens = async (
     vendaId: string | undefined,
@@ -1578,13 +1728,43 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       const itensComCondicao = itensAtuais.map((item: any) => {
         const original = porId.get(item.aparelhoId);
-        return original ? { ...item, condicaoOriginal: original } : item;
+        // 'vendido' é marca de baixa antiga, não estado físico: mantém o que já estava no item.
+        return original && original !== 'vendido' ? { ...item, condicaoOriginal: original } : item;
       });
 
       await supabase.from('vendas').update({ itens: itensComCondicao }).eq('id', vendaId);
     } catch (err) {
       // Não impede a venda: no pior caso o desfazer usa o palpite padrão.
       console.warn('Não foi possível registrar a condição original dos itens:', err);
+    }
+  };
+
+  /**
+   * Tira do estoque os aparelhos vendidos (ativo=false + status 'vendido', sem
+   * tocar em `condicao`) e registra a movimentação. A venda já está salva quando
+   * isto roda, então uma falha aqui é avisada mas não desfaz a venda.
+   */
+  const darBaixaPorVenda = async (ids: string[], vendaId: string | undefined, descricao: string, dataVendaIso?: string) => {
+    if (ids.length === 0) return;
+    try {
+      const quando = dataVendaIso ? new Date(dataVendaIso) : new Date();
+      const resultado = await aplicarMudancaEstoque(supabase, {
+        ids,
+        patch: patchSaida('vendido', 'venda', Number.isNaN(quando.getTime()) ? new Date() : quando),
+        tipo: 'venda',
+        origem: 'venda',
+        lojaId: usuario?.lojaId || null,
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
+        observacao: vendaId ? `${descricao} #${String(vendaId).slice(-6).toUpperCase()}` : descricao,
+        filtroElegivel: aindaNaoVendido,
+      });
+      avisarAuditoriaPendente(resultado, 'Baixa da venda aplicada');
+    } catch (erroEstoque: any) {
+      console.error('Erro ao dar baixa no estoque:', erroEstoque);
+      toast.error('Venda salva, mas não foi possível dar baixa no estoque.', {
+        description: erroEstoque?.message,
+      });
     }
   };
 
@@ -1605,37 +1785,67 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const itens = Array.isArray(vendaBanco?.itens) ? vendaBanco.itens : [];
       const itensComAparelho = itens.filter((i: any) => i?.aparelhoId);
 
-      // Devolve cada aparelho na condição em que estava, limpando as marcas
-      // que a venda deixou nas observações.
+      // Devolve cada aparelho ao estoque limpando as marcas que a venda deixou
+      // nas observações. Quem já está no estoque (ou em manutenção) fica como está.
       let devolvidos = 0;
+      let jaNoEstoque = 0;
+      let falhasDevolucao = 0;
+      let erroAuditoriaDevolucao: string | undefined;
+      const loteDevolucao = gerarLoteId();
       if (itensComAparelho.length > 0) {
         const ids = itensComAparelho.map((i: any) => i.aparelhoId);
         const { data: aparelhosVenda } = await supabase
           .from('aparelhos')
-          .select('id, observacoes')
+          .select('id, observacoes, condicao')
           .in('id', ids);
 
-        const observacoesPorId = new Map((aparelhosVenda || []).map((a) => [a.id, a.observacoes]));
+        const atuaisPorId = new Map((aparelhosVenda || []).map((a) => [a.id, a]));
 
         for (const item of itensComAparelho) {
-          if (!observacoesPorId.has(item.aparelhoId)) continue;
+          const atual = atuaisPorId.get(item.aparelhoId);
+          if (!atual) continue;
 
-          const obsLimpa = limparObservacoesDeVenda(observacoesPorId.get(item.aparelhoId));
+          const obsLimpa = limparObservacoesDeVenda(atual.observacoes);
+          // Baixas antigas gravavam 'vendido' em `condicao`: só nesses casos a
+          // condição física precisa ser recuperada do que a venda registrou.
+          const condicaoReparada = condicaoAoDevolver(atual.condicao, item);
 
-          const { error: erroUpdate } = await supabase
-            .from('aparelhos')
-            .update({
-              ativo: true,
-              condicao: condicaoParaDevolucao(item),
-              status: 'disponivel',
-              cliente: null,
-              clienteId: null,
-              observacoes: obsLimpa,
-            })
-            .eq('id', item.aparelhoId);
-
-          if (!erroUpdate) devolvidos += 1;
+          try {
+            const resultado = await aplicarMudancaEstoque(supabase, {
+              ids: [item.aparelhoId],
+              patch: {
+                cliente: null,
+                clienteId: null,
+                observacoes: obsLimpa,
+                ...(condicaoReparada ? { condicao: condicaoReparada } : {}),
+                ...patchRestauracao(),
+              },
+              tipo: 'restauracao',
+              origem: 'devolucao',
+              loteId: loteDevolucao,
+              lojaId: usuario?.lojaId || null,
+              usuarioId: usuario?.id || null,
+              usuarioNome: usuario?.nome || null,
+              observacao: `Venda #${venda.id.slice(-6).toUpperCase()} desfeita.`,
+              filtroElegivel: (estado) => !estaNoEstoque(estado),
+            });
+            if (resultado.afetados > 0) devolvidos += 1;
+            else jaNoEstoque += 1;
+            if (!resultado.auditoriaRegistrada) {
+              erroAuditoriaDevolucao = resultado.erroAuditoria || 'Falha ao gravar a movimentação.';
+            }
+          } catch (erroDevolucao) {
+            console.error('Erro ao devolver aparelho ao estoque:', erroDevolucao);
+            falhasDevolucao += 1;
+          }
         }
+      }
+
+      // Com aparelho que não voltou, apagar a venda o deixaria vendido sem venda nenhuma.
+      if (falhasDevolucao > 0) {
+        throw new Error(
+          `${falhasDevolucao} aparelho(s) não puderam voltar ao estoque. A venda foi mantida: tente desfazer de novo.`
+        );
       }
 
       const { error: erroDelete } = await supabase.from('vendas').delete().eq('id', venda.id);
@@ -1651,15 +1861,25 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           `${devolvidos} aparelho(s) devolvido(s) ao estoque.`,
       });
 
-      const semAparelho = itensComAparelho.length - devolvidos;
+      const semAparelho = itensComAparelho.length - devolvidos - jaNoEstoque;
+      const avisosDevolucao = [
+        semAparelho > 0 ? `${semAparelho} item(ns) não estavam mais no estoque e foram ignorados.` : '',
+        jaNoEstoque > 0 ? `${jaNoEstoque} aparelho(s) já estavam no estoque.` : '',
+      ].filter(Boolean);
       toast.success(
         devolvidos > 0
           ? `Venda desfeita. ${devolvidos} aparelho(s) de volta ao estoque.`
           : 'Venda desfeita.',
-        semAparelho > 0
-          ? { description: `${semAparelho} item(ns) não estavam mais no estoque e foram ignorados.` }
+        avisosDevolucao.length > 0
+          ? { description: avisosDevolucao.join(' ') }
           : undefined
       );
+      if (erroAuditoriaDevolucao) {
+        avisarAuditoriaPendente(
+          { auditoriaRegistrada: false, erroAuditoria: erroAuditoriaDevolucao },
+          'Aparelhos devolvidos ao estoque'
+        );
+      }
 
       setVendaParaDesfazer(null);
       await carregarVendas();
@@ -2031,64 +2251,121 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
-  const handleNovoAparelhoSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const focoAntesDoCadastroRef = useRef<HTMLElement | null>(null);
 
-    const parseCurrencyInput = (value: string) => {
-      const digits = value.replace(/\D/g, '');
-      return digits ? parseFloat(digits) / 100 : 0;
+  const abrirCadastroRapido = (inicial?: { identificador?: string; modelo?: string } | null) => {
+    focoAntesDoCadastroRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setCadastroRapidoInicial(inicial || null);
+    setShowNovoAparelho(true);
+  };
+
+  const fecharCadastroRapido = () => {
+    setShowNovoAparelho(false);
+    setCadastroRapidoInicial(null);
+    // O foco cairia no body e o próximo Enter (ou bip do leitor) finalizaria a venda.
+    enterLiberadoApartirDeRef.current = Date.now() + 800;
+    const anterior = focoAntesDoCadastroRef.current;
+    window.setTimeout(() => {
+      if (anterior && document.body.contains(anterior)) anterior.focus();
+    }, 0);
+  };
+
+  /** O cadastro rápido registra a própria entrada no estoque e precisa da mensagem real do banco. */
+  const criarAparelhoParaCadastroRapido = async (payload: PayloadCadastroRapido): Promise<Aparelho> => {
+    const criado = await criarAparelho(payload as unknown as Parameters<typeof criarAparelho>[0], {
+      registrarEntrada: false,
+      lancarErro: true,
+    });
+    if (!criado) throw new Error('Não foi possível cadastrar o aparelho.');
+    return criado;
+  };
+
+  const adicionarAparelhoAoCarrinho = (aparelho: Aparelho): boolean => {
+    if (carrinho.some((item) => item.aparelhoId === aparelho.id)) {
+      toast.error('Este aparelho já está no carrinho.');
+      return false;
+    }
+    const preco = aparelho.preco || 0;
+    const novoItem: VendaItem = {
+      id: `${Date.now()}`,
+      aparelhoId: aparelho.id,
+      descricao: [aparelho.marca, aparelho.modelo, aparelho.capacidade, aparelho.cor]
+        .filter((parte) => parte && parte !== 'N/A')
+        .join(' '),
+      quantidade: 1,
+      valorInterno: resolveAparelhoCusto(aparelho) || 0,
+      valorExibir: preco,
+      desconto: 0,
+      tipoDesconto: 'R$',
+      total: preco,
+      observacao: '',
+      imei: aparelho.imei || aparelho.numeroSerie || '',
     };
+    setCart((atual) => [...atual, novoItem]);
+    return true;
+  };
 
-    if (!novoAparelhoData.marca || !novoAparelhoData.modelo) {
-      alert('Marca e modelo são obrigatórios');
-      return;
-    }
-
-    const custoNum = parseCurrencyInput(novoAparelhoData.custo);
-    const precoNum = parseCurrencyInput(novoAparelhoData.preco);
-    const imeiSanitizado = novoAparelhoData.imei.replace(/\D/g, '').trim();
-
-    if (precoNum <= 0) {
-      alert('Informe um preço de venda válido para cadastrar o aparelho.');
-      return;
-    }
-
-    const aparelhoPayload: Omit<Aparelho, 'id' | 'dataCadastro' | 'lojaId'> = {
-      marca: novoAparelhoData.marca.trim(),
-      modelo: novoAparelhoData.modelo.trim(),
-      imei: imeiSanitizado || undefined,
-      condicao: novoAparelhoData.condicao,
-      preco: precoNum,
-      custo: custoNum,
-      ativo: true,
-      capacidade: 'N/A',
-      cor: 'N/A'
-    };
-
-    const aparelho = await criarAparelho(aparelhoPayload as Parameters<typeof criarAparelho>[0]);
-
-    if (!aparelho) {
-      alert(erroAparelhos || 'Não foi possível cadastrar o aparelho. Verifique IMEI duplicado ou tente novamente.');
-      return;
-    }
-
-    if (aparelho) {
-      setPosItem(prev => ({
-        ...prev,
-        aparelhoId: aparelho.id,
-        descricao: `${aparelho.marca} ${aparelho.modelo}`,
-        valorExibir: aparelho.preco,
-        valorInterno: resolveAparelhoCusto(aparelho) || custoNum
-      }));
-      setShowNovoAparelho(false);
-      setNovoAparelhoData({ marca: '', modelo: '', imei: '', preco: '', custo: '', condicao: 'seminovo' });
+  /** Lançado por engano: sai do carrinho e do estoque como baixa auditada. */
+  const desfazerCadastroNoPdv = async (aparelho: Aparelho) => {
+    setCart((atual) => atual.filter((item) => item.aparelhoId !== aparelho.id));
+    setPosItem((atual) =>
+      atual.aparelhoId === aparelho.id ? { ...atual, aparelhoId: '', descricao: '', valorExibir: 0, valorInterno: 0 } : atual
+    );
+    if (!usuario?.lojaId) return;
+    try {
+      const resultado = await desfazerCadastroRapido(supabase, aparelho, {
+        lojaId: usuario.lojaId,
+        usuarioId: usuario.id,
+        usuarioNome: usuario.nome,
+      });
+      toast.message(
+        resultado.afetados > 0
+          ? 'Cadastro desfeito: o aparelho saiu do estoque.'
+          : 'O aparelho já não estava no estoque; nada foi alterado.'
+      );
       await fetchAparelhos();
+    } catch (erro: any) {
+      toast.error('Não foi possível desfazer o cadastro.', { description: erro?.message });
     }
+  };
+
+  const concluirCadastroRapido = (aparelho: Aparelho, modo: 'adicionar' | 'cadastrar') => {
+    fecharCadastroRapido();
+    const nome = [aparelho.modelo, aparelho.capacidade].filter(Boolean).join(' ');
+    const desfazer = { label: 'Desfazer', onClick: () => void desfazerCadastroNoPdv(aparelho) };
+
+    if (modo === 'adicionar' && adicionarAparelhoAoCarrinho(aparelho)) {
+      const custo = resolveAparelhoCusto(aparelho) || 0;
+      const lucro = (aparelho.preco || 0) - custo;
+      toast.success(`${nome} adicionado à venda`, {
+        description:
+          canViewFinancials(usuario) && custo > 0
+            ? `Lucro ${lucro.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+            : undefined,
+        duration: 6000,
+        action: desfazer,
+      });
+      return;
+    }
+
+    // Só cadastrar: pré-seleciona na linha de item, como o popup antigo fazia.
+    setPosItem((atual) => ({
+      ...atual,
+      aparelhoId: aparelho.id,
+      descricao: `${aparelho.marca} ${aparelho.modelo}`,
+      valorExibir: aparelho.preco || 0,
+      valorInterno: resolveAparelhoCusto(aparelho) || 0,
+    }));
+    toast.success(`${nome} cadastrado no estoque`, { duration: 6000, action: desfazer });
   };
 
   const handleAddItem = () => {
     if (!posItem.aparelhoId && !posItem.descricao) {
       alert('Selecione um aparelho ou descreva o item.');
+      return;
+    }
+    if (posItem.aparelhoId && carrinho.some((item) => item.aparelhoId === posItem.aparelhoId)) {
+      toast.error('Este aparelho já está no carrinho.');
       return;
     }
 
@@ -3089,6 +3366,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         <ProdutoCombobox
                           aparelhos={aparelhos}
                           value={posItem.aparelhoId || ''}
+                          onCadastrarNovo={(termo) =>
+                            abrirCadastroRapido(/^[\d\s-]+$/.test(termo) ? { identificador: termo } : { modelo: termo })
+                          }
                           onChange={(aparelhoId) => {
                             const aparelho = aparelhos.find(a => a.id === aparelhoId);
                             const custo = resolveAparelhoCusto(aparelho);
@@ -3104,7 +3384,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         <Button type="button" size="icon" variant="outline" onClick={() => setShowBarcodeScanner(true)} title="Escanear Código de Barras / Câmera" className="h-11 w-11 shrink-0 bg-cyan-500/20 text-cyan-400 border-cyan-500/40 hover:bg-cyan-500/30 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
                           <Camera className="h-5 w-5" />
                         </Button>
-                        <Button type="button" size="icon" variant="outline" onClick={() => setShowNovoAparelho(true)} title="Novo Aparelho Avulso" className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+                        <Button type="button" size="icon" variant="outline" onClick={() => abrirCadastroRapido()} title="Cadastrar aparelho (F4)" className="h-11 w-11 shrink-0 bg-white/50 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
                           <Plus className="h-4 w-4" />
                         </Button>
                       </div>
@@ -4219,85 +4499,28 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         document.body
       )}
 
-      {/* Modal Novo Aparelho */}
-      {isClient && showNovoAparelho && createPortal(
-        <div className="modal-overlay modal-overlay-fit z-[60]">
-          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
-            <div className="modal-header">
-              <div>
-                <h3 className="modal-title">Novo Aparelho</h3>
-                <p className="modal-subtitle">Cadastro rápido para adicionar item na venda.</p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowNovoAparelho(false)}><X className="w-4 h-4" /></Button>
-            </div>
-            <div className="modal-body-scroll">
-              <form onSubmit={handleNovoAparelhoSubmit} className="space-y-4">
-                <input type="text" placeholder="Marca *" required className="input-glass" value={novoAparelhoData.marca} onChange={e => setNovoAparelhoData({...novoAparelhoData, marca: e.target.value})} />
-                <input type="text" placeholder="Modelo *" required className="input-glass" value={novoAparelhoData.modelo} onChange={e => setNovoAparelhoData({...novoAparelhoData, modelo: e.target.value})} />
-                <input type="tel" inputMode="numeric" pattern="[0-9]*" placeholder="IMEI" className="input-glass" value={novoAparelhoData.imei} onChange={e => setNovoAparelhoData({...novoAparelhoData, imei: e.target.value.replace(/\D/g, '')})} />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Preço Custo</label>
-                    <input 
-                      type="text" 
-                      inputMode="decimal"
-                      placeholder="R$ 0,00" 
-                      className="input-glass" 
-                      value={novoAparelhoData.custo} 
-                      onChange={e => {
-                        const v = e.target.value.replace(/\D/g, '');
-                        if (!v) {
-                          setNovoAparelhoData({...novoAparelhoData, custo: ''});
-                          return;
-                        }
-                        const custoNum = parseInt(v) / 100;
-                        const vendaNum = custoNum + 300;
-                        const formattedCusto = `R$ ${custoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-                        const formattedVenda = `R$ ${vendaNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-                        setNovoAparelhoData({...novoAparelhoData, custo: formattedCusto, preco: formattedVenda});
-                      }} 
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-muted-foreground ml-1 uppercase">Preço Venda</label>
-                    <input 
-                      type="text" 
-                      inputMode="decimal"
-                      placeholder="R$ 0,00" 
-                      className="input-glass" 
-                      value={novoAparelhoData.preco} 
-                      onChange={e => {
-                        const v = e.target.value.replace(/\D/g, '');
-                        const formatted = (parseInt(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-                        setNovoAparelhoData({...novoAparelhoData, preco: v ? `R$ ${formatted}` : ''});
-                      }} 
-                    />
-                  </div>
-                </div>
-                <select 
-                  className="input-glass"
-                  value={novoAparelhoData.condicao}
-                  onChange={e => setNovoAparelhoData({...novoAparelhoData, condicao: e.target.value as any})}
-                >
-                  <option value="novo">Novo</option>
-                  <option value="seminovo">Seminovo</option>
-                  <option value="usado">Usado</option>
-                </select>
-
-                <div className="flex gap-2 pt-2">
-                  <Button type="button" variant="outline" className="flex-1" onClick={() => setShowNovoAparelho(false)}>
-                    Cancelar
-                  </Button>
-                  <Button type="submit" disabled={loadingAparelhos} className="flex-1 bg-blue-600 hover:bg-blue-700">
-                    {loadingAparelhos ? 'Cadastrando...' : 'Cadastrar'}
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </GlassCard>
-        </div>,
-        document.body
-      )}
+      {/* Cadastro rápido de aparelho no PDV */}
+      <NovoAparelhoRapidoModal
+        aberto={isClient && showNovoAparelho}
+        onFechar={fecharCadastroRapido}
+        aparelhos={aparelhos}
+        carrinhoAparelhoIds={carrinho.map((item) => item.aparelhoId || '').filter(Boolean)}
+        podeVerFinanceiro={canViewFinancials(usuario)}
+        usuario={usuario}
+        valoresIniciais={cadastroRapidoInicial}
+        codigoEscaneado={codigoParaCadastro}
+        scannerAberto={showBarcodeScanner}
+        onAbrirScanner={() => {
+          setScannerAlvo('novoAparelho');
+          setShowBarcodeScanner(true);
+        }}
+        criarAparelho={criarAparelhoParaCadastroRapido}
+        onUsarExistente={(aparelho) => {
+          fecharCadastroRapido();
+          if (adicionarAparelhoAoCarrinho(aparelho)) toast.success(`${aparelho.modelo} adicionado à venda`);
+        }}
+        onConcluido={concluirCadastroRapido}
+      />
 
       {/* Modal Importar Pedido via Groq IA */}
       {isClient && showImportarPedidoModal && createPortal(
@@ -4385,7 +4608,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   <ShoppingCart className="w-4 h-4" /> Selecionar Aparelho do Estoque (Opcional)
                 </label>
                 <ComboboxAparelhos
-                  aparelhos={aparelhos.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido')}
+                  aparelhos={aparelhos.filter(aparelhoNoEstoque)}
                   value={selectedStockAparelhoId}
                   onChange={(selectedId) => {
                     setSelectedStockAparelhoId(selectedId);
@@ -4687,9 +4910,20 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       <ModalPortal>
         <BarcodeScannerModal
           isOpen={showBarcodeScanner}
-          onClose={() => setShowBarcodeScanner(false)}
-          onScan={(barcode) => selecionarAparelhoPorCodigo(barcode)}
-          title="Scanner de Código de Barras PDV"
+          onClose={() => {
+            setShowBarcodeScanner(false);
+            setScannerAlvo('item');
+          }}
+          onScan={(barcode) => {
+            if (scannerAlvo === 'novoAparelho') {
+              setCodigoParaCadastro({ valor: barcode, seq: Date.now() });
+              setShowBarcodeScanner(false);
+              setScannerAlvo('item');
+              return;
+            }
+            selecionarAparelhoPorCodigo(barcode);
+          }}
+          title={scannerAlvo === 'novoAparelho' ? 'Ler IMEI do aparelho novo' : 'Scanner de Código de Barras PDV'}
           subtitle="Aponte a câmera ou bipe o código do aparelho com o leitor USB"
         />
       </ModalPortal>
