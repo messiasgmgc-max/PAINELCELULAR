@@ -48,7 +48,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { loja_id, usuario_id, usuario_email, usuario_nome, tipo_evento, acao, detalhes } = body;
+    const { loja_id, usuario_id, usuario_email, usuario_nome, tipo_evento, acao, detalhes, valor_anterior, valor_novo } = body;
 
     if (!acao) {
       return NextResponse.json({ error: 'A ação é obrigatória.' }, { status: 400 });
@@ -64,6 +64,9 @@ export async function POST(request: Request) {
         tipo_evento: tipo_evento || 'info',
         acao: String(acao).trim(),
         detalhes: detalhes ? String(detalhes).trim() : null,
+        // Sem isto, o fallback descartava o antes/depois das operações em massa.
+        valor_anterior: valor_anterior ?? null,
+        valor_novo: valor_novo ?? null,
       })
       .select()
       .single();

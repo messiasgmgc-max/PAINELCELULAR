@@ -21,6 +21,19 @@ import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
 import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue, formatarSaudeBateria } from "@/lib/utils";
 import { devolverAparelhoAoEstoque } from "@/lib/devolucaoEstoque";
+import { ConfirmarAcaoEstoqueModal, type AcaoConfirmacao, type LinhaResumo } from "@/components/ConfirmarAcaoEstoqueModal";
+import { useStoreConfig } from "@/hooks/useStoreConfig";
+import { registrarLog } from "@/lib/logger";
+import { estaNoEstoque, patchRestauracao, patchSaida } from "@/lib/estoque/ciclo";
+import { aplicarMudancaEstoque } from "@/lib/estoque/movimentacoes";
+import {
+  executarPlanoRemontagem,
+  planejarRemontagem,
+  type AparelhoRemontagem,
+  type ItemListaImportada,
+  type PlanoRemontagem,
+} from "@/lib/estoque/remontagem";
+import { selecionarCandidatosRestauracao, type SelecaoRestauracao } from "@/lib/estoque/restauracao";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -53,6 +66,13 @@ export function AparelhosTab() {
   const [mercadoPhoneText, setMercadoPhoneText] = useState("");
   const [mercadoPhoneMargem, setMercadoPhoneMargem] = useState("300");
   const [importingMercadoPhone, setImportingMercadoPhone] = useState(false);
+  const { config: configLoja } = useStoreConfig(usuario?.lojaId || null);
+  const [planoMercadoPhone, setPlanoMercadoPhone] = useState<{ modo: 'importar' | 'remontar'; plano: PlanoRemontagem } | null>(null);
+  const [confirmacaoRestauracao, setConfirmacaoRestauracao] = useState<SelecaoRestauracao<any> | null>(null);
+  const [confirmacaoBaixaTotal, setConfirmacaoBaixaTotal] = useState<{ ids: string[] } | null>(null);
+  const [executandoAcaoEstoque, setExecutandoAcaoEstoque] = useState<
+    null | 'mercadophone_com_baixa' | 'mercadophone_sem_baixa' | 'restaurar' | 'baixa_total'
+  >(null);
   const [showOptionalFields, setShowOptionalFields] = useState(false);
   const [supplierListText, setSupplierListText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -226,8 +246,8 @@ export function AparelhosTab() {
   // Filtrar aparelhos ativos em estoque (excluindo vendidos e baixados)
   const aparelhosAtivos = useMemo(() => {
     return aparelhos.filter((aparelho: any) => {
-      if (aparelho.ativo === false) return false;
-      if (aparelho.condicao === 'vendido' || (aparelho as any).status === 'vendido') return false;
+      // Exclui vendido e baixado, e tolera o legado condicao='vendido'.
+      if (!estaNoEstoque(aparelho as any)) return false;
       if (categoriaFiltro !== 'todos') {
         const cat = aparelho.categoria || 'aparelho';
         if (cat !== categoriaFiltro) return false;
@@ -519,9 +539,13 @@ export function AparelhosTab() {
       if (!line) continue;
 
       let idEtiqueta = '';
+      // O ID aleatório abaixo existe só para o cadastro de aparelhos novos.
+      // Ele NUNCA pode ser usado para casar com o estoque (ver encontrarEquivalente).
+      let idEtiquetaInformado = false;
       const matchId = line.match(/^(\d{6,8})\s*[-•·:]?\s*/);
       if (matchId) {
         idEtiqueta = matchId[1];
+        idEtiquetaInformado = true;
         line = line.replace(matchId[0], '').trim();
       } else {
         idEtiqueta = String(Math.floor(10000000 + Math.random() * 90000000));
@@ -655,6 +679,7 @@ export function AparelhosTab() {
         aparelhosFormatados.push({
           raw: rawLine,
           idEtiqueta: idUnico,
+          idEtiquetaInformado: q === 0 ? idEtiquetaInformado : false,
           marca: marcaExtraida || 'Apple',
           modelo,
           capacidade: capacidade || (marcaExtraida === 'Apple' && modelo.includes('iPhone') ? '128GB' : ''),
@@ -673,9 +698,13 @@ export function AparelhosTab() {
     return aparelhosFormatados;
   };
 
-  const handleProcessMercadoPhoneList = async () => {
+  // ── Lista do MercadoPhone: importar ou remontar ──
+  // Nada é gravado ao clicar. Primeiro o plano é montado contra o banco e a
+  // tela mostra os números reais; só a confirmação executa. O histórico do
+  // incidente de 10/09/2026 está em src/lib/estoque/remontagem.ts.
+  const analisarListaMercadoPhone = async (modo: 'importar' | 'remontar') => {
     const margem = parseFloat(mercadoPhoneMargem) || 0;
-    const itens = parseMercadoPhoneList(mercadoPhoneText, margem);
+    const itens = parseMercadoPhoneList(mercadoPhoneText, margem) as ItemListaImportada[];
 
     if (itens.length === 0) {
       toast.error('Nenhum aparelho válido identificado. Verifique o texto colado.');
@@ -683,259 +712,187 @@ export function AparelhosTab() {
     }
 
     setImportingMercadoPhone(true);
-    const toastId = toast.loading(`Processando ${itens.length} aparelhos...`);
-
     try {
-      const targetLojaId = usuario?.lojaId;
       let query = supabase.from('aparelhos').select('*');
-      if (targetLojaId) {
-        query = query.eq('loja_id', targetLojaId);
-      }
-      const { data: aparelhosExistentes, error: searchError } = await query;
-
-      if (searchError) console.warn('Erro ao buscar existentes:', searchError);
-
-      const existentes = aparelhosExistentes || aparelhos || [];
-      let novosCadastrados = 0;
-      let existentesAtualizados = 0;
-
-      for (const item of itens) {
-        // Busca equivalente existente no banco por Código, ID de Etiqueta, IMEI ou Número de Série
-        const existente = existentes.find(a => {
-          const cod = getAparelhoCodigo(a);
-          if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
-          if (item.isCellular && item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
-          if (item.idEtiqueta && a.numeroSerie && a.numeroSerie === item.idEtiqueta) return true;
-          if (item.idEtiqueta && a.observacoes && a.observacoes.includes(item.idEtiqueta)) return true;
-          return false;
-        });
-
-        const idEtiquetaFinal = existente ? getAparelhoCodigo(existente) : item.idEtiqueta;
-        const obsString = [
-          item.observacoes ? `Obs: ${item.observacoes}` : '',
-          `ID: ${idEtiquetaFinal}`,
-          item.bateria ? `Bateria: ${item.bateria}` : '',
-          (item.isCellular && item.sufixoSerial) ? `IMEI: ${item.sufixoSerial}` : ''
-        ].filter(Boolean).join(' | ');
-
-        if (existente) {
-          const updatePayload: any = {
-            modelo: item.modelo,
-            capacidade: item.capacidade,
-            cor: item.cor,
-            condicao: item.condicao,
-            preco: item.preco,
-            custo: item.custo > 0 ? item.custo : existente.custo,
-            observacoes: obsString,
-            ativo: true,
-          };
-          if (item.bateria) {
-            updatePayload.saude_bateria = item.bateria;
-          }
-
-          const { error: updateErr } = await supabase
-            .from('aparelhos')
-            .update(updatePayload)
-            .eq('id', existente.id);
-
-          if (updateErr) {
-            delete updatePayload.saude_bateria;
-            delete updatePayload.codigo;
-            await supabase.from('aparelhos').update(updatePayload).eq('id', existente.id);
-          }
-          existentesAtualizados++;
-        } else {
-          await criarAparelho({
-            marca: item.marca,
-            modelo: item.modelo,
-            imei: item.isCellular ? (item.sufixoSerial || '') : '',
-            numeroSerie: idEtiquetaFinal,
-            cor: item.cor,
-            capacidade: item.capacidade,
-            condicao: item.condicao,
-            saude_bateria: item.bateria || '',
-            preco: String(item.preco),
-            custo: String(item.custo),
-            descricao: item.raw,
-            cliente: '',
-            clienteId: null,
-            acessorios: '',
-            observacoes: obsString,
-            ativo: true,
-          } as any);
-          novosCadastrados++;
-        }
-      }
-
-      toast.success(`🚀 Pronto! ${novosCadastrados} novos cadastrados, ${existentesAtualizados} atualizados.`, { id: toastId });
-      await fetchAparelhos();
-      setShowMercadoPhoneModal(false);
-      setMercadoPhoneText("");
-    } catch (error: any) {
-      console.error("Erro ao importar MercadoPhone:", error);
-      toast.error(`Erro ao importar: ${error.message || 'Falha no processamento'}`, { id: toastId });
-    } finally {
-      setImportingMercadoPhone(false);
-    }
-  };
-
-  // ── Restaurar Todo o Estoque Desativado / Inativo ──
-  const handleRestaurarEstoqueDesativado = async () => {
-    if (!confirm("Deseja reativar TODOS os aparelhos desativados do estoque? Isso fará com que todas as etiquetas e códigos de barras voltem a funcionar normalmente no sistema.")) {
-      return;
-    }
-
-    const toastId = toast.loading("Restaurando todos os aparelhos do estoque...");
-    try {
-      let query = supabase
-        .from('aparelhos')
-        .update({ ativo: true, condicao: 'seminovo' });
-
-      if (usuario?.lojaId) {
-        query = query.eq('loja_id', usuario.lojaId);
-      } else {
-        query = query.eq('ativo', false);
-      }
-
-      const { error } = await query;
+      if (usuario?.lojaId) query = query.eq('loja_id', usuario.lojaId);
+      const { data, error } = await query;
+      // Antes, uma falha na leitura caía para a lista em memória, que pode
+      // estar desatualizada. Numa operação que pode dar baixa, é melhor parar.
       if (error) throw error;
 
-      toast.success("⚡ Todo o estoque foi restaurado e reativado com sucesso! Os códigos de barra originais das etiquetas estão ativos novamente.", { id: toastId, duration: 6000 });
-      await fetchAparelhos();
-    } catch (err: any) {
-      toast.error(`Erro ao restaurar estoque: ${err?.message || 'Falha no banco'}`, { id: toastId });
+      setPlanoMercadoPhone({
+        modo,
+        plano: planejarRemontagem({
+          itens,
+          aparelhos: (data || []) as AparelhoRemontagem[],
+          obterCodigo: (a) => getAparelhoCodigo(a),
+        }),
+      });
+    } catch (error: any) {
+      console.error('Erro ao analisar lista MercadoPhone:', error);
+      toast.error(`Não foi possível analisar a lista: ${error?.message || 'falha ao ler o estoque'}`);
+    } finally {
+      setImportingMercadoPhone(false);
     }
   };
 
-  const handleRemontarEstoqueMercadoPhone = async () => {
-    const margem = parseFloat(mercadoPhoneMargem) || 0;
-    const itensImportados = parseMercadoPhoneList(mercadoPhoneText, margem);
+  const handleProcessMercadoPhoneList = () => analisarListaMercadoPhone('importar');
+  const handleRemontarEstoqueMercadoPhone = () => analisarListaMercadoPhone('remontar');
 
-    if (itensImportados.length === 0) {
-      toast.error('Nenhum aparelho válido identificado no texto.');
-      return;
-    }
+  const montarObservacaoMercadoPhone = (item: ItemListaImportada, idEtiqueta: string) =>
+    [
+      item.observacoes ? `Obs: ${item.observacoes}` : '',
+      `ID: ${idEtiqueta}`,
+      item.bateria ? `Bateria: ${item.bateria}` : '',
+      item.isCellular && item.sufixoSerial ? `IMEI: ${item.sufixoSerial}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
 
-    // Salva ponto de backup preventivo antes de remontar o estoque
-    salvarSnapshotBackup(aparelhos, usuario?.lojaId || null, 'Backup Automático Antes de Remontar Estoque');
-
-    setImportingMercadoPhone(true);
-    const toastId = toast.loading(`Remontando estoque (${itensImportados.length} aparelhos)...`);
+  const executarPlanoMercadoPhone = async (incluirBaixa: boolean) => {
+    if (!planoMercadoPhone) return;
+    const { modo, plano } = planoMercadoPhone;
+    setExecutandoAcaoEstoque(incluirBaixa ? 'mercadophone_com_baixa' : 'mercadophone_sem_baixa');
+    const toastId = toast.loading(modo === 'remontar' ? 'Remontando estoque...' : 'Importando aparelhos...');
 
     try {
-      const targetLojaId = usuario?.lojaId;
-      let queryBanco = supabase.from('aparelhos').select('*');
-      if (targetLojaId) {
-        queryBanco = queryBanco.eq('loja_id', targetLojaId);
+      await salvarSnapshotBackup(
+        aparelhos,
+        usuario?.lojaId || null,
+        modo === 'remontar' ? 'Backup Automático Antes de Remontar Estoque' : 'Backup Automático Antes de Importar Lista'
+      );
+
+      const r = await executarPlanoRemontagem(
+        supabase,
+        plano,
+        {
+          incluirBaixa,
+          origem: modo === 'remontar' ? 'remontar_mercadophone' : 'importar_mercadophone',
+        },
+        {
+          lojaId: usuario?.lojaId || null,
+          usuarioId: usuario?.id || null,
+          usuarioNome: usuario?.nome || null,
+          criarAparelho: async (item) => {
+            const criado = await criarAparelho({
+              marca: item.marca,
+              modelo: item.modelo,
+              imei: item.isCellular ? item.sufixoSerial || '' : '',
+              numeroSerie: item.idEtiqueta,
+              cor: item.cor,
+              capacidade: item.capacidade,
+              condicao: item.condicao || 'seminovo',
+              saude_bateria: item.bateria || '',
+              preco: item.preco,
+              custo: item.custo,
+              descricao: item.raw,
+              observacoes: montarObservacaoMercadoPhone(item, item.idEtiqueta),
+              ativo: true,
+            } as any);
+            return criado as any;
+          },
+          dadosCadastrais: (item, aparelho) => {
+            const dados: Record<string, unknown> = {
+              modelo: item.modelo,
+              capacidade: item.capacidade,
+              cor: item.cor,
+              condicao: item.condicao || 'seminovo',
+              preco: item.preco,
+              custo: item.custo > 0 ? item.custo : aparelho.custo,
+              observacoes: montarObservacaoMercadoPhone(item, getAparelhoCodigo(aparelho)),
+            };
+            if (item.bateria) dados.saude_bateria = item.bateria;
+            return dados;
+          },
+          registrarLog,
+        }
+      );
+
+      const partes = [`${r.atualizados} atualizados`, `${r.criados} novos`];
+      if (modo === 'remontar') partes.push(`${r.baixados} baixados`);
+      toast.success(`Estoque atualizado: ${partes.join(', ')}.`, { id: toastId, duration: 6000 });
+
+      if (r.baixaBloqueada) {
+        toast.warning(`Nenhum aparelho foi baixado: ${r.motivoBloqueio}`, { duration: 12000 });
       }
-      const { data: aparelhosDoBanco, error: fetchErr } = await queryBanco;
-
-      if (fetchErr) console.warn('Aviso ao buscar banco:', fetchErr);
-
-      // Considera TODOS os aparelhos no banco (inclusive inativos) para reativar o ID da etiqueta original sem reescrever o código de barras
-      const todosAparelhosBanco = aparelhosDoBanco || aparelhos || [];
-      const ativosAtuais = todosAparelhosBanco.filter(a => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
-
-      const ativosMantidosIds = new Set<string>();
-      let novosInseridos = 0;
-      let atualizados = 0;
-
-      for (const item of itensImportados) {
-        // Tenta encontrar equivalente no banco (busca em ativos e inativos para reativar etiqueta colada)
-        const equivalente = todosAparelhosBanco.find(a => {
-          const cod = getAparelhoCodigo(a);
-          if (item.idEtiqueta && cod && (cod === item.idEtiqueta || cod.endsWith(item.idEtiqueta) || item.idEtiqueta.endsWith(cod))) return true;
-          if (item.isCellular && item.sufixoSerial && a.imei && (a.imei === item.sufixoSerial || a.imei.endsWith(item.sufixoSerial))) return true;
-          if (item.idEtiqueta && a.numeroSerie && a.numeroSerie === item.idEtiqueta) return true;
-          if (item.idEtiqueta && a.observacoes && a.observacoes.includes(item.idEtiqueta)) return true;
-          return false;
+      if (r.conflitosVendidos > 0) {
+        toast.warning(
+          `${r.conflitosVendidos} item(ns) da lista já constam como vendidos e não foram reativados. Confira manualmente.`,
+          { duration: 12000 }
+        );
+      }
+      if (!r.auditoriaCompleta) {
+        toast.warning('A operação foi aplicada, mas parte da auditoria não foi gravada. Avise o suporte.', {
+          duration: 12000,
         });
-
-        const idEtiquetaFinal = equivalente ? getAparelhoCodigo(equivalente) : item.idEtiqueta;
-        const obsString = [
-          item.observacoes ? `Obs: ${item.observacoes}` : '',
-          `ID: ${idEtiquetaFinal}`,
-          item.bateria ? `Bateria: ${item.bateria}` : '',
-          (item.isCellular && item.sufixoSerial) ? `IMEI: ${item.sufixoSerial}` : ''
-        ].filter(Boolean).join(' | ');
-
-        if (equivalente) {
-          ativosMantidosIds.add(equivalente.id);
-          const updatePayload: any = {
-            modelo: item.modelo,
-            capacidade: item.capacidade,
-            cor: item.cor,
-            condicao: item.condicao || 'seminovo',
-            preco: item.preco,
-            custo: item.custo > 0 ? item.custo : equivalente.custo,
-            observacoes: obsString,
-            ativo: true,
-          };
-          if (item.bateria) {
-            updatePayload.saude_bateria = item.bateria;
-          }
-
-          const { error: updateErr } = await supabase
-            .from('aparelhos')
-            .update(updatePayload)
-            .eq('id', equivalente.id);
-
-          if (updateErr) {
-            delete updatePayload.saude_bateria;
-            delete updatePayload.codigo;
-            await supabase.from('aparelhos').update(updatePayload).eq('id', equivalente.id);
-          }
-          atualizados++;
-        } else {
-          await criarAparelho({
-            marca: item.marca,
-            modelo: item.modelo,
-            imei: item.isCellular ? (item.sufixoSerial || '') : '',
-            numeroSerie: idEtiquetaFinal,
-            cor: item.cor,
-            capacidade: item.capacidade,
-            condicao: item.condicao,
-            saude_bateria: item.bateria || '',
-            preco: String(item.preco),
-            custo: String(item.custo),
-            descricao: item.raw,
-            cliente: '',
-            clienteId: null,
-            acessorios: '',
-            observacoes: obsString,
-            ativo: true,
-          } as any);
-          novosInseridos++;
-        }
       }
 
-      const aparelhosParaDarBaixa = ativosAtuais.filter(a => !ativosMantidosIds.has(a.id));
-      let baixados = 0;
-
-      if (aparelhosParaDarBaixa.length > 0) {
-        const idsBaixa = aparelhosParaDarBaixa.map(a => a.id);
-        const { error: baixaErr } = await supabase
-          .from('aparelhos')
-          .update({
-            ativo: false,
-            condicao: 'vendido',
-          })
-          .in('id', idsBaixa);
-
-        if (!baixaErr) {
-          baixados = idsBaixa.length;
-        }
-      }
-
-      toast.success(`⚡ Estoque Remontado com Sucesso! ${novosInseridos} novos cadastrados, ${atualizados} reativados/atualizados e ${baixados} marcados como vendidos.`, { id: toastId, duration: 5000 });
-      await fetchAparelhos();
+      setPlanoMercadoPhone(null);
       setShowMercadoPhoneModal(false);
-      setMercadoPhoneText("");
+      setMercadoPhoneText('');
+      await fetchAparelhos();
     } catch (error: any) {
-      console.error("Erro ao remontar estoque:", error);
-      toast.error(`Erro ao remontar estoque: ${error.message || 'Falha no processamento'}`, { id: toastId });
+      console.error('Erro ao aplicar lista MercadoPhone:', error);
+      toast.error(`Erro ao aplicar a lista: ${error?.message || 'falha no processamento'}`, { id: toastId });
     } finally {
-      setImportingMercadoPhone(false);
+      setExecutandoAcaoEstoque(null);
+    }
+  };
+
+  // ── Reativar aparelhos desativados ──
+  // A versão anterior reativava TODOS os aparelhos da loja — vendidos inclusive —
+  // e sobrescrevia a condição de todos para 'seminovo'.
+  const handleRestaurarEstoqueDesativado = () => {
+    setConfirmacaoRestauracao(selecionarCandidatosRestauracao(aparelhos as any[]));
+  };
+
+  const executarRestauracaoConfirmada = async () => {
+    if (!confirmacaoRestauracao) return;
+    const ids = confirmacaoRestauracao.restaurar.map((a: any) => a.id as string);
+    if (ids.length === 0) return;
+
+    setExecutandoAcaoEstoque('restaurar');
+    const toastId = toast.loading(`Reativando ${ids.length} aparelho(s)...`);
+    try {
+      const r = await aplicarMudancaEstoque(supabase, {
+        ids,
+        patch: patchRestauracao(),
+        tipo: 'restauracao',
+        origem: 'restaurar_estoque',
+        lojaId: usuario?.lojaId || null,
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
+        observacao: 'Reativação em massa de aparelhos desativados.',
+        // Revalida no estado atual: quem foi vendido depois da prévia fica de fora.
+        filtroElegivel: (estado) => selecionarCandidatosRestauracao([estado]).restaurar.length === 1,
+      });
+
+      await registrarLog({
+        loja_id: usuario?.lojaId || null,
+        usuario_id: usuario?.id || null,
+        usuario_nome: usuario?.nome || null,
+        tipo_evento: 'estoque',
+        acao: 'Reativação em massa de estoque',
+        detalhes: `Lote ${r.loteId}: ${r.afetados} aparelho(s) reativados de ${ids.length} elegíveis na prévia.`,
+        valor_anterior: {
+          elegiveis: ids.length,
+          ignorados_vendidos: confirmacaoRestauracao.ignoradosVendidos.length,
+          ignorados_ambiguos: confirmacaoRestauracao.ignoradosAmbiguos.length,
+          ignorados_manutencao: confirmacaoRestauracao.ignoradosManutencao.length,
+        },
+        valor_novo: { lote_id: r.loteId, reativados: r.afetados, status: 'disponivel' },
+      });
+
+      toast.success(`${r.afetados} aparelho(s) de volta ao estoque.`, { id: toastId });
+      if (!r.auditoriaRegistrada) {
+        toast.warning('Reativação aplicada, mas a auditoria não foi gravada inteira. Avise o suporte.');
+      }
+      setConfirmacaoRestauracao(null);
+      await fetchAparelhos();
+    } catch (error: any) {
+      toast.error(`Erro ao reativar: ${error?.message || 'falha no banco'}`, { id: toastId });
+    } finally {
+      setExecutandoAcaoEstoque(null);
     }
   };
 
@@ -1220,49 +1177,63 @@ export function AparelhosTab() {
       });
   };
 
-  const handleDeleteEstoque = async () => {
-    if (aparelhosAtivos.length === 0) {
-      alert("O estoque já está vazio.");
+  // ── Baixar todo o estoque ──
+  // Era um DELETE físico de todas as linhas ativas, protegido só por confirm().
+  // Agora é baixa (status='baixado'), com backup, auditoria por lote e
+  // confirmação digitando o nome da loja.
+  const handleDeleteEstoque = () => {
+    const ids = aparelhos.filter((a: any) => estaNoEstoque(a)).map((a) => a.id);
+    if (ids.length === 0) {
+      toast.info('O estoque já está vazio.');
       return;
     }
+    setConfirmacaoBaixaTotal({ ids });
+  };
 
-    const currentLojaId = (aparelhosAtivos[0] as any).loja_id || aparelhosAtivos[0].lojaId;
+  const executarBaixaTotalConfirmada = async () => {
+    if (!confirmacaoBaixaTotal) return;
+    const { ids } = confirmacaoBaixaTotal;
+    setExecutandoAcaoEstoque('baixa_total');
+    const toastId = toast.loading(`Baixando ${ids.length} aparelho(s)...`);
+    try {
+      await salvarSnapshotBackup(aparelhos, usuario?.lojaId || null, 'Backup Automático Antes de Baixar Todo o Estoque');
 
-    const confirmacao = confirm("⚠️ ATENÇÃO: Isso removerá do estoque todos os aparelhos ativos desta loja. Aparelhos com histórico vinculado serão apenas baixados para preservar as OS.\n\nDeseja continuar?");
+      const r = await aplicarMudancaEstoque(supabase, {
+        ids,
+        patch: patchSaida('baixado', 'baixa_massa'),
+        tipo: 'baixa',
+        origem: 'deletar_estoque',
+        lojaId: usuario?.lojaId || null,
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
+        observacao: 'Baixa de todo o estoque (menu "Baixar Todo o Estoque").',
+        filtroElegivel: (estado) => estaNoEstoque(estado),
+      });
 
-    if (confirmacao) {
-      try {
-        // Gera ponto de backup de segurança antes de limpar o estoque
-        salvarSnapshotBackup(aparelhos, currentLojaId, 'Backup Automático Antes de Deletar Estoque');
+      await registrarLog({
+        loja_id: usuario?.lojaId || null,
+        usuario_id: usuario?.id || null,
+        usuario_nome: usuario?.nome || null,
+        tipo_evento: 'estoque',
+        acao: 'Baixa total do estoque',
+        detalhes: `Lote ${r.loteId}: ${r.afetados} aparelho(s) baixados.`,
+        valor_anterior: { em_estoque: ids.length },
+        valor_novo: { lote_id: r.loteId, baixados: r.afetados, status: 'baixado', motivo_saida: 'baixa_massa' },
+      });
 
-        const { error } = await supabase
-          .from('aparelhos')
-          .delete()
-          .eq('loja_id', currentLojaId)
-          .neq('ativo', false);
-
-        if (error) {
-          const observacaoBaixa = `BAIXA_ESTOQUE:${new Date().toISOString()}:Baixa em massa do estoque para preservar histórico.`;
-          const { error: updateError } = await supabase
-            .from('aparelhos')
-            .update({
-              ativo: false,
-              observacoes: observacaoBaixa,
-            })
-            .eq('loja_id', currentLojaId)
-            .neq('ativo', false);
-
-          if (updateError) throw updateError;
-          alert("Estoque baixado com sucesso. Os aparelhos com histórico foram preservados como saídas.");
-        } else {
-          alert("Estoque deletado com sucesso!");
-        }
-
-        await fetchAparelhos();
-      } catch (err: any) {
-        console.error("Erro ao deletar estoque:", err);
-        alert(`Erro ao deletar estoque: ${err.message}`);
+      toast.success(`${r.afetados} aparelho(s) baixados. Nada foi apagado: o lote fica registrado na auditoria.`, {
+        id: toastId,
+        duration: 8000,
+      });
+      if (!r.auditoriaRegistrada) {
+        toast.warning('Baixa aplicada, mas a auditoria não foi gravada inteira. Avise o suporte.');
       }
+      setConfirmacaoBaixaTotal(null);
+      await fetchAparelhos();
+    } catch (error: any) {
+      toast.error(`Erro ao baixar o estoque: ${error?.message || 'falha no banco'}`, { id: toastId });
+    } finally {
+      setExecutandoAcaoEstoque(null);
     }
   };
 
@@ -1947,6 +1918,17 @@ export function AparelhosTab() {
                     </div>
                   </DropdownMenuItem>
 
+                  <DropdownMenuItem
+                    onClick={handleRestaurarEstoqueDesativado}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <PackageCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Reativar Desativados</div>
+                      <div className="text-[10px] text-slate-400">Mostra a contagem antes de aplicar</div>
+                    </div>
+                  </DropdownMenuItem>
+
                   <DropdownMenuSeparator className="bg-slate-800 my-1" />
 
                   <DropdownMenuItem
@@ -1955,8 +1937,8 @@ export function AparelhosTab() {
                   >
                     <Trash2 className="h-4 w-4 text-rose-400 shrink-0" />
                     <div>
-                      <div className="font-bold text-xs text-rose-300">Deletar Todo Estoque</div>
-                      <div className="text-[10px] text-rose-400/80">Com criação automática de backup</div>
+                      <div className="font-bold text-xs text-rose-300">Baixar Todo o Estoque</div>
+                      <div className="text-[10px] text-rose-400/80">Sai da tela sem apagar · backup e auditoria</div>
                     </div>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -2912,6 +2894,210 @@ export function AparelhosTab() {
         </ModalPortal>
       )}
 
+      {/* Confirmação — lista do MercadoPhone (importar ou remontar) */}
+      {planoMercadoPhone &&
+        (() => {
+          const { modo, plano } = planoMercadoPhone;
+          const ehRemontar = modo === 'remontar';
+          const baixas = ehRemontar ? plano.baixar.length : 0;
+          const bloqueada = ehRemontar && plano.trava.bloqueada;
+          const reativados = plano.atualizar.filter((u) => u.reativa).length;
+          const muitosNovos = plano.ativosAtuais > 0 && plano.criar.length > plano.atualizar.length;
+
+          const resumo: LinhaResumo[] = [
+            { rotulo: 'Itens na lista colada', valor: plano.itensImportados },
+            {
+              rotulo: 'Encontrados no estoque',
+              valor: reativados ? `${plano.atualizar.length} (${reativados} voltam ao estoque)` : plano.atualizar.length,
+              tom: 'positivo',
+            },
+            { rotulo: 'Novos a cadastrar', valor: plano.criar.length, tom: muitosNovos ? 'aviso' : 'neutro' },
+          ];
+          if (ehRemontar) {
+            resumo.push({ rotulo: 'Sairiam do estoque', valor: bloqueada ? `${baixas} (bloqueado)` : baixas, tom: 'perigo' });
+          }
+          if (plano.conflitosVendidos.length) {
+            resumo.push({ rotulo: 'Já vendidos (não serão reativados)', valor: plano.conflitosVendidos.length, tom: 'aviso' });
+          }
+          if (ehRemontar && plano.preservadosManutencao.length) {
+            resumo.push({ rotulo: 'Em manutenção (mantidos)', valor: plano.preservadosManutencao.length });
+          }
+
+          const acoes: AcaoConfirmacao[] = [
+            {
+              rotulo: 'Cancelar',
+              variante: 'secundaria',
+              onClick: () => setPlanoMercadoPhone(null),
+              desabilitada: executandoAcaoEstoque !== null,
+            },
+          ];
+          if (ehRemontar && baixas > 0) {
+            acoes.push(
+              {
+                rotulo: 'Aplicar sem dar baixa',
+                variante: bloqueada ? 'primaria' : 'secundaria',
+                onClick: () => executarPlanoMercadoPhone(false),
+                carregando: executandoAcaoEstoque === 'mercadophone_sem_baixa',
+              },
+              {
+                rotulo: `Confirmar e baixar ${baixas}`,
+                variante: 'perigo',
+                onClick: () => executarPlanoMercadoPhone(true),
+                desabilitada: bloqueada,
+                carregando: executandoAcaoEstoque === 'mercadophone_com_baixa',
+              }
+            );
+          } else {
+            acoes.push({
+              rotulo: 'Aplicar',
+              variante: 'primaria',
+              onClick: () => executarPlanoMercadoPhone(false),
+              carregando: executandoAcaoEstoque === 'mercadophone_sem_baixa',
+            });
+          }
+
+          return (
+            <ConfirmarAcaoEstoqueModal
+              aberto
+              tom={baixas > 0 ? 'perigo' : 'aviso'}
+              titulo={ehRemontar ? 'Remontar estoque pela lista' : 'Importar lista do MercadoPhone'}
+              descricao={
+                ehRemontar && baixas > 0 && !bloqueada ? (
+                  <>
+                    <strong className="text-rose-300">{baixas} aparelho(s) serão BAIXADOS e sairão do estoque.</strong>{' '}
+                    {plano.atualizar.length} foram encontrados na lista. Confirma?
+                  </>
+                ) : (
+                  'Confira os números antes de aplicar. Nada foi gravado ainda.'
+                )
+              }
+              resumo={resumo}
+              bloqueio={
+                bloqueada
+                  ? `${plano.trava.motivo} Nenhum aparelho será baixado. Aplique só os encontrados e dê baixa manualmente no que de fato saiu.`
+                  : null
+              }
+              detalhes={
+                <>
+                  {muitosNovos && (
+                    <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5">
+                      A maioria dos itens não foi encontrada no estoque e será cadastrada como nova. Confira se não são
+                      aparelhos que já existem com outro código.
+                    </p>
+                  )}
+                  {ehRemontar && baixas > 0 && (
+                    <details className="rounded-xl border border-white/10 bg-slate-950/60 text-xs">
+                      <summary className="cursor-pointer px-3 py-2 text-slate-300">
+                        Ver os {baixas} aparelho(s) que sairiam
+                      </summary>
+                      <ul className="max-h-44 overflow-y-auto divide-y divide-white/5 px-3 pb-2">
+                        {plano.baixar.slice(0, 300).map((a) => (
+                          <li key={a.id} className="py-1.5 flex justify-between gap-3">
+                            <span className="text-slate-200 truncate">
+                              {(a as any).marca} {a.modelo} {(a as any).capacidade}
+                            </span>
+                            <span className="font-mono text-slate-500 shrink-0">{getAparelhoCodigo(a)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
+              }
+              acoes={acoes}
+              onFechar={() => {
+                if (executandoAcaoEstoque === null) setPlanoMercadoPhone(null);
+              }}
+            />
+          );
+        })()}
+
+      {/* Confirmação — reativar desativados */}
+      {confirmacaoRestauracao && (
+        <ConfirmarAcaoEstoqueModal
+          aberto
+          tom="aviso"
+          titulo="Reativar aparelhos desativados"
+          descricao={
+            confirmacaoRestauracao.restaurar.length > 0
+              ? `${confirmacaoRestauracao.restaurar.length} aparelho(s) voltarão ao estoque como disponíveis. A condição física de cada um é mantida.`
+              : 'Nenhum aparelho desativado pode ser reativado com segurança.'
+          }
+          resumo={[
+            { rotulo: 'Voltarão ao estoque', valor: confirmacaoRestauracao.restaurar.length, tom: 'positivo' },
+            { rotulo: 'Vendidos (nunca reativados)', valor: confirmacaoRestauracao.ignoradosVendidos.length },
+            {
+              rotulo: 'Estado ambíguo (conferir na loja)',
+              valor: confirmacaoRestauracao.ignoradosAmbiguos.length,
+              tom: confirmacaoRestauracao.ignoradosAmbiguos.length ? 'aviso' : 'neutro',
+            },
+            { rotulo: 'Em manutenção', valor: confirmacaoRestauracao.ignoradosManutencao.length },
+          ]}
+          detalhes={
+            confirmacaoRestauracao.ignoradosAmbiguos.length > 0 ? (
+              <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5">
+                Os de estado ambíguo foram tirados do estoque por remontagens com defeito, e não dá para saber se saíram
+                por engano ou foram vendidos. Eles ficam de fora: confira fisicamente e reative um a um.
+              </p>
+            ) : null
+          }
+          acoes={[
+            {
+              rotulo: 'Cancelar',
+              variante: 'secundaria',
+              onClick: () => setConfirmacaoRestauracao(null),
+              desabilitada: executandoAcaoEstoque !== null,
+            },
+            {
+              rotulo: `Reativar ${confirmacaoRestauracao.restaurar.length}`,
+              variante: 'primaria',
+              onClick: executarRestauracaoConfirmada,
+              desabilitada: confirmacaoRestauracao.restaurar.length === 0,
+              carregando: executandoAcaoEstoque === 'restaurar',
+            },
+          ]}
+          onFechar={() => {
+            if (executandoAcaoEstoque === null) setConfirmacaoRestauracao(null);
+          }}
+        />
+      )}
+
+      {/* Confirmação — baixar todo o estoque */}
+      {confirmacaoBaixaTotal && (
+        <ConfirmarAcaoEstoqueModal
+          aberto
+          tom="perigo"
+          titulo="Baixar todo o estoque"
+          descricao={
+            <>
+              Os <strong className="text-rose-300">{confirmacaoBaixaTotal.ids.length} aparelho(s)</strong> em estoque
+              sairão da tela como <strong>baixados</strong>. Nada é apagado: cada um fica registrado com data, motivo e
+              lote na auditoria, e um backup é salvo antes.
+            </>
+          }
+          resumo={[{ rotulo: 'Aparelhos que sairão', valor: confirmacaoBaixaTotal.ids.length, tom: 'perigo' }]}
+          textoConfirmacao={configLoja?.nomeLoja || 'CONFIRMAR'}
+          acoes={[
+            {
+              rotulo: 'Cancelar',
+              variante: 'secundaria',
+              onClick: () => setConfirmacaoBaixaTotal(null),
+              desabilitada: executandoAcaoEstoque !== null,
+            },
+            {
+              rotulo: `Baixar ${confirmacaoBaixaTotal.ids.length} aparelhos`,
+              variante: 'perigo',
+              exigeDigitacao: true,
+              onClick: executarBaixaTotalConfirmada,
+              carregando: executandoAcaoEstoque === 'baixa_total',
+            },
+          ]}
+          onFechar={() => {
+            if (executandoAcaoEstoque === null) setConfirmacaoBaixaTotal(null);
+          }}
+        />
+      )}
+
       {/* Modal Importar MercadoPhone */}
       {showMercadoPhoneModal && (
         <ModalPortal>
@@ -3003,14 +3189,14 @@ export function AparelhosTab() {
                     disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
                   >
                     <RotateCcw className="w-4 h-4" />
-                    {importingMercadoPhone ? 'Remontando...' : 'Atualizar Estoque por esta Lista'}
+                    {importingMercadoPhone ? 'Analisando...' : 'Remontar estoque por esta lista'}
                   </Button>
                   <Button
                     onClick={handleProcessMercadoPhoneList}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 shadow-lg shadow-emerald-500/20"
                     disabled={!mercadoPhoneText.trim() || importingMercadoPhone}
                   >
-                    {importingMercadoPhone ? 'Processando...' : `Confirmar e Cadastrar no Estoque`}
+                    {importingMercadoPhone ? 'Analisando...' : 'Importar e cadastrar'}
                   </Button>
                 </div>
               </div>

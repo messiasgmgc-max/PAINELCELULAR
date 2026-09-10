@@ -20,6 +20,10 @@ export interface RegistrarLogParams {
   acao: string;
   detalhes?: string | null;
   created_at?: string;
+  /** Estado antes da ação (coluna jsonb). Obrigatório na prática para operações em massa. */
+  valor_anterior?: unknown;
+  /** Estado depois da ação (coluna jsonb). */
+  valor_novo?: unknown;
 }
 
 /**
@@ -37,6 +41,8 @@ export async function registrarLog(params: RegistrarLogParams): Promise<void> {
       acao: String(params.acao || 'Ação do Sistema').trim(),
       detalhes: params.detalhes ? String(params.detalhes).trim() : null,
       created_at: params.created_at || new Date().toISOString(),
+      valor_anterior: params.valor_anterior ?? null,
+      valor_novo: params.valor_novo ?? null,
     };
 
     // Tenta inserção direta pelo cliente Supabase
