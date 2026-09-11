@@ -648,6 +648,9 @@ export function AtacadoTab() {
     }>();
 
     vendasBanco.forEach(v => {
+      // Venda cancelada (devolução, estorno) não é dívida: antes o cartão do fiado seguia
+      // cobrando o aparelho que já tinha voltado ao estoque.
+      if (!vendaConta(v)) return;
       const tipoEntregaLower = String(v.tipoEntrega || '').toLowerCase();
       const descLower = String(v.descricao || '').toLowerCase();
       const isVarejo = tipoEntregaLower.includes('varejo') || (descLower.includes('varejo') && !descLower.includes('atacado'));
