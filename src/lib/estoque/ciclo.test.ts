@@ -7,6 +7,8 @@ import {
   patchRestauracao,
   patchSaida,
   validarPatchCiclo,
+  ehAparelhoDeCliente,
+  patchAparelhoDeCliente,
 } from './ciclo';
 
 describe('Estar no estoque', () => {
@@ -134,5 +136,19 @@ describe('Montagem da trilha de auditoria', () => {
     });
     assert.equal(linha.usuario_id, null);
     assert.equal(linha.usuario_nome, 'Lucas');
+  });
+});
+
+describe('Celular do cliente na OS', () => {
+  it('não conta como estoque nem vai para o PDV', () => {
+    assert.equal(estaNoEstoque({ ativo: false, status: 'cliente', condicao: 'usado' }), false);
+    assert.equal(ehAparelhoDeCliente({ ativo: false, status: 'cliente' }), true);
+    assert.equal(ehAparelhoDeCliente({ ativo: true, status: 'disponivel' }), false);
+  });
+
+  it('só existe fora do estoque', () => {
+    assert.doesNotThrow(() => validarPatchCiclo(patchAparelhoDeCliente()));
+    assert.throws(() => validarPatchCiclo({ status: 'cliente' }), /exige ativo=false/);
+    assert.throws(() => validarPatchCiclo({ ativo: true, status: 'cliente' }), /exige ativo=false/);
   });
 });

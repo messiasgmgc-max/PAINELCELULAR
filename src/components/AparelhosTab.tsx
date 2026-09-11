@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
@@ -156,7 +157,8 @@ export function AparelhosTab() {
 
   useEffect(() => {
     const historicoSaidas = aparelhos
-      .filter((aparelho: any) => aparelho.ativo === false)
+      // Celular de cliente da OS nunca foi estoque: não é saída nem baixa.
+      .filter((aparelho: any) => aparelho.ativo === false && !ehAparelhoDeCliente(aparelho))
       .map((aparelho: any) => {
         const obs = String(aparelho.observacoes || '');
         const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)

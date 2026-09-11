@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ehAparelhoDeCliente, estaNoEstoque, patchAparelhoDeCliente } from '@/lib/estoque/ciclo';
 import { DragDropContext, Droppable, Draggable, DropResult, DroppableProps } from 'react-beautiful-dnd';
 import { useOrdensServico } from '@/hooks/useOrdensServico';
 import { useClientes } from '@/hooks/useClientes';
@@ -150,8 +151,9 @@ export function OrdensTab() {
 
   const ordensEntregues = ordensFiltradas.filter(o => o.status === 'entregue');
 
+  // Aparelhos da loja no estoque e celulares de clientes já cadastrados em OS.
   const aparelhosEstoque = aparelhos
-    .filter((aparelho) => aparelho.ativo)
+    .filter((aparelho) => estaNoEstoque(aparelho as any) || ehAparelhoDeCliente(aparelho as any))
     .sort((a, b) => {
       const marcaA = `${a.marca} ${a.modelo}`.toLowerCase();
       const marcaB = `${b.marca} ${b.modelo}`.toLowerCase();
@@ -273,8 +275,11 @@ export function OrdensTab() {
   const handleCreatePeca = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const custoPecaNum = parseInt((parseFloat(formNovaPeca.custoPeca) * 100).toString()) || 0;
-      const vendaPecaNum = parseInt((parseFloat(formNovaPeca.vendaPeca) * 100).toString()) || 0;
+      // Em reais, como a aba Peças e o bot gravam. Antes a OS gravava em centavos e
+      // dividia por 100 ao usar: peça de R$ 150 da aba Peças entrava como R$ 1,50.
+      const lerValor = (valor: string) => Number(parseFloat(String(valor).replace(',', '.')).toFixed(2)) || 0;
+      const custoPecaNum = lerValor(formNovaPeca.custoPeca);
+      const vendaPecaNum = lerValor(formNovaPeca.vendaPeca);
 
       const novaPeca = await criarPeca({
         codigoUnico: formNovaPeca.codigoUnico,
@@ -312,11 +317,12 @@ export function OrdensTab() {
         cor: formNovoAparelho.cor,
         clienteId: formData.clienteId,
         cliente: cliente?.nome || '',
-        condicao: 'usado', // Aparelho de cliente entra como usado/manutenção
+        condicao: 'usado',
         preco: 0,
-        ativo: true,
-        observacoes: 'Adicionado via OS - Manutenção'
-      });
+        // É do cliente, não da loja: fora do estoque, do PDV e das etiquetas.
+        ...patchAparelhoDeCliente(),
+        observacoes: 'Aparelho do cliente cadastrado na OS (não é estoque da loja)'
+      } as any, { registrarEntrada: false });
       
       if (novoAparelho) {
         setFormData(prev => ({
@@ -345,8 +351,8 @@ export function OrdensTab() {
       pecaId: peca.id,
       pecaNome: peca.nome,
       quantidade: quantidadePeca,
-      valorUnitario: peca.vendaPeca / 100,
-      valorTotal: (peca.vendaPeca / 100) * quantidadePeca
+      valorUnitario: Number(peca.vendaPeca) || 0,
+      valorTotal: (Number(peca.vendaPeca) || 0) * quantidadePeca
     };
 
     setSelectedPecas(prev => [...prev, pecaUtilizada]);
@@ -945,7 +951,7 @@ export function OrdensTab() {
                   <option value="">Selecionar peça</option>
                   {pecas.filter(p => p.estoque > 0).map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.nome} - R$ {(p.vendaPeca / 100).toFixed(2)}
+                      {p.nome} - R$ {(Number(p.vendaPeca) || 0).toFixed(2)}
                     </option>
                   ))}
                 </select>

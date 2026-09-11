@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { EstadoCicloAparelho, ehEstadoAmbiguoLegado, estaNoEstoque, patchRestauracao, patchSaida } from './ciclo';
+import { EstadoCicloAparelho, ehAparelhoDeCliente, ehEstadoAmbiguoLegado, estaNoEstoque, patchRestauracao, patchSaida } from './ciclo';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from './movimentacoes';
 
 /**
@@ -177,7 +177,7 @@ export function planejarRemontagem(params: {
     // fontes está errada e isso precisa ser conferido por uma pessoa.
     // O legado ambíguo (desativado com a condição antiga de venda) também: só a
     // conferência física diz se ele está mesmo na loja.
-    if (equivalente.status === 'vendido' || ehEstadoAmbiguoLegado(equivalente)) {
+    if (equivalente.status === 'vendido' || ehEstadoAmbiguoLegado(equivalente) || ehAparelhoDeCliente(equivalente)) {
       conflitosVendidos.push({ item, aparelho: equivalente });
       continue;
     }
@@ -271,7 +271,7 @@ export async function executarPlanoRemontagem(
       camposAuditados: ['preco', 'custo', 'modelo'],
       observacao: reativa ? 'Reativado: consta na lista colada do MercadoPhone.' : 'Atualizado pela lista do MercadoPhone.',
       // Revalida no banco: nem um plano adulterado reativa vendido ou legado ambíguo.
-      filtroElegivel: (estado) => estado.status !== 'vendido' && !ehEstadoAmbiguoLegado(estado),
+      filtroElegivel: (estado) => estado.status !== 'vendido' && !ehEstadoAmbiguoLegado(estado) && !ehAparelhoDeCliente(estado),
     });
     if (!r.auditoriaRegistrada && r.erroAuditoria) errosAuditoria.push(r.erroAuditoria);
     atualizados += r.afetados;

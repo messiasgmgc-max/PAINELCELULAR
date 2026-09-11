@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 import { Aparelho } from '@/lib/db/types';
 import { useAuth } from '@/hooks/useAuth';
 import { registrarLog } from '@/lib/logger';
-import { ehEstadoAmbiguoLegado, estaNoEstoque, patchRestauracao, patchSaida } from '@/lib/estoque/ciclo';
+import { ehAparelhoDeCliente, ehEstadoAmbiguoLegado, estaNoEstoque, patchRestauracao, patchSaida } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 
 /**
@@ -351,7 +351,7 @@ export function BackupEstoqueModal({
           camposAuditados: ['preco', 'modelo'],
           observacao: `Restaurado do backup "${backupSelecionado.motivo}" de ${backupSelecionado.dataHora}.`,
           // Revalida: se foi vendido depois que a prévia foi montada, fica de fora.
-          filtroElegivel: (estado) => !estaNoEstoque(estado) && estado.status !== 'vendido' && !ehEstadoAmbiguoLegado(estado),
+          filtroElegivel: (estado) => !estaNoEstoque(estado) && estado.status !== 'vendido' && !ehEstadoAmbiguoLegado(estado) && !ehAparelhoDeCliente(estado),
         });
         reativados += r.afetados;
         auditoriaIncompleta ||= !r.auditoriaRegistrada;

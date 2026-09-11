@@ -952,7 +952,8 @@ async function buscarMidiaBase64Evolution(
 interface ChecagemImeiResult {
   bloqueado: boolean;
   motivo?: string;
-  origem: 'base_local' | 'base_oficial_mock';
+  /** Só a base do próprio Phone Center: nenhuma base oficial é consultada. */
+  origem: 'base_local';
 }
 
 async function verificarImeiRoubado(lojaId: string, imei: string): Promise<ChecagemImeiResult> {
@@ -979,7 +980,7 @@ async function verificarImeiRoubado(lojaId: string, imei: string): Promise<Checa
   // Atualmente operando em validação de formato e checagem da base local do sistema.
   return {
     bloqueado: false,
-    origem: 'base_oficial_mock',
+    origem: 'base_local',
   };
 }
 
@@ -3846,7 +3847,14 @@ Digite: *!broadcast agora*`;
               `\u26A0\uFE0F N\u00e3o recomendamos prosseguir com a negocia\u00e7\u00e3o.`
             );
           }
-          return `\u2705 *IMEI ${imei} \u2014 Sem restri\u00e7\u00f5es*\n\nNenhum bloqueio encontrado (${checagem.origem}).`;
+          // Antes respondia "Sem restrições" sem consultar base oficial nenhuma: o lojista
+          // podia comprar aparelho roubado achando que estava verificado.
+          return (
+            `\u2139\uFE0F *IMEI ${imei}*\n\n` +
+            `Nada consta nos aparelhos marcados como roubo, furto ou bloqueio no Phone Center.\n\n` +
+            `\u26A0\uFE0F *N\u00e3o consultei a base oficial das operadoras.* Antes de comprar, confira em ` +
+            `https://www.consultaaparelhoimpedido.com.br`
+          );
         },
       },
     };

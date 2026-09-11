@@ -34,6 +34,8 @@ export function selecionarCandidatosRestauracao<T extends EstadoCicloAparelho>(
 
   for (const a of aparelhos) {
     if (a.ativo !== false) continue;
+    // Celular de cliente da OS nunca foi estoque da loja: restaurar o poria à venda.
+    if (a.status === 'cliente') continue;
 
     if (a.status === 'vendido') {
       selecao.ignoradosVendidos.push(a);

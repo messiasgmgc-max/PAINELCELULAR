@@ -8,14 +8,15 @@
  * 112 aparelhos de uma vez.
  *
  * Regra a partir daqui:
- *  - `status`   = ciclo de vida: disponivel | vendido | baixado | manutencao
+ *  - `status`   = ciclo de vida: disponivel | vendido | baixado | manutencao | cliente
+ *    ('cliente' = celular do cliente deixado para conserto na OS: não é da loja)
  *  - `condicao` = estado físico: novo | lacrado | seminovo | usado | danificado
  *    e NUNCA recebe 'vendido'.
  *  - Saída do estoque exige `ativo=false` junto de `status` vendido ou baixado,
  *    com `data_saida` e `motivo_saida` preenchidos.
  */
 
-export const STATUS_APARELHO = ['disponivel', 'vendido', 'baixado', 'manutencao'] as const;
+export const STATUS_APARELHO = ['disponivel', 'vendido', 'baixado', 'manutencao', 'cliente'] as const;
 export type StatusAparelho = (typeof STATUS_APARELHO)[number];
 
 export const MOTIVOS_SAIDA = ['venda', 'baixa_manual', 'baixa_massa', 'manutencao', 'perda'] as const;
@@ -76,9 +77,23 @@ export function estaNoEstoque(aparelho: EstadoCicloAparelho | null | undefined):
   if (!aparelho) return false;
   if (aparelho.ativo === false) return false;
   const status = aparelho.status || 'disponivel';
-  if (status === 'vendido' || status === 'baixado') return false;
+  if (status === 'vendido' || status === 'baixado' || status === 'cliente') return false;
   if (aparelho.condicao === 'vendido') return false;
   return true;
+}
+
+/**
+ * Celular do cliente cadastrado para a OS. Antes entrava ativo e com preço 0: aparecia
+ * no estoque, no PDV e na etiqueta como se fosse da loja. Nunca deve ser vendido,
+ * baixado nem reativado por operação de estoque.
+ */
+export function ehAparelhoDeCliente(aparelho: EstadoCicloAparelho | null | undefined): boolean {
+  return !!aparelho && aparelho.status === 'cliente';
+}
+
+/** Campos de ciclo para cadastrar o celular do cliente na OS. */
+export function patchAparelhoDeCliente(): PatchCiclo {
+  return { ativo: false, status: 'cliente', data_saida: null, motivo_saida: null };
 }
 
 /**
@@ -110,8 +125,12 @@ export function validarPatchCiclo(patch: Record<string, unknown>): void {
     throw new Error(`Escrita recusada: status '${status}' não pertence ao ciclo de vida.`);
   }
 
-  if (patch.ativo === false && status !== 'vendido' && status !== 'baixado') {
+  if (patch.ativo === false && status !== 'vendido' && status !== 'baixado' && status !== 'cliente') {
     throw new Error("Escrita recusada: tirar do estoque (ativo=false) exige status 'vendido' ou 'baixado'.");
+  }
+
+  if (status === 'cliente' && patch.ativo !== false) {
+    throw new Error("Escrita recusada: aparelho de cliente (status 'cliente') exige ativo=false.");
   }
 
   if ((status === 'vendido' || status === 'baixado') && patch.ativo !== false) {

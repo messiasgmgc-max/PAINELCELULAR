@@ -37,3 +37,10 @@ describe('Seleção para restauração em massa', () => {
     assert.ok(!todos.some((a) => a.id === 'ativo'));
   });
 });
+
+describe('Restauração ignora celular de cliente', () => {
+  it('aparelho da OS não volta para o estoque', () => {
+    const selecao = selecionarCandidatosRestauracao([{ id: 'c1', ativo: false, status: 'cliente', condicao: 'usado' }]);
+    assert.equal(selecao.restaurar.length, 0);
+  });
+});
