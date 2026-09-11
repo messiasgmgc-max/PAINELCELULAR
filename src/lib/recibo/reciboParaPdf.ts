@@ -30,3 +30,26 @@ export function escoparHtmlRecibo(html: string, classe: string = CLASSE_RECIBO_P
     .trim();
   return `<div class="${classe}"><style>${escoparCss(estilos, classe)}</style>${corpo}</div>`;
 }
+
+interface NoDeEstilo {
+  closest(seletor: string): unknown;
+  remove(): void;
+}
+
+/**
+ * Tira da cópia da página (onclone do html2canvas) os estilos do sistema, mantendo só o
+ * CSS do recibo. O Tailwind do sistema usa cores oklch, que o html2canvas não entende:
+ * "Attempting to parse an unsupported color function 'oklch'", e o PDF não era gerado.
+ */
+export function removerEstilosDoSistema(
+  doc: { querySelectorAll(seletor: string): ArrayLike<NoDeEstilo> },
+  classe: string = CLASSE_RECIBO_PDF
+): number {
+  let removidos = 0;
+  for (const no of Array.from(doc.querySelectorAll('link[rel="stylesheet"], style'))) {
+    if (no.closest(`.${classe}`)) continue;
+    no.remove();
+    removidos += 1;
+  }
+  return removidos;
+}

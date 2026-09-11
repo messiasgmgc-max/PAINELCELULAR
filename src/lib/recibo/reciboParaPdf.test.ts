@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { escoparHtmlRecibo } from './reciboParaPdf';
+import { escoparHtmlRecibo, removerEstilosDoSistema } from './reciboParaPdf';
 import { generateReciboA4Html } from '../reciboA4';
 
 describe('Recibo para PDF', () => {
@@ -33,5 +33,19 @@ describe('Recibo para PDF', () => {
     assert.equal(saida.includes('window.print'), false);
     assert.ok(saida.includes('LUCAS IMPORTS'));
     assert.ok(saida.includes('.recibo-pdf .section-title'));
+  });
+});
+
+describe('Cópia da página para o PDF', () => {
+  it('remove o CSS do sistema e mantém o do recibo', () => {
+    const removidos: string[] = [];
+    const no = (nome: string, dentroDoRecibo: boolean) => ({
+      closest: (seletor: string) => (dentroDoRecibo && seletor === '.recibo-pdf' ? {} : null),
+      remove: () => removidos.push(nome),
+    });
+    const doc = { querySelectorAll: () => [no('tailwind.css', false), no('style-do-tema', false), no('style-do-recibo', true)] };
+
+    assert.equal(removerEstilosDoSistema(doc), 2);
+    assert.deepEqual(removidos, ['tailwind.css', 'style-do-tema']);
   });
 });

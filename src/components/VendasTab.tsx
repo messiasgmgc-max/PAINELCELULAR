@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { textoGarantiaPadrao } from '@/lib/vendas/garantia';
 import { aplicarEdicaoItem } from '@/lib/vendas/itemVenda';
-import { escoparHtmlRecibo } from '@/lib/recibo/reciboParaPdf';
+import { escoparHtmlRecibo, removerEstilosDoSistema } from '@/lib/recibo/reciboParaPdf';
 import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
@@ -1838,7 +1838,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         .set({
           margin: 6,
           image: { type: 'jpeg', quality: 0.9 },
-          html2canvas: { scale: 1.5, useCORS: true },
+          html2canvas: {
+            scale: 1.5,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            // Sem o CSS do sistema na cópia: as cores oklch do Tailwind quebravam o html2canvas.
+            onclone: (copia: Document) => {
+              removerEstilosDoSistema(copia);
+            },
+          },
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         })
         .from(container)
