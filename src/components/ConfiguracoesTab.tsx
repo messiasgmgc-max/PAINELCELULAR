@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { MENSAGEM_RECIBO_PADRAO, VARIAVEIS_RECIBO, lerConfigReciboWhatsapp, salvarConfigReciboWhatsapp } from '@/lib/whatsapp/reciboWhatsapp';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
@@ -66,6 +67,51 @@ export function ConfiguracoesTab() {
   const [notificacoesWhatsapp, setNotificacoesWhatsapp] = useState(false);
   const [notificacoesOS, setNotificacoesOS] = useState(true);
   const [notificacoesGarantia, setNotificacoesGarantia] = useState(true);
+
+  // Recibo em PDF no WhatsApp do cliente ao finalizar a venda.
+  const [reciboWhatsappAtivo, setReciboWhatsappAtivo] = useState(false);
+  const [reciboWhatsappMensagem, setReciboWhatsappMensagem] = useState(MENSAGEM_RECIBO_PADRAO);
+  const [salvandoReciboWhatsapp, setSalvandoReciboWhatsapp] = useState(false);
+
+  useEffect(() => {
+    if (!usuario?.lojaId) return;
+    let cancelado = false;
+    supabase
+      .from('lojas')
+      .select('configuracoes')
+      .eq('id', usuario.lojaId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelado || !data) return;
+        const salvo = lerConfigReciboWhatsapp(data.configuracoes);
+        setReciboWhatsappAtivo(salvo.ativo);
+        setReciboWhatsappMensagem(salvo.mensagem);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [usuario?.lojaId]);
+
+  const salvarReciboWhatsapp = async () => {
+    if (!usuario?.lojaId) return;
+    setSalvandoReciboWhatsapp(true);
+    try {
+      // Relê antes de gravar: configuracoes guarda outras chaves (assinatura) que não podem sumir.
+      const { data, error } = await supabase.from('lojas').select('configuracoes').eq('id', usuario.lojaId).maybeSingle();
+      if (error) throw error;
+      const configuracoes = salvarConfigReciboWhatsapp(data?.configuracoes, {
+        ativo: reciboWhatsappAtivo,
+        mensagem: reciboWhatsappMensagem,
+      });
+      const { error: erroUpdate } = await supabase.from('lojas').update({ configuracoes }).eq('id', usuario.lojaId);
+      if (erroUpdate) throw erroUpdate;
+      toast.success(reciboWhatsappAtivo ? 'Recibo no WhatsApp ativado.' : 'Recibo no WhatsApp desativado.');
+    } catch (err: any) {
+      toast.error('Não foi possível salvar o recibo no WhatsApp.', { description: err?.message });
+    } finally {
+      setSalvandoReciboWhatsapp(false);
+    }
+  };
   
   const [senhaAtual, setSenhaAtual] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
@@ -1155,6 +1201,37 @@ export function ConfiguracoesTab() {
                         />
                       </div>
                     </div>
+                  </div>
+
+                  {/* Recibo em PDF no WhatsApp do cliente */}
+                  <div className="border-b dark:border-slate-700 pb-4 sm:pb-6 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm sm:text-base font-semibold">Recibo no WhatsApp do cliente</h3>
+                        <p className="text-xs text-muted-foreground">
+                          Ao finalizar a venda, envia o recibo em PDF para o WhatsApp cadastrado do cliente, pelo número
+                          conectado da loja.
+                        </p>
+                      </div>
+                      <Switch checked={reciboWhatsappAtivo} onCheckedChange={setReciboWhatsappAtivo} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="recibo-whatsapp-mensagem" className="text-xs font-semibold">
+                        Mensagem enviada junto do PDF
+                      </label>
+                      <textarea
+                        id="recibo-whatsapp-mensagem"
+                        rows={4}
+                        maxLength={1000}
+                        value={reciboWhatsappMensagem}
+                        onChange={(e) => setReciboWhatsappMensagem(e.target.value)}
+                        className="input-glass w-full text-sm resize-y"
+                      />
+                      <p className="text-[11px] text-muted-foreground">Pode usar: {VARIAVEIS_RECIBO.join('  ')}</p>
+                    </div>
+                    <Button type="button" size="sm" onClick={salvarReciboWhatsapp} disabled={salvandoReciboWhatsapp}>
+                      {salvandoReciboWhatsapp ? 'Salvando…' : 'Salvar recibo no WhatsApp'}
+                    </Button>
                   </div>
 
                   {/* Tipos de Notificação */}

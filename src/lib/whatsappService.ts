@@ -195,3 +195,58 @@ export async function enviarTextoWhatsApp({
     return { success: false, error: err.message || 'Erro de conexão com Evolution API' };
   }
 }
+
+/**
+ * Envia um PDF como documento pela Evolution API (sendMedia), com as mesmas tentativas
+ * de número com e sem o 9 do envio de texto.
+ */
+export async function enviarDocumentoWhatsApp({
+  lojaId,
+  telefone,
+  base64,
+  nomeArquivo,
+  legenda,
+}: {
+  lojaId?: string | null;
+  telefone: string;
+  /** Conteúdo do PDF em base64, sem o prefixo data:. */
+  base64: string;
+  nomeArquivo: string;
+  legenda?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const cleanPhone = formatarTelefoneWhatsApp(telefone);
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return { success: false, error: 'Telefone inválido ou não informado' };
+  }
+
+  const { evolutionUrl, apiKey, instanceName } = await getEvolutionConfig(lojaId);
+  const endpoint = `${evolutionUrl}/message/sendMedia/${instanceName}`;
+
+  const numeros = [cleanPhone];
+  if (cleanPhone.startsWith('55') && cleanPhone.length === 13) numeros.push(cleanPhone.slice(0, 4) + cleanPhone.slice(5));
+  if (cleanPhone.startsWith('55') && cleanPhone.length === 12) numeros.push(cleanPhone.slice(0, 4) + '9' + cleanPhone.slice(4));
+
+  let ultimoErro = '';
+  for (const numero of numeros) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: apiKey },
+        body: JSON.stringify({
+          number: numero,
+          mediatype: 'document',
+          mimetype: 'application/pdf',
+          fileName: nomeArquivo,
+          caption: legenda ? sanitizarTextoWhatsApp(legenda) : '',
+          media: base64,
+        }),
+      });
+      if (res.ok) return { success: true };
+      ultimoErro = `Evolution API (${res.status}): ${(await res.text()).slice(0, 150)}`;
+      console.warn(`[Evolution API] Envio de documento falhou para ${numero}: ${ultimoErro}`);
+    } catch (err: any) {
+      ultimoErro = err?.message || 'Erro de conexão com Evolution API';
+    }
+  }
+  return { success: false, error: ultimoErro };
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { escoparHtmlRecibo } from '@/lib/recibo/reciboParaPdf';
 import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
@@ -458,6 +459,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [showImportarPedidoModal, setShowImportarPedidoModal] = useState(false);
+
+  // Recibo em PDF no WhatsApp do cliente (Configurações → Notificações).
+  const [reciboWhatsappAtivo, setReciboWhatsappAtivo] = useState(false);
+  useEffect(() => {
+    if (!usuario?.lojaId) return;
+    let cancelado = false;
+    fetch('/api/whatsapp/enviar-recibo', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelado) setReciboWhatsappAtivo(Boolean(j?.ativo));
+      })
+      .catch(() => {});
+    return () => {
+      cancelado = true;
+    };
+  }, [usuario?.lojaId]);
   const [isClient, setIsClient] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const [posOverlayRect, setPosOverlayRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -1200,6 +1217,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       // 6. Gerar Notinha / Recibo A4 automaticamente
       handleGerarReciboA4(vendaCriada);
+      void enviarReciboWhatsApp(vendaCriada, clienteObj);
     } catch (err: any) {
       console.error('Erro ao aplicar venda por IA:', err);
       toast.error(err.message || 'Erro ao finalizar venda por IA');
@@ -1566,6 +1584,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         setShowReenviarNotinhaPrompt(true);
       } else if (vendaSalva) {
         handleGerarReciboA4(vendaSalva);
+        void enviarReciboWhatsApp(vendaSalva as Venda, clienteVenda);
       }
 
       successTimerRef.current = setTimeout(() => {
@@ -1785,6 +1804,46 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       assinatura_url: config?.assinaturaLoja || null,
     };
     return generateReciboA4Html(venda, storeObj, clienteVenda, isForEmail);
+  };
+
+  /**
+   * Gera o recibo em PDF na própria página e manda para o WhatsApp do cliente pela
+   * Evolution. Nunca atrapalha a venda: qualquer falha vira só um aviso.
+   */
+  const enviarReciboWhatsApp = async (venda: Venda, clienteVenda?: Cliente | null) => {
+    if (!reciboWhatsappAtivo || !venda?.id) return;
+    const digitos = String(clienteVenda?.telefone || '').replace(/\D/g, '');
+    if (digitos.length < 10 || /^0/.test(digitos)) return;
+
+    try {
+      const html = escoparHtmlRecibo(getReciboA4Html(venda, clienteVenda || undefined, true));
+      const html2pdf = (await import('html2pdf.js')).default as any;
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      const pdfBase64: string = await html2pdf()
+        .set({
+          margin: 6,
+          image: { type: 'jpeg', quality: 0.9 },
+          html2canvas: { scale: 1.5, useCORS: true },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        })
+        .from(container)
+        .outputPdf('datauristring');
+
+      const resposta = await fetch('/api/whatsapp/enviar-recibo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendaId: venda.id, pdfBase64 }),
+      });
+      const resultado = await resposta.json().catch(() => ({}));
+      if (resultado?.enviado) {
+        toast.success(`📲 Recibo enviado no WhatsApp de ${clienteVenda?.nome || venda.clienteNome}.`);
+      } else if (!resposta.ok) {
+        toast.warning('Venda salva, mas o recibo não foi enviado no WhatsApp.', { description: resultado?.error });
+      }
+    } catch (erro: any) {
+      toast.warning('Venda salva, mas o recibo não foi enviado no WhatsApp.', { description: erro?.message });
+    }
   };
 
   const dispararEmailReciboComPdf = async (venda: Venda, clienteVenda: Cliente) => {
