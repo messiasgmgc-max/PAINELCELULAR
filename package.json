@@ -19,6 +19,7 @@
     "mobile:open:ios": "cap open ios"
   },
   "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^7.5.0",
     "@emotion/is-prop-valid": "latest",
     "@google/genai": "^1.52.0",
     "@hookform/resolvers": "^3.9.1",

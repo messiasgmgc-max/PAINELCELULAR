@@ -33,6 +33,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Leitor de código de barras (@capacitor-mlkit/barcode-scanning). O leitor do PDV usa o
+             modelo do ML Kit que vai dentro do APK; isto só adianta o download do leitor do
+             Google Play Services para quem instala pela Play Store. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
     </application>
 
     <!-- Permissions -->
