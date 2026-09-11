@@ -6,6 +6,11 @@
 --   3. Suporte a Período de Teste Gratuito (Trial de 3 dias para novos clientes ou upgrade de plano)
 --   4. Suporte a Cartão de Crédito e Mercado Pago Checkout / Preferences com parcelamento
 --   5. Campos de dados cadastrais da loja para onboarding self-service (cidade, estado, instagram)
+--
+-- Aplicada só em 11/09/2026 (até então as colunas não existiam no banco e a
+-- renovação por cartão e o teste grátis falhavam). Versão aplicada: sem
+-- updated_at em lojas (a coluna não existe) e com a função liberada só para o
+-- servidor (service_role).
 -- ==============================================================================
 
 -- 1. ADICIONAR COLUNAS NA TABELA 'lojas'
@@ -74,6 +79,7 @@ CREATE OR REPLACE FUNCTION public.solicitar_trial_plano(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_loja RECORD;
@@ -127,8 +133,7 @@ BEGIN
     plano_trial_ate = v_data_fim,
     plano_trial_usado = TRUE,
     trial_planos_usados = v_trial_usados,
-    data_vencimento = v_novo_vencimento,
-    updated_at = NOW()
+    data_vencimento = v_novo_vencimento
   WHERE id = p_loja_id;
 
   -- Registrar no histórico
@@ -159,6 +164,11 @@ BEGIN
   );
 END;
 $$;
+
+-- Sem checagem de quem chama: só o servidor pode executar.
+REVOKE ALL ON FUNCTION public.solicitar_trial_plano(UUID, TEXT, INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.solicitar_trial_plano(UUID, TEXT, INTEGER) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.solicitar_trial_plano(UUID, TEXT, INTEGER) TO service_role;
 
 -- 5. COMENTÁRIOS EXPLICATIVOS
 COMMENT ON COLUMN public.lojas.plano_tipo IS 'Nível do plano: entrada (R$99,90), intermediario (R$189,00) ou avancado (R$299,00)';

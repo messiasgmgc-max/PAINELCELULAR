@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { enviarTextoWhatsApp, formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 
@@ -12,6 +13,9 @@ export async function POST(request: Request) {
       mensagem,
       valorTotal,
     } = body;
+
+    const acesso = await exigirAcesso(request, { lojaId: lojaId || null });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!mensagem || !mensagem.trim()) {
       return NextResponse.json({ error: 'Mensagem do extrato não pode estar vazia.' }, { status: 400 });

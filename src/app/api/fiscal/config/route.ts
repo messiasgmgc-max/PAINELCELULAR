@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { lojaEfetiva, PAPEIS_GESTAO } from '@/lib/auth/acesso';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { obterDadosFiscaisLoja } from '@/lib/fiscal/fiscalService';
 
@@ -6,6 +8,9 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const lojaId = searchParams.get('lojaId');
+
+    const acesso = await exigirAcesso(req, { lojaId: lojaId || null, papeis: PAPEIS_GESTAO });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!lojaId) {
       return NextResponse.json({ error: 'lojaId é obrigatório' }, { status: 400 });
@@ -22,6 +27,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { lojaId, dadosFiscais } = body;
+
+    const acesso = await exigirAcesso(req, { lojaId: lojaId || null, papeis: PAPEIS_GESTAO });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!lojaId || !dadosFiscais) {
       return NextResponse.json({ error: 'lojaId e dadosFiscais são obrigatórios' }, { status: 400 });

@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabase } from '@/lib/supabaseClient';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const lojaId = body?.lojaId;
+    const acesso = await exigirAcesso(request, {});
+    if (!acesso.ok) return acesso.resposta;
+    const lojaId = acesso.usuario.superAdmin ? body?.lojaId : acesso.usuario.lojaId ?? undefined;
 
     return await executarSincronizacao(lojaId);
   } catch (error: any) {
@@ -17,7 +20,9 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const lojaId = searchParams.get('lojaId') || undefined;
+    const acesso = await exigirAcesso(request, {});
+    if (!acesso.ok) return acesso.resposta;
+    const lojaId = acesso.usuario.superAdmin ? searchParams.get('lojaId') || undefined : acesso.usuario.lojaId ?? undefined;
 
     return await executarSincronizacao(lojaId);
   } catch (error: any) {

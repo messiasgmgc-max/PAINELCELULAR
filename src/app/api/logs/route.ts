@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabase } from '@/lib/supabaseClient';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const lojaId = searchParams.get('lojaId');
+    const acesso = await exigirAcesso(request, {});
+    if (!acesso.ok) return acesso.resposta;
+    // 'todas' só para o administrador da plataforma: os demais veem só a própria loja.
+    const lojaId = acesso.usuario.superAdmin ? searchParams.get('lojaId') : acesso.usuario.lojaId;
     const tipo = searchParams.get('tipo');
     const termo = searchParams.get('termo');
     const limit = parseInt(searchParams.get('limit') || '50', 10);
@@ -50,6 +54,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { loja_id, usuario_id, usuario_email, usuario_nome, tipo_evento, acao, detalhes, valor_anterior, valor_novo } = body;
 
+    const acesso = await exigirAcesso(request, {});
+    if (!acesso.ok) return acesso.resposta;
+
     if (!acao) {
       return NextResponse.json({ error: 'A ação é obrigatória.' }, { status: 400 });
     }
@@ -57,7 +64,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from('logs_sistema')
       .insert({
-        loja_id: loja_id || null,
+        loja_id: acesso.usuario.superAdmin ? loja_id || null : acesso.usuario.lojaId,
         usuario_id: usuario_id || null,
         usuario_email: usuario_email || null,
         usuario_nome: usuario_nome || null,

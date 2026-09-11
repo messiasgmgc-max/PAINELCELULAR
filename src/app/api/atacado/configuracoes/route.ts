@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
+import { lojaEfetiva, PAPEIS_GESTAO } from '@/lib/auth/acesso';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    let lojaId = url.searchParams.get('lojaId');
+    const acesso = await exigirAcesso(request, { lojaId: null });
+    if (!acesso.ok) return acesso.resposta;
+    // Sem loja informada, a rota pegava a loja mais recente do banco (de outra pessoa).
+    let lojaId = lojaEfetiva(acesso.usuario, url.searchParams.get('lojaId'));
 
     let lojaQuery = supabaseAdmin
       .from('lojas')
@@ -68,7 +73,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    let lojaId = body.lojaId || (body.configAtacado && body.configAtacado.lojaId);
+    const acesso = await exigirAcesso(request, { lojaId: null, papeis: PAPEIS_GESTAO });
+    if (!acesso.ok) return acesso.resposta;
+    let lojaId = lojaEfetiva(acesso.usuario, body.lojaId || (body.configAtacado && body.configAtacado.lojaId));
 
     if (!lojaId) {
       // Fallback para obter a loja ativa

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { lojaEfetiva, PAPEIS_GESTAO } from '@/lib/auth/acesso';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 
 function normalizarTelefone(tel: string): string {
@@ -21,6 +23,9 @@ export async function GET(request: Request) {
     if (!lojaId) {
       return NextResponse.json({ error: 'loja_id é obrigatório.' }, { status: 400 });
     }
+
+    const acesso = await exigirAcesso(request, { lojaId });
+    if (!acesso.ok) return acesso.resposta;
 
     // 1. Dados da Loja e do Dono
     const { data: loja } = await supabaseAdmin
@@ -59,6 +64,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { id, loja_id, nome, telefone, email, cargo = 'vendedor', ativo = true } = body;
+
+    const acesso = await exigirAcesso(request, { lojaId: loja_id || null, papeis: PAPEIS_GESTAO });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!loja_id || !nome?.trim()) {
       return NextResponse.json({ error: 'loja_id e nome são obrigatórios.' }, { status: 400 });
@@ -162,6 +170,9 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     const lojaId = searchParams.get('loja_id');
+
+    const acesso = await exigirAcesso(request, { lojaId: lojaId || null, papeis: PAPEIS_GESTAO });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!id || !lojaId) {
       return NextResponse.json({ error: 'id e loja_id são obrigatórios.' }, { status: 400 });

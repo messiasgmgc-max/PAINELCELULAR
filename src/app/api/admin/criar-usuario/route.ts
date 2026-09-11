@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { supabase } from '@/lib/supabaseClient';
 
 export async function POST(request: Request) {
   try {
     const { email, senha, nome, role, loja_id } = await request.json();
+
+    const acesso = await exigirAcesso(request, { superAdmin: true });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!email || !senha) {
       return NextResponse.json({ error: 'E-mail e senha são obrigatórios' }, { status: 400 });

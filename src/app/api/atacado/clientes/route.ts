@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 
 export async function GET(request: Request) {
@@ -9,6 +10,9 @@ export async function GET(request: Request) {
     if (!lojaId) {
       return NextResponse.json({ error: 'ID da loja é obrigatório' }, { status: 400 });
     }
+
+    const acesso = await exigirAcesso(request, { lojaId });
+    if (!acesso.ok) return acesso.resposta;
 
     // Busca clientes já cadastrados formalmente
     const { data: clientes, error } = await supabaseAdmin
@@ -120,6 +124,9 @@ export async function POST(request: Request) {
       saldoDevedor
     } = body;
 
+    const acesso = await exigirAcesso(request, { lojaId: lojaId || null });
+    if (!acesso.ok) return acesso.resposta;
+
     if (!lojaId || !nome?.trim()) {
       return NextResponse.json({ error: 'ID da loja e Nome do cliente são obrigatórios' }, { status: 400 });
     }
@@ -189,6 +196,9 @@ export async function DELETE(request: Request) {
     const url = new URL(request.url);
     const id = url.searchParams.get('id');
     const lojaId = url.searchParams.get('lojaId');
+
+    const acesso = await exigirAcesso(request, { lojaId: lojaId || null });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!id || !lojaId) {
       return NextResponse.json({ error: 'ID do cliente e da loja são obrigatórios' }, { status: 400 });

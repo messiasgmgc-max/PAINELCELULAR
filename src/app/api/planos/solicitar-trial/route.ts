@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
+import { lojaEfetiva, PAPEIS_GESTAO } from '@/lib/auth/acesso';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { TipoPlano, obterPlanoPorTipo } from '@/lib/planos-config';
 
 export async function POST(request: Request) {
   try {
     const { lojaId, novoPlano } = await request.json();
+
+    const acesso = await exigirAcesso(request, { lojaId: lojaId || null, papeis: PAPEIS_GESTAO });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!lojaId || !novoPlano) {
       return NextResponse.json({ error: 'ID da loja e plano são obrigatórios' }, { status: 400 });

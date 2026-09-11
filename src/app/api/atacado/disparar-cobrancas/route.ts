@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { enviarTextoWhatsApp, formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
@@ -13,6 +14,9 @@ export async function POST(request: Request) {
       mensagemPersonalizada, 
       modoSimulacao = false 
     } = body;
+
+    const acesso = await exigirAcesso(request, { lojaId: lojaId || null });
+    if (!acesso.ok) return acesso.resposta;
 
     if (!lojaId) {
       return NextResponse.json({ error: 'ID da loja é obrigatório' }, { status: 400 });

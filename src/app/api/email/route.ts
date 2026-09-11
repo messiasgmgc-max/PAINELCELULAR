@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
 import nodemailer from 'nodemailer';
 
 export const dynamic = 'force-dynamic';
@@ -6,6 +7,12 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   try {
     const { para, assunto, mensagem, pdfBufferBase64, nomePdf, pdfUrl } = await request.json();
+
+    const acesso = await exigirAcesso(request, {});
+    if (!acesso.ok) return acesso.resposta;
+    if (pdfUrl && !/^https?:\/\//i.test(String(pdfUrl))) {
+      return NextResponse.json({ error: 'Anexo precisa ser um link http(s).' }, { status: 400 });
+    }
 
     const transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST,
