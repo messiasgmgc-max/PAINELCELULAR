@@ -1,5 +1,5 @@
 /**
- * Linha do tempo da experiência 3D de /assinar/3d (página de teste).
+ * Linha do tempo da experiência 3D de /assinar.
  *
  * O scroll vira um progresso de 0 a 1 e cada propriedade da cena é lida daqui:
  * rolar para baixo avança, rolar para cima volta, parar em qualquer ponto é um

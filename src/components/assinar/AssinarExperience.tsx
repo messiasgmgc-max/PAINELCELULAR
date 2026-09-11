@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useMotionValueEvent, useReducedMotion, useScroll } from 'framer-motion';
-import AssinarPage from '@/app/assinar/page';
+import AssinarPage from '@/components/assinar/AssinarPage';
 import { NotebookScene } from '@/components/assinar/NotebookScene';
 import { ALTURA_ROLAGEM_VH, PROGRESSO_ENTRADA } from '@/lib/assinar/timeline3d';
 
 /**
- * /assinar/3d — página de teste: a mesma /assinar, com uma abertura em que o
- * usuário "entra" pela tela de um notebook conforme rola.
+ * /assinar — a página de assinatura com uma abertura em que o usuário "entra"
+ * pela tela de um notebook (celular, no mobile) conforme rola.
  *
  * Arquitetura:
  *  - AssinarExperience: decide se há animação (movimento reduzido, suporte a 3D)

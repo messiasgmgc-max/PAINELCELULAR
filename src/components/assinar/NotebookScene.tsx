@@ -191,7 +191,9 @@ export function NotebookScene({ progresso, mobile, children, onEntrar }: Props) 
           Entre no sistema.
         </h1>
         <p className="mx-auto mt-3 max-w-md text-sm text-slate-400 sm:text-base">
-          Role para abrir o notebook e assinar por dentro dele.
+          {mobile
+            ? 'Role para entrar pela tela do celular e assinar por dentro dele.'
+            : 'Role para abrir o notebook e assinar por dentro dele.'}
         </p>
       </motion.div>
 
