@@ -83,9 +83,11 @@ jobs:
       - name: Instalar Dependências
         run: pnpm install --no-frozen-lockfile
 
+      # O sync registra os plugins nativos (leitor de código de barras do ML Kit) e reescreve
+      # android/capacitor.settings.gradle com o caminho do node_modules do pnpm. Antes o
+      # "|| true" escondia a falha e o Gradle seguia sem os plugins; agora o job para aqui.
       - name: Sincronizar Capacitor Android
-        run: |
-          npx cap sync android || true
+        run: pnpm exec cap sync android
 
       - name: Compilar APK Android
         if: hashFiles('android/gradlew') != ''
