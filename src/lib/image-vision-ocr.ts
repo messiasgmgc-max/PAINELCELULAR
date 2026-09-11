@@ -141,6 +141,10 @@ export async function analyzeImageWithGroq(
           },
         ],
         temperature: 0.1,
+        // Sem raciocínio: com ele o Qwen gastava os 600 tokens pensando e não fechava o JSON
+        // (erro json_validate_failed), e toda foto caía no Gemini. A conta gratuita limita
+        // a 1000 tokens de saída por minuto, então subir o max_tokens não resolve.
+        reasoning_effort: 'none',
         max_tokens: 600,
         response_format: {
           type: 'json_object',
