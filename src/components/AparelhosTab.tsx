@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { EdicaoMassaModal } from '@/components/estoque/EdicaoMassaModal';
 import { conflitoPodeReentrar } from '@/lib/estoque/remontagem';
 import { bateriaParaLista, observacaoParaLista } from '@/lib/estoque/listaWhatsapp';
 import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
@@ -57,6 +58,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
+  const [showEdicaoMassa, setShowEdicaoMassa] = useState(false);
   const [aparelhoParaVenda, setAparelhoParaVenda] = useState<Aparelho | null>(null);
   const [aparelhoParaManutencao, setAparelhoParaManutencao] = useState<Aparelho | null>(null);
   const [aparelhoParaRetorno, setAparelhoParaRetorno] = useState<Aparelho | null>(null);
@@ -1808,6 +1810,16 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 Valores Atacado
               </Button>
 
+              {/* Edição em massa por modelo: cor, capacidade e observação */}
+              <Button
+                onClick={() => setShowEdicaoMassa(true)}
+                className="bg-violet-500/15 hover:bg-violet-500/25 text-violet-200 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-violet-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                title="Mudar cor, capacidade e observação de vários aparelhos de uma vez"
+              >
+                <Edit2 className="h-4 w-4 text-violet-300" />
+                Editar em massa
+              </Button>
+
               {/* 2. Menu Importar */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -3105,6 +3117,14 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             />
           );
         })()}
+
+      <EdicaoMassaModal
+        aberto={showEdicaoMassa}
+        aparelhos={aparelhos as any[]}
+        atualizarAparelho={(id, dados) => atualizarAparelho(id, dados as any)}
+        onFechar={() => setShowEdicaoMassa(false)}
+        onConcluido={() => fetchAparelhos()}
+      />
 
       {/* Depois de aplicar a lista: gerar as etiquetas de quem entrou */}
       {etiquetasPendentesLista && (
