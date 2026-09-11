@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { bateriaParaLista, observacaoParaLista } from '@/lib/estoque/listaWhatsapp';
 import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
 import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
@@ -1135,16 +1136,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             corLimpa = '';
           }
 
-          // Extrai % de bateria de observações ou campo de saúde
-          let bateriaStr = '';
-          if (a.observacoes) {
-            const bateriaMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
-            if (bateriaMatch) bateriaStr = `${bateriaMatch[1]}%`;
-          }
-          if (!bateriaStr && (a as any).saudeBateria) {
-            const saude = String((a as any).saudeBateria).replace('%', '').trim();
-            if (saude && saude !== '-') bateriaStr = `${saude}%`;
-          }
+          // Coluna saude_bateria ou, se faltar, "Bateria: 89%" da observação.
+          const bateriaStr = bateriaParaLista(a);
 
           // Preço para Atacado formatado em destaque
           const valAtacado = (a as any).precoAtacado || a.preco || 0;
@@ -1152,22 +1145,9 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             ? `*R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}*` 
             : '';
 
-          // Outras observações relevantes
-          let obsExtra = '';
-          if (a.observacoes) {
-            const obsLimpas = a.observacoes
-              .replace(/BAIXA_ESTOQUE:[^|]+/g, '')
-              .replace(/ID:\s*[A-Za-z0-9]+/gi, '')
-              .replace(/IMEI:\s*[A-Za-z0-9]+/gi, '')
-              .replace(/\d+%\s*bat[a-z]*/gi, '')
-              .replace(/\b\d{2,3}%\b/g, '')
-              .split('|')
-              .map((o) => o.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').trim())
-              .filter((o) => o.length > 0 && o.length < 35);
-            if (obsLimpas.length > 0) {
-              obsExtra = ` (${obsLimpas[0]})`;
-            }
-          }
+          // Observação curta, sem "Obs:" e sem parênteses dobrados ("(Obs: (CAM USADA))").
+          const obsCurta = observacaoParaLista(a.observacoes);
+          const obsExtra = obsCurta ? ` (${obsCurta})` : '';
 
           const partes = [];
           if (capacidadeStr) partes.push(capacidadeStr);

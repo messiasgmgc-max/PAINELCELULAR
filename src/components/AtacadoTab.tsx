@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { bateriaParaLista } from '@/lib/estoque/listaWhatsapp';
 import { FILTRO_VENDA_VALIDA, montarCancelamento, vendaConta } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { 
@@ -1081,11 +1082,8 @@ export function AtacadoTab() {
         }
         const codigoDisplay = imeiReal ? imeiReal : (getAparelhoCodigo(a) || '');
 
-        let bateriaStr = '';
-        if (a.observacoes) {
-          const bMatch = a.observacoes.match(/(\d+)%\s*bat/i) || a.observacoes.match(/\b(\d{2,3})%\b/);
-          if (bMatch) bateriaStr = `${bMatch[1]}%`;
-        }
+        // Coluna saude_bateria ou, se faltar, "Bateria: 89%" da observação.
+        const bateriaStr = bateriaParaLista(a);
 
         const partes = [];
         if (a.capacidade) partes.push(a.capacidade);
