@@ -5,6 +5,8 @@ import { textoGarantiaPadrao } from '@/lib/vendas/garantia';
 import { aplicarEdicaoItem } from '@/lib/vendas/itemVenda';
 import { escoparHtmlRecibo, removerEstilosDoSistema } from '@/lib/recibo/reciboParaPdf';
 import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
+import { MAX_FOTOS_VENDA, type CampoDaFoto } from '@/lib/vendas/fotoVenda';
+import { reduzirImagemParaEnvio } from '@/lib/imagens/reduzirImagem';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -15,10 +17,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet, Check } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet, Check, ChevronRight, ImagePlus, Send } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { NovoAparelhoRapidoModal } from '@/components/vendas/components/NovoAparelhoRapidoModal';
 import { desfazerCadastroRapido, type PayloadCadastroRapido } from '@/lib/pdv/cadastroRapido';
@@ -49,6 +55,16 @@ import {
   type ExportColumn,
   type ExportFormat,
 } from '@/lib/importExport';
+
+type CanalRecibo = 'todos' | 'email' | 'whatsapp';
+
+type ResultadoReciboWhatsApp = { enviado: boolean; motivo?: string; erro?: string };
+
+const MOTIVOS_RECIBO_WHATSAPP: Record<string, string> = {
+  desativado: 'envio desligado em Configurações → Notificações',
+  cancelada: 'venda cancelada',
+  sem_telefone: 'cliente sem telefone válido',
+};
 
 type VendasTabProps = {
   isSidebarCollapsed?: boolean;
@@ -490,6 +506,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');
   const [processingAiText, setProcessingAiText] = useState(false);
+  // Fotos da venda inteligente (etiqueta, caixa, tela Sobre), já reduzidas para envio.
+  const [fotosVenda, setFotosVenda] = useState<string[]>([]);
+  const [preparandoFotoVenda, setPreparandoFotoVenda] = useState(false);
+  const [leituraFotoVenda, setLeituraFotoVenda] = useState<{ avisos: string[]; camposDaFoto: CampoDaFoto[] } | null>(null);
   const [showDadosFaltantesModal, setShowDadosFaltantesModal] = useState(false);
   const [aiParsedData, setAiParsedData] = useState<any>(null);
   const [selectedStockAparelhoId, setSelectedStockAparelhoId] = useState('');
@@ -503,6 +523,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     cor: '',
     condicao: 'seminovo' as 'seminovo' | 'novo',
     imei: '',
+    bateria: '',
     preco: '',
     custo: '',
     vendedor: '',
@@ -1110,6 +1131,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           preco: Number(parsedData.aparelho.preco || parsedData.valorTotal || 0),
           custo: Number(parsedData.aparelho.custo || 0),
           condicao: parsedData.aparelho.condicao || 'seminovo',
+          ...(Number(parsedData.aparelho.saudeBateria) > 0 ? { saude_bateria: String(Number(parsedData.aparelho.saudeBateria)) } : {}),
           ativo: true,
           status: 'disponivel',
           loja_id: usuario?.lojaId || null
@@ -1240,9 +1262,39 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
+  const adicionarFotosVenda = async (arquivos: File[]) => {
+    const imagens = arquivos.filter((arquivo) => arquivo.type.startsWith('image/'));
+    if (!imagens.length) return;
+    const vagas = MAX_FOTOS_VENDA - fotosVenda.length;
+    if (vagas <= 0) {
+      toast.error(`Até ${MAX_FOTOS_VENDA} fotos por venda.`);
+      return;
+    }
+    if (imagens.length > vagas) toast.info(`Só cabem mais ${vagas} foto(s); usei as primeiras.`);
+    setPreparandoFotoVenda(true);
+    try {
+      const reduzidas = await Promise.all(imagens.slice(0, vagas).map((imagem) => reduzirImagemParaEnvio(imagem)));
+      setFotosVenda((atuais) => [...atuais, ...reduzidas].slice(0, MAX_FOTOS_VENDA));
+    } catch {
+      toast.error('Não consegui abrir essa imagem. Tente outra foto.');
+    } finally {
+      setPreparandoFotoVenda(false);
+    }
+  };
+
+  /** Selo no campo da revisão que veio da foto (some quando um aparelho do estoque é escolhido). */
+  const seloDaFoto = (campo: CampoDaFoto) =>
+    !selectedStockAparelhoId && leituraFotoVenda?.camposDaFoto.includes(campo) ? (
+      <span className="ml-1 text-sky-400 text-[10px] font-mono">📷 DA FOTO</span>
+    ) : null;
+
   const handleProcessarTextoVenda = async () => {
-    if (!textoPedido.trim()) {
-      toast.error('Cole o texto da venda na área indicada.');
+    if (!textoPedido.trim() && fotosVenda.length === 0) {
+      toast.error('Cole o texto da venda ou adicione uma foto do aparelho.');
+      return;
+    }
+    if (preparandoFotoVenda) {
+      toast.info('Aguarde a foto terminar de carregar.');
       return;
     }
 
@@ -1251,7 +1303,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const res = await fetch('/api/ai/parse-venda', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texto: textoPedido, lojaId: usuario?.lojaId }),
+        body: JSON.stringify({ texto: textoPedido, imagens: fotosVenda }),
       });
 
       const result = await res.json();
@@ -1260,7 +1312,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       }
 
       const parsed = result.data;
+      const leituraFotos = result.fotos as { avisos: string[]; camposDaFoto: CampoDaFoto[]; imeis: string[] } | null;
       setShowImportarPedidoModal(false);
+      // As fotos foram para a revisão; não podem ir junto na próxima venda.
+      setFotosVenda([]);
+      setLeituraFotoVenda(leituraFotos ? { avisos: leituraFotos.avisos, camposDaFoto: leituraFotos.camposDaFoto } : null);
 
       const faltantes = parsed.camposFaltantes || [];
 
@@ -1277,8 +1333,18 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         const escolha = escolherAparelhoParaVendaIA<Aparelho>({ aparelhos: disponiveis, ...parsed.aparelho });
         if (escolha.tipo === 'estoque') matchedStockId = escolha.aparelho.id;
       }
+      // A foto pode trazer IMEI 1 e IMEI 2; o estoque pode ter qualquer um dos dois.
+      for (const imei of leituraFotos?.imeis ?? []) {
+        if (matchedStockId) break;
+        const escolha = escolherAparelhoParaVendaIA<Aparelho>({ aparelhos: disponiveis, ...parsed.aparelho, imei });
+        if (escolha.tipo === 'estoque') {
+          matchedStockId = escolha.aparelho.id;
+          parsed.aparelho.imei = imei;
+        }
+      }
 
-      if (faltantes.length > 0) {
+      // Leitura de foto sempre passa pela revisão: o IMEI lido precisa ser conferido.
+      if (faltantes.length > 0 || leituraFotos) {
         setAiParsedData(parsed);
         const apPreSel = matchedStockId ? disponiveis.find(a => a.id === matchedStockId) : null;
         setDadosFaltantesForm({
@@ -1291,6 +1357,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           cor: apPreSel ? (apPreSel.cor || '') : parsed.aparelho?.cor || '',
           condicao: (apPreSel ? apPreSel.condicao : parsed.aparelho?.condicao === 'novo' ? 'novo' : 'seminovo') as 'seminovo' | 'novo',
           imei: apPreSel ? (apPreSel.imei || apPreSel.numeroSerie || '') : parsed.aparelho?.imei || '',
+          bateria: apPreSel
+            ? String(apPreSel.saudeBateria || apPreSel.saude_bateria || '')
+            : parsed.aparelho?.saudeBateria ? String(parsed.aparelho.saudeBateria) : '',
           preco: apPreSel ? String(apPreSel.preco) : parsed.aparelho?.preco ? String(parsed.aparelho.preco) : parsed.valorTotal ? String(parsed.valorTotal) : '',
           custo: apPreSel ? String((apPreSel as any).custo || 0) : parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
@@ -1824,44 +1893,53 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
    * Gera o recibo em PDF na própria página e manda para o WhatsApp do cliente pela
    * Evolution. Nunca atrapalha a venda: qualquer falha vira só um aviso.
    */
+  const postarReciboWhatsApp = async (venda: Venda, clienteVenda?: Cliente | null): Promise<ResultadoReciboWhatsApp> => {
+    const html = escoparHtmlRecibo(getReciboA4Html(venda, clienteVenda || undefined, true));
+    const html2pdf = (await import('html2pdf.js')).default as any;
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    const pdfBase64: string = await html2pdf()
+      .set({
+        margin: 6,
+        image: { type: 'jpeg', quality: 0.9 },
+        html2canvas: {
+          scale: 1.5,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          // Sem o CSS do sistema na cópia: as cores oklch do Tailwind quebravam o html2canvas.
+          onclone: (copia: Document) => {
+            removerEstilosDoSistema(copia);
+          },
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      })
+      .from(container)
+      .outputPdf('datauristring');
+
+    const resposta = await fetch('/api/whatsapp/enviar-recibo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendaId: venda.id, pdfBase64 }),
+    });
+    const resultado = await resposta.json().catch(() => ({}));
+    return {
+      enviado: Boolean(resultado?.enviado),
+      motivo: resultado?.motivo,
+      erro: resposta.ok ? undefined : resultado?.error || `Erro ${resposta.status}`,
+    };
+  };
+
   const enviarReciboWhatsApp = async (venda: Venda, clienteVenda?: Cliente | null) => {
     if (!reciboWhatsappAtivo || !venda?.id) return;
     const digitos = String(clienteVenda?.telefone || '').replace(/\D/g, '');
     if (digitos.length < 10 || /^0/.test(digitos)) return;
 
     try {
-      const html = escoparHtmlRecibo(getReciboA4Html(venda, clienteVenda || undefined, true));
-      const html2pdf = (await import('html2pdf.js')).default as any;
-      const container = document.createElement('div');
-      container.innerHTML = html;
-      const pdfBase64: string = await html2pdf()
-        .set({
-          margin: 6,
-          image: { type: 'jpeg', quality: 0.9 },
-          html2canvas: {
-            scale: 1.5,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            // Sem o CSS do sistema na cópia: as cores oklch do Tailwind quebravam o html2canvas.
-            onclone: (copia: Document) => {
-              removerEstilosDoSistema(copia);
-            },
-          },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        })
-        .from(container)
-        .outputPdf('datauristring');
-
-      const resposta = await fetch('/api/whatsapp/enviar-recibo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vendaId: venda.id, pdfBase64 }),
-      });
-      const resultado = await resposta.json().catch(() => ({}));
-      if (resultado?.enviado) {
+      const resultado = await postarReciboWhatsApp(venda, clienteVenda);
+      if (resultado.enviado) {
         toast.success(`📲 Recibo enviado no WhatsApp de ${clienteVenda?.nome || venda.clienteNome}.`);
-      } else if (!resposta.ok) {
-        toast.warning('Venda salva, mas o recibo não foi enviado no WhatsApp.', { description: resultado?.error });
+      } else if (resultado.erro) {
+        toast.warning('Venda salva, mas o recibo não foi enviado no WhatsApp.', { description: resultado.erro });
       }
     } catch (erro: any) {
       toast.warning('Venda salva, mas o recibo não foi enviado no WhatsApp.', { description: erro?.message });
@@ -1900,7 +1978,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         </div>
       `;
 
-      await fetch('/api/email', {
+      const resposta = await fetch('/api/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1909,36 +1987,73 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           mensagem: emailCorpoHtml,
         }),
       });
-      return true;
+      return resposta.ok;
     } catch (err) {
       console.error('Erro ao enviar e-mail:', err);
       return false;
     }
   };
 
-  const handleReenviarRecibo = async (venda: Venda) => {
-    if (!venda.clienteId) {
-      toast.error('Cliente não associado a esta venda.');
+  /** Reenvia o recibo por e-mail, WhatsApp ou os dois ao mesmo tempo. */
+  const handleReenviarRecibo = async (venda: Venda, canal: CanalRecibo) => {
+    const clienteVenda = venda.clienteId ? clientes.find((c) => c.id === venda.clienteId) : undefined;
+    if (!clienteVenda) {
+      toast.error('Esta venda não tem cliente cadastrado para receber o recibo.');
       return;
     }
-    const clienteVenda = clientes.find(c => c.id === venda.clienteId);
-    if (!clienteVenda || !clienteVenda.email || clienteVenda.email === 'sem@email.com') {
+
+    const temEmail = Boolean(clienteVenda.email) && clienteVenda.email !== 'sem@email.com';
+    const digitos = String(clienteVenda.telefone || '').replace(/\D/g, '');
+    const temTelefone = digitos.length >= 10 && !/^0/.test(digitos);
+    const querEmail = canal !== 'whatsapp';
+    const querWhatsApp = canal !== 'email';
+
+    if (canal === 'email' && !temEmail) {
       toast.error('Cliente sem e-mail cadastrado.');
       return;
     }
+    if (canal === 'whatsapp' && !temTelefone) {
+      toast.error('Cliente sem WhatsApp cadastrado.');
+      return;
+    }
+    if (canal === 'todos' && !temEmail && !temTelefone) {
+      toast.error('Cliente sem e-mail e sem WhatsApp cadastrados.');
+      return;
+    }
 
-    const toastId = toast.loading('Enviando e-mail do recibo...');
+    const toastId = toast.loading(
+      canal === 'email' ? 'Enviando recibo por e-mail...' : canal === 'whatsapp' ? 'Enviando recibo no WhatsApp...' : 'Enviando recibo por e-mail e WhatsApp...'
+    );
 
-    try {
-      const ok = await dispararEmailReciboComPdf(venda, clienteVenda);
-      if (ok) {
-        toast.success('E-mail com recibo digital enviado com sucesso!', { id: toastId });
-      } else {
-        toast.error('Erro ao enviar e-mail.', { id: toastId });
-      }
-    } catch (error) {
-      console.error('Erro ao reenviar recibo:', error);
-      toast.error('Erro ao reenviar recibo.', { id: toastId });
+    const [emailOk, whatsapp] = await Promise.all([
+      querEmail && temEmail ? dispararEmailReciboComPdf(venda, clienteVenda) : Promise.resolve(null),
+      querWhatsApp && temTelefone
+        ? postarReciboWhatsApp(venda, clienteVenda).catch(
+            (erro: any): ResultadoReciboWhatsApp => ({ enviado: false, erro: erro?.message || 'Falha ao gerar o PDF.' })
+          )
+        : Promise.resolve(null),
+    ]);
+
+    const enviados: string[] = [];
+    const falhas: string[] = [];
+    if (querEmail) {
+      if (!temEmail) falhas.push('e-mail: cliente sem e-mail');
+      else if (emailOk) enviados.push('e-mail');
+      else falhas.push('e-mail: falha no envio');
+    }
+    if (querWhatsApp) {
+      if (!temTelefone) falhas.push('WhatsApp: cliente sem telefone');
+      else if (whatsapp?.enviado) enviados.push('WhatsApp');
+      else falhas.push(`WhatsApp: ${whatsapp?.erro || MOTIVOS_RECIBO_WHATSAPP[whatsapp?.motivo ?? ''] || 'não enviado'}`);
+    }
+
+    const descricao = falhas.length ? falhas.join(' · ') : undefined;
+    if (enviados.length && !falhas.length) {
+      toast.success(`Recibo enviado por ${enviados.join(' e ')}.`, { id: toastId });
+    } else if (enviados.length) {
+      toast.warning(`Recibo enviado por ${enviados.join(' e ')}.`, { id: toastId, description: descricao });
+    } else {
+      toast.error('Recibo não enviado.', { id: toastId, description: descricao });
     }
   };
 
@@ -4322,10 +4437,29 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <FileText className="mr-2 h-4 w-4" />
                                 Recibo A4
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleReenviarRecibo(venda)}>
-                                <Mail className="mr-2 h-4 w-4" />
-                                Reenviar Recibo
-                              </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="font-normal">
+                                  <Mail className="mr-2 h-4 w-4" />
+                                  Reenviar Recibo
+                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                  <DropdownMenuSubContent className="w-44">
+                                    <DropdownMenuItem onClick={() => handleReenviarRecibo(venda, 'todos')}>
+                                      <Send className="mr-2 h-4 w-4 text-blue-400" />
+                                      Todos
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleReenviarRecibo(venda, 'email')}>
+                                      <Mail className="mr-2 h-4 w-4" />
+                                      E-mail
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleReenviarRecibo(venda, 'whatsapp')}>
+                                      <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
+                                      WhatsApp
+                                    </DropdownMenuItem>
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                              </DropdownMenuSub>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
                                 <FileText className="mr-2 h-4 w-4 text-blue-400" />
@@ -4509,7 +4643,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 <Button
                   type="button"
                   onClick={() => {
-                    handleReenviarRecibo(vendaEditadaNotinha);
+                    handleReenviarRecibo(vendaEditadaNotinha, 'todos');
                     setShowReenviarNotinhaPrompt(false);
                   }}
                   className="bg-emerald-600 hover:bg-emerald-700 text-xs font-bold"
@@ -4581,10 +4715,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             <div className="modal-header">
               <div>
                 <h3 className="modal-title flex items-center gap-2 text-blue-400 font-bold">
-                  <Sparkles className="w-5 h-5 text-blue-400 animate-pulse" /> Venda por Texto Inteligente (Groq IA)
+                  <Sparkles className="w-5 h-5 text-blue-400 animate-pulse" /> Venda Inteligente (texto e foto)
                 </h3>
                 <p className="modal-subtitle">
-                  Cole qualquer texto de venda (mensagens do WhatsApp, formulários ou anotações) para gerar a venda automaticamente.
+                  Cole o texto da venda e, se quiser, a foto da etiqueta, da caixa ou da tela Ajustes › Sobre: a IA lê o IMEI e os dados do aparelho.
                 </p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setShowImportarPedidoModal(false)}>
@@ -4594,13 +4728,63 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             <div className="modal-body-scroll">
               <form onSubmit={(e) => { e.preventDefault(); handleProcessarTextoVenda(); }} className="space-y-4">
                 <textarea
-                  className="input-glass min-h-[220px] font-sans text-sm p-3 border-blue-500/20 focus:border-blue-500"
-                  placeholder="Ex: Vendi um iPhone 13 Pro 128GB Grafite IMEI 358921098492041 para o cliente Carlos Silva por R$ 3.500 no Pix pelo vendedor Lucas..."
+                  className="input-glass min-h-[160px] font-sans text-sm p-3 border-blue-500/20 focus:border-blue-500"
+                  placeholder="Ex: Vendi para o cliente Carlos Silva por R$ 3.500 no Pix pelo vendedor Lucas. (Modelo e IMEI podem vir da foto.)"
                   value={textoPedido}
                   onChange={(e) => setTextoPedido(e.target.value)}
+                  onPaste={(e) => {
+                    const arquivos = Array.from(e.clipboardData.files).filter((arquivo) => arquivo.type.startsWith('image/'));
+                    if (!arquivos.length) return;
+                    if (!e.clipboardData.getData('text/plain')) e.preventDefault();
+                    void adicionarFotosVenda(arquivos);
+                  }}
                   disabled={processingAiText}
-                  required
                 />
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {fotosVenda.map((foto, indice) => (
+                      <div key={indice} className="relative h-20 w-20 overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={foto} alt={`Foto ${indice + 1} da venda`} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setFotosVenda((atuais) => atuais.filter((_, i) => i !== indice))}
+                          disabled={processingAiText}
+                          className="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white hover:bg-red-600"
+                          aria-label={`Remover foto ${indice + 1}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    {fotosVenda.length < MAX_FOTOS_VENDA && (
+                      <label
+                        className={cn(
+                          'flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-blue-500/40 text-[11px] font-semibold text-blue-300 transition hover:bg-blue-500/10',
+                          (processingAiText || preparandoFotoVenda) && 'pointer-events-none opacity-50'
+                        )}
+                      >
+                        {preparandoFotoVenda ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+                        Foto
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="sr-only"
+                          disabled={processingAiText || preparandoFotoVenda}
+                          onChange={(e) => {
+                            const arquivos = Array.from(e.target.files ?? []);
+                            e.target.value = '';
+                            void adicionarFotosVenda(arquivos);
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Até {MAX_FOTOS_VENDA} fotos (etiqueta, caixa, Ajustes › Sobre, bateria). No computador, dá para colar um print com Ctrl+V no texto.
+                  </p>
+                </div>
                 <div className="flex gap-2 pt-2">
                   <Button
                     type="button"
@@ -4613,12 +4797,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   </Button>
                   <Button
                     type="submit"
-                    disabled={processingAiText}
+                    disabled={processingAiText || preparandoFotoVenda}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 font-bold gap-2 shadow-lg shadow-blue-500/20"
                   >
                     {processingAiText ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin" /> Lendo texto com IA...
+                        <Loader2 className="w-4 h-4 animate-spin" /> {fotosVenda.length ? 'Lendo texto e fotos com IA...' : 'Lendo texto com IA...'}
                       </>
                     ) : (
                       <>
@@ -4642,10 +4826,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               <div>
                 <h3 className="modal-title flex items-center gap-2 text-amber-400 font-bold">
                   <AlertCircle className="w-5 h-5 text-amber-400 animate-bounce" />
-                  Dados Pendentes para Concluir Venda
+                  {aiParsedData?.camposFaltantes?.length ? 'Dados Pendentes para Concluir Venda' : 'Confira os dados antes de gerar a venda'}
                 </h3>
                 <p className="modal-subtitle text-slate-300">
-                  A IA leu seu texto, mas identificou que faltam informações cruciais. Preencha abaixo para finalizar:
+                  {aiParsedData?.camposFaltantes?.length
+                    ? 'A IA leu a venda, mas faltam informações cruciais. Preencha abaixo para finalizar:'
+                    : 'A IA leu a foto do aparelho. Confira principalmente o IMEI antes de confirmar.'}
                 </p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setShowDadosFaltantesModal(false)}>
@@ -4654,6 +4840,19 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             </div>
 
             <div className="modal-body-scroll p-4 space-y-4">
+              {leituraFotoVenda && leituraFotoVenda.avisos.length > 0 && (
+                <div className="space-y-1 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                  <p className="flex items-center gap-1.5 font-bold text-amber-300">
+                    <Camera className="h-4 w-4" /> Confira o que veio da foto
+                  </p>
+                  <ul className="list-disc space-y-0.5 pl-5">
+                    {leituraFotoVenda.avisos.map((aviso) => (
+                      <li key={aviso}>{aviso}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {/* Opção de Seleção de Aparelho do Estoque */}
               <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl space-y-1.5">
                 <label className="text-xs font-bold text-blue-400 uppercase flex items-center gap-1.5">
@@ -4674,6 +4873,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           capacidade: ap.capacidade || '128GB',
                           cor: ap.cor || '',
                           imei: ap.imei || ap.numeroSerie || '',
+                          bateria: String(ap.saudeBateria || ap.saude_bateria || ''),
                           preco: String(ap.preco),
                           custo: String((ap as any).custo || 0)
                         }));
@@ -4720,7 +4920,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
                 <div>
                   <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                    <span>Modelo do Celular <span className="text-red-400">*</span></span>
+                    <span>Modelo do Celular <span className="text-red-400">*</span>{seloDaFoto('modelo')}</span>
                     {aiParsedData?.camposFaltantes?.includes('modelo') && (
                       <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
                     )}
@@ -4737,7 +4937,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
                 <div>
                   <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                    <span>Capacidade GB <span className="text-red-400">*</span></span>
+                    <span>Capacidade GB <span className="text-red-400">*</span>{seloDaFoto('capacidade')}</span>
                     {aiParsedData?.camposFaltantes?.includes('capacidade') && (
                       <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
                     )}
@@ -4747,6 +4947,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     value={dadosFaltantesForm.capacidade}
                     onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, capacidade: e.target.value})}
                   >
+                    {dadosFaltantesForm.capacidade && !['64GB', '128GB', '256GB', '512GB', '1TB'].includes(dadosFaltantesForm.capacidade) && (
+                      <option value={dadosFaltantesForm.capacidade}>{dadosFaltantesForm.capacidade}</option>
+                    )}
                     <option value="64GB">64GB</option>
                     <option value="128GB">128GB</option>
                     <option value="256GB">256GB</option>
@@ -4768,7 +4971,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-300">Cor do Aparelho</label>
+                  <label className="text-xs font-bold text-slate-300">Cor do Aparelho{seloDaFoto('cor')}</label>
                   <input
                     type="text"
                     className="input-glass mt-1"
@@ -4779,13 +4982,27 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-300">IMEI / Nº de Série (Opcional)</label>
+                  <label className="text-xs font-bold text-slate-300">IMEI / Nº de Série (Opcional){seloDaFoto('imei')}</label>
                   <input
                     type="text"
                     className="input-glass mt-1 font-mono"
                     placeholder="Ex: 358921098492041"
                     value={dadosFaltantesForm.imei}
                     onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, imei: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-300">Saúde da Bateria % (Opcional){seloDaFoto('saudeBateria')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    inputMode="numeric"
+                    className="input-glass mt-1"
+                    placeholder="Ex: 88"
+                    value={dadosFaltantesForm.bateria}
+                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, bateria: e.target.value})}
                   />
                 </div>
 
@@ -4881,6 +5098,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         cor: dadosFaltantesForm.cor,
                         condicao: dadosFaltantesForm.condicao,
                         imei: dadosFaltantesForm.imei,
+                        saudeBateria: Number(dadosFaltantesForm.bateria) > 0 ? Number(dadosFaltantesForm.bateria) : null,
                         preco: Number(dadosFaltantesForm.preco),
                         custo: Number(dadosFaltantesForm.custo),
                       },

@@ -1,22 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { exigirAcesso } from '@/lib/auth/servidor';
+import { processImageVision } from '@/lib/image-vision-ocr';
+import {
+  MAX_FOTOS_VENDA,
+  PROMPT_FOTO_VENDA,
+  camposFaltantesDaVenda,
+  mesclarFotosNaVenda,
+  normalizarLeituraFoto,
+  type LeituraFotoVenda,
+  type ResultadoFotosVenda,
+} from '@/lib/vendas/fotoVenda';
+
+// Texto e até 3 fotos passam por IA; com fallback de modelos a resposta pode demorar.
+export const maxDuration = 60;
+
+/** ~6 MB por foto em base64. O painel reduz antes de enviar; isto só barra abuso. */
+const LIMITE_CARACTERES_FOTO = 8_000_000;
+
+async function lerFoto(dataUrl: string): Promise<LeituraFotoVenda | null> {
+  try {
+    const mime = dataUrl.match(/^data:([^;]+);base64,/)?.[1] || 'image/jpeg';
+    const bruto = await processImageVision(dataUrl, mime, PROMPT_FOTO_VENDA);
+    return bruto ? normalizarLeituraFoto(bruto) : null;
+  } catch (erro) {
+    console.warn('Falha ao ler foto da venda:', erro);
+    return null;
+  }
+}
 
 export async function POST(request: NextRequest) {
-  try {
-    const { texto } = await request.json();
+  const acesso = await exigirAcesso(request);
+  if (!acesso.ok) return acesso.resposta;
 
-    if (!texto || typeof texto !== 'string' || !texto.trim()) {
+  try {
+    const { texto, imagens } = await request.json();
+
+    const trimmedText = typeof texto === 'string' ? texto.trim() : '';
+    const fotos: string[] = Array.isArray(imagens)
+      ? imagens.filter((imagem: unknown): imagem is string => typeof imagem === 'string' && imagem.length > 0)
+      : [];
+
+    if (!trimmedText && fotos.length === 0) {
       return NextResponse.json(
-        { error: 'Por favor, informe o texto da venda.' },
+        { error: 'Cole o texto da venda ou envie uma foto do aparelho.' },
         { status: 400 }
       );
     }
+    if (fotos.length > MAX_FOTOS_VENDA) {
+      return NextResponse.json({ error: `Envie até ${MAX_FOTOS_VENDA} fotos por venda.` }, { status: 400 });
+    }
+    if (fotos.some((foto) => foto.length > LIMITE_CARACTERES_FOTO)) {
+      return NextResponse.json({ error: 'Foto grande demais. Tire outra ou envie um print.' }, { status: 413 });
+    }
 
-    const trimmedText = texto.trim();
+    // As fotos são lidas enquanto a IA lê o texto.
+    const leiturasFotos = Promise.all(fotos.map(lerFoto));
+
     const apiKey = process.env.GROQ_API_KEY;
     let parsedJson: any = null;
 
     // 1. TENTA PROCESSAR VIA IA GROQ SE A CHAVE ESTIVER CONFIGURADA
-    if (apiKey) {
+    if (apiKey && trimmedText) {
       const systemPrompt = `Você é um assistente especialista em extrair dados de formulários e vendas de celulares/eletrônicos para um sistema ERP.
 Sua missão é analisar o texto digitado pelo usuário e retornar ESTRITAMENTE um objeto JSON válido (sem qualquer markdown, sem texto extra, sem \`\`\`json).
 
@@ -122,7 +166,7 @@ Regras para os camposFaltantes:
 
     // 2. PARSER NATIVO LOCAL DE FALLBACK SE A IA FALHAR OU NÃO TIVER CHAVE
     if (!parsedJson) {
-      console.log('Executando parser nativo local de fallback...');
+      if (trimmedText) console.log('Executando parser nativo local de fallback...');
       parsedJson = {
         cliente: {},
         aparelho: {},
@@ -137,6 +181,12 @@ Regras para os camposFaltantes:
 
     if (!parsedJson.cliente) parsedJson.cliente = {};
     if (!parsedJson.aparelho) parsedJson.aparelho = {};
+
+    // 3. FOTOS: completam o aparelho antes dos palpites de regex, que só olham o texto.
+    let fotosResultado: ResultadoFotosVenda | null = null;
+    if (fotos.length) {
+      fotosResultado = mesclarFotosNaVenda(parsedJson, await leiturasFotos);
+    }
 
     // --- FALLBACKS ROBUSTOS DE REGEX LOCAL ---
     // 1. E-mail Regex
@@ -250,32 +300,13 @@ Regras para os camposFaltantes:
       }
     }
 
-    // Pós-processamento e sanitização dos camposFaltantes (IMEI, CPF e DataNascimento são OPCIONAIS)
-    const camposFaltantes: string[] = (Array.isArray(parsedJson.camposFaltantes) ? parsedJson.camposFaltantes : [])
-      .filter((c: string) => c !== 'imei' && c !== 'cpf' && c !== 'dataNascimento' && c !== 'data_nascimento');
-    
-    // Verificação de segurança para campos cruciais
-    if (!parsedJson.aparelho?.modelo && !camposFaltantes.includes('modelo')) {
-      camposFaltantes.push('modelo');
-    }
-    if (!parsedJson.aparelho?.capacidade && !camposFaltantes.includes('capacidade')) {
-      camposFaltantes.push('capacidade');
-    }
-    if ((parsedJson.valorTotal === null || parsedJson.valorTotal === undefined || parsedJson.valorTotal <= 0) && !camposFaltantes.includes('valorTotal')) {
-      camposFaltantes.push('valorTotal');
-    }
-    if (!parsedJson.formaPagamento && !camposFaltantes.includes('formaPagamento')) {
-      camposFaltantes.push('formaPagamento');
-    }
-    if (!parsedJson.dataVenda && !camposFaltantes.includes('dataVenda')) {
-      camposFaltantes.push('dataVenda');
-    }
-
-    parsedJson.camposFaltantes = Array.from(new Set(camposFaltantes));
+    // Campos faltantes conferidos nos dados finais (texto + foto + regex). IMEI, CPF e nascimento são opcionais.
+    parsedJson.camposFaltantes = camposFaltantesDaVenda(parsedJson);
 
     return NextResponse.json({
       ok: true,
-      data: parsedJson
+      data: parsedJson,
+      fotos: fotosResultado,
     });
 
   } catch (error: any) {
