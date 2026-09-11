@@ -36,7 +36,8 @@ import {
   PeriodoFaturamento, 
   calcularValoresPlano, 
   obterPlanoPorTipo,
-  WHATSAPP_SUPORTE_URL 
+  WHATSAPP_SUPORTE_URL,
+  DIAS_TESTE_GRATIS
 } from '@/lib/planos-config';
 
 export function PlanPaywallModal() {
@@ -185,12 +186,12 @@ export function PlanPaywallModal() {
     }
   };
 
-  // Ativar 3 dias de Teste Gratuito
+  // Ativar o teste grátis (DIAS_TESTE_GRATIS dias)
   const handleAtivarTrial = async () => {
     try {
       setAtivandoTrial(true);
       const res = await solicitarTrial(planoEscolhido);
-      toast.success(res.mensagem || '🎉 Teste de 3 dias ativado! Painel liberado!');
+      toast.success(res.mensagem || `🎉 Teste de ${DIAS_TESTE_GRATIS} dias ativado! Painel liberado!`);
       await refetchPlan();
       setTimeout(() => {
         window.location.reload();
@@ -371,7 +372,7 @@ export function PlanPaywallModal() {
                 <Gift className="w-4 h-4 text-purple-400" /> Quer testar antes de pagar?
               </div>
               <p className="text-[11px] text-slate-400">
-                Ative <b>3 dias de teste grátis</b> deste plano agora mesmo, sem precisar de cartão.
+                Ative <b>{DIAS_TESTE_GRATIS} dias de teste grátis</b> deste plano agora mesmo, sem precisar de cartão.
               </p>
             </div>
             <Button
@@ -381,7 +382,7 @@ export function PlanPaywallModal() {
               className="w-full sm:w-auto h-9 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-600/20 gap-1.5 cursor-pointer shrink-0"
             >
               {ativandoTrial ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              Ativar 3 Dias Grátis
+              Ativar {DIAS_TESTE_GRATIS} Dias Grátis
             </Button>
           </div>
         )}

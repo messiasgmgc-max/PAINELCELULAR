@@ -45,18 +45,36 @@ export interface PlanoConfig {
     };
   };
   beneficios: string[];
+  /** O que o plano NÃO libera (dito com todas as letras, para ninguém assinar achando que tem). */
+  naoInclui?: string[];
   recursos: RecursoPlano[];
 }
 
 export const WHATSAPP_SUPORTE = '5531993586377';
 export const WHATSAPP_SUPORTE_URL = 'https://wa.me/5531993586377?text=' + encodeURIComponent('Olá! Gostaria de tirar dúvidas sobre os planos do Phone Center.');
 
+/** Dias do teste grátis: cadastro pela /assinar e teste de outro plano no painel. */
+export const DIAS_TESTE_GRATIS = 7;
+export const TEXTO_TESTE_GRATIS = `${DIAS_TESTE_GRATIS} dias grátis`;
+/** Valor gravado em historico_pagamentos_planos.metodo_pagamento quando o teste é concedido. */
+export const METODO_PAGAMENTO_TESTE = `trial_${DIAS_TESTE_GRATIS}_dias`;
+
+/** Fim do teste grátis a partir de `inicio`. */
+export function fimDoTesteGratis(inicio: Date = new Date(), dias: number = DIAS_TESTE_GRATIS): Date {
+  return new Date(inicio.getTime() + dias * 24 * 60 * 60 * 1000);
+}
+
+/** Registro do histórico que foi um teste grátis (os antigos são "trial_3_dias"). */
+export function ehRegistroDeTesteGratis(pagamento: { metodo_pagamento?: string | null; forma_pagamento?: string | null }): boolean {
+  return pagamento.forma_pagamento === 'trial_gratis' || /^trial_\d+_dias$/.test(pagamento.metodo_pagamento || '');
+}
+
 export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
   entrada: {
     id: 'entrada',
     nome: 'Entrada',
     badge: 'Mais Acessível',
-    descricao: 'Ideal para lojas individuais e assistências que querem profissionalizar suas vendas e estoque com o bot mais ágil do mercado.',
+    descricao: 'Para a loja ou assistência que quer o sistema completo no painel e o bot no WhatsApp para estoque, vendas e OS.',
     popular: false,
     precos: {
       mensal: {
@@ -79,13 +97,20 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
       }
     },
     beneficios: [
-      'Site e Painel Web Completo de Gestão',
-      'Bot WhatsApp Ágil (!estoque, !vender, !cadastrar, !os)',
-      'Leitura inteligente de etiquetas por OCR (Gemini Vision)',
-      'Respostas em Linguagem Natural com IA integrada',
-      'Controle de Garantias e Ordens de Serviço',
-      'Cadastro de Compradores e Recibos Térmicos',
-      '1 Conexão WhatsApp Dedicada'
+      'Painel web completo: estoque por IMEI, PDV, OS, atacado com fiado, clientes e garantias',
+      'Usuários sem limite e sem cobrança por usuário',
+      'Etiquetas dos aparelhos, NFC-e/NF-e (com sua conta Focus NFe) e app no celular',
+      'Bot no WhatsApp: consulta de estoque, venda, cadastro e OS (!estoque, !vender, !cadastrar, !os)',
+      'Bot entende linguagem natural ("vendi o 13 pro pro Lucas por 2500")',
+      'Cadastro por foto da etiqueta (leitura por IA)',
+      '1 número de WhatsApp conectado ao bot',
+      'Migração do MercadoPhone: estoque, clientes e vendas com prévia'
+    ],
+    naoInclui: [
+      'Bot cobrando fiado e saldo devedor no WhatsApp (!abater, !saldo)',
+      'Checagem de IMEI pelo bot (!checarimei)',
+      'Disparo de lista de estoque em grupos (!broadcast)',
+      'Rede multi-loja, trilha de auditoria e API'
     ],
     recursos: [
       'painel_web',
@@ -102,7 +127,7 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
     nome: 'Intermediário',
     badge: 'Mais Popular',
     popular: true,
-    descricao: 'Para lojistas em crescimento que trabalham com atacado, crediário próprio e necessitam de velocidade de checagem e vendas.',
+    descricao: 'Para quem vende no atacado e no fiado e quer o bot cobrando, checando IMEI e divulgando o estoque nos grupos.',
     precos: {
       mensal: {
         valorMensal: 189.00,
@@ -124,12 +149,12 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
       }
     },
     beneficios: [
-      'Tudo incluído no Plano Entrada',
-      'Gestão Automatizada de Fiado e Saldo Devedor (!abater, !saldo)',
+      'Tudo do plano Entrada',
+      'Bot cobra e abate fiado e saldo devedor no WhatsApp (!abater, !saldo)',
       'Checagem rápida de IMEI e Bloqueios Anatel/Operadoras (!checarimei)',
-      'Disparo e Broadcast de Lista de Estoque em Grupos (!broadcast)',
-      'Histórico completo de transações e recibos de abatimento',
-      'Suporte humanizado no WhatsApp'
+      'Disparo da lista de estoque em grupos do WhatsApp (!broadcast)',
+      'Recibo de abatimento enviado ao cliente no WhatsApp',
+      'Suporte humano no WhatsApp'
     ],
     recursos: [
       'painel_web',
@@ -149,7 +174,7 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
     nome: 'Avançado',
     badge: 'Máxima Potência',
     popular: false,
-    descricao: 'A suíte definitiva para grandes lojas, revendedores com equipes e redes de parceiros que exigem escala e integração total.',
+    descricao: 'Para redes de parceiros e lojas que precisam de auditoria e integração por API.',
     precos: {
       mensal: {
         valorMensal: 299.00,
@@ -171,12 +196,11 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
       }
     },
     beneficios: [
-      'Tudo incluído no Plano Intermediário',
-      'Escuta Inteligente e Busca em Grupos Multi-Loja (Rede de Parceiros)',
-      'Trilha de Auditoria Completa com logs de alterações e aprovações',
-      'API REST com API Key para integrar sistemas e bots próprios',
-      'Gestão multi-usuários com controle granular de permissões',
-      'Fila de Suporte VIP Prioritário 24/7'
+      'Tudo do plano Intermediário',
+      'Escuta e busca de estoque em grupos multi-loja (rede de parceiros)',
+      'Trilha de auditoria com log de alterações e aprovações',
+      'Chave de API para integrar sistemas e bots próprios',
+      'Suporte prioritário'
     ],
     recursos: [
       'painel_web',
