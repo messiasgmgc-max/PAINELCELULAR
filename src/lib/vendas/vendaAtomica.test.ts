@@ -79,3 +79,11 @@ describe('Chamada da venda atômica', () => {
     );
   });
 });
+
+describe('Venda cancelada', () => {
+  it('editar venda cancelada vira mensagem clara', () => {
+    const erro = interpretarErroVenda({ code: 'P0001', message: 'VENDA_CANCELADA' });
+    assert.equal(erro.codigo, 'venda_cancelada');
+    assert.match(erro.message, /cancelada/);
+  });
+});

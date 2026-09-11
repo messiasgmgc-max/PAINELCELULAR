@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -1054,10 +1055,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
         const disponiveis = aparelhos.filter(aparelhoNoEstoque);
-        aparelhoFinal = disponiveis.find(a => 
-          (parsedData.aparelho?.imei && a.imei && a.imei.toLowerCase() === parsedData.aparelho.imei.toLowerCase()) ||
-          (`${a.marca} ${a.modelo}`.toLowerCase().includes(parsedData.aparelho.modelo.toLowerCase()))
-        ) || null;
+        // IMEI informado só casa com esse IMEI; sem IMEI, só com um único candidato. Antes
+        // qualquer aparelho do mesmo modelo servia, e a venda levava outro 17 Pro Max.
+        const escolha = escolherAparelhoParaVendaIA<Aparelho>({ aparelhos: disponiveis, ...parsedData.aparelho });
+        if (escolha.tipo === 'estoque') aparelhoFinal = escolha.aparelho;
+        if (escolha.tipo === 'ambiguo') {
+          throw new Error(
+            `Há ${escolha.candidatos.length} aparelhos "${parsedData.aparelho.modelo}" no estoque que servem para esta venda. ` +
+              'Coloque o IMEI no texto ou escolha o aparelho na tela de dados. Nada foi gravado.'
+          );
+        }
       }
 
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
@@ -1233,13 +1240,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         const apMatch = disponiveis.find(a => getAparelhoCodigo(a).includes(codAi));
         if (apMatch) matchedStockId = apMatch.id;
       }
-      if (!matchedStockId && parsed.aparelho?.imei) {
-        const apMatch = disponiveis.find(a => a.imei && a.imei.toLowerCase() === parsed.aparelho.imei.toLowerCase());
-        if (apMatch) matchedStockId = apMatch.id;
-      }
-      if (!matchedStockId && parsed.aparelho?.modelo) {
-        const apMatch = disponiveis.find(a => `${a.marca} ${a.modelo}`.toLowerCase().includes(parsed.aparelho.modelo.toLowerCase()));
-        if (apMatch) matchedStockId = apMatch.id;
+      if (!matchedStockId && (parsed.aparelho?.imei || parsed.aparelho?.modelo)) {
+        // Mesma regra da finalização: nunca pré-seleciona outro aparelho só pelo modelo.
+        const escolha = escolherAparelhoParaVendaIA<Aparelho>({ aparelhos: disponiveis, ...parsed.aparelho });
+        if (escolha.tipo === 'estoque') matchedStockId = escolha.aparelho.id;
       }
 
       if (faltantes.length > 0) {
@@ -1585,6 +1589,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   const handleEdit = (venda: Venda) => {
+    // Salvar por cima de uma venda cancelada baixava de novo os aparelhos dela, que já
+    // tinham voltado ao estoque (caso da venda #106952).
+    if (vendaCancelada(venda)) {
+      toast.error('Venda cancelada não pode ser editada.', { description: 'Para vender de novo, lance uma venda nova.' });
+      return;
+    }
     setPosDados({
       tipoVenda: 'Venda',
       clienteId: venda.clienteId || '',
@@ -4110,7 +4120,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <Edit className="mr-2 h-4 w-4 text-amber-400" />
                                 Editar Custos / Dados
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleEdit(venda)}>
+                              <DropdownMenuItem onClick={() => handleEdit(venda)} disabled={vendaCancelada(venda)}>
                                 <Repeat className="mr-2 h-4 w-4 text-blue-400" />
                                 Reabrir no PDV
                               </DropdownMenuItem>

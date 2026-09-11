@@ -46,6 +46,7 @@ export type CodigoErroVenda =
   | 'aparelho_nao_encontrado'
   | 'imei_duplicado'
   | 'venda_nao_encontrada'
+  | 'venda_cancelada'
   | 'sem_loja'
   | 'funcao_ausente'
   | 'falha';
@@ -116,6 +117,12 @@ export function interpretarErroVenda(erro: ErroBanco | null | undefined): ErroVe
   }
   if (mensagem.includes('VENDA_NAO_ENCONTRADA')) {
     return new ErroVenda('venda_nao_encontrada', `A venda que você está editando não existe mais. ${nada}`);
+  }
+  if (mensagem.includes('VENDA_CANCELADA')) {
+    return new ErroVenda(
+      'venda_cancelada',
+      `Esta venda está cancelada e não pode ser alterada: os aparelhos voltariam a sair do estoque. ${nada} Lance uma venda nova.`
+    );
   }
   if (mensagem.includes('VENDA_SEM_LOJA')) {
     return new ErroVenda('sem_loja', `Não identifiquei a loja desta venda. Entre de novo e tente outra vez. ${nada}`);
