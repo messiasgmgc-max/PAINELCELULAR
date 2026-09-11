@@ -29,6 +29,7 @@ import {
 } from './capabilities';
 import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
+import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -2387,111 +2388,67 @@ A venda foi enviada para validação de um administrador no painel!`;
         return NextResponse.json({ status: 'ok', message: 'Venda pendente de aprovação manual.' }, { status: 200 });
       }
 
-      // 1. Tira o aparelho do estoque como vendido. A tabela não tem colunas
-      // comprador/precoVenda/dataVenda: o comprador vai em `cliente` (como no
-      // painel); valor e data ficam na venda e em data_saida.
-      const resultadoBaixa = await aplicarMudancaEstoque(supabase, {
-        ids: [aparelho.id],
-        patch: { ...patchSaida('vendido', 'venda'), cliente: compradorNome },
-        tipo: 'venda',
-        origem: 'bot_whatsapp',
-        lojaId,
-        usuarioNome: nomeUsuario || pushName,
-        observacao: `Venda via WhatsApp para ${compradorNome} por R$ ${valorNum.toFixed(2)}`,
-        filtroElegivel: estaNoEstoque,
-      }).catch((erroBaixa: unknown) => {
-        console.error('❌ Erro ao dar baixa no aparelho vendido via WhatsApp:', erroBaixa);
-        return null;
-      });
-
-      if (!resultadoBaixa) {
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Não consegui dar baixa no aparelho *${aparelho.modelo}*. A venda não foi registrada; tente novamente.`);
-        return NextResponse.json({ status: 'error', message: 'Falha ao dar baixa no aparelho.' }, { status: 200 });
-      }
-
-      if (resultadoBaixa.afetados === 0) {
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `⚠️ O aparelho *${aparelho.modelo}* (IMEI: ${aparelho.imei}) já saiu do estoque. A venda não foi registrada.`);
-        return NextResponse.json({ status: 'ok' }, { status: 200 });
-      }
-
-      if (!resultadoBaixa.auditoriaRegistrada) {
-        console.warn('[Estoque] Venda via !vender baixou o aparelho sem auditoria completa:', resultadoBaixa.erroAuditoria);
-      }
-
-      // 2. Insere na tabela 'vendas'
+      // Venda e baixa numa transação só: sem venda sem baixa nem baixa sem venda, e dois
+      // pedidos simultâneos não vendem o mesmo aparelho.
       const custoNum = Number(aparelho.custo || aparelho.precoCusto || 0);
       const lucroNum = valorNum - custoNum;
       const margemPercent = custoNum > 0 ? ((lucroNum / custoNum) * 100).toFixed(1) : '100';
 
-      // `vendas` não tem coluna lojaId: com ela o insert falhava sempre, em silêncio.
-      const { error: erroVenda } = await supabase.from('vendas').insert({
-        loja_id: lojaId,
-        clienteNome: compradorNome,
-        vendedor: `WhatsApp (${pushName})`,
-        tipoEntrega: 'Varejo',
-        valor: valorNum,
-        custo: custoNum,
-        lucro: lucroNum,
-        percentualLucro: parseFloat(margemPercent) || 0,
-        dataPagamento: new Date().toISOString(),
-        status: 'pago',
-        metodo: 'pix',
-        valorPago: valorNum,
-        saldoDevedor: 0,
-        descricao: `Venda via WhatsApp: ${aparelho.marca} ${aparelho.modelo}`,
-        garantia: '3 Meses (Garantia Legal)',
-        descontoTotal: 0,
-        itens: [
-          {
-            id: Date.now().toString(),
-            aparelhoId: aparelho.id,
-            descricao: `${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || 'N/A'}) - IMEI: ${aparelho.imei || termoBusca}`,
-            quantidade: 1,
-            valorInterno: custoNum,
-            valorExibir: valorNum,
-            desconto: 0,
-            tipoDesconto: 'R$',
-            total: valorNum,
-            observacao: `Venda balcão via WhatsApp para ${compradorNome}`,
-          },
-        ],
-        pagamentos: [
-          {
-            id: Date.now().toString(),
-            metodo: 'pix',
+      try {
+        await registrarVendaAtomica(supabase, {
+          venda: {
+            loja_id: lojaId,
+            clienteNome: compradorNome,
+            vendedor: `WhatsApp (${pushName})`,
+            tipoEntrega: 'Varejo',
             valor: valorNum,
-            parcelas: 1,
+            custo: custoNum,
+            lucro: lucroNum,
+            percentualLucro: parseFloat(margemPercent) || 0,
+            dataPagamento: new Date().toISOString(),
+            status: 'pago',
+            metodo: 'pix',
+            valorPago: valorNum,
+            saldoDevedor: 0,
+            descricao: `Venda via WhatsApp: ${aparelho.marca} ${aparelho.modelo}`,
+            garantia: '3 Meses (Garantia Legal)',
+            descontoTotal: 0,
+            itens: [
+              {
+                id: Date.now().toString(),
+                aparelhoId: aparelho.id,
+                descricao: `${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || 'N/A'}) - IMEI: ${aparelho.imei || termoBusca}`,
+                quantidade: 1,
+                valorInterno: custoNum,
+                valorExibir: valorNum,
+                desconto: 0,
+                tipoDesconto: 'R$',
+                total: valorNum,
+                observacao: `Venda balcão via WhatsApp para ${compradorNome}`,
+              },
+            ],
+            pagamentos: [
+              {
+                id: Date.now().toString(),
+                metodo: 'pix',
+                valor: valorNum,
+                parcelas: 1,
+              },
+            ],
           },
-        ],
-      });
-
-      if (erroVenda) {
-        console.error('❌ Venda via !vender não foi gravada; desfazendo a baixa do aparelho:', erroVenda);
-        // Sem a venda, a baixa não tem lastro: o aparelho volta para o estoque no mesmo lote.
-        const revertido = await aplicarMudancaEstoque(supabase, {
-          ids: [aparelho.id],
-          loteId: resultadoBaixa.loteId,
-          patch: {
-            ...patchRestauracao(),
-            status: aparelho.status === 'manutencao' ? 'manutencao' : 'disponivel',
-            cliente: aparelho.cliente ?? null,
-          },
-          tipo: 'restauracao',
+          aparelhoIds: [aparelho.id],
+          camposAparelho: { [aparelho.id]: { cliente: compradorNome } },
           origem: 'bot_whatsapp',
-          lojaId,
           usuarioNome: nomeUsuario || pushName,
-          observacao: 'Venda via WhatsApp não gravada; baixa desfeita.',
-          filtroElegivel: (estado) => !estaNoEstoque(estado),
-        })
-          .then((r) => r.afetados > 0)
-          .catch((erroReversao: unknown) => {
-            console.error('❌ Falha ao desfazer a baixa do !vender:', erroReversao);
-            return false;
-          });
-        const situacao = revertido
-          ? 'O aparelho continua no estoque.'
-          : '⚠️ O aparelho saiu do estoque sem a venda: confira no painel.';
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ Não consegui registrar a venda do *${aparelho.modelo}* (${erroVenda.message}). ${situacao}`);
+          observacao: `Venda via WhatsApp para ${compradorNome} por R$ ${valorNum.toFixed(2)}`,
+        });
+      } catch (erroVenda) {
+        console.error('❌ Venda via !vender não foi gravada:', erroVenda);
+        const mensagemVenda =
+          erroVenda instanceof ErroVenda && erroVenda.codigo === 'fora_do_estoque'
+            ? `⚠️ O aparelho *${aparelho.modelo}* (IMEI: ${aparelho.imei}) já saiu do estoque. A venda não foi registrada.`
+            : `❌ Não consegui registrar a venda do *${aparelho.modelo}* (${erroVenda instanceof Error ? erroVenda.message : 'erro no banco'}). Nada foi alterado.`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemVenda);
         return NextResponse.json({ status: 'error', message: 'Falha ao registrar a venda.' }, { status: 200 });
       }
 

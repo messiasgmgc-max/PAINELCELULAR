@@ -1,5 +1,6 @@
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
+import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import { Capability, dataBr, descreverAparelho, moeda, numero, texto } from './core';
 
@@ -146,31 +147,29 @@ export const capabilitiesVendas: Capability[] = [
         ativo: true,
       };
 
-      const { error } = await ctx.supabase.from('vendas').insert(registro);
-      if (error) throw error;
-
-      // Baixa do estoque só quando o aparelho foi identificado com segurança.
-      // A venda já foi gravada: falha na baixa vira aviso, sem desfazer a venda.
+      // Com aparelho identificado, venda e baixa vão numa transação só: se ele já saiu do
+      // estoque, nada é gravado (antes a venda entrava e só a baixa falhava).
       let baixado = false;
       if (aparelho?.id) {
         try {
-          const resultado = await aplicarMudancaEstoque(ctx.supabase, {
-            ids: [aparelho.id as string],
-            patch: { ...patchSaida('vendido', 'venda'), cliente: comprador },
-            tipo: 'venda',
+          const resultado = await registrarVendaAtomica(ctx.supabase, {
+            venda: registro,
+            aparelhoIds: [aparelho.id as string],
+            camposAparelho: { [aparelho.id as string]: { cliente: comprador } },
             origem: 'bot_whatsapp',
-            lojaId: ctx.lojaId,
             usuarioNome: ctx.pushName,
             observacao: `Venda via WhatsApp para ${comprador}`,
-            filtroElegivel: estaNoEstoque,
           });
-          baixado = resultado.afetados > 0;
-          if (!resultado.auditoriaRegistrada) {
-            console.warn('[Estoque] Venda via WhatsApp baixou o aparelho sem auditoria completa:', resultado.erroAuditoria);
+          baixado = resultado.baixados > 0;
+        } catch (erro) {
+          if (erro instanceof ErroVenda && erro.codigo === 'fora_do_estoque') {
+            return `⚠️ O *${descricaoItem}* já saiu do estoque. A venda não foi registrada.`;
           }
-        } catch (err) {
-          console.error('[Estoque] Venda registrada via WhatsApp, mas a baixa do aparelho falhou:', err);
+          throw erro;
         }
+      } else {
+        const { error } = await ctx.supabase.from('vendas').insert(registro);
+        if (error) throw error;
       }
 
       return (

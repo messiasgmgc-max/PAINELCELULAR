@@ -29,6 +29,7 @@ import { logVenda, logEstoque } from '@/lib/logger';
 import { estaNoEstoque, patchRestauracao, patchSaida } from '@/lib/estoque/ciclo';
 import type { OrigemMovimentacao, PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
+import { registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 
 interface MarcarVendidoModalProps {
   isOpen: boolean;
@@ -178,7 +179,9 @@ export function MarcarVendidoModal({
         origemMovimentacao = tipoVenda === 'atacado' ? 'atacado' : 'venda';
       }
 
-      const resultadoEstoque = await aplicarMudancaEstoque(supabase, {
+      // Venda (varejo/atacado) grava venda e baixa juntas no banco, mais abaixo.
+      const ehVenda = tipoVenda === 'varejo' || tipoVenda === 'atacado';
+      const resultadoEstoque = ehVenda ? null : await aplicarMudancaEstoque(supabase, {
         ids: [aparelho.id],
         patch: patchAparelho,
         tipo: tipoMovimentacao,
@@ -190,10 +193,10 @@ export function MarcarVendidoModal({
         filtroElegivel: estaNoEstoque,
       });
 
-      if (resultadoEstoque.afetados === 0) {
+      if (resultadoEstoque && resultadoEstoque.afetados === 0) {
         throw new Error('este aparelho não está mais no estoque (já foi vendido ou baixado). Atualize a lista.');
       }
-      if (!resultadoEstoque.auditoriaRegistrada) {
+      if (resultadoEstoque && !resultadoEstoque.auditoriaRegistrada) {
         toast.warning('Saída registrada, mas a movimentação não foi gravada no histórico do estoque.', { duration: 8000 });
       }
 
@@ -253,47 +256,59 @@ export function MarcarVendidoModal({
         lojaId: lojaId || null,
       };
 
-      let { error: errVenda } = await supabase.from('vendas').insert([payloadVenda]);
-      if (errVenda) {
-        console.warn('Tentando inserção de venda em formato compatível com o schema:', errVenda);
-        const {
-          lojaId: _lid,
-          saldoDevedor: _sd,
-          valorPago: _vp,
-          dataVencimento: _dv,
-          taxaJurosMensal: _tjm,
-          valorJuros: _vj,
-          historicoAbatimentos: _ha,
-          ...payloadCompativel
-        } = payloadVenda;
+      if (ehVenda) {
+        await registrarVendaAtomica(supabase, {
+          venda: { ...payloadVenda, loja_id: payloadVenda.loja_id || usuario?.lojaId || null },
+          aparelhoIds: [aparelho.id],
+          camposAparelho: { [aparelho.id]: camposDaVenda },
+          origem: tipoVenda === 'atacado' ? 'atacado' : 'venda',
+          usuarioId: usuario?.id || null,
+          usuarioNome: usuario?.nome || null,
+          observacao: `Venda ${tipoVenda.toUpperCase()} para ${compradorFinal}`,
+        });
+      } else {
+        let { error: errVenda } = await supabase.from('vendas').insert([payloadVenda]);
+        if (errVenda) {
+          console.warn('Tentando inserção de venda em formato compatível com o schema:', errVenda);
+          const {
+            lojaId: _lid,
+            saldoDevedor: _sd,
+            valorPago: _vp,
+            dataVencimento: _dv,
+            taxaJurosMensal: _tjm,
+            valorJuros: _vj,
+            historicoAbatimentos: _ha,
+            ...payloadCompativel
+          } = payloadVenda;
 
-        const resFallback = await supabase.from('vendas').insert([payloadCompativel]);
-        if (resFallback.error) {
-          console.error('Falha no fallback de inserção na tabela vendas:', resFallback.error);
-          // Sem a venda, a saída não tem lastro: o aparelho volta como estava.
-          const reversao = await aplicarMudancaEstoque(supabase, {
-            ids: [aparelho.id],
-            loteId: resultadoEstoque.loteId,
-            patch: {
-              ...patchRestauracao(),
-              status: aparelho.status === 'manutencao' ? 'manutencao' : 'disponivel',
-              cliente: aparelho.cliente ?? null,
-              observacoes: aparelho.observacoes ?? null,
-            },
-            tipo: 'restauracao',
-            origem: origemMovimentacao,
-            lojaId: lojaId || usuario?.lojaId || null,
-            usuarioId: usuario?.id,
-            usuarioNome: usuario?.nome,
-            observacao: 'Venda não gravada: saída desfeita.',
-          }).catch((erroReversao) => {
-            console.error('Falha ao desfazer a saída sem venda:', erroReversao);
-            return null;
-          });
-          throw new Error(
-            `a venda não foi gravada (${resFallback.error.message}). ` +
-              (reversao && reversao.afetados > 0 ? 'O aparelho continua no estoque.' : 'Confira o aparelho no estoque.')
-          );
+          const resFallback = await supabase.from('vendas').insert([payloadCompativel]);
+          if (resFallback.error) {
+            console.error('Falha no fallback de inserção na tabela vendas:', resFallback.error);
+            // Sem a venda, a saída não tem lastro: o aparelho volta como estava.
+            const reversao = await aplicarMudancaEstoque(supabase, {
+              ids: [aparelho.id],
+              loteId: resultadoEstoque?.loteId,
+              patch: {
+                ...patchRestauracao(),
+                status: aparelho.status === 'manutencao' ? 'manutencao' : 'disponivel',
+                cliente: aparelho.cliente ?? null,
+                observacoes: aparelho.observacoes ?? null,
+              },
+              tipo: 'restauracao',
+              origem: origemMovimentacao,
+              lojaId: lojaId || usuario?.lojaId || null,
+              usuarioId: usuario?.id,
+              usuarioNome: usuario?.nome,
+              observacao: 'Venda não gravada: saída desfeita.',
+            }).catch((erroReversao) => {
+              console.error('Falha ao desfazer a saída sem venda:', erroReversao);
+              return null;
+            });
+            throw new Error(
+              `a venda não foi gravada (${resFallback.error.message}). ` +
+                (reversao && reversao.afetados > 0 ? 'O aparelho continua no estoque.' : 'Confira o aparelho no estoque.')
+            );
+          }
         }
       }
 

@@ -29,6 +29,7 @@ import { CompradorAutocomplete } from '@/components/CompradorAutocomplete';
 import { useCompradores } from '@/hooks/useCompradores';
 import { useAuth } from '@/hooks/useAuth';
 import { logVenda } from '@/lib/logger';
+import { registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 
@@ -317,133 +318,6 @@ export function VendaLoteAtacadoModal({
         }
       ] : [];
 
-      // 1. Confere no banco se os aparelhos do lote continuam no estoque: entre abrir
-      // o modal e confirmar, alguém pode ter vendido ou baixado um deles.
-      const idsLote = itensSelecionados.map((item) => item.id);
-      const disponiveisNoBanco = new Set<string>();
-      for (let i = 0; i < idsLote.length; i += 150) {
-        let consultaEstado = supabase
-          .from('aparelhos')
-          .select('id, ativo, status, condicao')
-          .in('id', idsLote.slice(i, i + 150));
-        if (lojaId) consultaEstado = consultaEstado.eq('loja_id', lojaId);
-        const { data: estadoAtual, error: errEstado } = await consultaEstado;
-        if (errEstado) throw errEstado;
-        for (const estado of estadoAtual || []) {
-          if (estaNoEstoque(estado)) disponiveisNoBanco.add(estado.id);
-        }
-      }
-
-      const indisponiveis = itensSelecionados.filter((item) => !disponiveisNoBanco.has(item.id));
-      if (indisponiveis.length > 0) {
-        const nomes = indisponiveis
-          .slice(0, 5)
-          .map((item) => `${item.modelo} (${getAparelhoCodigo(item)})`)
-          .join(', ');
-        toast.error(
-          `${indisponiveis.length} aparelho(s) do lote já não estão no estoque: ${nomes}${indisponiveis.length > 5 ? '...' : ''}. Remova-os do lote e tente novamente.`,
-          { id: toastId, duration: 8000 }
-        );
-        return;
-      }
-
-      // 2. Baixa cada aparelho como vendido pelo módulo de estoque. Todos compartilham
-      // o mesmo lote de movimentações, o que permite desfazer a venda inteira depois.
-      const loteMovimentacao = gerarLoteId();
-      const dataVendaDate = new Date(dataIso);
-      const dataSaida = Number.isNaN(dataVendaDate.getTime()) ? new Date() : dataVendaDate;
-      const naoBaixados: Aparelho[] = [];
-      let auditoriaIncompleta = false;
-
-      const baixarItemDoEstoque = (item: Aparelho) => {
-        const precoItem = getPrecoItem(item);
-        const custoItem = item.custo || 0;
-        const lucroItem = precoItem - custoItem;
-
-        const obsBaixa = [
-          `BAIXA_ESTOQUE:${dataIso}:Venda ATACADO (Lote com ${itensSelecionados.length} itens) para ${compradorFinal} por R$ ${precoItem.toFixed(2)} | Custo: R$ ${custoItem.toFixed(2)} | Lucro: R$ ${lucroItem.toFixed(2)} | Pgto: ${metodoPgto}`,
-          observacoes ? `Obs: ${observacoes.trim()}` : '',
-          `ID: ${getAparelhoCodigo(item)}`,
-          item.imei ? `IMEI: ${item.imei}` : ''
-        ].filter(Boolean).join(' | ');
-
-        return aplicarMudancaEstoque(supabase, {
-          ids: [item.id],
-          patch: {
-            ...patchSaida('vendido', 'venda', dataSaida),
-            cliente: compradorFinal,
-            observacoes: obsBaixa,
-          },
-          tipo: 'venda',
-          origem: 'atacado',
-          loteId: loteMovimentacao,
-          lojaId,
-          usuarioId: usuario?.id,
-          usuarioNome: usuario?.nome,
-          observacao: `Venda ATACADO em lote (${itensSelecionados.length} itens) para ${compradorFinal}`,
-          filtroElegivel: estaNoEstoque,
-        });
-      };
-
-      /** Devolve ao estoque os aparelhos já baixados. Retorna quantos não voltaram. */
-      const devolverBaixados = async (lista: Aparelho[], motivo: string) => {
-        let naoRevertidos = 0;
-        for (const item of lista) {
-          try {
-            const r = await aplicarMudancaEstoque(supabase, {
-              ids: [item.id],
-              patch: { ...patchRestauracao(), cliente: item.cliente ?? null, observacoes: item.observacoes ?? null },
-              tipo: 'restauracao',
-              origem: 'atacado',
-              loteId: loteMovimentacao,
-              lojaId,
-              usuarioId: usuario?.id,
-              usuarioNome: usuario?.nome,
-              observacao: motivo,
-              filtroElegivel: (estado) => !estaNoEstoque(estado),
-            });
-            if (r.afetados === 0) naoRevertidos += 1;
-          } catch (erroReversao) {
-            console.error('Erro ao devolver aparelho do lote ao estoque:', erroReversao);
-            naoRevertidos += 1;
-          }
-        }
-        return naoRevertidos;
-      };
-
-      const baixados: Aparelho[] = [];
-      for (let i = 0; i < itensSelecionados.length; i += 5) {
-        const fatia = itensSelecionados.slice(i, i + 5);
-        const resultados = await Promise.allSettled(fatia.map(baixarItemDoEstoque));
-        for (let j = 0; j < resultados.length; j += 1) {
-          const resultado = resultados[j];
-          if (resultado.status === 'rejected') {
-            console.error('Erro ao baixar aparelho do lote no estoque:', resultado.reason);
-            naoBaixados.push(fatia[j]);
-          } else if (resultado.value.afetados === 0) {
-            naoBaixados.push(fatia[j]);
-          } else {
-            baixados.push(fatia[j]);
-            if (!resultado.value.auditoriaRegistrada) auditoriaIncompleta = true;
-          }
-        }
-      }
-
-      // Se algum aparelho não saiu do estoque, os que saíram voltam e nada é vendido:
-      // senão o lote cobraria (inclusive no fiado) por aparelho que continua à venda.
-      if (naoBaixados.length > 0) {
-        const naoRevertidos = await devolverBaixados(baixados, 'Venda em lote cancelada: nem todos os aparelhos puderam ser baixados.');
-        const nomes = naoBaixados.slice(0, 5).map((item) => item.modelo).join(', ');
-        throw new Error(
-          `${naoBaixados.length} aparelho(s) não puderam ser baixados (${nomes}${naoBaixados.length > 5 ? '...' : ''}). A venda não foi registrada` +
-            (naoRevertidos > 0 ? `, e ${naoRevertidos} aparelho(s) ficaram fora do estoque: confira no estoque.` : '; o estoque ficou como estava.')
-        );
-      }
-      if (auditoriaIncompleta) {
-        toast.warning('Venda registrada, mas o histórico de movimentações do estoque não foi gravado por completo.', { duration: 8000 });
-      }
-
-      // 2. Insere um registro agrupado na tabela 'vendas'
       const payloadVenda: any = {
         clienteNome: compradorFinal,
         vendedor: 'Sistema',
@@ -491,15 +365,33 @@ export function VendaLoteAtacadoModal({
         loja_id: lojaId || null,
       };
 
-      const { error: errInsert } = await supabase.from('vendas').insert([payloadVenda]);
-      if (errInsert) {
-        console.error('Erro ao inserir venda em lote:', errInsert);
-        const naoRevertidos = await devolverBaixados(baixados, 'Venda em lote não gravada: baixa desfeita.');
-        throw new Error(
-          `Não foi possível registrar a venda: ${errInsert.message}.` +
-            (naoRevertidos > 0 ? ` ${naoRevertidos} aparelho(s) ficaram fora do estoque: confira no estoque.` : ' Os aparelhos continuam no estoque.')
-        );
-      }
+      // Observação de baixa de cada aparelho, gravada junto com a venda.
+      const camposAparelho = Object.fromEntries(
+        itensSelecionados.map((item) => {
+          const precoItem = getPrecoItem(item);
+          const custoItem = item.custo || 0;
+          const lucroItem = precoItem - custoItem;
+          const obsBaixa = [
+            `BAIXA_ESTOQUE:${dataIso}:Venda ATACADO (Lote com ${itensSelecionados.length} itens) para ${compradorFinal} por R$ ${precoItem.toFixed(2)} | Custo: R$ ${custoItem.toFixed(2)} | Lucro: R$ ${lucroItem.toFixed(2)} | Pgto: ${metodoPgto}`,
+            observacoes ? `Obs: ${observacoes.trim()}` : '',
+            `ID: ${getAparelhoCodigo(item)}`,
+            item.imei ? `IMEI: ${item.imei}` : ''
+          ].filter(Boolean).join(' | ');
+          return [item.id, { cliente: compradorFinal, observacoes: obsBaixa }];
+        })
+      );
+
+      // Venda, baixa de todos os aparelhos e movimentações numa transação só: se um aparelho
+      // do lote já saiu do estoque, nada é gravado e a mensagem diz qual foi.
+      await registrarVendaAtomica(supabase, {
+        venda: { ...payloadVenda, loja_id: lojaId || usuario?.lojaId || null },
+        aparelhoIds: itensSelecionados.map((item) => item.id),
+        camposAparelho,
+        origem: 'atacado',
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
+        observacao: `Venda ATACADO em lote (${itensSelecionados.length} itens) para ${compradorFinal}`,
+      });
 
       await upsertComprador(compradorFinal, 'lojista', compradorTelefone || undefined);
 

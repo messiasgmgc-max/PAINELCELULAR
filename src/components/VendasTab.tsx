@@ -16,6 +16,7 @@ import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printe
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { NovoAparelhoRapidoModal } from '@/components/vendas/components/NovoAparelhoRapidoModal';
 import { desfazerCadastroRapido, type PayloadCadastroRapido } from '@/lib/pdv/cadastroRapido';
+import { registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { ModalPortal } from '@/components/ModalPortal';
 import { EditarVendaRegistroModal, VendaEditavelData } from '@/components/EditarVendaRegistroModal';
 import { VincularVendidoModal } from '@/components/VincularVendidoModal';
@@ -84,15 +85,6 @@ const SALE_EMOJIS = ['🎉', '🥳', '💰', '✨', '🚀', '🔥'];
  * signature, por isso a conversão para o tipo do helper do ciclo.)
  */
 const aparelhoNoEstoque = (a: Aparelho): boolean => estaNoEstoque(a as unknown as EstadoCicloAparelho);
-
-/**
- * A venda só baixa o que ainda não está marcado como vendido: salvar de novo uma
- * venda já baixada não pode sobrescrever a data de saída nem duplicar a movimentação.
- * Vale também para o legado (ativo=false com a condição antiga de venda), que já saiu
- * do estoque. Um aparelho 'baixado' vinculado a uma venda passa a constar como vendido.
- */
-const aindaNaoVendido = (estado: EstadoCicloAparelho): boolean =>
-  estaNoEstoque(estado) || (estado.ativo === false && estado.status === 'baixado');
 
 /** A mudança no estoque já foi aplicada; só avisa que a trilha de auditoria ficou incompleta. */
 function avisarAuditoriaPendente(
@@ -1164,20 +1156,20 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         loja_id: usuario?.lojaId || null
       };
 
-      const { data: vendaCriada, error: erroVenda } = await supabase
-        .from('vendas')
-        .insert([vendaPayload])
-        .select()
-        .single();
-
-      if (erroVenda) throw erroVenda;
-
-      // 4. Dar baixa no aparelho no estoque imediatamente
-      if (aparelhoFinal?.id) {
-        await registrarCondicaoOriginalDosItens(vendaCriada?.id, [aparelhoFinal.id]);
-        await darBaixaPorVenda([aparelhoFinal.id], vendaCriada?.id, 'Venda gerada por IA', dataPagamentoIso);
-        await fetchAparelhos();
-      }
+      // 4. Venda e baixa do aparelho numa transação só.
+      const aparelhoJaForaDoEstoque =
+        aparelhoFinal?.id && !estaNoEstoque(aparelhoFinal as unknown as EstadoCicloAparelho) ? [aparelhoFinal.id] : [];
+      const resultadoVendaIA = await registrarVendaAtomica(supabase, {
+        venda: vendaPayload,
+        aparelhoIds: aparelhoFinal?.id ? [aparelhoFinal.id] : [],
+        permitirForaDoEstoque: aparelhoJaForaDoEstoque,
+        origem: 'venda',
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
+        observacao: 'Venda gerada por IA',
+      });
+      const vendaCriada: any = resultadoVendaIA.venda;
+      if (aparelhoFinal?.id) await fetchAparelhos();
 
       await carregarVendas();
       setShowSaleCelebration(true);
@@ -1336,114 +1328,57 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         loja_id: usuario?.lojaId || null
       };
 
-      // Outro terminal pode ter vendido um aparelho do carrinho depois que a lista foi
-      // carregada. Só bloqueia quem estava no estoque aqui e já saiu no banco: aparelho já
-      // baixado escolhido de propósito (vincular venda antiga) continua permitido.
-      if (!editingId) {
-        const idsParaConferir = carrinho
-          .map((item) => item.aparelhoId)
-          .filter((id): id is string => Boolean(id))
-          .filter((id) => estaNoEstoque(aparelhos.find((a) => a.id === id) as unknown as EstadoCicloAparelho | undefined));
-        if (idsParaConferir.length > 0) {
-          const { data: estadoAtual, error: erroEstado } = await supabase
-            .from('aparelhos')
-            .select('id, modelo, ativo, status, condicao')
-            .in('id', idsParaConferir);
-          if (erroEstado) throw erroEstado;
-          const jaSairam = (estadoAtual || []).filter((a) => !estaNoEstoque(a));
-          if (jaSairam.length > 0) {
-            throw new Error(
-              `${jaSairam.map((a) => a.modelo).join(', ')} já saiu do estoque (vendido em outro terminal?). Remova do carrinho e atualize a lista.`
-            );
-          }
-        }
-      }
-
-      let vendaSalva = null;
-
-      if (editingId) {
-        const { data, error } = await supabase
-          .from('vendas')
-          .update(vendaDados)
-          .eq('id', editingId)
-          .select()
-          .single();
-        if (error) throw error;
-        vendaSalva = data;
-      } else {
-        const { data, error } = await supabase
-          .from('vendas')
-          .insert([vendaDados])
-          .select()
-          .single();
-        if (error) throw error;
-        vendaSalva = data;
-      }
-
       const aparelhosIds = carrinho
-        .map(item => item.aparelhoId)
+        .map((item) => item.aparelhoId)
         .filter((id): id is string => Boolean(id));
-      if (aparelhosIds.length > 0) {
-        // Guardamos a condição física original na própria venda para que
-        // desfazê-la devolva o aparelho ao estoque como ele estava — um lacrado
-        // não pode voltar como seminovo (baixas antigas gravavam 'vendido' em `condicao`).
-        await registrarCondicaoOriginalDosItens(vendaSalva?.id, aparelhosIds);
-        await darBaixaPorVenda(aparelhosIds, vendaSalva?.id, editingId ? 'Venda PDV editada' : 'Venda PDV', dataPagamentoFinalIso);
-        await fetchAparelhos();
+
+      // Quem já estava fora do estoque nesta tela foi escolhido de propósito (vincular venda
+      // antiga). Quem estava no estoque aqui e saiu no banco (outro terminal) recusa a venda.
+      const permitirForaDoEstoque = aparelhosIds.filter(
+        (id) => !estaNoEstoque(aparelhos.find((a) => a.id === id) as unknown as EstadoCicloAparelho | undefined)
+      );
+
+      // A troca só entra numa venda nova: salvar de novo uma venda editada duplicava o aparelho.
+      const temPagamentoTradeIn = posPagamento.pagamentos.some((p) => p.metodo === ('trade_in' as any));
+      const tradeIn =
+        !editingId && temPagamentoTradeIn && tradeInVenda && tradeInVenda.valor > 0
+          ? {
+              marca: /iphone|ipad|apple/i.test(tradeInVenda.modelo) ? 'Apple' : null,
+              modelo: tradeInVenda.modelo,
+              capacidade: tradeInVenda.capacidade || null,
+              cor: tradeInVenda.cor || null,
+              imei: tradeInVenda.imei || null,
+              saude_bateria: tradeInVenda.bateria ? `${tradeInVenda.bateria}%` : null,
+              condicao: 'seminovo',
+              custo: tradeInVenda.valor,
+              preco: Math.round(tradeInVenda.valor * 1.3),
+              precoAtacado: Math.round(tradeInVenda.valor * 1.15),
+              preco_atacado: Math.round(tradeInVenda.valor * 1.15),
+              observacoes: `Recebido como troca (trade-in) no PDV de ${posDados.clienteNome || 'cliente'}`,
+            }
+          : null;
+
+      // Venda, baixa do estoque e aparelho da troca numa transação só: se um aparelho já
+      // saiu do estoque ou algo falhar no meio, nada é gravado.
+      const resultadoVenda = await registrarVendaAtomica(supabase, {
+        venda: vendaDados,
+        vendaId: editingId || null,
+        aparelhoIds: aparelhosIds,
+        permitirForaDoEstoque,
+        tradeIn,
+        avaliacaoId: tradeIn ? tradeInVenda?.avaliacaoId || null : null,
+        origem: 'venda',
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
+        observacao: editingId ? 'Venda PDV editada' : 'Venda PDV',
+      });
+      const vendaSalva: any = resultadoVenda.venda;
+
+      if (aparelhosIds.length > 0 || resultadoVenda.tradeInId) await fetchAparelhos();
+      if (resultadoVenda.tradeInId && tradeInVenda) {
+        toast.success(`Aparelho da troca (${tradeInVenda.modelo}) entrou no estoque.`);
       }
 
-      // Entrada automática no Estoque do aparelho recebido na troca (Trade-In / Upgrade)
-      const temPagamentoTradeIn = posPagamento.pagamentos.some(p => p.metodo === ('trade_in' as any));
-      if (temPagamentoTradeIn && tradeInVenda && tradeInVenda.valor > 0) {
-        try {
-          const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
-          const observacaoTroca = `Recebido como Trade-In na venda #${vendaSalva?.id ? String(vendaSalva.id).slice(-6).toUpperCase() : 'NOVA'}`;
-          // estoque-guard: auditado
-          const { data: aparelhoTroca, error: erroTroca } = await supabase.from('aparelhos').insert([{
-            modelo: tradeInVenda.modelo,
-            capacidade: tradeInVenda.capacidade,
-            cor: tradeInVenda.cor || 'Preto',
-            imei: tradeInVenda.imei || null,
-            bateria: tradeInVenda.bateria || 85,
-            condicao: 'seminovo',
-            custo: tradeInVenda.valor,
-            preco: Math.round(tradeInVenda.valor * 1.30),
-            precoAtacado: Math.round(tradeInVenda.valor * 1.15),
-            status: 'disponivel',
-            ativo: true,
-            loja_id: targetLojaId || null,
-            observacoes: observacaoTroca
-          }]).select('id, loja_id, ativo, status, condicao').single();
-
-          if (tradeInVenda.avaliacaoId) {
-            await supabase.from('avaliacoes_upgrade').update({
-              status: 'convertido_venda',
-              venda_id: vendaSalva?.id || null,
-            }).eq('id', tradeInVenda.avaliacaoId);
-          }
-
-          if (erroTroca || !aparelhoTroca) {
-            console.warn('Aviso ao registrar aparelho de troca no estoque:', erroTroca);
-            toast.error(`Não foi possível dar entrada no aparelho da troca (${tradeInVenda.modelo}) no estoque.`);
-          } else {
-            const entrada = await registrarEntradaEstoque(supabase, {
-              aparelhos: [aparelhoTroca as EstadoCicloAparelho],
-              origem: 'venda',
-              lojaId: targetLojaId || null,
-              usuarioId: usuario?.id || null,
-              usuarioNome: usuario?.nome || null,
-              observacao: observacaoTroca,
-            });
-            avisarAuditoriaPendente(entrada, 'Aparelho da troca cadastrado');
-            toast.success(`Aparelho na troca (${tradeInVenda.modelo}) entrou no Estoque Geral!`);
-          }
-          await fetchAparelhos();
-        } catch (errTradeIn) {
-          console.warn('Aviso ao registrar aparelho de troca no estoque:', errTradeIn);
-        }
-      }
-
-       
       const clienteVenda = clientes.find(c => c.id === posDados.clienteId);
       
       if (clienteVenda && clienteVenda.email && clienteVenda.email !== 'sem@email.com') {
@@ -1693,79 +1628,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
     setEditingId(venda.id);
     openPOSModal();
-  };
-
-  /**
-   * Salva na venda a condição física em que cada aparelho estava ao ser vendido.
-   *
-   * A baixa não mexe mais em `condicao`, mas baixas antigas gravavam 'vendido'
-   * por cima do valor original — nesses registros só a venda sabe o estado certo
-   * para devolver o aparelho ao estoque. Por isso 'vendido' nunca é gravado como
-   * condição original: ao reeditar uma venda antiga, apagaria o valor verdadeiro.
-   */
-  const registrarCondicaoOriginalDosItens = async (
-    vendaId: string | undefined,
-    aparelhosIds: Array<string | undefined | null>
-  ) => {
-    const ids = aparelhosIds.filter((id): id is string => Boolean(id));
-    if (!vendaId || ids.length === 0) return;
-    try {
-      const { data: aparelhosAtuais } = await supabase
-        .from('aparelhos')
-        .select('id, condicao')
-        .in('id', ids);
-
-      const porId = new Map((aparelhosAtuais || []).map((a) => [a.id, a.condicao]));
-
-      const { data: vendaAtual } = await supabase
-        .from('vendas')
-        .select('itens')
-        .eq('id', vendaId)
-        .maybeSingle();
-
-      const itensAtuais = Array.isArray(vendaAtual?.itens) ? vendaAtual.itens : [];
-      if (itensAtuais.length === 0) return;
-
-      const itensComCondicao = itensAtuais.map((item: any) => {
-        const original = porId.get(item.aparelhoId);
-        // 'vendido' é marca de baixa antiga, não estado físico: mantém o que já estava no item.
-        return original && original !== 'vendido' ? { ...item, condicaoOriginal: original } : item;
-      });
-
-      await supabase.from('vendas').update({ itens: itensComCondicao }).eq('id', vendaId);
-    } catch (err) {
-      // Não impede a venda: no pior caso o desfazer usa o palpite padrão.
-      console.warn('Não foi possível registrar a condição original dos itens:', err);
-    }
-  };
-
-  /**
-   * Tira do estoque os aparelhos vendidos (ativo=false + status 'vendido', sem
-   * tocar em `condicao`) e registra a movimentação. A venda já está salva quando
-   * isto roda, então uma falha aqui é avisada mas não desfaz a venda.
-   */
-  const darBaixaPorVenda = async (ids: string[], vendaId: string | undefined, descricao: string, dataVendaIso?: string) => {
-    if (ids.length === 0) return;
-    try {
-      const quando = dataVendaIso ? new Date(dataVendaIso) : new Date();
-      const resultado = await aplicarMudancaEstoque(supabase, {
-        ids,
-        patch: patchSaida('vendido', 'venda', Number.isNaN(quando.getTime()) ? new Date() : quando),
-        tipo: 'venda',
-        origem: 'venda',
-        lojaId: usuario?.lojaId || null,
-        usuarioId: usuario?.id || null,
-        usuarioNome: usuario?.nome || null,
-        observacao: vendaId ? `${descricao} #${String(vendaId).slice(-6).toUpperCase()}` : descricao,
-        filtroElegivel: aindaNaoVendido,
-      });
-      avisarAuditoriaPendente(resultado, 'Baixa da venda aplicada');
-    } catch (erroEstoque: any) {
-      console.error('Erro ao dar baixa no estoque:', erroEstoque);
-      toast.error('Venda salva, mas não foi possível dar baixa no estoque.', {
-        description: erroEstoque?.message,
-      });
-    }
   };
 
   /**
