@@ -54,3 +54,6 @@ test.txt
 
 # Backups gerados pelo script de correcao de datas
 backup-datas-vendas-*.json
+
+# Sessao do WhatsApp Web (wppconnect): perfil de navegador com cookies. Nunca versionar.
+.tokens/
