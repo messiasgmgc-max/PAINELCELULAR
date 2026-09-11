@@ -188,9 +188,17 @@ export default function AvaliacaoPublicaUpgradePage() {
     };
 
     try {
-      await supabase.from('avaliacoes_upgrade').insert([payload]);
+      // Grava pelo servidor: sem login, a tabela não aceita gravação direta.
+      const resposta = await fetch(`/api/publico/upgrade/${lojaId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'avaliacao', dados: payload }),
+      });
+      if (!resposta.ok) {
+        console.warn('Avaliação não registrada:', await resposta.text());
+      }
     } catch (err) {
-      console.warn('Erro ao gravar no Supabase, mantendo fluxo ativo:', err);
+      console.warn('Erro ao registrar a avaliação, mantendo fluxo ativo:', err);
     } finally {
       setSalvandoProposta(false);
       setEtapa(5); // Tela de Conclusão / WhatsApp

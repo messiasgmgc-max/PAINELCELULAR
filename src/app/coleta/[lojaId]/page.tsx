@@ -129,31 +129,20 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
           }
         }
 
-        // Busca motoboys da loja
-        const { data: listaMotoboys } = await supabase
-          .from('motoboys')
-          .select('*')
-          .or(`loja_id.eq.${lojaId},loja_id.is.null`)
-          .eq('ativo', true)
-          .order('nome');
+        // Motoboys e propostas vêm do servidor: sem login, a leitura direta dessas
+        // tabelas fica bloqueada pela RLS.
+        const resposta = await fetch(`/api/publico/upgrade/${lojaId}`, { cache: 'no-store' });
+        const publico = resposta.ok ? await resposta.json() : null;
+        const listaMotoboys: any[] = publico?.motoboys || [];
 
-        if (listaMotoboys && listaMotoboys.length > 0) {
+        if (listaMotoboys.length > 0) {
           setMotoboys(listaMotoboys);
           setMotoboySelecionadoId(listaMotoboys[0].id);
           setMotoboyNome(listaMotoboys[0].nome);
         }
 
-        // Busca propostas pendentes para vincular rápido
-        const { data: propostas } = await supabase
-          .from('avaliacoes_upgrade')
-          .select('*')
-          .or(`loja_id.eq.${lojaId},loja_id.is.null`)
-          .in('status', ['pendente', 'em_negociacao', 'aprovado'])
-          .order('created_at', { ascending: false })
-          .limit(10);
-
-        if (propostas) {
-          setPropostasPendentes(propostas);
+        if (publico?.propostas) {
+          setPropostasPendentes(publico.propostas);
         }
       } catch (err) {
         console.error('Erro ao inicializar página de coleta:', err);
@@ -355,30 +344,23 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
         created_at: new Date().toISOString(),
       };
 
-      // Salva no Supabase
-      const { error } = await supabase.from('vistorias_upgrade').insert([payloadVistoria]);
-
-      if (error) {
-        console.warn('Salvando vistoria em cache local:', error.message);
-      }
-
-      // Se havia avaliação vinculada, atualiza o status
-      if (propostaIdVinculada) {
-        await supabase
-          .from('avaliacoes_upgrade')
-          .update({
-            status: 'em_negociacao',
-            valor_aprovado: valorFinal,
-          })
-          .eq('id', propostaIdVinculada);
+      // Salva pelo servidor, que também atualiza a proposta vinculada.
+      const resposta = await fetch(`/api/publico/upgrade/${lojaId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'vistoria', dados: payloadVistoria }),
+      });
+      if (!resposta.ok) {
+        const corpo = await resposta.json().catch(() => ({}));
+        throw new Error(corpo.error || 'Não foi possível salvar a coleta. Tente de novo.');
       }
 
       toast.success('Laudo de coleta salvo com sucesso!');
       setEtapa(6); // Tela de sucesso
     } catch (err: any) {
       console.error('Erro ao finalizar coleta:', err);
-      toast.error('Erro ao salvar no servidor, mas dados foram gravados no aparelho!');
-      setEtapa(6);
+      // Nada fica guardado no aparelho: o motoboy precisa tentar de novo antes de sair.
+      toast.error(err?.message || 'Erro ao salvar a coleta. Tente de novo.');
     } finally {
       setSalvando(false);
     }
