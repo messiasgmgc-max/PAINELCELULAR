@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { consumirPreselecaoEtiquetas, semEtiqueta } from '@/lib/etiquetas/pendentes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GlassCard } from '@/components/GlassCard';
@@ -113,6 +114,18 @@ export function EtiquetasTab() {
   );
 
   const aparelhosAtivos = useMemo(() => aparelhos.filter((aparelho) => aparelho.ativo), [aparelhos]);
+  const totalSemEtiqueta = useMemo(() => aparelhosAtivos.filter(semEtiqueta).length, [aparelhosAtivos]);
+
+  // Aparelhos vindos do estoque ("Gerar etiquetas" depois de aplicar a lista do MercadoPhone).
+  const preselecaoRef = useRef<string[] | null>(null);
+  const [avisoPreselecao, setAvisoPreselecao] = useState<number | null>(null);
+  useEffect(() => {
+    const ids = consumirPreselecaoEtiquetas();
+    if (ids) {
+      preselecaoRef.current = ids;
+      setAvisoPreselecao(ids.length);
+    }
+  }, []);
 
   const getAparelhoIdentificador = (aparelho: typeof aparelhosAtivos[number]) => {
     const candidatos = [
@@ -198,11 +211,18 @@ export function EtiquetasTab() {
     }
 
     setAparelhosSelecionadosIds((prev) => {
+      const preselecao = preselecaoRef.current;
+      if (preselecao) {
+        preselecaoRef.current = null;
+        return preselecao.filter((id) => aparelhosAtivos.some((aparelho) => aparelho.id === id));
+      }
       if (prev.length > 0) {
         const validos = prev.filter((id) => aparelhosAtivos.some((aparelho) => aparelho.id === id));
         if (validos.length > 0) return validos;
       }
-      return aparelhosAtivos.map((aparelho) => aparelho.id);
+      // Antes marcava o estoque inteiro: um clique em "Gerar" imprimia (e contava como
+      // etiquetado) até quem já tinha etiqueta. Agora começa pelos que não têm.
+      return aparelhosAtivos.filter(semEtiqueta).map((aparelho) => aparelho.id);
     });
   }, [aparelhosAtivos]);
 
@@ -277,6 +297,11 @@ export function EtiquetasTab() {
     } else {
       setAparelhosSelecionadosIds((prev) => Array.from(new Set([...prev, ...aparelhosVisiveis.map((aparelho) => aparelho.id)])));
     }
+  };
+
+  const marcarSoSemEtiqueta = () => {
+    setAparelhosSelecionadosIds(aparelhosAtivos.filter(semEtiqueta).map((aparelho) => aparelho.id));
+    setFiltroApenasSemEtiqueta(true);
   };
 
   const abrirNovoModelo = () => {
@@ -562,7 +587,16 @@ export function EtiquetasTab() {
     const html = gerarHtmlEtiquetas();
     if (!html) return;
 
-    // Atualizar contagem de etiquetas impressas no Supabase para todos os aparelhos selecionados
+    // A janela abre antes de gravar a contagem: depois de várias gravações o navegador
+    // bloqueava o pop-up, e os aparelhos ficavam marcados como etiquetados sem imprimir nada.
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Permita pop-up para imprimir as etiquetas.');
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+
     try {
       for (const aparelho of aparelhosSelecionados) {
         const atual = Number((aparelho as any).etiquetas_impressas || (aparelho as any).etiquetasImpressas || 0);
@@ -576,14 +610,6 @@ export function EtiquetasTab() {
     } catch (err) {
       console.error('Erro ao atualizar contagem de etiquetas no Supabase:', err);
     }
-
-    const win = window.open('', '_blank');
-    if (!win) {
-      alert('Permita pop-up para imprimir as etiquetas.');
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
   };
 
   return (
@@ -596,6 +622,18 @@ export function EtiquetasTab() {
           </h2>
           <p className="text-sm text-muted-foreground">Modelos globais de etiqueta, seleção individual dos aparelhos e impressão ajustada para rolo e A4.</p>
         </div>
+
+        {avisoPreselecao !== null && (
+          <div className="flex items-start justify-between gap-3 text-sm text-emerald-200 bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3">
+            <p>
+              <strong>{avisoPreselecao} aparelho(s) da lista</strong> já estão marcados. Escolha o modelo e clique em
+              <strong> Gerar Etiquetas</strong>.
+            </p>
+            <button type="button" onClick={() => setAvisoPreselecao(null)} className="text-emerald-300 hover:text-white" aria-label="Fechar aviso">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {erroModelosEtiqueta && (
           <div className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded-xl p-3">
@@ -654,7 +692,15 @@ export function EtiquetasTab() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4 mt-1 md:mt-2">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <p className="text-xs font-bold uppercase text-muted-foreground">Aparelhos no estoque da loja atual</p>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={marcarSoSemEtiqueta}
+                disabled={totalSemEtiqueta === 0}
+                className="text-xs font-bold px-3 py-1.5 rounded-xl border bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25 transition-all disabled:opacity-50"
+              >
+                🏷️ Marcar só os sem etiqueta ({totalSemEtiqueta})
+              </button>
               <button
                 type="button"
                 onClick={() => setFiltroApenasSemEtiqueta(!filtroApenasSemEtiqueta)}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { guardarPreselecaoEtiquetas } from '@/lib/etiquetas/pendentes';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -197,7 +198,14 @@ export default function Home() {
       case 'clientes':
         return <ClientesTab />;
       case 'aparelhos':
-        return <AparelhosTab />;
+        return (
+          <AparelhosTab
+            onGerarEtiquetas={(ids) => {
+              guardarPreselecaoEtiquetas(ids);
+              handleTabChange('etiquetas');
+            }}
+          />
+        );
       case 'atacado':
         return <AtacadoTab />;
       case 'pecas':

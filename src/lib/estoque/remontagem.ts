@@ -206,6 +206,10 @@ export interface ResultadoRemontagem {
   atualizados: number;
   reativados: number;
   criados: number;
+  /** Aparelhos cadastrados nesta execução (o estoque oferece as etiquetas deles). */
+  idsCriados: string[];
+  /** Aparelhos existentes que a lista atualizou ou reativou. */
+  idsAtualizados: string[];
   baixados: number;
   baixaBloqueada: boolean;
   motivoBloqueio?: string;
@@ -257,6 +261,7 @@ export async function executarPlanoRemontagem(
   const errosAuditoria: string[] = [];
   let atualizados = 0;
   let reativados = 0;
+  const idsAtualizados: string[] = [];
 
   for (const { item, aparelho, reativa } of plano.atualizar) {
     const dados = deps.dadosCadastrais(item, aparelho);
@@ -276,6 +281,7 @@ export async function executarPlanoRemontagem(
     if (!r.auditoriaRegistrada && r.erroAuditoria) errosAuditoria.push(r.erroAuditoria);
     atualizados += r.afetados;
     if (reativa) reativados += r.afetados;
+    if (r.afetados > 0) idsAtualizados.push(aparelho.id);
   }
 
   const criadosLinhas: EstadoCicloAparelho[] = [];
@@ -321,6 +327,8 @@ export async function executarPlanoRemontagem(
     atualizados,
     reativados,
     criados: criadosLinhas.length,
+    idsCriados: criadosLinhas.map((a) => String(a.id)),
+    idsAtualizados,
     baixados,
     baixaBloqueada: permiteBaixa && baixaBloqueada,
     motivoBloqueio: baixaBloqueada ? trava.motivo || plano.trava.motivo : undefined,

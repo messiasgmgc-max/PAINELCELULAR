@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
 import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function AparelhosTab() {
+export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: string[]) => void } = {}) {
   const { usuario } = useAuth();
   const { aparelhos, loading, error, fetchAparelhos, criarAparelho, atualizarAparelho, deletarAparelho } = useAparelhos();
   const { clientes, fetchClientes, criarCliente } = useClientes();
@@ -70,6 +71,8 @@ export function AparelhosTab() {
   const [importingMercadoPhone, setImportingMercadoPhone] = useState(false);
   const { config: configLoja } = useStoreConfig(usuario?.lojaId || null);
   const [planoMercadoPhone, setPlanoMercadoPhone] = useState<{ modo: 'importar' | 'remontar'; plano: PlanoRemontagem } | null>(null);
+  // Aparelhos da última lista aplicada que ainda não têm etiqueta impressa.
+  const [etiquetasPendentesLista, setEtiquetasPendentesLista] = useState<{ ids: string[]; novos: number; existentes: number } | null>(null);
   const [confirmacaoRestauracao, setConfirmacaoRestauracao] = useState<SelecaoRestauracao<any> | null>(null);
   const [confirmacaoBaixaTotal, setConfirmacaoBaixaTotal] = useState<{ ids: string[] } | null>(null);
   const [executandoAcaoEstoque, setExecutandoAcaoEstoque] = useState<
@@ -833,6 +836,19 @@ export function AparelhosTab() {
       if (!r.auditoriaCompleta) {
         toast.warning('A operação foi aplicada, mas parte da auditoria não foi gravada. Avise o suporte.', {
           duration: 12000,
+        });
+      }
+
+      // Quem entra pela lista costuma ficar sem etiqueta: oferece gerar na hora.
+      const atualizadosNaLista = plano.atualizar
+        .filter((u) => r.idsAtualizados.includes(u.aparelho.id))
+        .map((u) => u.aparelho as { id: string } & object);
+      const idsEtiquetar = idsParaEtiquetar({ idsCriados: r.idsCriados, atualizados: atualizadosNaLista });
+      if (idsEtiquetar.length > 0) {
+        setEtiquetasPendentesLista({
+          ids: idsEtiquetar,
+          novos: r.idsCriados.length,
+          existentes: idsEtiquetar.length - new Set(r.idsCriados).size,
         });
       }
 
@@ -3043,6 +3059,38 @@ export function AparelhosTab() {
             />
           );
         })()}
+
+      {/* Depois de aplicar a lista: gerar as etiquetas de quem entrou */}
+      {etiquetasPendentesLista && (
+        <ConfirmarAcaoEstoqueModal
+          aberto
+          tom="aviso"
+          titulo="Gerar as etiquetas agora?"
+          descricao={`${etiquetasPendentesLista.ids.length} aparelho(s) desta lista ainda não têm etiqueta. Gere agora para não precisar procurar depois.`}
+          resumo={[
+            { rotulo: 'Novos cadastrados', valor: etiquetasPendentesLista.novos, tom: 'positivo' },
+            { rotulo: 'Já estavam no estoque, sem etiqueta', valor: etiquetasPendentesLista.existentes },
+          ]}
+          acoes={[
+            {
+              rotulo: 'Agora não',
+              variante: 'secundaria',
+              onClick: () => setEtiquetasPendentesLista(null),
+            },
+            {
+              rotulo: `Gerar ${etiquetasPendentesLista.ids.length} etiqueta(s)`,
+              variante: 'primaria',
+              onClick: () => {
+                const ids = etiquetasPendentesLista.ids;
+                setEtiquetasPendentesLista(null);
+                if (onGerarEtiquetas) onGerarEtiquetas(ids);
+                else toast.info('Abra a aba Etiquetas e use "Marcar só os sem etiqueta".');
+              },
+            },
+          ]}
+          onFechar={() => setEtiquetasPendentesLista(null)}
+        />
+      )}
 
       {/* Confirmação — reativar desativados */}
       {confirmacaoRestauracao && (
