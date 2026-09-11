@@ -163,8 +163,10 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
   useEffect(() => {
     const historicoSaidas = aparelhos
-      // Celular de cliente da OS nunca foi estoque: não é saída nem baixa.
-      .filter((aparelho: any) => aparelho.ativo === false && !ehAparelhoDeCliente(aparelho))
+      // Tudo que não está no estoque. Antes filtrava só ativo=false, e aparelho marcado como
+      // vendido mas ainda ativo (conferência antiga) sumia do estoque E das saídas, sem como
+      // devolver. Celular de cliente da OS nunca foi estoque: não é saída nem baixa.
+      .filter((aparelho: any) => !estaNoEstoque(aparelho) && !ehAparelhoDeCliente(aparelho))
       .map((aparelho: any) => {
         const obs = String(aparelho.observacoes || '');
         const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
