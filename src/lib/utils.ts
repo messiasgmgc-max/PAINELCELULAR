@@ -237,6 +237,12 @@ export function obterDataHoraVenda(dataStr?: string): string {
         return d.toISOString();
       }
     }
+    // Campo datetime-local ("2026-09-10T19:23") não tem fuso: é hora local. Gravar o texto
+    // cru fazia o banco ler como UTC, e cada edição da venda recuava 3 horas.
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(dataStr)) {
+      const local = new Date(dataStr);
+      if (!isNaN(local.getTime())) return local.toISOString();
+    }
     return dataStr;
   }
 
@@ -325,6 +331,11 @@ export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = 
     // Se tem imei ou modelo diretamente no objeto do item
     if (!imei && (primeiro.imei || primeiro.serial)) {
       imei = String(primeiro.imei || primeiro.serial).trim();
+    }
+    // Venda digitada ou gerada pela IA guarda o IMEI na observação ("IMEI: 3580...").
+    if (!imei && primeiro.observacao) {
+      const matchObs = String(primeiro.observacao).match(/IMEI(?:\/ID)?:\s*([A-Za-z0-9]+)/i);
+      if (matchObs) imei = matchObs[1];
     }
     if (!nomeAparelho && (primeiro.modelo || primeiro.nome)) {
       nomeAparelho = String(primeiro.modelo || primeiro.nome).trim();

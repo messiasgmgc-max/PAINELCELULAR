@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { dataDaVendaEditada, dataLocalDoCampo } from '@/lib/vendas/itemVenda';
 import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
 import { 
   X, 
@@ -92,12 +93,12 @@ export function EditarVendaRegistroModal({
       setCusto(venda.custo ? String(venda.custo) : '0');
       
       const d = venda.data ? new Date(venda.data) : new Date();
-      setDataVenda(!isNaN(d.getTime()) ? d.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+      setDataVenda(dataLocalDoCampo(!isNaN(d.getTime()) ? d : new Date()));
       
       const rawVenc = venda.dataVencimento || (venda.raw && (venda.raw.dataVencimento || venda.raw.data_vencimento));
       if (rawVenc) {
         const dV = new Date(rawVenc);
-        setDataVencimento(!isNaN(dV.getTime()) ? dV.toISOString().split('T')[0] : '');
+        setDataVencimento(!isNaN(dV.getTime()) ? dataLocalDoCampo(dV) : '');
       } else {
         setDataVencimento('');
       }
@@ -122,7 +123,8 @@ export function EditarVendaRegistroModal({
 
     try {
       const compradorFinal = comprador.trim() || 'Comprador / Lojista';
-      const dataIso = obterDataHoraVenda(dataVenda);
+      // Mantém o horário original da venda; só o dia muda se a data foi trocada.
+      const dataIso = dataDaVendaEditada(venda.data, dataVenda) ?? obterDataHoraVenda(dataVenda);
 
       // 1. Se tem aparelhoId vinculado, atualiza o aparelho na tabela 'aparelhos'
       if (venda.aparelhoId) {
@@ -249,6 +251,7 @@ export function EditarVendaRegistroModal({
                 total: valorVendaNum,
                 valorExibir: valorVendaNum,
                 valorUnitario: valorVendaNum,
+                valorInterno: custoNum,
                 custoUnitario: custoNum,
                 lucroUnitario: lucroNum,
               };
@@ -314,6 +317,7 @@ export function EditarVendaRegistroModal({
               valorUnitario: valorVendaNum,
               total: valorVendaNum,
               valorExibir: valorVendaNum,
+              valorInterno: custoNum,
               custoUnitario: custoNum,
               lucroUnitario: lucroNum,
               tipoVenda: tipoVenda.toLowerCase(),

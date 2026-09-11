@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { aplicarEdicaoItem } from '@/lib/vendas/itemVenda';
 import { escoparHtmlRecibo } from '@/lib/recibo/reciboParaPdf';
 import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
@@ -16,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet, Check } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { NovoAparelhoRapidoModal } from '@/components/vendas/components/NovoAparelhoRapidoModal';
 import { desfazerCadastroRapido, type PayloadCadastroRapido } from '@/lib/pdv/cadastroRapido';
@@ -2348,6 +2349,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
   const handleRemoveItem = (id: string) => {
     setCart(carrinho.filter(item => item.id !== id));
+    if (itemEditando?.id === id) setItemEditando(null);
+  };
+
+  // Edição de item já no carrinho: antes só dava para apagar e lançar de novo.
+  const [itemEditando, setItemEditando] = useState<VendaItem | null>(null);
+
+  const salvarEdicaoItem = () => {
+    if (!itemEditando) return;
+    const original = carrinho.find((item) => item.id === itemEditando.id);
+    if (!original) {
+      setItemEditando(null);
+      return;
+    }
+    const atualizado = aplicarEdicaoItem(original, itemEditando);
+    setCart(carrinho.map((item) => (item.id === atualizado.id ? atualizado : item)));
+    setItemEditando(null);
   };
 
   const handleAddPagamento = () => {
@@ -3402,7 +3419,89 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/10">
-                          {carrinho.map(item => (
+                          {carrinho.map(item => itemEditando?.id === item.id ? (
+                            <tr key={item.id} className="bg-blue-500/5">
+                              <td className="p-1.5 space-y-1">
+                                <input
+                                  className="input-glass h-8 w-full text-xs"
+                                  value={itemEditando.descricao}
+                                  onChange={(e) => setItemEditando({ ...itemEditando, descricao: e.target.value })}
+                                  placeholder="Produto"
+                                  aria-label="Produto"
+                                />
+                                <input
+                                  className="input-glass h-7 w-full text-[11px]"
+                                  value={itemEditando.observacao}
+                                  onChange={(e) => setItemEditando({ ...itemEditando, observacao: e.target.value })}
+                                  placeholder="IMEI: ... / observação"
+                                  aria-label="IMEI ou observação"
+                                />
+                              </td>
+                              <td className="p-1.5 text-center">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  className="input-glass h-8 w-14 text-center text-xs"
+                                  value={itemEditando.quantidade}
+                                  onChange={(e) => setItemEditando({ ...itemEditando, quantidade: Number(e.target.value) || 1 })}
+                                  aria-label="Quantidade"
+                                />
+                              </td>
+                              <td className="p-1.5 text-right">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  className="input-glass h-8 w-24 text-right text-xs"
+                                  value={formatCurrencyField(itemEditando.valorInterno)}
+                                  onChange={(e) => setItemEditando({ ...itemEditando, valorInterno: parseCurrencyField(e.target.value) })}
+                                  aria-label="Custo unitário"
+                                />
+                              </td>
+                              <td className="p-1.5 text-right">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  className="input-glass h-8 w-24 text-right text-xs"
+                                  value={formatCurrencyField(itemEditando.valorExibir)}
+                                  onChange={(e) => setItemEditando({ ...itemEditando, valorExibir: parseCurrencyField(e.target.value) })}
+                                  aria-label="Valor unitário"
+                                />
+                              </td>
+                              <td className="p-1.5 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    className="input-glass h-8 w-16 text-right text-xs"
+                                    value={formatCurrencyField(itemEditando.desconto)}
+                                    onChange={(e) => setItemEditando({ ...itemEditando, desconto: parseCurrencyField(e.target.value) })}
+                                    aria-label="Desconto"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setItemEditando({ ...itemEditando, tipoDesconto: itemEditando.tipoDesconto === '%' ? 'R$' : '%' })}
+                                    className="h-7 min-w-7 rounded-full px-1.5 text-[10px] font-bold bg-white/10 hover:bg-white/20"
+                                    title="Alternar desconto em R$ ou %"
+                                  >
+                                    {itemEditando.tipoDesconto}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="p-1.5 text-right font-bold">
+                                R$ {aplicarEdicaoItem(item, itemEditando).total.toFixed(2)}
+                              </td>
+                              <td className="p-1.5 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button type="button" onClick={salvarEdicaoItem} className="text-emerald-500 hover:text-emerald-400" title="Salvar item">
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                  <button type="button" onClick={() => setItemEditando(null)} className="text-slate-400 hover:text-white" title="Cancelar edição">
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : (
                             <tr key={item.id} className="hover:bg-white/5">
                               <td className="p-1.5">{item.descricao} <span className="text-[10px] text-gray-400 block">{item.observacao}</span></td>
                               <td className="p-1.5 text-center">{item.quantidade}</td>
@@ -3413,7 +3512,14 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                               </td>
                               <td className="p-1.5 text-right font-bold">R$ {item.total.toFixed(2)}</td>
                               <td className="p-1.5 text-center">
-                                <button onClick={() => handleRemoveItem(item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                                <div className="flex items-center justify-center gap-2">
+                                  <button type="button" onClick={() => setItemEditando({ ...item })} className="text-blue-400 hover:text-blue-300" title="Editar item">
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button type="button" onClick={() => handleRemoveItem(item.id)} className="text-red-500 hover:text-red-700" title="Remover item">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
