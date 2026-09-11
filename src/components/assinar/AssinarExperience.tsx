@@ -39,6 +39,11 @@ export function AssinarExperience() {
   const reduzirMovimento = useReducedMotion();
   const [suporta3d] = useState(navegadorSuporta3d);
   const [mobile, setMobile] = useState(() => window.matchMedia(CONSULTA_MOBILE).matches);
+  // Quem tem "efeitos de animação" desligados no sistema vê a página normal, mas com aviso
+  // e a opção de ver a animação mesmo assim (ou ?animacao=1 na URL).
+  const [forcarAnimacao, setForcarAnimacao] = useState(
+    () => new URLSearchParams(window.location.search).get('animacao') === '1'
+  );
 
   useEffect(() => {
     const mq = window.matchMedia(CONSULTA_MOBILE);
@@ -47,8 +52,33 @@ export function AssinarExperience() {
     return () => mq.removeEventListener('change', atualizar);
   }, []);
 
-  // Sem animação para quem pediu menos movimento ou navegador sem 3D: a página normal.
-  if (reduzirMovimento || !suporta3d) return <AssinarPage />;
+  // Sem animação para quem pediu menos movimento ou navegador sem 3D: a página normal, avisando.
+  if (!suporta3d || (reduzirMovimento && !forcarAnimacao)) {
+    return (
+      <>
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200"
+        >
+          {suporta3d ? (
+            <>
+              <span>Animação 3D desligada: seu sistema pede menos movimento (efeitos de animação desativados).</span>
+              <button
+                type="button"
+                onClick={() => setForcarAnimacao(true)}
+                className="font-bold text-white underline underline-offset-4 hover:text-amber-100"
+              >
+                Ver a animação mesmo assim
+              </button>
+            </>
+          ) : (
+            <span>Animação 3D indisponível neste navegador; mostrando a página normal.</span>
+          )}
+        </div>
+        <AssinarPage />
+      </>
+    );
+  }
 
   return <CenaComRolagem mobile={mobile} />;
 }
