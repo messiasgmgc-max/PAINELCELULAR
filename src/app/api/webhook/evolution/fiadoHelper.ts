@@ -1,5 +1,6 @@
 // Helper consolidado para gestão e extrato de fiado da loja (vendas + baixas de aparelhos + lojistas_devedores)
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
+import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 
 export interface ItemExtrato {
@@ -413,6 +414,7 @@ export async function buscarFiadoConsolidadoLoja(
       .from('vendas')
       .select('id, clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento, dataVencimento')
       .eq('loja_id', lojaId)
+      .or(FILTRO_VENDA_VALIDA)
       .order('id')
       .range(de, ate)
   ).catch(() => null);

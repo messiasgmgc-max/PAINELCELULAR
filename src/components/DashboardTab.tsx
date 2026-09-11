@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { vendaConta } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { useOrdensServico } from '@/hooks/useOrdensServico';
 import { usePecas } from '@/hooks/usePecas';
@@ -72,6 +73,8 @@ export function DashboardTab() {
     });
 
     const vendasFiltradas = vendas.filter(v => {
+      // Venda cancelada fica no histórico, mas não é faturamento.
+      if (!vendaConta(v)) return false;
       const date = v.dataPagamento ? new Date(v.dataPagamento) : new Date();
       return date >= start && date <= end;
     });

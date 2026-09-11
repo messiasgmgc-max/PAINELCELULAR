@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { planejarAjusteDaVenda } from './devolucaoEstoque';
 
 describe('Ajuste da venda ao devolver um aparelho', () => {
-  it('venda de um item só é removida por inteiro', () => {
+  it('venda de um item só é cancelada, sem apagar o registro', () => {
     const acao = planejarAjusteDaVenda(
       { id: 'v1', itens: [{ aparelhoId: 'ap1', total: 2500, valorInterno: 2000 }], valor: 2500 },
       'ap1'
     );
-    assert.equal(acao.tipo, 'excluir');
-    assert.equal(acao.tipo === 'excluir' && acao.vendaId, 'v1');
+    assert.equal(acao.tipo, 'cancelar');
+    assert.equal(acao.tipo === 'cancelar' && acao.vendaId, 'v1');
   });
 
   it('venda com vários itens perde só o item devolvido e recalcula os totais', () => {

@@ -1,3 +1,5 @@
+import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
+
 export interface ResumoVendasTotais {
   total: number;
   qtd: number;
@@ -286,6 +288,7 @@ export async function buscarResumoVendasLoja(
     .from('vendas')
     .select('id, clienteNome, valor, custo, lucro, percentualLucro, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento')
     .eq('loja_id', lojaId)
+    .or(FILTRO_VENDA_VALIDA)
     .gte('dataPagamento', inicioConsulta.toISOString())
     .order('dataPagamento', { ascending: false });
 
@@ -294,6 +297,7 @@ export async function buscarResumoVendasLoja(
     .from('vendas')
     .select('id, clienteNome, valor, custo, lucro, percentualLucro, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento')
     .eq('loja_id', lojaId)
+    .or(FILTRO_VENDA_VALIDA)
     .order('dataPagamento', { ascending: false })
     .limit(10);
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
@@ -1646,6 +1647,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         .eq('id', venda.id)
         .single();
       if (erroBusca) throw erroBusca;
+      if (vendaCancelada(vendaBanco)) throw new Error('Esta venda já está cancelada.');
 
       const itens = Array.isArray(vendaBanco?.itens) ? vendaBanco.itens : [];
       const itensComAparelho = itens.filter((i: any) => i?.aparelhoId);
@@ -1713,8 +1715,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         );
       }
 
-      const { error: erroDelete } = await supabase.from('vendas').delete().eq('id', venda.id);
-      if (erroDelete) throw erroDelete;
+      // A venda fica no histórico como cancelada (quem, quando, por quê), em vez de sumir.
+      const { error: erroCancelar } = await supabase
+        .from('vendas')
+        .update(montarCancelamento('Venda desfeita no painel', usuario?.nome))
+        .eq('id', venda.id);
+      if (erroCancelar) throw erroCancelar;
 
       await registrarLog({
         loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
@@ -3947,7 +3953,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     const isPendente = !isAtacado && verificarVendaDadosPendentes(venda, clientes);
 
                     return (
-                    <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5")}>
+                    <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5", vendaCancelada(venda) && "opacity-60")}>
                       <td className="py-3 px-2 font-mono text-xs text-blue-400 font-bold">#{venda.id ? venda.id.slice(-6).toUpperCase() : 'N/A'}</td>
                       <td className="py-3 px-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap">
                         {getVendaDataExibicao(venda).toLocaleString('pt-BR', {
@@ -4058,20 +4064,22 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       <td className="py-3 px-2 hidden sm:table-cell text-xs">{metodoLabel(venda.metodo)}</td>
                       <td className="py-3 px-2">
                         <Badge variant={venda.status === 'pago' ? 'default' : venda.status === 'pendente' ? 'secondary' : 'outline'} className="text-xs">
-                          {venda.status === 'pago' ? 'Pago' : venda.status === 'pendente' ? 'Pendente' : 'Cancelado'}
+                          {venda.status === 'pago' ? 'Pago' : venda.status === 'pendente' ? 'Pendente' : venda.status === 'parcial' ? 'Parcial' : 'Cancelado'}
                         </Badge>
                       </td>
                       <td className="py-3 px-2 text-right">
                         <div className="flex gap-1 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="Desfazer venda e devolver ao estoque"
-                            onClick={() => setVendaParaDesfazer(venda)}
-                            className="h-8 w-8 p-0 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                          >
-                            <Undo2 className="h-4 w-4" />
-                          </Button>
+                          {!vendaCancelada(venda) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Desfazer venda e devolver ao estoque"
+                              onClick={() => setVendaParaDesfazer(venda)}
+                              className="h-8 w-8 p-0 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
+                            >
+                              <Undo2 className="h-4 w-4" />
+                            </Button>
+                          )}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -4224,8 +4232,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               })()}
 
               <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
-                O registro desta venda será removido do histórico e deixará de contar no
-                faturamento. Esta ação não pode ser desfeita.
+                A venda continua no histórico como cancelada e deixa de contar no
+                faturamento e no fiado.
               </p>
             </div>
 

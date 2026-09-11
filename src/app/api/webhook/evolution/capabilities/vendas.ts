@@ -1,4 +1,5 @@
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
+import { FILTRO_VENDA_VALIDA, vendaCancelada, vendaConta } from '@/lib/vendas/situacao';
 import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { melhorOuAmbiguo, ranquear } from '../matching';
@@ -213,7 +214,8 @@ export const capabilitiesVendas: Capability[] = [
       let query = ctx.supabase
         .from('vendas')
         .select('id, clienteNome, valor, custo, descricao, dataPagamento')
-        .eq('loja_id', ctx.lojaId);
+        .eq('loja_id', ctx.lojaId)
+        .or(FILTRO_VENDA_VALIDA);
       if (comprador) query = query.ilike('clienteNome', `%${comprador}%`);
       else query = query.ilike('descricao', `%${modelo}%`);
 
@@ -279,9 +281,9 @@ export const capabilitiesVendas: Capability[] = [
         return cliente ? `💰 Nenhuma venda encontrada para *${cliente}*.` : `💰 Nenhuma venda registrada ${rotulo}.`;
       }
 
-      const total = vendas.reduce((soma, v) => soma + Number(v.valor || 0), 0);
+      const total = vendas.filter(vendaConta).reduce((soma, v) => soma + Number(v.valor || 0), 0);
       const linhas = vendas
-        .map((v) => `• ${dataBr(v.dataPagamento as string)} — ${v.clienteNome} · ${moeda(Number(v.valor || 0))}`)
+        .map((v) => `• ${dataBr(v.dataPagamento as string)} — ${v.clienteNome} · ${moeda(Number(v.valor || 0))}${vendaCancelada(v) ? ' (cancelada)' : ''}`)
         .join('\n');
 
       return (
@@ -307,6 +309,7 @@ export const capabilitiesVendas: Capability[] = [
         .from('vendas')
         .select('valor, lucro, custo, metodo, status')
         .eq('loja_id', ctx.lojaId)
+        .or(FILTRO_VENDA_VALIDA)
         .gte('dataPagamento', inicio.toISOString())
         .lt('dataPagamento', fim.toISOString());
 

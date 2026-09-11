@@ -3510,7 +3510,7 @@ export function AparelhosTab() {
                 {saidaParaDevolver.tipoSaida !== 'outro' && (
                   <p className="text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
                     Esta saída veio de uma venda. O aparelho sai dessa venda — se ele era o
-                    único item, a venda inteira é removida do faturamento.
+                    único item, a venda fica como cancelada no histórico e sai do faturamento.
                   </p>
                 )}
               </div>

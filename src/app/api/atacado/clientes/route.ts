@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
@@ -54,6 +55,7 @@ export async function GET(request: Request) {
           .from('vendas')
           .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
           .eq('loja_id', lojaDasVendas)
+          .or(FILTRO_VENDA_VALIDA)
           .order('id')
           .range(de, ate)
       );

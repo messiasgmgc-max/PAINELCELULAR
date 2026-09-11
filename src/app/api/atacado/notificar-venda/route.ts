@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { enviarTextoWhatsApp, formatarTelefoneWhatsApp } from '@/lib/whatsappService';
@@ -110,6 +111,7 @@ export async function POST(request: Request) {
         .from('vendas')
         .select('valor, valorPago, saldoDevedor, status, metodo')
         .eq('loja_id', lojaId)
+        .or(FILTRO_VENDA_VALIDA)
         .ilike('clienteNome', nomeLimpo);
 
       if (vendasCliente && vendasCliente.length > 0) {

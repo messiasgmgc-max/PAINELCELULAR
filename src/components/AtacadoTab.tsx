@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { FILTRO_VENDA_VALIDA, montarCancelamento, vendaConta } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { 
   Boxes, 
@@ -496,6 +497,8 @@ export function AtacadoTab() {
 
     // Mescla vendas registradas no banco que sejam de atacado
     vendasBanco.forEach((v) => {
+      // Cancelada fica no histórico de vendas, mas não entra em faturamento nem fiado.
+      if (!vendaConta(v)) return;
       const isAtacado = (v.tipoEntrega && v.tipoEntrega.toLowerCase().includes('atacado')) ||
                         (v.descricao && v.descricao.toLowerCase().includes('atacado')) ||
                         (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.tipoVenda === 'atacado'));
@@ -920,14 +923,18 @@ export function AtacadoTab() {
       // aparelhos dos itens dela — nunca procura por aparelhoId indefinido.
       let vendaParaDeletar: { id: string; itens?: any } | undefined;
       if (venda.aparelhoId) {
-        const { data: vendasRelacionadas } = await supabase
+        // Filtra no banco: ler todas as vendas parava em 1000 e podia não achar a venda.
+        const { data: vendasRelacionadas, error: erroBuscaVenda } = await supabase
           .from('vendas')
-          .select('id, itens');
-
-        vendaParaDeletar = vendasRelacionadas?.find(vb =>
-          (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
-          (vb as any).aparelhoId === venda.aparelhoId
-        );
+          .select('id, itens')
+          .contains('itens', [{ aparelhoId: venda.aparelhoId }])
+          .or(FILTRO_VENDA_VALIDA)
+          .limit(2);
+        if (erroBuscaVenda) throw erroBuscaVenda;
+        if ((vendasRelacionadas || []).length > 1) {
+          throw new Error('Este aparelho aparece em mais de uma venda. Ajuste pelo histórico de vendas.');
+        }
+        vendaParaDeletar = vendasRelacionadas?.[0];
       } else if (venda.vendaId) {
         vendaParaDeletar = { id: venda.vendaId, itens: venda.raw?.itens };
       }
@@ -1017,8 +1024,12 @@ export function AtacadoTab() {
       }
 
       if (vendaParaDeletar?.id) {
-        const { error: errDelete } = await supabase.from('vendas').delete().eq('id', vendaParaDeletar.id);
-        if (errDelete) throw errDelete;
+        // A venda fica no histórico como cancelada, em vez de sumir.
+        const { error: errCancelar } = await supabase
+          .from('vendas')
+          .update(montarCancelamento(`Estorno da venda de atacado para ${venda.comprador}`, usuario?.nome))
+          .eq('id', vendaParaDeletar.id);
+        if (errCancelar) throw errCancelar;
       }
 
       await registrarLog({

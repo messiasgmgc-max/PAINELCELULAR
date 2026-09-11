@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
@@ -93,6 +94,7 @@ export async function POST(request: Request) {
               .from('vendas')
               .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
               .eq('loja_id', lojaDasVendas)
+              .or(FILTRO_VENDA_VALIDA)
               .order('id')
               .range(de, ate)
           );
@@ -214,6 +216,7 @@ export async function POST(request: Request) {
           .from('vendas')
           .select('id, descricao, itens, valor, valorPago, saldoDevedor, metodo, status, dataPagamento, dataVencimento, created_at')
           .eq('loja_id', lojaId)
+          .or(FILTRO_VENDA_VALIDA)
           .ilike('clienteNome', dev.nome.trim())
           .order('dataPagamento', { ascending: false });
 

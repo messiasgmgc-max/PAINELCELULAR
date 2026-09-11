@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { vendaConta } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { formatarDataCurta, lerDescontoLoja, DESCONTO_MAXIMO } from '@/lib/planos/desconto';
 import { Button } from "@/components/ui/button";
@@ -329,7 +330,7 @@ export default function SuperAdminTab() {
 
       // 3. Buscar Métricas e Estatísticas por Loja
       // Paginado: somando todas as lojas já passa de 1000 vendas.
-      const vendasData = await buscarTodasPaginas((de, ate) => supabase.from("vendas").select("id, loja_id, valor, valorTotal").order("id").range(de, ate)).catch(() => null);
+      const vendasData = await buscarTodasPaginas((de, ate) => supabase.from("vendas").select("id, loja_id, valor, status").order("id").range(de, ate)).catch(() => null);
       const aparelhosData = await buscarTodasPaginas((de, ate) => supabase.from("aparelhos").select("id, loja_id, ativo, condicao, status").order("id").range(de, ate)).catch(() => null);
 
       const stats: Record<string, LojaStats> = {};
@@ -349,7 +350,8 @@ export default function SuperAdminTab() {
 
       if (vendasData) {
         vendasData.forEach((v: any) => {
-          const val = Number(v.valor !== undefined && v.valor !== null ? v.valor : v.valorTotal) || 0;
+          if (!vendaConta(v)) return;
+          const val = Number(v.valor) || 0;
           const targetId = v.loja_id ? String(v.loja_id) : primaryLojaId;
           if (targetId && stats[targetId]) {
             stats[targetId].totalVendas += 1;

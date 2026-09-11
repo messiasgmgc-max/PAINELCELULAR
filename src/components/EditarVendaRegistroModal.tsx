@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { FILTRO_VENDA_VALIDA } from '@/lib/vendas/situacao';
 import { 
   X, 
   Edit2, 
@@ -179,14 +180,15 @@ export function EditarVendaRegistroModal({
       if (!idParaVenda && venda.aparelhoId) {
         const { data: vendasExistentes } = await supabase
           .from('vendas')
-          .select('id, itens, valorPago, saldoDevedor, status, aparelhoId')
-          .order('created_at', { ascending: false })
-          .limit(500);
+          .select('id, itens, valorPago, saldoDevedor, status')
+          // "aparelhoId" e "created_at" não existem em vendas: a consulta antiga falhava e a
+          // venda nunca era achada. Filtra pelo item no banco, ignorando vendas canceladas.
+          .contains('itens', [{ aparelhoId: venda.aparelhoId }])
+          .or(FILTRO_VENDA_VALIDA)
+          .limit(2);
 
-        const vendaEncontrada = vendasExistentes?.find((v: any) => 
-          (v.itens && Array.isArray(v.itens) && v.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||
-          (v as any).aparelhoId === venda.aparelhoId
-        );
+        // Mais de uma venda com o mesmo aparelho: não escolhe às cegas.
+        const vendaEncontrada = vendasExistentes?.length === 1 ? vendasExistentes[0] : undefined;
 
         if (vendaEncontrada && isValidUUID(vendaEncontrada.id)) {
           idParaVenda = vendaEncontrada.id;

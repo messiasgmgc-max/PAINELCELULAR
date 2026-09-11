@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { FILTRO_VENDA_VALIDA, montarCancelamento } from '@/lib/vendas/situacao';
 import { estaNoEstoque, patchRestauracao } from './estoque/ciclo';
 import { aplicarMudancaEstoque } from './estoque/movimentacoes';
 import { condicaoAoDevolver, limparObservacoesDeVenda } from './vendasDevolucao';
@@ -54,7 +55,7 @@ export interface AtualizacaoVenda {
 
 export type AcaoNaVenda =
   | { tipo: 'nenhuma' }
-  | { tipo: 'excluir'; vendaId: string }
+  | { tipo: 'cancelar'; vendaId: string }
   | ({ tipo: 'atualizar'; vendaId: string } & AtualizacaoVenda);
 
 /** Soma o que um item representa de venda, respeitando a quantidade. */
@@ -76,7 +77,7 @@ function custoDoItem(item: ItemVenda): number {
 /**
  * Decide o que fazer com a venda quando um dos seus aparelhos volta ao estoque.
  *
- * Venda de um item só deixa de ter razão de existir e é removida. Venda com
+ * Venda de um item só é cancelada (continua no histórico). Venda com
  * vários itens continua válida: sai apenas o item devolvido e os totais são
  * refeitos a partir do que sobrou, preservando o desconto global e reajustando
  * o saldo em aberto quando a venda era fiada.
@@ -93,7 +94,7 @@ export function planejarAjusteDaVenda(
   // Nenhum item saiu: a venda não referencia este aparelho.
   if (restantes.length === itens.length) return { tipo: 'nenhuma' };
 
-  if (restantes.length === 0) return { tipo: 'excluir', vendaId: venda.id };
+  if (restantes.length === 0) return { tipo: 'cancelar', vendaId: venda.id };
 
   const bruto = restantes.reduce((s, i) => s + totalDoItem(i), 0);
 
@@ -154,7 +155,8 @@ async function localizarVendaDoAparelho(
   lojaId: string | null
 ): Promise<VendaParaRecalculo | null | 'varias'> {
   const base = () => {
-    let q = supabase.from('vendas').select(COLUNAS_VENDA);
+    // Venda já cancelada não cobra mais o aparelho.
+    let q = supabase.from('vendas').select(COLUNAS_VENDA).or(FILTRO_VENDA_VALIDA);
     if (lojaId) q = q.eq('loja_id', lojaId);
     return q;
   };
@@ -259,8 +261,11 @@ export async function devolverAparelhoAoEstoque(
   // A venda é ajustada ANTES de reativar o aparelho: se algo falhar aqui, o
   // aparelho continua baixado e a operação pode ser repetida. Na ordem inversa,
   // uma falha deixaria o aparelho no estoque e a venda ainda cobrando por ele.
-  if (acao.tipo === 'excluir') {
-    const { error } = await supabase.from('vendas').delete().eq('id', acao.vendaId);
+  if (acao.tipo === 'cancelar') {
+    const { error } = await supabase
+      .from('vendas')
+      .update(montarCancelamento('Aparelho da venda devolvido ao estoque', params.usuarioNome))
+      .eq('id', acao.vendaId);
     if (error) throw error;
   } else if (acao.tipo === 'atualizar') {
     const { tipo: _tipo, vendaId, ...campos } = acao;
@@ -292,8 +297,8 @@ export async function devolverAparelhoAoEstoque(
     usuarioId: usuario.id,
     usuarioNome: usuario.nome,
     observacao:
-      acao.tipo === 'excluir'
-        ? `Devolução ao estoque; venda ${acao.vendaId} removida.`
+      acao.tipo === 'cancelar'
+        ? `Devolução ao estoque; venda ${acao.vendaId} cancelada.`
         : acao.tipo === 'atualizar'
           ? `Devolução ao estoque; item retirado da venda ${acao.vendaId}.`
           : 'Devolução ao estoque de aparelho sem venda vinculada.',
@@ -304,8 +309,8 @@ export async function devolverAparelhoAoEstoque(
   });
 
   const complemento =
-    acao.tipo === 'excluir'
-      ? ' A venda correspondente foi removida.'
+    acao.tipo === 'cancelar'
+      ? ' A venda correspondente ficou como cancelada no histórico.'
       : acao.tipo === 'atualizar'
         ? ' O item saiu da venda e os totais foram recalculados.'
         : '';
