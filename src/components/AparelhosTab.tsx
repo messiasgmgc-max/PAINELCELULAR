@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { conflitoPodeReentrar } from '@/lib/estoque/remontagem';
 import { bateriaParaLista, observacaoParaLista } from '@/lib/estoque/listaWhatsapp';
 import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
 import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
@@ -71,7 +72,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [mercadoPhoneMargem, setMercadoPhoneMargem] = useState("300");
   const [importingMercadoPhone, setImportingMercadoPhone] = useState(false);
   const { config: configLoja } = useStoreConfig(usuario?.lojaId || null);
-  const [planoMercadoPhone, setPlanoMercadoPhone] = useState<{ modo: 'importar' | 'remontar'; plano: PlanoRemontagem } | null>(null);
+  // `reentrada`: ids dos aparelhos vendidos que a pessoa marcou para voltar como entrada nova.
+  const [planoMercadoPhone, setPlanoMercadoPhone] = useState<{ modo: 'importar' | 'remontar'; plano: PlanoRemontagem; reentrada: string[] } | null>(null);
   // Aparelhos da última lista aplicada que ainda não têm etiqueta impressa.
   const [etiquetasPendentesLista, setEtiquetasPendentesLista] = useState<{ ids: string[]; novos: number; existentes: number } | null>(null);
   const [confirmacaoRestauracao, setConfirmacaoRestauracao] = useState<SelecaoRestauracao<any> | null>(null);
@@ -732,14 +734,16 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         return query.order('id').range(de, ate);
       });
 
-      setPlanoMercadoPhone({
-        modo,
-        plano: planejarRemontagem({
-          itens,
-          aparelhos: (data || []) as AparelhoRemontagem[],
-          obterCodigo: (a) => getAparelhoCodigo(a),
-        }),
+      const plano = planejarRemontagem({
+        itens,
+        aparelhos: (data || []) as AparelhoRemontagem[],
+        obterCodigo: (a) => getAparelhoCodigo(a),
       });
+      // Se está na lista, a pessoa está com o aparelho: os vendidos já vêm marcados para voltar.
+      const reentrada = plano.conflitosVendidos
+        .filter((c) => conflitoPodeReentrar(c.aparelho))
+        .map((c) => c.aparelho.id);
+      setPlanoMercadoPhone({ modo, plano, reentrada });
     } catch (error: any) {
       console.error('Erro ao analisar lista MercadoPhone:', error);
       toast.error(`Não foi possível analisar a lista: ${error?.message || 'falha ao ler o estoque'}`);
@@ -763,7 +767,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
   const executarPlanoMercadoPhone = async (incluirBaixa: boolean) => {
     if (!planoMercadoPhone) return;
-    const { modo, plano } = planoMercadoPhone;
+    const { modo, plano, reentrada } = planoMercadoPhone;
     setExecutandoAcaoEstoque(incluirBaixa ? 'mercadophone_com_baixa' : 'mercadophone_sem_baixa');
     const toastId = toast.loading(modo === 'remontar' ? 'Remontando estoque...' : 'Importando aparelhos...');
 
@@ -780,6 +784,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         {
           incluirBaixa,
           origem: modo === 'remontar' ? 'remontar_mercadophone' : 'importar_mercadophone',
+          reentradaVendidos: reentrada,
         },
         {
           lojaId: usuario?.lojaId || null,
@@ -822,6 +827,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       );
 
       const partes = [`${r.atualizados} atualizados`, `${r.criados} novos`];
+      if (r.reentradas > 0) partes.push(`${r.reentradas} vendido(s) de volta com entrada nova`);
       if (modo === 'remontar') partes.push(`${r.baixados} baixados`);
       toast.success(`Estoque atualizado: ${partes.join(', ')}.`, { id: toastId, duration: 6000 });
 
@@ -830,7 +836,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       }
       if (r.conflitosVendidos > 0) {
         toast.warning(
-          `${r.conflitosVendidos} item(ns) da lista já constam como vendidos e não foram reativados. Confira manualmente.`,
+          `${r.conflitosVendidos} item(ns) da lista constam como vendidos e ficaram fora do estoque. Confira manualmente.`,
           { duration: 12000 }
         );
       }
@@ -843,7 +849,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       // Quem entra pela lista costuma ficar sem etiqueta: oferece gerar na hora.
       const atualizadosNaLista = plano.atualizar
         .filter((u) => r.idsAtualizados.includes(u.aparelho.id))
-        .map((u) => u.aparelho as { id: string } & object);
+        .map((u) => u.aparelho);
       const idsEtiquetar = idsParaEtiquetar({ idsCriados: r.idsCriados, atualizados: atualizadosNaLista });
       if (idsEtiquetar.length > 0) {
         setEtiquetasPendentesLista({
@@ -2925,7 +2931,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       {/* Confirmação — lista do MercadoPhone (importar ou remontar) */}
       {planoMercadoPhone &&
         (() => {
-          const { modo, plano } = planoMercadoPhone;
+          const { modo, plano, reentrada } = planoMercadoPhone;
           const ehRemontar = modo === 'remontar';
           const baixas = ehRemontar ? plano.baixar.length : 0;
           const bloqueada = ehRemontar && plano.trava.bloqueada;
@@ -2945,7 +2951,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             resumo.push({ rotulo: 'Sairiam do estoque', valor: bloqueada ? `${baixas} (bloqueado)` : baixas, tom: 'perigo' });
           }
           if (plano.conflitosVendidos.length) {
-            resumo.push({ rotulo: 'Já vendidos (não serão reativados)', valor: plano.conflitosVendidos.length, tom: 'aviso' });
+            resumo.push({
+              rotulo: 'Já constam como vendidos',
+              valor: `${plano.conflitosVendidos.length} (${reentrada.length} voltam com entrada nova)`,
+              tom: 'aviso',
+            });
           }
           if (ehRemontar && plano.preservadosManutencao.length) {
             resumo.push({ rotulo: 'Em manutenção (mantidos)', valor: plano.preservadosManutencao.length });
@@ -3007,6 +3017,60 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
               }
               detalhes={
                 <>
+                  {plano.conflitosVendidos.length > 0 && (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2 text-xs">
+                      <p className="text-amber-200">
+                        Estes aparelhos constam como <strong>vendidos</strong>. Os marcados voltam ao estoque como
+                        entrada nova e a venda antiga continua no histórico. Se foi devolução, desmarque e use
+                        &quot;Desfazer venda&quot; em Vendas.
+                      </p>
+                      <ul className="space-y-1.5">
+                        {plano.conflitosVendidos.map(({ item, aparelho }) => {
+                          const pode = conflitoPodeReentrar(aparelho);
+                          const marcado = reentrada.includes(aparelho.id);
+                          const dataSaida = aparelho.data_saida
+                            ? new Date(String(aparelho.data_saida)).toLocaleDateString('pt-BR')
+                            : null;
+                          const cliente = typeof aparelho.cliente === 'string' && aparelho.cliente.trim() ? aparelho.cliente.trim() : null;
+                          return (
+                            <li key={aparelho.id}>
+                              <label className={cn('flex items-start gap-2', pode ? 'cursor-pointer' : 'opacity-60')}>
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5"
+                                  checked={marcado}
+                                  disabled={!pode || executandoAcaoEstoque !== null}
+                                  onChange={() =>
+                                    setPlanoMercadoPhone((atual) =>
+                                      atual
+                                        ? {
+                                            ...atual,
+                                            reentrada: marcado
+                                              ? atual.reentrada.filter((id) => id !== aparelho.id)
+                                              : [...atual.reentrada, aparelho.id],
+                                          }
+                                        : atual
+                                    )
+                                  }
+                                />
+                                <span className="min-w-0">
+                                  <span className="text-slate-100 font-semibold">
+                                    {item.modelo} {item.capacidade}
+                                  </span>
+                                  <span className="font-mono text-slate-500"> · {getAparelhoCodigo(aparelho)}</span>
+                                  <span className="block text-slate-400">
+                                    {pode
+                                      ? `Vendido${dataSaida ? ` em ${dataSaida}` : ''}${cliente ? ` para ${cliente}` : ''}`
+                                      : 'Precisa de conferência manual (registro antigo ou celular de cliente)'}
+                                  </span>
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
                   {muitosNovos && (
                     <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5">
                       A maioria dos itens não foi encontrada no estoque e será cadastrada como nova. Confira se não são

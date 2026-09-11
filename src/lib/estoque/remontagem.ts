@@ -98,13 +98,33 @@ function somenteDigitos(valor: unknown): string {
  *  - final de IMEI só casa se apontar para UM aparelho (4 dígitos repetem);
  *  - um aparelho já casado com outro item da lista não é reutilizado.
  */
+/**
+ * Vendido que a pessoa pode trazer de volta pela lista (recompra, troca). Entra como
+ * aparelho novo: o registro vendido e a venda continuam como estão. Legado ambíguo e
+ * celular de cliente da OS seguem exigindo conferência manual.
+ */
+export function conflitoPodeReentrar(aparelho: AparelhoRemontagem): boolean {
+  return aparelho.status === 'vendido' && !ehAparelhoDeCliente(aparelho);
+}
+
+/** No estoque primeiro; vendido, legado ambíguo e celular de cliente por último. */
+function prioridadeParaCasar(a: AparelhoRemontagem): number {
+  if (estaNoEstoque(a)) return 0;
+  if (a.status === 'vendido' || ehEstadoAmbiguoLegado(a) || ehAparelhoDeCliente(a)) return 2;
+  return 1;
+}
+
 export function encontrarEquivalente(
   item: ItemListaImportada,
   aparelhos: AparelhoRemontagem[],
   obterCodigo: (a: AparelhoRemontagem) => string,
   jaUsados: Set<string> = new Set()
 ): AparelhoRemontagem | undefined {
-  const livres = aparelhos.filter((a) => !jaUsados.has(a.id));
+  // Com o mesmo código no registro vendido e numa entrada nova, casar com o vendido
+  // faria a entrada nova parecer fora da lista (e sair numa remontagem).
+  const livres = aparelhos
+    .filter((a) => !jaUsados.has(a.id))
+    .sort((a, b) => prioridadeParaCasar(a) - prioridadeParaCasar(b));
   const id = somenteDigitos(item.idEtiqueta);
   const idConfiavel = item.idEtiquetaInformado !== false && id.length >= 6;
 
@@ -206,6 +226,8 @@ export interface ResultadoRemontagem {
   atualizados: number;
   reativados: number;
   criados: number;
+  /** Vendidos que voltaram como entrada nova (a venda anterior foi mantida). */
+  reentradas: number;
   /** Aparelhos cadastrados nesta execução (o estoque oferece as etiquetas deles). */
   idsCriados: string[];
   /** Aparelhos existentes que a lista atualizou ou reativou. */
@@ -246,6 +268,8 @@ export async function executarPlanoRemontagem(
     incluirBaixa: boolean;
     /** 'importar_mercadophone' só cadastra e atualiza: nunca dá baixa. */
     origem?: 'remontar_mercadophone' | 'importar_mercadophone';
+    /** Ids dos aparelhos vendidos (em plano.conflitosVendidos) que voltam como entrada nova. */
+    reentradaVendidos?: string[];
   },
   deps: DependenciasRemontagem
 ): Promise<ResultadoRemontagem> {
@@ -299,6 +323,29 @@ export async function executarPlanoRemontagem(
     if (!r.auditoriaRegistrada && r.erroAuditoria) errosAuditoria.push(r.erroAuditoria);
   }
 
+  // Vendidos marcados na confirmação: entram como aparelho novo. O registro vendido e a
+  // venda ficam intactos, então faturamento e histórico não mudam.
+  const pedidosReentrada = new Set(opcoes.reentradaVendidos || []);
+  const reentradasLinhas: EstadoCicloAparelho[] = [];
+  const idsVendidosReentrada: string[] = [];
+  for (const { item, aparelho } of plano.conflitosVendidos) {
+    if (!pedidosReentrada.has(aparelho.id) || !conflitoPodeReentrar(aparelho)) continue;
+    const criado = await deps.criarAparelho(item);
+    if (criado?.id) {
+      reentradasLinhas.push(criado);
+      idsVendidosReentrada.push(aparelho.id);
+    }
+  }
+  if (reentradasLinhas.length > 0) {
+    const r = await registrarEntradaEstoque(supabase, {
+      ...contexto,
+      aparelhos: reentradasLinhas,
+      origem,
+      observacao: 'Nova entrada pela lista do MercadoPhone: o aparelho já constava como vendido; a venda anterior foi mantida.',
+    });
+    if (!r.auditoriaRegistrada && r.erroAuditoria) errosAuditoria.push(r.erroAuditoria);
+  }
+
   // A trava é reavaliada com os números do próprio plano: não confiamos só no
   // campo `trava` recebido, que poderia ter vindo de um plano adulterado.
   const trava = avaliarTravaBaixa({
@@ -327,12 +374,13 @@ export async function executarPlanoRemontagem(
     atualizados,
     reativados,
     criados: criadosLinhas.length,
-    idsCriados: criadosLinhas.map((a) => String(a.id)),
+    reentradas: reentradasLinhas.length,
+    idsCriados: [...criadosLinhas, ...reentradasLinhas].map((a) => String(a.id)),
     idsAtualizados,
     baixados,
     baixaBloqueada: permiteBaixa && baixaBloqueada,
     motivoBloqueio: baixaBloqueada ? trava.motivo || plano.trava.motivo : undefined,
-    conflitosVendidos: plano.conflitosVendidos.length,
+    conflitosVendidos: plano.conflitosVendidos.length - reentradasLinhas.length,
     auditoriaCompleta: errosAuditoria.length === 0,
     errosAuditoria,
   };
@@ -352,7 +400,8 @@ export async function executarPlanoRemontagem(
       `Lote ${loteId}: lista com ${plano.itensImportados} itens; ${atualizados} atualizados ` +
       `(${reativados} reativados), ${resultado.criados} criados, ${baixados} baixados` +
       (resultado.baixaBloqueada ? ` — BAIXA BLOQUEADA: ${resultado.motivoBloqueio}` : '') +
-      (plano.conflitosVendidos.length ? `; ${plano.conflitosVendidos.length} conflito(s) com vendidos` : ''),
+      (reentradasLinhas.length ? `; ${reentradasLinhas.length} vendido(s) com nova entrada` : '') +
+      (resultado.conflitosVendidos ? `; ${resultado.conflitosVendidos} conflito(s) com vendidos` : ''),
     valor_anterior: {
       ativos: plano.ativosAtuais,
       aparelhos_para_baixa: plano.baixar.length,
@@ -362,6 +411,8 @@ export async function executarPlanoRemontagem(
       atualizados,
       reativados,
       criados: resultado.criados,
+      reentradas: resultado.reentradas,
+      ids_vendidos_reentrada: idsVendidosReentrada,
       baixados,
       baixa_bloqueada: resultado.baixaBloqueada,
       ids_baixados: baixados > 0 ? plano.baixar.map((a) => a.id) : [],

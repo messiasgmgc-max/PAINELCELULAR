@@ -36,7 +36,7 @@ export function semEtiqueta(aparelho: object | null | undefined): boolean {
 /** Ids de uma lista aplicada que precisam de etiqueta: os novos e os existentes nunca etiquetados. */
 export function idsParaEtiquetar(params: {
   idsCriados: string[];
-  atualizados: Array<{ id: string } & object>;
+  atualizados: Array<{ id: string } & Record<string, unknown>>;
 }): string[] {
   const existentes = params.atualizados.filter(semEtiqueta).map((a) => a.id);
   return Array.from(new Set([...params.idsCriados, ...existentes].filter(Boolean)));

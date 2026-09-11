@@ -245,3 +245,60 @@ describe('Trava de sanidade', () => {
     assert.equal(avaliarTravaBaixa({ baixas: 0, itensImportados: 0, ativos: 100 }).bloqueada, false);
   });
 });
+
+describe('Vendido que volta pela lista', () => {
+  it('com o mesmo código, casa com o aparelho do estoque e não com o vendido', () => {
+    const aparelhos = [
+      aparelho(0, { ativo: false, status: 'vendido' }),
+      aparelho(0, { id: 'ap-0-novo' }),
+    ];
+    const plano = planejarRemontagem({ itens: [itemPara(0)], aparelhos, obterCodigo });
+    assert.equal(plano.conflitosVendidos.length, 0);
+    assert.equal(plano.atualizar[0].aparelho.id, 'ap-0-novo');
+    assert.equal(plano.baixar.length, 0);
+  });
+
+  it('marcado na confirmação: entra como aparelho novo e a venda antiga fica intacta', async () => {
+    const aparelhos = [aparelho(0, { ativo: false, status: 'vendido', data_saida: '2026-08-01T12:00:00Z' }), aparelho(1)];
+    const fake = criarSupabaseFake({ aparelhos });
+    const plano = planejarRemontagem({ itens: [itemPara(0), itemPara(1)], aparelhos: fake.tabelas.aparelhos as AparelhoRemontagem[], obterCodigo });
+    const logs: any[] = [];
+
+    const r = await executarPlanoRemontagem(fake.client, plano, { incluirBaixa: false, reentradaVendidos: ['ap-0'] }, dependencias(fake, logs));
+
+    assert.equal(r.reentradas, 1);
+    assert.equal(r.conflitosVendidos, 0);
+    assert.ok(r.idsCriados.includes('novo-10000000'));
+    const vendido = fake.tabelas.aparelhos.find((a) => a.id === 'ap-0');
+    assert.equal(vendido?.ativo, false);
+    assert.equal(vendido?.status, 'vendido');
+    assert.ok(fake.tabelas.aparelhos.some((a) => a.id === 'novo-10000000' && a.ativo === true));
+    assert.deepEqual(logs[0].valor_novo.ids_vendidos_reentrada, ['ap-0']);
+  });
+
+  it('desmarcado: nada é criado e o conflito continua avisado', async () => {
+    const aparelhos = [aparelho(0, { ativo: false, status: 'vendido' })];
+    const fake = criarSupabaseFake({ aparelhos });
+    const plano = planejarRemontagem({ itens: [itemPara(0)], aparelhos: fake.tabelas.aparelhos as AparelhoRemontagem[], obterCodigo });
+
+    const r = await executarPlanoRemontagem(fake.client, plano, { incluirBaixa: false, reentradaVendidos: [] }, dependencias(fake));
+
+    assert.equal(r.reentradas, 0);
+    assert.equal(r.conflitosVendidos, 1);
+    assert.equal(fake.tabelas.aparelhos.length, 1);
+  });
+
+  it('legado ambíguo e celular de cliente não voltam nem se forem pedidos', async () => {
+    const aparelhos = [
+      aparelho(0, { ativo: false, status: 'disponivel', condicao: 'vendido' }),
+      aparelho(1, { ativo: false, status: 'cliente' }),
+    ];
+    const fake = criarSupabaseFake({ aparelhos });
+    const plano = planejarRemontagem({ itens: [itemPara(0), itemPara(1)], aparelhos: fake.tabelas.aparelhos as AparelhoRemontagem[], obterCodigo });
+
+    const r = await executarPlanoRemontagem(fake.client, plano, { incluirBaixa: false, reentradaVendidos: ['ap-0', 'ap-1'] }, dependencias(fake));
+
+    assert.equal(r.reentradas, 0);
+    assert.equal(fake.tabelas.aparelhos.length, 2);
+  });
+});
