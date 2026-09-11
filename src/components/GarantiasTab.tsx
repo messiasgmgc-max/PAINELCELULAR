@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { useGarantias } from '@/hooks/useGarantias';
 import { useClientes } from '@/hooks/useClientes';
 import { useAparelhos } from '@/hooks/useAparelhos';
@@ -80,27 +81,25 @@ export function GarantiasTab() {
     setLoadingVendas(true);
     try {
       const targetLojaId = usuario?.lojaId || (usuario as any)?.loja_id;
-      let query = supabase
-        .from('vendas')
-        .select('*')
-        .neq('status', 'cancelado')
-        .order('dataPagamento', { ascending: false });
-
-      if (targetLojaId) {
-        query = query.or(`loja_id.eq.${targetLojaId},loja_id.is.null`);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        console.warn('Erro com filtro loja_id em vendas:', error);
-        const resFallback = await supabase
+      // Paginado: com mais de 1000 vendas, as mais antigas sumiam da lista de garantias.
+      const consulta = (comFiltroLoja: boolean) => (de: number, ate: number) => {
+        let query = supabase
           .from('vendas')
           .select('*')
           .neq('status', 'cancelado')
-          .order('dataPagamento', { ascending: false });
-        setVendasProcessadas(resFallback.data || []);
-      } else {
-        setVendasProcessadas(data || []);
+          .order('dataPagamento', { ascending: false })
+          .order('id');
+        if (comFiltroLoja && targetLojaId) {
+          query = query.or(`loja_id.eq.${targetLojaId},loja_id.is.null`);
+        }
+        return query.range(de, ate);
+      };
+
+      try {
+        setVendasProcessadas(await buscarTodasPaginas(consulta(true)));
+      } catch (error) {
+        console.warn('Erro com filtro loja_id em vendas:', error);
+        setVendasProcessadas(await buscarTodasPaginas(consulta(false)).catch(() => []));
       }
     } catch (err) {
       console.error('Erro ao carregar vendas processadas:', err);

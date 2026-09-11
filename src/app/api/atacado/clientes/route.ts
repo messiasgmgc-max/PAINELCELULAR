@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 
@@ -46,10 +47,16 @@ export async function GET(request: Request) {
     // Auto-população inteligente: se existirem vendas com devedores no banco para esta loja,
     // inclui no retorno para que apareçam imediatamente na lista mesmo antes de salvar formalmente
     try {
-      const { data: vendasLoja } = await supabaseAdmin
-        .from('vendas')
-        .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
-        .or(`loja_id.eq.${lojaId}`);
+      const lojaDasVendas = String(lojaId);
+      // Paginado: acima de 1000 vendas, devedores antigos não apareciam.
+      const vendasLoja = await buscarTodasPaginas((de, ate) =>
+        supabaseAdmin
+          .from('vendas')
+          .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
+          .eq('loja_id', lojaDasVendas)
+          .order('id')
+          .range(de, ate)
+      );
 
       if (vendasLoja && vendasLoja.length > 0) {
         for (const v of vendasLoja) {

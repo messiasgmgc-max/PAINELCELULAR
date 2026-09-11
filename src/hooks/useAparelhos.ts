@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { toast } from "sonner";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
@@ -180,13 +181,12 @@ export function useAparelhos(): UseAparelhosReturn {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('aparelhos')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .order('dataCadastro', { ascending: false });
-      if (error) throw error;
-      setAparelhos(data || []);
+      const lojaId = usuario.lojaId;
+      // Paginado: acima de 1000 aparelhos o estoque aparecia incompleto.
+      const data = await buscarTodasPaginas((de, ate) =>
+        supabase.from('aparelhos').select('*').eq('loja_id', lojaId).order('dataCadastro', { ascending: false }).order('id').range(de, ate)
+      );
+      setAparelhos(data);
     } catch (err) {
       setError("Erro ao buscar aparelhos");
     } finally {

@@ -1,5 +1,6 @@
 // Helper consolidado para gestão e extrato de fiado da loja (vendas + baixas de aparelhos + lojistas_devedores)
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 
 export interface ItemExtrato {
   descricao: string;
@@ -406,16 +407,25 @@ export async function buscarFiadoConsolidadoLoja(
     .eq('ativo', true);
 
   // 3. Busca vendas atacado / fiado / pendentes
-  const { data: vendasBanco } = await supabase
-    .from('vendas')
-    .select('id, clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento, dataVencimento')
-    .eq('loja_id', lojaId);
+  // Paginado: acima de 1000 vendas, o extrato de fiado ficava incompleto.
+  const vendasBanco = await buscarTodasPaginas((de, ate) =>
+    supabase
+      .from('vendas')
+      .select('id, clienteNome, valor, valorPago, saldoDevedor, metodo, status, tipoEntrega, descricao, itens, dataPagamento, dataVencimento')
+      .eq('loja_id', lojaId)
+      .order('id')
+      .range(de, ate)
+  ).catch(() => null);
 
   // 4. Busca aparelhos do estoque da loja
-  const { data: aparelhos } = await supabase
-    .from('aparelhos')
-    .select('id, modelo, marca, cor, capacidade, imei, preco, precoAtacado, observacoes, status, condicao, dataCadastro')
-    .eq('loja_id', lojaId);
+  const aparelhos = await buscarTodasPaginas((de, ate) =>
+    supabase
+      .from('aparelhos')
+      .select('id, modelo, marca, cor, capacidade, imei, preco, precoAtacado, observacoes, status, condicao, dataCadastro')
+      .eq('loja_id', lojaId)
+      .order('id')
+      .range(de, ate)
+  ).catch(() => null);
 
   return consolidarFiadoCompleto(devedoresCadastrados, vendasBanco, aparelhos, nomeLoja, chavePix);
 }

@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { formatarDataCurta, lerDescontoLoja, DESCONTO_MAXIMO } from '@/lib/planos/desconto';
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
@@ -327,8 +328,9 @@ export default function SuperAdminTab() {
       setPerfis(perfisLista);
 
       // 3. Buscar Métricas e Estatísticas por Loja
-      const { data: vendasData } = await supabase.from("vendas").select("id, loja_id, valor, valorTotal");
-      const { data: aparelhosData } = await supabase.from("aparelhos").select("id, loja_id, ativo, condicao, status");
+      // Paginado: somando todas as lojas já passa de 1000 vendas.
+      const vendasData = await buscarTodasPaginas((de, ate) => supabase.from("vendas").select("id, loja_id, valor, valorTotal").order("id").range(de, ate)).catch(() => null);
+      const aparelhosData = await buscarTodasPaginas((de, ate) => supabase.from("aparelhos").select("id, loja_id, ativo, condicao, status").order("id").range(de, ate)).catch(() => null);
 
       const stats: Record<string, LojaStats> = {};
       const primaryLojaId = lojasLista[0]?.id ? String(lojasLista[0].id) : null;

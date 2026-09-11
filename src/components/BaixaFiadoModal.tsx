@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { 
   X, 
   DollarSign, 
@@ -139,9 +140,11 @@ export function BaixaFiadoModal({
           targetVendaId = venda.vendaId;
         } else if (venda.aparelhoId) {
           // Tenta localizar a venda pelo aparelhoId vinculado
-          const { data: vendasExistentes } = await supabase
-            .from('vendas')
-            .select('id, itens');
+          // Paginado: acima de 1000 vendas, a venda do aparelho podia não ser achada
+          // e a baixa criava uma venda nova em vez de abater a existente.
+          const vendasExistentes = await buscarTodasPaginas((de, ate) =>
+            supabase.from('vendas').select('id, itens').order('id').range(de, ate)
+          ).catch(() => null);
           
           const encontrada = vendasExistentes?.find((vb: any) => 
             (vb.itens && Array.isArray(vb.itens) && vb.itens.some((it: any) => it.aparelhoId === venda.aparelhoId)) ||

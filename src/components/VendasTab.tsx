@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
@@ -924,6 +925,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         .from('vendas')
         .select('*')
         .order('dataPagamento', { ascending: false })
+        // Desempate: vendas com a mesma data podiam pular ou repetir entre páginas.
+        .order('id')
         .range(pagina * TAMANHO_PAGINA_VENDAS, (pagina + 1) * TAMANHO_PAGINA_VENDAS - 1);
 
       if (aplicarFiltroLoja && targetLojaId) {
@@ -2477,12 +2480,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         return;
       }
 
-      const { data: existentes, error: existentesError } = await supabase
-        .from('vendas')
-        .select('descricao, clienteNome, dataPagamento, valor')
-        .eq('loja_id', usuario.lojaId);
-
-      if (existentesError) throw existentesError;
+      // Paginado: acima de 1000 vendas, a importação não via as antigas e duplicava.
+      const lojaDaImportacao = usuario.lojaId;
+      const existentes = await buscarTodasPaginas((de, ate) =>
+        supabase.from('vendas').select('descricao, clienteNome, dataPagamento, valor').eq('loja_id', lojaDaImportacao).order('id').range(de, ate)
+      );
 
       const chavesExistentes = new Set(
         (existentes || []).map((item: any) => {

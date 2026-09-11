@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
@@ -715,12 +716,15 @@ export function AparelhosTab() {
 
     setImportingMercadoPhone(true);
     try {
-      let query = supabase.from('aparelhos').select('*');
-      if (usuario?.lojaId) query = query.eq('loja_id', usuario.lojaId);
-      const { data, error } = await query;
-      // Antes, uma falha na leitura caía para a lista em memória, que pode
-      // estar desatualizada. Numa operação que pode dar baixa, é melhor parar.
-      if (error) throw error;
+      const lojaId = usuario?.lojaId;
+      // Paginado: acima de 1000 aparelhos, os excedentes pareciam fora da lista e
+      // podiam receber baixa. Uma falha na leitura para tudo (não cai para a lista
+      // em memória, que pode estar desatualizada).
+      const data = await buscarTodasPaginas((de, ate) => {
+        let query = supabase.from('aparelhos').select('*');
+        if (lojaId) query = query.eq('loja_id', lojaId);
+        return query.order('id').range(de, ate);
+      });
 
       setPlanoMercadoPhone({
         modo,

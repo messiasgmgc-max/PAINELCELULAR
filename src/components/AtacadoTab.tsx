@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { 
   Boxes, 
   Package, 
@@ -220,14 +221,10 @@ export function AtacadoTab() {
   // Carrega vendas do Supabase para controle de fiado e histórico
   const fetchVendasBanco = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('vendas')
-        .select('*')
-        .order('dataPagamento', { ascending: false });
-
-      if (data && !error) {
-        setVendasBanco(data);
-      }
+      // Paginado: com mais de 1000 vendas, fiados antigos sumiam do controle.
+      setVendasBanco(await buscarTodasPaginas((de, ate) =>
+        supabase.from('vendas').select('*').order('dataPagamento', { ascending: false }).order('id').range(de, ate)
+      ));
     } catch (e) {
       console.error('Erro ao carregar vendas:', e);
     }

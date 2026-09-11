@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
@@ -198,12 +199,11 @@ export function ClientesTab() {
         return;
       }
 
-      const { data: existentes, error: existentesError } = await supabase
-        .from("clientes")
-        .select("nome, telefone, cpf")
-        .eq("loja_id", usuario.lojaId);
-
-      if (existentesError) throw existentesError;
+      // Paginado: acima de 1000 clientes, a importação não via os antigos e duplicava.
+      const lojaDaImportacao = usuario.lojaId;
+      const existentes = await buscarTodasPaginas((de, ate) =>
+        supabase.from("clientes").select("nome, telefone, cpf").eq("loja_id", lojaDaImportacao).order("id").range(de, ate)
+      );
 
       const chaveExistente = new Set(
         (existentes || []).map((item: any) => {

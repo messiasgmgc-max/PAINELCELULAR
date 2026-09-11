@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { enviarTextoWhatsApp, formatarTelefoneWhatsApp } from '@/lib/whatsappService';
@@ -85,10 +86,16 @@ export async function POST(request: Request) {
       // sincroniza dinamicamente a partir das vendas da loja com fiado/pendente
       if (devedoresParaDisparo.length === 0 && !clienteId) {
         try {
-          const { data: vendasPendentes } = await supabaseAdmin
-            .from('vendas')
-            .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
-            .eq('loja_id', lojaId);
+          const lojaDasVendas = String(lojaId);
+          // Paginado: acima de 1000 vendas, devedores antigos ficavam sem cobrança.
+          const vendasPendentes = await buscarTodasPaginas((de, ate) =>
+            supabaseAdmin
+              .from('vendas')
+              .select('clienteNome, valor, valorPago, saldoDevedor, metodo, status, clienteTelefone')
+              .eq('loja_id', lojaDasVendas)
+              .order('id')
+              .range(de, ate)
+          );
 
           if (vendasPendentes && vendasPendentes.length > 0) {
             const mapDeb = new Map<string, { nome: string; telefone: string; saldo: number }>();

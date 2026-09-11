@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { supabase } from "@/lib/supabaseClient";
 import { Cliente } from "@/lib/db/types";
 import { useAuth } from "./useAuth";
@@ -25,14 +26,11 @@ export function useClientes(): UseClientesReturn {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .select('*')
-        .eq('loja_id', usuario.lojaId)
-        .order('dataCadastro', { ascending: false });
-
-      if (error) throw error;
-      setClientes(data || []);
+      const lojaId = usuario.lojaId;
+      // Paginado: acima de 1000 clientes a lista aparecia incompleta.
+      setClientes(await buscarTodasPaginas((de, ate) =>
+        supabase.from('clientes').select('*').eq('loja_id', lojaId).order('dataCadastro', { ascending: false }).order('id').range(de, ate)
+      ));
     } catch (err) {
       setError("Erro ao buscar clientes");
     } finally {

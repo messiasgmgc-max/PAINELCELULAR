@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { useOrdensServico } from '@/hooks/useOrdensServico';
 import { usePecas } from '@/hooks/usePecas';
 import { useTecnicos } from '@/hooks/useTecnicos';
@@ -44,12 +45,14 @@ export function DashboardTab() {
     
     const fetchVendas = async () => {
       if (!usuario?.lojaId) return;
-      const { data, error } = await supabase
-        .from('vendas')
-        .select('*')
-        .eq('loja_id', usuario.lojaId);
-      if (!error && data) {
-        setVendas(data);
+      const lojaId = usuario.lojaId;
+      try {
+        // Paginado: com mais de 1000 vendas o faturamento ficava menor que o real.
+        setVendas(await buscarTodasPaginas((de, ate) =>
+          supabase.from('vendas').select('*').eq('loja_id', lojaId).order('id').range(de, ate)
+        ));
+      } catch (err) {
+        console.error('Erro ao carregar vendas do dashboard:', err);
       }
     };
     fetchVendas();

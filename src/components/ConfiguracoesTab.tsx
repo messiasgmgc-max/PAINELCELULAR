@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { GlassCard } from '@/components/GlassCard';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -322,29 +323,25 @@ export function ConfiguracoesTab() {
       const downloads: Array<{ filename: string; rows: any[] }> = [];
 
       if (incluirClientes && usuario?.lojaId) {
-        const { data, error } = await supabase.from('clientes').select('*');
-        if (error) throw error;
+        const data = await buscarTodasPaginas((de, ate) => supabase.from('clientes').select('*').order('id').range(de, ate));
         const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.lojaId === usuario.lojaId || row.loja_id === usuario.lojaId);
         downloads.push({ filename: `clientes_${new Date().toISOString().slice(0, 10)}.csv`, rows });
       }
 
       if (incluirOS && usuario?.lojaId) {
-        const { data, error } = await supabase.from('ordens_servico').select('*');
-        if (error) throw error;
+        const data = await buscarTodasPaginas((de, ate) => supabase.from('ordens_servico').select('*').order('id').range(de, ate));
         const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.lojaId === usuario.lojaId || row.loja_id === usuario.lojaId);
         downloads.push({ filename: `ordens_servico_${new Date().toISOString().slice(0, 10)}.csv`, rows });
       }
 
       if (incluirPecas && usuario?.lojaId) {
-        const { data, error } = await supabase.from('pecas').select('*');
-        if (error) throw error;
+        const data = await buscarTodasPaginas((de, ate) => supabase.from('pecas').select('*').order('id').range(de, ate));
         const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.lojaId === usuario.lojaId || row.loja_id === usuario.lojaId);
         downloads.push({ filename: `pecas_${new Date().toISOString().slice(0, 10)}.csv`, rows });
       }
 
       if (incluirVendas && usuario?.lojaId) {
-        const { data, error } = await supabase.from('vendas').select('*');
-        if (error) throw error;
+        const data = await buscarTodasPaginas((de, ate) => supabase.from('vendas').select('*').order('id').range(de, ate));
         const rows = (data || []).filter((row: any) => !usuario?.lojaId || row.loja_id === usuario.lojaId || row.lojaId === usuario.lojaId);
         downloads.push({ filename: `vendas_${new Date().toISOString().slice(0, 10)}.csv`, rows });
       }
