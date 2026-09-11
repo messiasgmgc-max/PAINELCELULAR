@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { exigirAcesso } from '@/lib/auth/servidor';
-import { supabase } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/integrations/supabase/server';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
 
 export async function POST(request: Request) {
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 
 async function executarSincronizacao(lojaId?: string) {
   // 1. Busca todos os logs existentes para não duplicar
-  let queryLogs = supabase
+  let queryLogs = supabaseAdmin
     .from('logs_sistema')
     .select('detalhes');
 
@@ -56,7 +56,7 @@ async function executarSincronizacao(lojaId?: string) {
   const novosLogs: any[] = [];
 
   // 2. Sincronizar VENDAS
-  let queryVendas = supabase
+  let queryVendas = supabaseAdmin
     .from('vendas')
     .select('*')
     .order('created_at', { ascending: false })
@@ -91,7 +91,7 @@ async function executarSincronizacao(lojaId?: string) {
   }
 
   // 3. Sincronizar APARELHOS (Estoque e Saídas)
-  let queryAparelhos = supabase
+  let queryAparelhos = supabaseAdmin
     .from('aparelhos')
     .select('*')
     .order('created_at', { ascending: false })
@@ -131,7 +131,7 @@ async function executarSincronizacao(lojaId?: string) {
   }
 
   // 4. Sincronizar ORDENS DE SERVIÇO
-  let queryOS = supabase
+  let queryOS = supabaseAdmin
     .from('ordens_servico')
     .select('*')
     .order('created_at', { ascending: false })
@@ -160,7 +160,7 @@ async function executarSincronizacao(lojaId?: string) {
   }
 
   // 5. Sincronizar GARANTIAS
-  let queryGarantias = supabase
+  let queryGarantias = supabaseAdmin
     .from('garantias')
     .select('*')
     .order('created_at', { ascending: false })
@@ -194,7 +194,7 @@ async function executarSincronizacao(lojaId?: string) {
     const batchSize = 50;
     for (let i = 0; i < novosLogs.length; i += batchSize) {
       const batch = novosLogs.slice(i, i + batchSize);
-      const { error: insertErr } = await supabase.from('logs_sistema').insert(batch);
+      const { error: insertErr } = await supabaseAdmin.from('logs_sistema').insert(batch);
       if (!insertErr) {
         inseridos += batch.length;
       } else {

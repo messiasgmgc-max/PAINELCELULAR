@@ -24,12 +24,7 @@ export function useTecnicos() {
         if (perfil?.loja_id) return perfil.loja_id;
       }
 
-      const { data: primeiraLoja } = await supabase
-        .from('lojas')
-        .select('id')
-        .limit(1)
-        .maybeSingle();
-      if (primeiraLoja?.id) return primeiraLoja.id;
+      // Sem loja do usuário não há técnicos a mostrar: a primeira loja do banco é de outra pessoa.
     } catch (e) {
       console.error('Erro ao resolver loja_id:', e);
     }

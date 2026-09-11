@@ -112,11 +112,12 @@ export default function ColetaMotoboyPage({ params }: ColetaPageProps) {
         setLoading(true);
 
         // Busca loja
-        const { data: loja } = await supabase
-          .from('lojas')
-          .select('*')
-          .eq('id', lojaId)
-          .maybeSingle();
+        // Só os dados públicos da loja. A leitura direta de lojas fica bloqueada pela RLS;
+        // enquanto a função não existir no banco, cai na leitura antiga.
+        const publica = await supabase.rpc('loja_publica', { p_loja_id: lojaId });
+        const { data: loja } = publica.error
+          ? await supabase.from('lojas').select('*').eq('id', lojaId).maybeSingle()
+          : publica;
 
         if (loja) {
           setLojaInfo(loja);

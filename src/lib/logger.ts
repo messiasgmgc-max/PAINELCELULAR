@@ -45,8 +45,15 @@ export async function registrarLog(params: RegistrarLogParams): Promise<void> {
       valor_novo: params.valor_novo ?? null,
     };
 
-    // Tenta inserção direta pelo cliente Supabase
-    const { error } = await supabase.from('logs_sistema').insert([payload]);
+    // No servidor (rotas e bot) não há sessão: grava com a chave de serviço. No navegador,
+    // grava com a sessão do usuário, que a RLS limita à própria loja.
+    let error: { message: string } | null = null;
+    if (typeof window === 'undefined') {
+      const { supabaseAdmin } = await import('@/integrations/supabase/server');
+      ({ error } = await supabaseAdmin.from('logs_sistema').insert([payload]));
+    } else {
+      ({ error } = await supabase.from('logs_sistema').insert([payload]));
+    }
 
     if (error) {
       // Se falhar no client-side (ex: RLS restrito), faz fallback via API route

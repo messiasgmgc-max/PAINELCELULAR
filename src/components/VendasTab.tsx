@@ -2696,14 +2696,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           .maybeSingle();
         dbLoja = found;
       }
-      if (!dbLoja) {
-        const { data: fallbackLoja } = await supabase
-          .from('lojas')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-        dbLoja = fallbackLoja;
-      }
 
       if (dbLoja) {
         storeData = {
@@ -2929,14 +2921,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           .eq('id', targetLojaId)
           .maybeSingle();
         dbLoja = found;
-      }
-      if (!dbLoja) {
-        const { data: fallbackLoja } = await supabase
-          .from('lojas')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-        dbLoja = fallbackLoja;
       }
 
       if (dbLoja) {

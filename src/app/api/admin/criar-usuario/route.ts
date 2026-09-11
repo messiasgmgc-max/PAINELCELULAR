@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     // 3. Se ainda assim a conta de Auth já existir, buscar o ID na tabela perfis ou auth
     if (!userId) {
-      const { data: perfilExistente } = await supabase
+      const { data: perfilExistente } = await supabaseAdmin
         .from('perfis')
         .select('id')
         .eq('email', cleanEmail)
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
     }
 
     // 4. Salva ou atualiza a tabela 'perfis'
-    const { data: perfilFinal, error: perfilError } = await supabase
+    const { data: perfilFinal, error: perfilError } = await supabaseAdmin
       .from('perfis')
       .upsert({
         id: userId,

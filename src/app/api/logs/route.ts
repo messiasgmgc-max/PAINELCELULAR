@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { exigirAcesso } from '@/lib/auth/servidor';
-import { supabase } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/integrations/supabase/server';
 
 export async function GET(request: Request) {
   try {
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const termo = searchParams.get('termo');
     const limit = parseInt(searchParams.get('limit') || '50', 10);
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('logs_sistema')
       .select('*')
       .order('created_at', { ascending: false })
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'A ação é obrigatória.' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('logs_sistema')
       .insert({
         loja_id: acesso.usuario.superAdmin ? loja_id || null : acesso.usuario.lojaId,

@@ -15,7 +15,7 @@ export async function POST(request: Request) {
 
     // ── 1. ETAPA DE VALIDAÇÃO DO E-MAIL ──
     // Busca na tabela 'tecnicos' (membros da equipe cadastrados pelo dono da loja)
-    const { data: tecnico, error: tecError } = await supabase
+    const { data: tecnico, error: tecError } = await supabaseAdmin
       .from('tecnicos')
       .select('id, nome, email, tipo, loja_id')
       .ilike('email', cleanEmail)
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
     // Se não encontrou em técnicos, busca em 'perfis'
     if (!registroEncontrado) {
-      const { data: perfil } = await supabase
+      const { data: perfil } = await supabaseAdmin
         .from('perfis')
         .select('id, nome, email, role, loja_id')
         .ilike('email', cleanEmail)
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     // Busca o nome da loja vinculada
     let nomeLoja = 'Sua Loja';
     if (registroEncontrado.loja_id) {
-      const { data: loja } = await supabase
+      const { data: loja } = await supabaseAdmin
         .from('lojas')
         .select('nome')
         .eq('id', registroEncontrado.loja_id)
@@ -175,7 +175,7 @@ export async function POST(request: Request) {
       }
 
       // 2d. Salva/Atualiza o perfil na tabela 'perfis'
-      await supabase.from('perfis').upsert(
+      await supabaseAdmin.from('perfis').upsert(
         {
           id: userId,
           email: cleanEmail,
@@ -188,7 +188,7 @@ export async function POST(request: Request) {
 
       // 2e. Atualiza o registro do técnico para indicar conta ativada
       if (origem === 'tecnicos' && registroEncontrado.id) {
-        await supabase
+        await supabaseAdmin
           .from('tecnicos')
           .update({ status_conta: 'ativo' })
           .eq('id', registroEncontrado.id);
@@ -196,7 +196,7 @@ export async function POST(request: Request) {
 
       // 2f. Grava o log no sistema
       try {
-        await supabase.from('logs_sistema').insert({
+        await supabaseAdmin.from('logs_sistema').insert({
           loja_id: lojaId,
           usuario_id: userId,
           usuario_email: cleanEmail,

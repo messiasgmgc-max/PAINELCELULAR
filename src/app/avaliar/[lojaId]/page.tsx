@@ -78,11 +78,12 @@ export default function AvaliacaoPublicaUpgradePage() {
     const carregarLoja = async () => {
       try {
         setLoadingLoja(true);
-        const { data, error } = await supabase
-          .from('lojas')
-          .select('*')
-          .eq('id', lojaId)
-          .maybeSingle();
+        // Só os dados públicos da loja. A leitura direta de lojas fica bloqueada pela RLS;
+        // enquanto a função não existir no banco, cai na leitura antiga.
+        const publica = await supabase.rpc('loja_publica', { p_loja_id: lojaId });
+        const { data, error } = publica.error
+          ? await supabase.from('lojas').select('*').eq('id', lojaId).maybeSingle()
+          : publica;
 
         if (data && !error) {
           setLoja(data);
