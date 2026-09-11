@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { lojaEfetiva, PAPEIS_GESTAO } from '@/lib/auth/acesso';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
-import { TipoPlano, obterPlanoPorTipo } from '@/lib/planos-config';
+import { TipoPlano, obterPlanoPorTipo, DIAS_TESTE_GRATIS, METODO_PAGAMENTO_TESTE, fimDoTesteGratis } from '@/lib/planos-config';
 
 export async function POST(request: Request) {
   try {
@@ -35,13 +35,13 @@ export async function POST(request: Request) {
     // Verificar se já usou teste desse plano específico
     if (trialsUsados.includes(novoPlano)) {
       return NextResponse.json({ 
-        error: `Você já utilizou o teste gratuito de 3 dias do Plano ${obterPlanoPorTipo(novoPlano).nome}. Assine para continuar desfrutando de todos os recursos!` 
+        error: `Você já utilizou o teste gratuito de ${DIAS_TESTE_GRATIS} dias do Plano ${obterPlanoPorTipo(novoPlano).nome}. Assine para continuar desfrutando de todos os recursos!` 
       }, { status: 400 });
     }
 
-    // 3 dias a partir de agora
+    // DIAS_TESTE_GRATIS dias a partir de agora
     const agora = new Date();
-    const dataFimTrial = new Date(agora.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const dataFimTrial = fimDoTesteGratis(agora);
     const dataFimIso = dataFimTrial.toISOString();
     const dataVencStr = dataFimIso.split('T')[0];
 
@@ -83,9 +83,9 @@ export async function POST(request: Request) {
       valor: 0.00,
       status: 'aprovado',
       forma_pagamento: 'trial_gratis',
-      metodo_pagamento: 'trial_3_dias',
+      metodo_pagamento: METODO_PAGAMENTO_TESTE,
       plano_contratado: novoPlano,
-      observacao: `🎉 Teste gratuito de 3 dias ativado para o Plano ${nomePlanoFormatado}! Válido até ${dataFimTrial.toLocaleDateString('pt-BR')} às ${dataFimTrial.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+      observacao: `🎉 Teste gratuito de ${DIAS_TESTE_GRATIS} dias ativado para o Plano ${nomePlanoFormatado}! Válido até ${dataFimTrial.toLocaleDateString('pt-BR')} às ${dataFimTrial.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
     });
 
     return NextResponse.json({
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       nomePlano: nomePlanoFormatado,
       trialAte: dataFimIso,
       dataVencimento: vencimentoFinal,
-      mensagem: `🎉 Parabéns! Seu teste de 3 dias do Plano ${nomePlanoFormatado} está ativo!`
+      mensagem: `🎉 Parabéns! Seu teste de ${DIAS_TESTE_GRATIS} dias do Plano ${nomePlanoFormatado} está ativo!`
     });
 
   } catch (err: any) {

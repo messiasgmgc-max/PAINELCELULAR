@@ -123,7 +123,7 @@ export function useStorePlan() {
 
       const isBloqueado = status === 'bloqueado' || status === 'vencido';
 
-      // Checar se o trial de 3 dias está ativo
+      // Checar se o teste grátis (DIAS_TESTE_GRATIS dias) está ativo
       let isTrialAtivo = false;
       if (loja.plano_trial_ate) {
         const trialEnd = new Date(loja.plano_trial_ate).getTime();
@@ -247,7 +247,7 @@ export function useStorePlan() {
     }
   };
 
-  // Solicitar 3 Dias de Teste Gratuito de um Plano
+  // Solicitar o teste grátis (DIAS_TESTE_GRATIS dias) de um plano
   const solicitarTrial = async (novoPlano: TipoPlano) => {
     if (!planData.lojaId) throw new Error('Loja não identificada');
 

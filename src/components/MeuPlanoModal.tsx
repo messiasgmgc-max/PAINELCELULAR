@@ -43,7 +43,9 @@ import {
   PeriodoFaturamento, 
   calcularValoresPlano, 
   obterPlanoPorTipo,
-  WHATSAPP_SUPORTE_URL 
+  WHATSAPP_SUPORTE_URL,
+  DIAS_TESTE_GRATIS,
+  ehRegistroDeTesteGratis
 } from '@/lib/planos-config';
 
 interface MeuPlanoModalProps {
@@ -248,12 +250,12 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     }
   };
 
-  // Solicitar 3 dias de Teste Gratuito
+  // Solicitar o teste grátis (DIAS_TESTE_GRATIS dias)
   const handleSolicitarTrial = async (novoPlano: TipoPlano) => {
     try {
       setAtivandoTrial(true);
       const res = await solicitarTrial(novoPlano);
-      toast.success(res.mensagem || 'Teste de 3 dias ativado com sucesso!');
+      toast.success(res.mensagem || `Teste de ${DIAS_TESTE_GRATIS} dias ativado com sucesso!`);
       await refetchPlan();
       await refetchHistorico();
     } catch (err: any) {
@@ -300,7 +302,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     if (planData.isTrialAtivo) {
       return (
         <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/40 text-xs px-3 py-1 flex items-center gap-1.5 font-bold animate-pulse">
-          <Gift className="w-4 h-4 text-purple-400" /> Teste de 3 Dias Ativo
+          <Gift className="w-4 h-4 text-purple-400" /> Teste Grátis Ativo
         </Badge>
       );
     }
@@ -635,7 +637,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                             className="w-full h-10 text-xs font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border-purple-500/40 rounded-xl gap-1.5 cursor-pointer"
                           >
                             <Gift className="w-3.5 h-3.5 text-purple-400" />
-                            {ativandoTrial ? 'Ativando...' : 'Testar 3 Dias Grátis'}
+                            {ativandoTrial ? 'Ativando...' : `Testar ${DIAS_TESTE_GRATIS} Dias Grátis`}
                           </Button>
                         )}
 
@@ -933,7 +935,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                     const status = pag.status || 'pendente';
                     const isMercadoPago = !!pag.mp_payment_id;
                     const isCartao = pag.metodo_pagamento === 'cartao_credito' || pag.forma_pagamento === 'cartao_credito';
-                    const isTrial = pag.metodo_pagamento === 'trial_3_dias' || pag.forma_pagamento === 'trial_gratis';
+                    const isTrial = ehRegistroDeTesteGratis(pag);
                     const temComprovante = !!pag.comprovante_url;
 
                     return (
@@ -964,7 +966,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                               )}
                               {isTrial && (
                                 <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30 text-[10px] font-bold">
-                                  🎁 Teste 3 Dias
+                                  🎁 Teste Grátis
                                 </Badge>
                               )}
                             </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { supabase } from '@/lib/supabaseClient';
-import { calcularValoresPlano, TipoPlano, PeriodoFaturamento } from '@/lib/planos-config';
+import { calcularValoresPlano, TipoPlano, PeriodoFaturamento, DIAS_TESTE_GRATIS, METODO_PAGAMENTO_TESTE, fimDoTesteGratis } from '@/lib/planos-config';
 
 export async function POST(request: Request) {
   try {
@@ -40,8 +40,8 @@ export async function POST(request: Request) {
 
     // 1. Criar Loja
     const agora = new Date();
-    // Teste inicial de 3 dias para todos os novos clientes (liberação imediata de demonstração)
-    const dataFimTrial = new Date(agora.getTime() + 3 * 24 * 60 * 60 * 1000);
+    // Teste grátis inicial (DIAS_TESTE_GRATIS dias) para toda loja nova, liberado na hora
+    const dataFimTrial = fimDoTesteGratis(agora);
     const dataFimIso = dataFimTrial.toISOString();
     const vencimentoStr = dataFimIso.split('T')[0];
 
@@ -149,10 +149,10 @@ export async function POST(request: Request) {
         valor: 0.00,
         status: 'aprovado',
         forma_pagamento: 'trial_gratis',
-        metodo_pagamento: 'trial_3_dias',
+        metodo_pagamento: METODO_PAGAMENTO_TESTE,
         plano_contratado: planoEscolhido,
         periodo_contratado: periodoEscolhido,
-        observacao: `🎁 Cadastro de nova loja com Teste Grátis de 3 dias do Plano ${infoPlano.nomePlano}! Válido até ${vencimentoStr}`
+        observacao: `🎁 Cadastro de nova loja com Teste Grátis de ${DIAS_TESTE_GRATIS} dias do Plano ${infoPlano.nomePlano}! Válido até ${vencimentoStr}`
       });
     }
 
@@ -165,7 +165,7 @@ export async function POST(request: Request) {
       valorTotal: infoPlano.valorTotal,
       dataVencimento: vencimentoStr,
       ...checkoutData,
-      mensagem: 'Loja cadastrada com sucesso! Seu acesso de 3 dias já está liberado.'
+      mensagem: `Loja cadastrada com sucesso! Seu acesso de ${DIAS_TESTE_GRATIS} dias já está liberado.`
     });
 
   } catch (err: any) {

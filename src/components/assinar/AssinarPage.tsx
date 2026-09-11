@@ -2,42 +2,55 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { 
-  CheckCircle2, 
-  Sparkles, 
-  Zap, 
-  ShieldCheck, 
-  Smartphone, 
-  CreditCard, 
-  QrCode, 
-  Gift, 
-  ArrowRight, 
-  Building2, 
-  User, 
-  Mail, 
-  Lock, 
-  Phone, 
-  MapPin, 
-  Instagram, 
-  MessageCircle, 
-  ChevronDown, 
-  ChevronUp, 
-  TrendingUp, 
-  Check, 
-  Copy, 
+import {
+  CheckCircle2,
+  Sparkles,
+  Zap,
+  ShieldCheck,
+  CreditCard,
+  QrCode,
+  Gift,
+  ArrowRight,
+  Building2,
+  User,
+  Mail,
+  Lock,
+  Phone,
+  MapPin,
+  Instagram,
+  MessageCircle,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Copy,
   Loader2,
+  XCircle,
+  Scale,
+  Import,
+  Smartphone,
+  Handshake,
+  Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { 
-  PLANOS_SISTEMA, 
-  TipoPlano, 
-  PeriodoFaturamento, 
-  calcularValoresPlano, 
+import {
+  PLANOS_SISTEMA,
+  TipoPlano,
+  PeriodoFaturamento,
+  calcularValoresPlano,
   obterPlanoPorTipo,
-  WHATSAPP_SUPORTE_URL 
+  WHATSAPP_SUPORTE_URL,
+  DIAS_TESTE_GRATIS,
 } from '@/lib/planos-config';
+import { economiaDoPeriodo, formatarPreco, resumoComparacao, DATA_CONSULTA_MERCADOPHONE_TEXTO } from '@/lib/assinar/comparacao';
+import { IPhone3D } from '@/components/assinar/IPhone3D';
+import { MedidorPrejuizo } from '@/components/assinar/MedidorPrejuizo';
+import { ComoFunciona3D } from '@/components/assinar/ComoFunciona3D';
+import { ConversaWhatsApp3D } from '@/components/assinar/ConversaWhatsApp3D';
+import { AntesDepoisSlider } from '@/components/assinar/AntesDepoisSlider';
+import { CartaoTilt } from '@/components/assinar/efeitos/CartaoTilt';
+import { NumeroContador } from '@/components/assinar/efeitos/NumeroContador';
 
 export default function AssinarPage() {
   // Configuração de Plano e Ciclo
@@ -69,13 +82,18 @@ export default function AssinarPage() {
 
   const [pixCopiado, setPixCopiado] = useState(false);
   const [faqAberto, setFaqAberto] = useState<number | null>(null);
-  const [vendasMensais, setVendasMensais] = useState<number>(45);
-  const prejuizoEstimadoSemBot = Math.round(vendasMensais * 38.5);
 
   const infoCalculo = calcularValoresPlano(planoSelecionado, periodoSelecionado);
+  const comparacao = resumoComparacao();
+  const economiaAnualEntrada = economiaDoPeriodo('entrada', 'anual');
 
   const handleInputChange = (field: string, val: string) => {
     setFormData(prev => ({ ...prev, [field]: val }));
+  };
+
+  const irParaFormulario = () => {
+    const el = document.getElementById('formulario');
+    el?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleCadastrar = async (e: React.FormEvent) => {
@@ -186,30 +204,32 @@ export default function AssinarPage() {
       r: 'Não! O robô do Phone Center roda 24 horas por dia em nossos servidores de nuvem de alta velocidade. Mesmo se seu celular desligar ou seu computador estiver fechado, seus clientes recebem preços e estoques instantaneamente.'
     },
     {
-      p: 'Como funciona o teste de 3 dias gratuitos?',
-      r: 'Você cria o acesso da sua loja agora e recebe 3 dias de acesso total e irrestrito sem precisar cadastrar cartão de crédito. Você pode testar o robô no WhatsApp, cadastrar seu estoque e fazer vendas reais imediatamente.'
+      p: `Como funciona o teste de ${DIAS_TESTE_GRATIS} dias grátis?`,
+      r: `Você cria o acesso da sua loja agora e recebe ${DIAS_TESTE_GRATIS} dias de acesso total ao plano escolhido, sem cadastrar cartão de crédito. Dá para conectar o bot no WhatsApp, cadastrar o estoque e fazer vendas reais desde o primeiro dia. No fim do teste, nada é cobrado sozinho: você escolhe se assina por Pix ou cartão.`
     },
     {
       p: 'Qual a diferença entre os planos Entrada, Intermediário e Avançado?',
-      r: 'O plano Entrada (R$ 99,90) é perfeito para quem quer o robô ágil de vendas, estoque e o painel web. O Intermediário (R$ 189) inclui o controle automatizado de fiado/devedores com !abater e !saldo, além de checagem de IMEI e broadcast para grupos. O Avançado (R$ 299) inclui escuta em grupos de parceiros multi-loja, auditoria completa e API REST para integrações.'
+      r: `O plano Entrada (R$ ${formatarPreco(PLANOS_SISTEMA.entrada.precos.mensal.valorMensal)}) já vem com o painel completo (estoque por IMEI, PDV, OS, atacado com fiado, etiquetas, nota fiscal, usuários sem limite) e o bot de estoque, venda, cadastro e OS no WhatsApp. O Intermediário (R$ ${formatarPreco(PLANOS_SISTEMA.intermediario.precos.mensal.valorMensal)}) põe o bot para cobrar fiado (!abater, !saldo), checar IMEI e disparar o estoque nos grupos. O Avançado (R$ ${formatarPreco(PLANOS_SISTEMA.avancado.precos.mensal.valorMensal)}) adiciona a rede multi-loja, a trilha de auditoria e a chave de API.`
     },
     {
       p: 'Posso parcelar o pagamento no cartão de crédito?',
       r: 'Sim! Aceitamos pagamentos via PIX com ativação instantânea e cartão de crédito em até 12 vezes com a segurança oficial do Mercado Pago.'
     },
     {
-      p: 'Consigo importar meu estoque atual de planilhas ou de outro sistema?',
-      r: 'Sim! Você pode cadastrar aparelhos em lote, tirar foto da etiqueta de garantia com nosso leitor OCR inteligente (IA Vision) ou importar sua lista de produtos.'
+      p: 'Uso o MercadoPhone. Consigo trazer meu estoque, clientes e vendas?',
+      r: 'Sim. No painel há o importador "Vindo do MercadoPhone": você exporta do MercadoPhone, envia os arquivos e confere uma prévia (aparelhos, clientes e histórico de vendas) antes de confirmar. Também dá para cadastrar em lote e por foto da etiqueta.'
     },
     {
       p: 'Tem fidelidade ou multa de cancelamento?',
-      r: 'Nenhuma fidelidade. Você pode cancelar ou mudar de plano quando desejar direto pelo seu painel, sem taxas escondidas.'
+      r: 'Nenhuma fidelidade. O cancelamento é feito por você mesmo, no painel (Meu Plano), sem falar com ninguém. A loja continua liberada até o fim do período já pago, e se mudar de ideia é só reativar no mesmo lugar.'
     }
   ];
 
+  const planosOrdem = Object.keys(PLANOS_SISTEMA) as TipoPlano[];
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white relative overflow-x-hidden font-sans">
-      
+
       {/* Luzes de Fundo */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-gradient-to-b from-blue-600/15 via-indigo-600/10 to-transparent blur-3xl pointer-events-none -z-10" />
       <div className="absolute top-[400px] right-0 w-96 h-96 bg-purple-600/10 blur-3xl pointer-events-none -z-10" />
@@ -222,6 +242,12 @@ export default function AssinarPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/comparar"
+              className="hidden sm:inline text-xs font-semibold text-slate-300 hover:text-white px-2.5 py-2 rounded-xl transition"
+            >
+              Comparar com o MercadoPhone
+            </Link>
             <Link
               href="/login"
               className="text-xs font-semibold text-slate-300 hover:text-white px-2.5 py-2 rounded-xl transition"
@@ -239,90 +265,84 @@ export default function AssinarPage() {
       </nav>
 
       {/* HERO SECTION */}
-      <section className="pt-8 sm:pt-12 pb-10 sm:pb-16 px-4 sm:px-6 max-w-5xl mx-auto text-center space-y-5">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[11px] font-bold animate-pulse">
-          <Sparkles className="w-3 h-3" />
-          O Sistema Especialista em Lojas de iPhone &amp; Eletrônicos
-        </div>
+      <section className="pt-8 sm:pt-12 pb-6 sm:pb-10 px-4 sm:px-6 max-w-6xl mx-auto grid gap-8 md:grid-cols-[1.15fr_0.85fr] items-center">
+        <div className="text-center md:text-left space-y-5">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[11px] font-bold">
+            <Sparkles className="w-3 h-3" />
+            Feito para loja de iPhone: IMEI, trade-in, atacado com fiado
+          </div>
 
-        <h1 className="text-2xl sm:text-5xl md:text-6xl font-black text-white tracking-tight leading-tight">
-          Pare de perder vendas enquanto procura preço em tabelas.{' '}
-          <span className="bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
-            Seu estoque responde no WhatsApp na hora.
-          </span>
-        </h1>
-
-        <p className="text-sm sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
-          Atenda clientes e lojistas parceiros em grupos com velocidade relâmpago, controle fiado sem erros de caderno e dê baixa em estoque por foto de etiqueta com IA.
-        </p>
-
-        {/* Badges de Destaque — scroll horizontal no mobile */}
-        <div className="flex items-center justify-start sm:justify-center gap-2 pt-1 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap scrollbar-none">
-          {[
-            { icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />, text: '3 Dias Grátis' },
-            { icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />, text: 'Sem Cartão Inicial' },
-            { icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />, text: 'Ativo em 2 Minutos' },
-          ].map((b, i) => (
-            <span key={i} className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-full border border-slate-800 text-xs font-semibold text-slate-300 whitespace-nowrap shrink-0">
-              {b.icon} {b.text}
+          <h1 className="text-2xl sm:text-5xl md:text-[3.4rem] font-black text-white tracking-tight leading-tight">
+            Pare de perder vendas enquanto procura preço em tabelas.{' '}
+            <span className="bg-gradient-to-r from-blue-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">
+              Seu estoque responde no WhatsApp na hora.
             </span>
-          ))}
-        </div>
+          </h1>
 
-        <div className="pt-2">
-          <a
-            href="#formulario"
-            className="inline-flex items-center gap-2 px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-sm sm:text-base shadow-xl shadow-blue-500/25 transition-all hover:scale-[1.02]"
-          >
-            Começar Teste Grátis <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" />
-          </a>
-        </div>
-      </section>
+          <p className="text-sm sm:text-lg text-slate-300 max-w-2xl mx-auto md:mx-0 leading-relaxed">
+            Estoque por IMEI, PDV com lucro líquido, OS, atacado com fiado e um bot que responde seus clientes no WhatsApp com o que você tem na loja.
+          </p>
 
-      {/* CALCULADORA DE PREJUÍZO EVITADO (ROI) */}
-      <section className="py-6 sm:py-10 px-4 sm:px-6 max-w-4xl mx-auto">
-        <div className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-slate-800 rounded-3xl p-5 sm:p-8 shadow-2xl relative overflow-hidden">
-          <div className="flex flex-col gap-5">
-            <div className="space-y-3">
-              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                <TrendingUp className="w-4 h-4" /> Calculadora de Oportunidade Perdida
+          {/* Badges de Destaque — scroll horizontal no mobile */}
+          <div className="flex items-center justify-start md:justify-start sm:justify-center gap-2 pt-1 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap scrollbar-none">
+            {[
+              `${DIAS_TESTE_GRATIS} dias grátis`,
+              'Sem cartão para testar',
+              'Sem fidelidade',
+              'Cancela pelo painel',
+            ].map((texto) => (
+              <span key={texto} className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-full border border-slate-800 text-xs font-semibold text-slate-300 whitespace-nowrap shrink-0">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> {texto}
               </span>
-              <h2 className="text-lg sm:text-2xl font-black text-white">
-                Quanto sua loja perde todo mês por demora no WhatsApp?
-              </h2>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Quando um cliente pede um iPhone e você demora mais de 3 minutos, ele já comprou de outro lojista.
-              </p>
+            ))}
+          </div>
 
-              <div className="pt-2 space-y-2">
-                <div className="flex justify-between text-xs text-slate-300 font-bold">
-                  <span>Aparelhos vendidos por mês:</span>
-                  <span className="text-blue-400 font-mono">{vendasMensais}/mês</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="300"
-                  step="5"
-                  value={vendasMensais}
-                  onChange={(e) => setVendasMensais(Number(e.target.value))}
-                  className="w-full h-3 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="bg-slate-950/90 border border-red-500/30 rounded-2xl p-5 text-center space-y-2 shadow-lg shadow-red-500/5">
-              <span className="text-xs text-slate-400 font-semibold">Perda estimada por mês:</span>
-              <div className="text-3xl sm:text-4xl font-black text-red-400 font-mono">
-                R$ {prejuizoEstimadoSemBot.toLocaleString('pt-BR')},00
-              </div>
-              <p className="text-[11px] text-slate-400">
-                O robô custa a partir de <strong>R$ 99,90/mês</strong> e se paga na <strong>primeira venda</strong> que você não perde.
-              </p>
-            </div>
+          <div className="pt-2 flex flex-col sm:flex-row items-center gap-3 md:justify-start justify-center">
+            <a
+              href="#formulario"
+              className="inline-flex items-center gap-2 px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-sm sm:text-base shadow-xl shadow-blue-500/25 transition-all hover:scale-[1.02]"
+            >
+              Começar {DIAS_TESTE_GRATIS} dias grátis <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" />
+            </a>
+            <Link href="/comparar" className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white underline-offset-4 hover:underline">
+              <Scale className="w-4 h-4" /> Ver comparação com o MercadoPhone
+            </Link>
           </div>
         </div>
+
+        <IPhone3D className="order-first md:order-none" />
       </section>
+
+      {/* NÚMEROS QUE CONTAM (só fatos do produto) */}
+      <section className="px-4 sm:px-6 max-w-5xl mx-auto pb-6 sm:pb-10">
+        <dl className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { valor: DIAS_TESTE_GRATIS, casas: 0, prefixo: '', sufixo: ' dias', rotulo: 'de teste grátis, sem cartão' },
+            { valor: PLANOS_SISTEMA.entrada.precos.mensal.valorMensal, casas: 2, prefixo: 'R$ ', sufixo: '', rotulo: 'por mês no plano Entrada' },
+            { valor: economiaAnualEntrada, casas: 0, prefixo: 'R$ ', sufixo: '', rotulo: 'de economia no ano com o Entrada anual' },
+            { valor: 12, casas: 0, prefixo: 'até ', sufixo: 'x', rotulo: 'no cartão pelo Mercado Pago' },
+          ].map((n) => (
+            <div key={n.rotulo} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-center">
+              <dt className="order-2 text-[11px] text-slate-400 leading-snug">{n.rotulo}</dt>
+              <dd className="text-2xl sm:text-3xl font-black text-white font-mono">
+                <NumeroContador valor={n.valor} casas={n.casas} prefixo={n.prefixo} sufixo={n.sufixo} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      {/* CALCULADORA DE PREJUÍZO (aversão à perda) */}
+      <MedidorPrejuizo />
+
+      {/* COMO FUNCIONA (etapas 3D pelo scroll) */}
+      <ComoFunciona3D />
+
+      {/* SIMULAÇÃO DE CONVERSA NO WHATSAPP */}
+      <ConversaWhatsApp3D />
+
+      {/* ANTES x DEPOIS */}
+      <AntesDepoisSlider />
 
       {/* SEÇÃO DE PLANOS & PREÇOS */}
       <section id="planos" className="py-8 sm:py-12 px-4 sm:px-6 max-w-6xl mx-auto space-y-6 sm:space-y-8">
@@ -331,7 +351,7 @@ export default function AssinarPage() {
             Planos para qualquer tamanho de loja
           </h2>
           <p className="text-xs sm:text-sm text-slate-400">
-            Escolha o plano ideal. Todos com suporte especializado. Mude quando quiser.
+            Escolha em 1 clique. Sem fidelidade: cancele ou mude de plano pelo painel quando quiser.
           </p>
 
           {/* Toggle de Ciclos */}
@@ -360,22 +380,28 @@ export default function AssinarPage() {
               ))}
             </div>
           </div>
+          {periodoSelecionado === 'mensal' && (
+            <p className="text-[11px] text-emerald-400">
+              No anual, o plano Entrada sai por R$ {formatarPreco(PLANOS_SISTEMA.entrada.precos.anual.valorMensal)}/mês: R$ {formatarPreco(economiaAnualEntrada)} a menos no ano.
+            </p>
+          )}
         </div>
 
         {/* Cards dos Planos — scroll horizontal no mobile */}
         <div className="flex sm:grid sm:grid-cols-3 gap-4 overflow-x-auto pb-4 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-none snap-x snap-mandatory">
-          {(Object.keys(PLANOS_SISTEMA) as TipoPlano[]).map((chave) => {
+          {planosOrdem.map((chave) => {
             const p = PLANOS_SISTEMA[chave];
             const precoObj = p.precos[periodoSelecionado];
             const isSelected = planoSelecionado === chave;
+            const economia = economiaDoPeriodo(chave, periodoSelecionado);
 
             return (
-              <div
+              <CartaoTilt
                 key={chave}
                 onClick={() => setPlanoSelecionado(chave)}
-                className={`relative rounded-3xl p-5 sm:p-6 border flex flex-col justify-between transition-all duration-200 cursor-pointer shrink-0 w-[80vw] sm:w-auto snap-start ${
-                  p.popular 
-                    ? 'bg-gradient-to-b from-blue-950/60 via-slate-900 to-slate-950 border-blue-500/60 shadow-2xl shadow-blue-500/10 ring-2 ring-blue-500/40' 
+                className={`rounded-3xl p-5 sm:p-6 border flex flex-col justify-between transition-colors duration-200 cursor-pointer shrink-0 w-[80vw] sm:w-auto snap-start ${
+                  p.popular
+                    ? 'bg-gradient-to-b from-blue-950/60 via-slate-900 to-slate-950 border-blue-500/60 shadow-2xl shadow-blue-500/10 ring-2 ring-blue-500/40'
                     : isSelected
                       ? 'bg-slate-950/90 border-emerald-500/60 ring-2 ring-emerald-500/30'
                       : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
@@ -405,9 +431,15 @@ export default function AssinarPage() {
                       </span>
                       <span className="text-xs text-slate-400">/mês</span>
                     </div>
-                    {periodoSelecionado !== 'mensal' && (
+                    {periodoSelecionado !== 'mensal' ? (
                       <p className="text-xs text-emerald-400 font-semibold mt-1">
                         Faturado R$ {precoObj.valorTotal.toFixed(2).replace('.', ',')} a cada {precoObj.diasValidade} dias
+                        {economia > 0 && <> · economiza R$ {formatarPreco(economia)}</>}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500 mt-1">
+                        <span className="line-through">R$ {formatarPreco(p.precos.mensal.valorMensal)}</span>{' '}
+                        <span className="text-emerald-400 font-semibold">R$ {formatarPreco(p.precos.anual.valorMensal)}/mês no anual</span>
                       </p>
                     )}
                     <p className="text-xs text-slate-400 mt-2 leading-relaxed min-h-[40px]">
@@ -423,6 +455,17 @@ export default function AssinarPage() {
                         <span>{ben}</span>
                       </div>
                     ))}
+                    {p.naoInclui && p.naoInclui.length > 0 && (
+                      <>
+                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block pt-2">Não inclui:</span>
+                        {p.naoInclui.map((item, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-xs text-slate-500">
+                            <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -432,8 +475,7 @@ export default function AssinarPage() {
                     onClick={(e) => {
                       e.stopPropagation();
                       setPlanoSelecionado(chave);
-                      const el = document.getElementById('formulario');
-                      el?.scrollIntoView({ behavior: 'smooth' });
+                      irParaFormulario();
                     }}
                     className={`w-full h-11 text-xs font-black rounded-xl gap-2 cursor-pointer ${
                       isSelected
@@ -441,10 +483,10 @@ export default function AssinarPage() {
                         : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
                     }`}
                   >
-                    {isSelected ? '✓ Selecionado' : 'Selecionar'}
+                    {isSelected ? `✓ Selecionado · testar ${DIAS_TESTE_GRATIS} dias` : 'Selecionar'}
                   </Button>
                 </div>
-              </div>
+              </CartaoTilt>
             );
           })}
         </div>
@@ -453,15 +495,93 @@ export default function AssinarPage() {
         <p className="text-center text-[11px] text-slate-500 sm:hidden flex items-center justify-center gap-1.5">
           ← Deslize para ver os planos →
         </p>
+
+        {/* Ancoragem: comparação com o concorrente */}
+        <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 sm:p-6 grid gap-4 md:grid-cols-[1fr_auto] items-center">
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400 flex items-center gap-1.5">
+              <Scale className="w-4 h-4" /> Comparação de preço
+            </span>
+            <p className="text-sm sm:text-base font-bold text-white">
+              OS, nota fiscal, app e etiquetas: no MercadoPhone só a partir do plano {comparacao.mercadoPhone.nome} (R$ {formatarPreco(comparacao.mercadoPhone.precoMensal)}/mês).
+              No Phone Center vêm no plano {comparacao.phoneCenter.nome} (R$ {formatarPreco(comparacao.phoneCenter.precoMensal)}/mês).
+            </p>
+            <p className="text-xs text-slate-400">
+              Diferença de R$ {formatarPreco(comparacao.diferencaMensal)} por mês (R$ {formatarPreco(comparacao.diferencaAnual)} por ano), nos preços mensais dos dois. Preços públicos do MercadoPhone consultados em {DATA_CONSULTA_MERCADOPHONE_TEXTO}.
+            </p>
+          </div>
+          <Link
+            href="/comparar"
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition"
+          >
+            Ver comparação completa <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </section>
+
+      {/* VEM DO MERCADOPHONE? (reciprocidade) */}
+      <section className="py-6 sm:py-10 px-4 sm:px-6 max-w-5xl mx-auto">
+        <div className="rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-950 p-5 sm:p-8 grid gap-6 md:grid-cols-2 items-center">
+          <div className="space-y-3">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              <Import className="w-4 h-4" /> Vem do MercadoPhone?
+            </span>
+            <h2 className="text-xl sm:text-3xl font-black text-white">Trazemos seu estoque, clientes e vendas.</h2>
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Exporte do MercadoPhone e envie no painel. O importador "Vindo do MercadoPhone" mostra uma prévia dos aparelhos, clientes e do histórico de vendas antes de confirmar. Nada é apagado nem duplicado sem você ver.
+            </p>
+            <a
+              href="#formulario"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/20 transition"
+            >
+              Criar loja e importar <ArrowRight className="w-4 h-4" />
+            </a>
+          </div>
+          <ul className="space-y-2.5 text-xs sm:text-sm text-slate-300">
+            {[
+              'Estoque com IMEI, modelo, capacidade, cor e preço',
+              'Clientes com telefone e histórico',
+              'Vendas passadas, para o relatório não começar do zero',
+              'Prévia antes de gravar: você confere e confirma',
+              `Dá para fazer dentro dos ${DIAS_TESTE_GRATIS} dias grátis`,
+            ].map((t) => (
+              <li key={t} className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" /> {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* ESPECIALIZAÇÃO (autoridade honesta: o que existe no sistema) */}
+      <section className="py-6 sm:py-10 px-4 sm:px-6 max-w-6xl mx-auto space-y-6">
+        <div className="text-center space-y-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-blue-400">Feito para loja de iPhone</span>
+          <h2 className="text-xl sm:text-3xl font-black text-white">Não é um ERP genérico com "celular" no nome</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { Icone: Smartphone, t: 'Estoque por IMEI', d: 'Cada aparelho é um IMEI: entrada, etiqueta, venda, garantia e OS ligados a ele.' },
+            { Icone: Handshake, t: 'Trade-in', d: 'Aparelho do cliente entra como parte do pagamento e já vai para o estoque.' },
+            { Icone: Users, t: 'Atacado com fiado', d: 'Venda em lote para lojista parceiro, saldo devedor e abatimentos com recibo.' },
+            { Icone: MessageCircle, t: 'Bot no WhatsApp', d: 'Estoque, venda, cadastro, OS e, nos planos maiores, cobrança e broadcast.' },
+          ].map(({ Icone, t, d }) => (
+            <CartaoTilt key={t} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4" maxGraus={6}>
+              <Icone className="w-6 h-6 text-blue-400" />
+              <h3 className="mt-3 text-sm font-black text-white">{t}</h3>
+              <p className="mt-1 text-xs text-slate-400 leading-relaxed">{d}</p>
+            </CartaoTilt>
+          ))}
+        </div>
       </section>
 
       {/* FORMULÁRIO DE CADASTRO E CHECKOUT */}
       <section id="formulario" className="py-10 sm:py-16 px-4 sm:px-6 max-w-3xl mx-auto">
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-10 shadow-2xl space-y-6 sm:space-y-8">
-          
+
           <div className="text-center space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
-              <Gift className="w-3.5 h-3.5" /> 3 Dias Grátis com Liberação Imediata
+              <Gift className="w-3.5 h-3.5" /> {DIAS_TESTE_GRATIS} dias grátis, liberado na hora, sem cartão
             </div>
             <h2 className="text-xl sm:text-3xl font-black text-white">
               Crie o acesso da sua loja agora mesmo
@@ -510,15 +630,15 @@ export default function AssinarPage() {
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-3 max-w-xs mx-auto">
                   <span className="text-xs font-bold text-emerald-400 block">QR Code PIX para Liberação:</span>
                   {cadastroConcluido.pixData.qrCodeBase64 ? (
-                    <img 
-                      src={`data:image/png;base64,${cadastroConcluido.pixData.qrCodeBase64}`} 
-                      alt="QR Code Pix" 
+                    <img
+                      src={`data:image/png;base64,${cadastroConcluido.pixData.qrCodeBase64}`}
+                      alt="QR Code Pix"
                       className="w-44 h-44 object-contain bg-white p-2 rounded-xl mx-auto shadow"
                     />
                   ) : (
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(cadastroConcluido.pixData.qrCode || cadastroConcluido.pixData.chavePix)}`} 
-                      alt="QR Code Pix" 
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(cadastroConcluido.pixData.qrCode || cadastroConcluido.pixData.chavePix)}`}
+                      alt="QR Code Pix"
                       className="w-44 h-44 object-contain bg-white p-2 rounded-xl mx-auto shadow"
                     />
                   )}
@@ -572,7 +692,7 @@ export default function AssinarPage() {
           ) : (
             /* Formulário Ativo */
             <form onSubmit={handleCadastrar} className="space-y-5">
-              
+
               {/* Escolha da Modalidade */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
@@ -589,7 +709,7 @@ export default function AssinarPage() {
                     }`}
                   >
                     <Gift className={`w-4 h-4 ${modalidade === 'trial' ? 'text-purple-400' : 'text-slate-500'}`} />
-                    <span className="text-[11px] font-bold leading-tight">3 Dias Grátis</span>
+                    <span className="text-[11px] font-bold leading-tight">{DIAS_TESTE_GRATIS} Dias Grátis</span>
                     <span className="text-[10px] text-slate-400 leading-tight">Sem cartão</span>
                   </button>
 
@@ -625,7 +745,7 @@ export default function AssinarPage() {
 
               {/* Campos do Formulário */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                
+
                 {/* Nome da Loja */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
@@ -767,8 +887,8 @@ export default function AssinarPage() {
                 ) : (
                   <>
                     <Zap className="w-5 h-5 text-amber-300" />
-                    {modalidade === 'trial' 
-                      ? 'Liberar Acesso Grátis de 3 Dias'
+                    {modalidade === 'trial'
+                      ? `Liberar Acesso Grátis de ${DIAS_TESTE_GRATIS} Dias`
                       : modalidade === 'pix'
                         ? `Gerar PIX e Ativar (R$ ${infoCalculo.valorTotal.toFixed(2).replace('.', ',')})`
                         : `Pagar no Cartão (R$ ${infoCalculo.valorTotal.toFixed(2).replace('.', ',')})`
@@ -777,9 +897,9 @@ export default function AssinarPage() {
                 )}
               </Button>
 
-              <div className="text-center text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Dados protegidos com criptografia ponta a ponta.</span>
+              <div className="text-center text-[11px] text-slate-400 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+                <span className="flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" /> Dados protegidos com criptografia.</span>
+                <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> Sem fidelidade: cancele pelo painel.</span>
               </div>
             </form>
           )}
@@ -797,7 +917,7 @@ export default function AssinarPage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-          <div className="bg-slate-900/60 border border-slate-800 p-5 sm:p-6 rounded-3xl space-y-4">
+          <CartaoTilt className="bg-slate-900/60 border border-slate-800 p-5 sm:p-6 rounded-3xl space-y-4" maxGraus={5}>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed italic">
               "A velocidade do robô responder nos grupos do WhatsApp salvou meu dia a dia. Antes eu perdia pelo menos 2 a 3 vendas por dia. Hoje o cliente pergunta e o robô responde em 2 segundos."
             </p>
@@ -810,9 +930,9 @@ export default function AssinarPage() {
                 <span className="text-[11px] text-slate-400">Revendedor de iPhones — BH</span>
               </div>
             </div>
-          </div>
+          </CartaoTilt>
 
-          <div className="bg-slate-900/60 border border-slate-800 p-5 sm:p-6 rounded-3xl space-y-4">
+          <CartaoTilt className="bg-slate-900/60 border border-slate-800 p-5 sm:p-6 rounded-3xl space-y-4" maxGraus={5}>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed italic">
               "A função de fiado e devedores com !abater e !saldo eliminou todas as dores de cabeça com cobrança. Os lojistas parceiros recebem o comprovante automático no WhatsApp."
             </p>
@@ -825,7 +945,7 @@ export default function AssinarPage() {
                 <span className="text-[11px] text-slate-400">Loja &amp; Assistência Técnica</span>
               </div>
             </div>
-          </div>
+          </CartaoTilt>
         </div>
       </section>
 
@@ -852,8 +972,8 @@ export default function AssinarPage() {
                   className="w-full p-4 sm:p-5 text-left flex items-center justify-between gap-3 text-xs sm:text-sm font-bold text-white hover:text-blue-300 transition cursor-pointer min-h-[56px]"
                 >
                   <span className="leading-snug">{faq.p}</span>
-                  {isAberto 
-                    ? <ChevronUp className="w-4 h-4 text-blue-400 shrink-0" /> 
+                  {isAberto
+                    ? <ChevronUp className="w-4 h-4 text-blue-400 shrink-0" />
                     : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
                 </button>
                 {isAberto && (
@@ -910,6 +1030,7 @@ export default function AssinarPage() {
       <footer className="border-t border-slate-800/80 py-6 px-4 text-center text-xs text-slate-500 space-y-1">
         <p>© {new Date().getFullYear()} Phone Center. Todos os direitos reservados.</p>
         <p>Desenvolvido para lojistas de eletrônicos e assistências técnicas no Brasil.</p>
+        <p><Link href="/comparar" className="underline underline-offset-4 hover:text-slate-300">Comparação com o MercadoPhone</Link></p>
       </footer>
 
     </div>
