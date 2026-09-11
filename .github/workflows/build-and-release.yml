@@ -32,12 +32,19 @@ jobs:
       - name: Instalar Dependências
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build Next.js & Electron
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pnpm build
-          pnpm electron:build --publish always
+      # O .exe usa a mesma versão da release (v0.1.N). Antes ficava sempre 0.1.0, e o
+      # auto-update nunca via versão nova.
+      - name: Versão do app igual à da release
+        shell: bash
+        run: npm pkg set version=0.1.${{ github.run_number }}
+
+      # O app desktop abre https://app.phonecenter.tech: não precisa do build do Next
+      # (que falhava sem as variáveis do Supabase, e o PowerShell só olhava o último comando).
+      # Quem publica o .exe é o job de release. Com --publish always, o electron-builder
+      # procurava a release v0.1.0 só entre as 30 mais recentes; a partir da 31ª não achava,
+      # tentava recriar a tag e o build quebrava.
+      - name: Build Electron (.exe)
+        run: pnpm electron:build --publish never
 
       - name: Upload Artefato Windows (.exe)
         uses: actions/upload-artifact@v4
@@ -127,7 +134,7 @@ jobs:
             Atualização automática gerada pelo pipeline de CI/CD.
             
             ### 📥 Downloads:
-            - **Windows (.exe Instalável):** Baixe o `PhoneCenter-Setup.exe` abaixo.
+            - **Windows (.exe Instalável):** Baixe o `PhoneCenter-Setup-<versão>.exe` abaixo.
             - **Android (.apk Instalável):** Baixe o `app-debug.apk` abaixo.
             - **Auto-Update:** Os usuários com o app Windows já instalado receberão esta atualização automaticamente ao abrir o aplicativo.
           files: release-files/*
