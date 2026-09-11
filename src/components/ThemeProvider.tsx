@@ -18,17 +18,18 @@ export function useColorTheme() {
   return context;
 }
 
-function ThemeSync({ children }: { children: React.ReactNode }) {
+function ThemeSync({ children, pronto }: { children: React.ReactNode; pronto: boolean }) {
   const { colorTheme } = useColorTheme();
   const { setTheme } = useTheme();
 
   useEffect(() => {
-    if (colorTheme === 'white-clean') {
-      setTheme('light');
-    } else if (colorTheme !== 'padrao') {
-      setTheme('dark'); // Força o modo escuro para os temas customizados escuros
-    }
-  }, [colorTheme, setTheme]);
+    // Antes de ler o tema salvo, colorTheme ainda é o valor inicial.
+    if (!pronto) return;
+    // Só o White Clean é claro. O "padrao" também precisa voltar para dark: antes,
+    // quem alternava White Clean -> Dark ficava com as classes do modo claro sobre o
+    // fundo escuro (títulos escuros, barra inferior branca, campos cinza).
+    setTheme(colorTheme === 'white-clean' ? 'light' : 'dark');
+  }, [pronto, colorTheme, setTheme]);
 
   return <>{children}</>;
 }
@@ -55,7 +56,7 @@ export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
   return (
     <ColorThemeContext.Provider value={{ colorTheme, setColorTheme }}>
       <NextThemesProvider {...props}>
-        <ThemeSync>
+        <ThemeSync pronto={mounted}>
           {children}
           {mounted && <ColorThemeStyles theme={colorTheme} />}
           <style dangerouslySetInnerHTML={{ __html: `
@@ -85,6 +86,7 @@ function ColorThemeStyles({ theme }: { theme: ColorTheme }) {
           radial-gradient(at 0% 100%, #f8fafc 0px, transparent 50%) !important;
       }
       [data-color-theme="white-clean"] {
+        color-scheme: light;
         --mesh-1: #f8fafc !important;
         --mesh-2: #f1f5f9 !important;
         --mesh-3: #e2e8f0 !important;

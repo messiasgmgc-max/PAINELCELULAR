@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { lerDescontoLoja, type DescontoLoja } from '@/lib/planos/desconto';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { TipoPlano, PeriodoFaturamento, obterPlanoPorTipo } from '@/lib/planos-config';
@@ -28,6 +29,8 @@ export interface StorePlanData {
   isVitalicio: boolean;
   /** Cancelamento pelo painel: a loja segue liberada até o vencimento já pago. */
   assinatura: EstadoAssinatura;
+  /** Desconto em vigor dado pelo administrador (já aplicado no PIX e no cartão). */
+  desconto: DescontoLoja | null;
 }
 
 const DEFAULT_PLAN: StorePlanData = {
@@ -51,6 +54,7 @@ const DEFAULT_PLAN: StorePlanData = {
   isBloqueado: false,
   isVitalicio: false,
   assinatura: lerAssinatura(null, null),
+  desconto: null,
 };
 
 export function useStorePlan() {
@@ -156,6 +160,7 @@ export function useStorePlan() {
         isBloqueado,
         isVitalicio,
         assinatura: lerAssinatura(loja.configuracoes, loja.data_vencimento),
+        desconto: lerDescontoLoja(loja),
       });
     } catch (err) {
       console.error('Erro ao carregar dados do plano:', err);

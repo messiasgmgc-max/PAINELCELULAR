@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { aplicarDesconto, formatarDataCurta } from '@/lib/planos/desconto';
 import { 
   CreditCard, 
   CheckCircle2, 
@@ -79,9 +80,11 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
   
   const infoCalculo = calcularValoresPlano(planoSelecionado, periodoSelecionado);
   const valorDiaria = infoCalculo.valorMensal / 30;
-  const valorCobrancaFinal = isRenovacaoAntecipada 
+  const valorSemDesconto = isRenovacaoAntecipada 
     ? Math.max(1.00, Number((diasParaCompletar * valorDiaria).toFixed(2)))
     : infoCalculo.valorTotal;
+  // Mesmo cálculo do servidor (gerar-pix / pagar-cartao): desconto depois do proporcional.
+  const valorCobrancaFinal = aplicarDesconto(valorSemDesconto, planData.desconto).valorFinal;
 
   // Estados PIX
   const [copied, setCopied] = useState(false);
@@ -683,6 +686,13 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
                   <p className="text-xl font-mono font-black text-emerald-400">
                     R$ {valorCobrancaFinal.toFixed(2).replace('.', ',')}
                   </p>
+                  {planData.desconto && valorCobrancaFinal < valorSemDesconto && (
+                    <p className="text-[11px] font-semibold text-amber-300">
+                      <span className="mr-1 text-slate-500 line-through">R$ {valorSemDesconto.toFixed(2).replace('.', ',')}</span>
+                      {planData.desconto.percentual}% de desconto
+                      {planData.desconto.validoAte ? ` até ${formatarDataCurta(planData.desconto.validoAte)}` : ''}
+                    </p>
+                  )}
                 </div>
               </div>
 

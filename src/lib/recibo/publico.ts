@@ -4,9 +4,10 @@
  * O link do recibo vai para o cliente no WhatsApp e no QR code impresso: quem
  * tiver o link vê a página sem login. A API devolvia a venda inteira (custo e
  * lucro da loja), a loja inteira (token do Mercado Pago, dados fiscais,
- * configurações) e o cadastro do cliente, e ainda aceitava os 6 últimos
+ * configurações) e o cadastro inteiro do cliente, e ainda aceitava os 6 últimos
  * caracteres do id, o que dava para adivinhar. Aqui fica só o que o recibo
- * mostra, com os dados pessoais mascarados.
+ * mostra: nome, CPF, telefone e e-mail do cliente (o comprovante precisa deles),
+ * sem endereço e sem o resto do cadastro.
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -122,9 +123,9 @@ export function montarReciboPublico(
     cliente: cliente
       ? {
           nome: cliente.nome ?? null,
-          cpf: mascararCpf(cliente.cpf) || null,
-          telefone: mascararTelefone(cliente.telefone) || null,
-          email: mascararEmail(cliente.email) || null,
+          cpf: cliente.cpf ?? null,
+          telefone: cliente.telefone ?? null,
+          email: cliente.email && cliente.email !== 'sem@email.com' ? cliente.email : null,
         }
       : null,
   };

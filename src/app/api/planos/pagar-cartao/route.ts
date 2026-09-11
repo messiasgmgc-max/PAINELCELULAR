@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { aplicarDesconto, lerDescontoLoja } from '@/lib/planos/desconto';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { calcularValoresPlano, TipoPlano, PeriodoFaturamento } from '@/lib/planos-config';
 
@@ -32,7 +33,9 @@ export async function POST(request: Request) {
 
     // Calcular valores do plano e período
     const planoInfo = calcularValoresPlano(plano as TipoPlano, periodo as PeriodoFaturamento);
-    const valorCobranca = Number(planoInfo.valorTotal.toFixed(2));
+    // Desconto da loja (dado pelo administrador), igual ao do PIX.
+    const desconto = lerDescontoLoja(loja);
+    const valorCobranca = aplicarDesconto(planoInfo.valorTotal, desconto).valorFinal;
 
     // Token Mercado Pago
     // A assinatura do Phone Center é paga na conta da plataforma. Usar o token da loja (ou o de
@@ -102,7 +105,7 @@ export async function POST(request: Request) {
           ativo: true,
           data_vencimento: novoVencimento,
           periodo_cobranca: periodo,
-          valor_mensalidade: planoInfo.valorMensal,
+          valor_mensalidade: aplicarDesconto(planoInfo.valorMensal, desconto).valorFinal,
           solicitacao_liberacao_status: 'aprovado'
         }).eq('id', lojaId);
 

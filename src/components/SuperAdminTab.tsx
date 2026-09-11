@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { formatarDataCurta, lerDescontoLoja, DESCONTO_MAXIMO } from '@/lib/planos/desconto';
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +68,9 @@ interface Loja {
   observacao_plano?: string | null;
   mp_access_token?: string | null;
   mp_public_key?: string | null;
+  desconto_percentual?: number | string | null;
+  desconto_valido_ate?: string | null;
+  desconto_motivo?: string | null;
   ativo: boolean;
   created_at: string;
 }
@@ -232,6 +236,9 @@ export default function SuperAdminTab() {
     chave_pix_cobranca: "financeiro@phonecenter.com.br",
     observacao_plano: "",
     mp_access_token: "",
+    desconto_percentual: 0,
+    desconto_valido_ate: "",
+    desconto_motivo: "",
   });
 
   // Sub-aba e Histórico Global de Planos & Mensalidades
@@ -795,6 +802,9 @@ export default function SuperAdminTab() {
       chave_pix_cobranca: loja.chave_pix_cobranca || "financeiro@phonecenter.com.br",
       observacao_plano: loja.observacao_plano || "",
       mp_access_token: loja.mp_access_token || "",
+      desconto_percentual: Number(loja.desconto_percentual) || 0,
+      desconto_valido_ate: loja.desconto_valido_ate || "",
+      desconto_motivo: loja.desconto_motivo || "",
     });
   };
 
@@ -819,6 +829,9 @@ export default function SuperAdminTab() {
           chave_pix_cobranca: editPlanoForm.chave_pix_cobranca.trim(),
           observacao_plano: editPlanoForm.observacao_plano.trim() || null,
           mp_access_token: editPlanoForm.mp_access_token.trim() || null,
+          desconto_percentual: Number(editPlanoForm.desconto_percentual) || 0,
+          desconto_valido_ate: editPlanoForm.desconto_percentual > 0 ? (editPlanoForm.desconto_valido_ate || null) : null,
+          desconto_motivo: editPlanoForm.desconto_percentual > 0 ? (editPlanoForm.desconto_motivo.trim() || null) : null,
         })
         .eq("id", editingPlanoLoja.id);
 
@@ -1708,6 +1721,14 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                             </td>
                             <td className="py-3.5 px-3 font-mono font-bold text-emerald-400">
                               R$ {(loja.valor_mensalidade || 99.90).toFixed(2).replace('.', ',')}
+                              {(() => {
+                                const desconto = lerDescontoLoja(loja);
+                                return desconto ? (
+                                  <span className="block text-[10px] font-bold text-amber-300">
+                                    -{desconto.percentual}%{desconto.validoAte ? ` até ${formatarDataCurta(desconto.validoAte)}` : ''}
+                                  </span>
+                                ) : null;
+                              })()}
                             </td>
                             <td className="py-3.5 px-3 font-mono">
                               {isVitalicio ? (
@@ -2631,6 +2652,53 @@ CREATE POLICY "SuperAdmin tudo em perfis" ON public.perfis FOR ALL USING (true) 
                     className="input-glass w-full text-sm"
                   />
                 </div>
+              </div>
+
+              {/* Desconto na mensalidade: o PIX e o cartão cobram com ele enquanto estiver no prazo */}
+              <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-3">
+                <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Gift className="w-3.5 h-3.5" /> Desconto na mensalidade
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-300 font-semibold mb-1 block">Desconto (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={DESCONTO_MAXIMO}
+                      step="1"
+                      value={editPlanoForm.desconto_percentual}
+                      onChange={(e) => setEditPlanoForm({ ...editPlanoForm, desconto_percentual: Math.min(DESCONTO_MAXIMO, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                      className="input-glass w-full text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-300 font-semibold mb-1 block">Válido até</label>
+                    <input
+                      type="date"
+                      value={editPlanoForm.desconto_valido_ate}
+                      disabled={editPlanoForm.desconto_percentual <= 0}
+                      onChange={(e) => setEditPlanoForm({ ...editPlanoForm, desconto_valido_ate: e.target.value })}
+                      className="input-glass w-full text-sm disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-300 font-semibold mb-1 block">Motivo</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: parceiro, indicação"
+                      value={editPlanoForm.desconto_motivo}
+                      disabled={editPlanoForm.desconto_percentual <= 0}
+                      onChange={(e) => setEditPlanoForm({ ...editPlanoForm, desconto_motivo: e.target.value })}
+                      className="input-glass w-full text-sm disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {editPlanoForm.desconto_percentual > 0
+                    ? `A loja paga ${editPlanoForm.desconto_percentual}% a menos em qualquer plano e período, no PIX e no cartão${editPlanoForm.desconto_valido_ate ? `, até ${formatarDataCurta(editPlanoForm.desconto_valido_ate)}` : ', sem data para acabar'}.`
+                    : 'Sem desconto: a loja paga o preço da tabela do plano.'}
+                </p>
               </div>
 
               {/* Painel de Ações Rápidas de Isenção e Prazos */}

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { aplicarDesconto, lerDescontoLoja } from '@/lib/planos/desconto';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { calcularValoresPlano, TipoPlano, PeriodoFaturamento, obterPlanoPorTipo } from '@/lib/planos-config';
 
@@ -55,7 +56,9 @@ export async function POST(request: Request) {
     }
 
     // O valor vem sempre do servidor: aceitar o da tela deixava ativar o plano pagando R$ 1.
-    const valorCobranca = valorCalculado;
+    // O desconto da loja (dado pelo administrador) entra depois do proporcional.
+    const desconto = lerDescontoLoja(loja);
+    const valorCobranca = aplicarDesconto(valorCalculado, desconto).valorFinal;
     
     // A assinatura do Phone Center é paga na conta da plataforma. Usar o token da loja (ou o de
     // "qualquer loja com token") mandava o dinheiro para a conta errada, e uma loja com o
@@ -106,8 +109,8 @@ export async function POST(request: Request) {
           const ticketUrl = txData.ticket_url;
 
           const obsHistorico = isProporcional
-            ? `PIX Mercado Pago gerado (ID: ${paymentId}) - Renovação Proporcional de ${diasCobrados} dias (restavam ${diasRestantes} dias) | Plano: ${infoPlano.nomePlano} | Dias: ${diasCobrados}`
-            : `PIX Mercado Pago gerado (ID: ${paymentId}) | Plano: ${infoPlano.nomePlano} (${periodoEscolhido}) | Dias: ${diasCobrados}`;
+            ? `PIX Mercado Pago gerado (ID: ${paymentId}) - Renovação Proporcional de ${diasCobrados} dias (restavam ${diasRestantes} dias) | Plano: ${infoPlano.nomePlano} | Dias: ${diasCobrados}${desconto ? ` | Desconto: ${desconto.percentual}%` : ''}`
+            : `PIX Mercado Pago gerado (ID: ${paymentId}) | Plano: ${infoPlano.nomePlano} (${periodoEscolhido}) | Dias: ${diasCobrados}${desconto ? ` | Desconto: ${desconto.percentual}%` : ''}`;
 
           // Grava no histórico de pagamentos
           await supabaseAdmin.from('historico_pagamentos_planos').insert({

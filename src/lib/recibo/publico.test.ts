@@ -54,7 +54,7 @@ describe('Recibo público', () => {
     assert.equal('dono_whatsapp' in (recibo.loja || {}), false);
   });
 
-  it('mascara CPF, telefone e e-mail do cliente e esconde o endereço', () => {
+  it('mostra CPF, telefone e e-mail do cliente, mas não o endereço', () => {
     const recibo = montarReciboPublico(
       { id: 'v1' },
       null,
@@ -62,9 +62,9 @@ describe('Recibo público', () => {
     );
     assert.deepEqual(recibo.cliente, {
       nome: 'Ana',
-      cpf: '***.***.789-09',
-      telefone: '(31) *****-5432',
-      email: 'a***@gmail.com',
+      cpf: '123.456.789-09',
+      telefone: '(31) 99876-5432',
+      email: 'ana.souza@gmail.com',
     });
   });
 

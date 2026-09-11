@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { aplicarDesconto } from '@/lib/planos/desconto';
 import { 
   Lock, 
   AlertTriangle, 
@@ -54,6 +55,8 @@ export function PlanPaywallModal() {
   const [periodoEscolhido, setPeriodoEscolhido] = useState<PeriodoFaturamento>('mensal');
 
   const infoCalculo = calcularValoresPlano(planoEscolhido, periodoEscolhido);
+  // O servidor cobra com o desconto da loja; a tela mostra o mesmo valor.
+  const valorComDesconto = aplicarDesconto(infoCalculo.valorTotal, planData.desconto).valorFinal;
 
   // Estados para PIX Dinâmico / Mercado Pago
   const [gerandoPix, setGerandoPix] = useState(false);
@@ -355,7 +358,7 @@ export function PlanPaywallModal() {
           <div className="text-right">
             <span className="text-slate-400">Total a Pagar:</span>
             <p className="text-lg font-mono font-black text-emerald-400">
-              R$ {infoCalculo.valorTotal.toFixed(2).replace('.', ',')}
+              R$ {valorComDesconto.toFixed(2).replace('.', ',')}
             </p>
           </div>
         </div>

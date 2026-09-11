@@ -199,7 +199,7 @@ function ProdutoCombobox({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1.5 w-full min-w-[340px] sm:min-w-[500px] md:min-w-[620px] bg-slate-900/98 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-[9999] overflow-hidden flex flex-col max-h-84 animate-in fade-in slide-in-from-top-1 duration-150">
+        <div className="absolute left-0 top-full mt-1.5 w-full sm:min-w-[500px] md:min-w-[620px] bg-slate-900/98 backdrop-blur-2xl border border-white/20 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-[9999] overflow-hidden flex flex-col max-h-84 animate-in fade-in slide-in-from-top-1 duration-150">
           <div className="p-2.5 border-b border-white/10 bg-black/40 flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <Search className="w-4 h-4 text-emerald-400 shrink-0 ml-1" />
@@ -3735,7 +3735,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               </div>
 
               {/* Ações Rápidas de Filtro */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-1 p-1 bg-slate-900/90 border border-slate-800 rounded-xl">
                   {[
                     { id: 'mes' as const, label: 'Este mês' },
@@ -3791,7 +3791,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             </div>
 
             {/* SUB-ABAS DE CANAIS DE VENDA */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl w-full sm:w-fit flex-wrap">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl w-full sm:w-fit overflow-x-auto no-scrollbar sm:flex-wrap">
               {[
                 { id: 'varejo', label: '📱 Varejo', count: contagemCanais.varejo, color: 'text-emerald-400' },
                 { id: 'pendentes', label: '⚠️ Dados Pendentes', count: contagemCanais.pendentes, color: 'text-amber-400', isAlert: true },
@@ -3803,7 +3803,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   type="button"
                   onClick={() => setFiltroCanal(tab.id as any)}
                   className={cn(
-                    "px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer",
+                    "shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer",
                     filtroCanal === tab.id
                       ? "bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-950/40"
                       : "text-slate-400 hover:text-white hover:bg-slate-800/60"

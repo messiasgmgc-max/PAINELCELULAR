@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2 } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan } from "lucide-react";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
@@ -2419,7 +2419,7 @@ export function AparelhosTab() {
                           : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
                       )}
                     >
-                      <Smartphone className="w-4 h-4" /> 📱 Celular
+                      <Smartphone className="w-4 h-4" /> Celular
                     </button>
 
                     <button
@@ -2432,7 +2432,7 @@ export function AparelhosTab() {
                           : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
                       )}
                     >
-                      🧴 Perfume
+                      <SprayCan className="w-4 h-4" /> Perfume
                     </button>
 
                     <button
@@ -2445,7 +2445,7 @@ export function AparelhosTab() {
                           : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
                       )}
                     >
-                      <Headphones className="w-4 h-4" /> 🎧 Acessório
+                      <Headphones className="w-4 h-4" /> Acessório
                     </button>
 
                     <button
@@ -2458,7 +2458,7 @@ export function AparelhosTab() {
                           : "bg-slate-950/70 text-slate-400 border-slate-800 hover:text-white"
                       )}
                     >
-                      <Package className="w-4 h-4" /> 📦 Outro
+                      <Package className="w-4 h-4" /> Outro
                     </button>
                   </div>
                 </div>
