@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { textoGarantiaPadrao } from '@/lib/vendas/garantia';
 import { aplicarEdicaoItem } from '@/lib/vendas/itemVenda';
 import { escoparHtmlRecibo } from '@/lib/recibo/reciboParaPdf';
 import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
@@ -102,13 +103,13 @@ function avisarAuditoriaPendente(
   });
 }
 
-const createInitialPosPagamento = (): PosPagamentoState => ({
+const createInitialPosPagamento = (garantia: string = textoGarantiaPadrao(undefined)): PosPagamentoState => ({
   metodo: 'dinheiro',
   parcelas: 1,
   detalhes: '',
   valorPago: 0,
   status: 'pago',
-  garantia: '90 dias',
+  garantia,
   descontoGlobal: 0,
   tipoDescontoGlobal: 'R$',
   pagamentos: [createPagamentoItem()],
@@ -318,6 +319,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const isVendasRoute = pathname === '/vendas';
   const { usuario } = useAuth();
   const { config } = useStoreConfig();
+  // Garantia de Configurações: vem pronta na venda nova e pode ser alterada na hora.
+  const garantiaPadrao = textoGarantiaPadrao(config?.garantiaDias);
   const { clientes, fetchClientes, criarCliente } = useClientes();
   const { aparelhos, fetchAparelhos, criarAparelho } = useAparelhos();
   const { tecnicos, fetchTecnicos } = useTecnicos();
@@ -602,6 +605,16 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       successTimerRef.current = null;
     }
   };
+
+  // A configuração da loja carrega depois do primeiro render: atualiza a garantia da venda
+  // nova só se ela ainda estiver no padrão anterior (ninguém mexeu no campo).
+  const garantiaPadraoAplicadaRef = useRef(textoGarantiaPadrao(undefined));
+  useEffect(() => {
+    const anterior = garantiaPadraoAplicadaRef.current;
+    garantiaPadraoAplicadaRef.current = garantiaPadrao;
+    if (editingId || anterior === garantiaPadrao) return;
+    setPosPagamento((atual) => (atual.garantia === anterior ? { ...atual, garantia: garantiaPadrao } : atual));
+  }, [garantiaPadrao, editingId]);
 
   const openPOSModal = () => {
     clearPosTimers();
@@ -1603,7 +1616,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     setPosDados({ tipoVenda: 'Venda', clienteId: '', clienteNome: '', vendedor: '', tipoEntrega: 'Retirada', dataVenda: formatForDatetimeLocal() });
     setCart([]);
     setPosItem({ quantidade: 1, valorInterno: 0, valorExibir: 0, desconto: 0, tipoDesconto: 'R$', observacao: '' });
-    setPosPagamento(createInitialPosPagamento());
+    setPosPagamento(createInitialPosPagamento(garantiaPadrao));
     setTradeInVenda(null);
     setEditingId(null);
   };
@@ -1653,7 +1666,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       ...createInitialPosPagamento(),
       metodo: venda.metodo,
       status: venda.status,
-      garantia: venda.garantia || '90 dias',
+      garantia: venda.garantia || garantiaPadrao,
       descontoGlobal: venda.descontoTotal || 0,
       pagamentos: pagamentosNormalizados,
     };
@@ -2738,7 +2751,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           status: sale.status,
           metodo: sale.metodo,
           descricao,
-          garantia: '90 dias',
+          garantia: garantiaPadrao,
           descontoTotal: 0,
           loja_id: usuario.lojaId,
         });
