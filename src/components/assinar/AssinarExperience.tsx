@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMotionValueEvent, useReducedMotion, useScroll } from 'framer-motion';
 import AssinarPage from '@/components/assinar/AssinarPage';
 import { NotebookScene } from '@/components/assinar/NotebookScene';
+import { MovimentoProvider } from '@/components/assinar/movimento';
 import { ALTURA_ROLAGEM_VH, PROGRESSO_ENTRADA } from '@/lib/assinar/timeline3d';
 
 /**
@@ -16,7 +17,8 @@ import { ALTURA_ROLAGEM_VH, PROGRESSO_ENTRADA } from '@/lib/assinar/timeline3d';
  *    tela de forma síncrona e não troca de layout depois do primeiro desenho.
  *  - CenaComRolagem: container alto (a rolagem vira progresso), palco grudado
  *    (sticky) com a cena, e a página real logo abaixo.
- *  - NotebookScene: notebook em CSS 3D; a tela mostra a página real sem interação.
+ *  - NotebookScene: notebook em CSS 3D; a tela mostra a página real sem interação
+ *    (modo 'previa': efeitos parados no estado final, sem ouvintes).
  *  - A página real começa exatamente 100dvh acima do fim do container. No fim da
  *    animação a tela do notebook (identidade) e a página real coincidem pixel a
  *    pixel; o palco some e a página, com toda a lógica original, recebe os cliques.
@@ -75,7 +77,9 @@ export function AssinarExperience() {
             <span>Animação 3D indisponível neste navegador; mostrando a página normal.</span>
           )}
         </div>
-        <AssinarPage />
+        <MovimentoProvider value={reduzirMovimento && !forcarAnimacao ? 'reduzido' : 'completo'}>
+          <AssinarPage />
+        </MovimentoProvider>
       </>
     );
   }
@@ -114,7 +118,10 @@ function CenaComRolagem({ mobile }: { mobile: boolean }) {
               className="pointer-events-none h-full w-full select-none overflow-hidden"
               {...({ inert: true } as Record<string, boolean>)}
             >
-              <AssinarPage />
+              {/* Prévia: tudo parado no estado final, sem ouvintes. */}
+              <MovimentoProvider value="previa">
+                <AssinarPage />
+              </MovimentoProvider>
             </div>
           </NotebookScene>
         </div>
@@ -122,7 +129,9 @@ function CenaComRolagem({ mobile }: { mobile: boolean }) {
 
       {/* A página real, alinhada ao topo do palco no fim da animação. */}
       <div className="relative z-0" style={{ marginTop: '-100dvh' }}>
-        <AssinarPage />
+        <MovimentoProvider value="completo">
+          <AssinarPage />
+        </MovimentoProvider>
       </div>
     </div>
   );
