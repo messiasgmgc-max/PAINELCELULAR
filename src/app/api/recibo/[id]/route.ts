@@ -1,104 +1,61 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
+import { CAMPOS_LOJA_RECIBO, idReciboValido, montarReciboPublico } from '@/lib/recibo/publico';
 
+/**
+ * Recibo público: aberto sem login por quem tem o link (WhatsApp, QR code).
+ * Devolve só o que o recibo mostra; ver src/lib/recibo/publico.ts.
+ */
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const semCache = { 'Cache-Control': 'private, no-store' };
+
   try {
     const { id } = await params;
-    if (!id) {
-      return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
+    if (!idReciboValido(id)) {
+      return NextResponse.json({ error: 'Recibo não encontrado' }, { status: 404, headers: semCache });
     }
 
-    // 1. Buscar a venda pelo ID (exato ou sufixo)
-    let { data: venda } = await supabaseAdmin
+    const { data: venda, error: erroVenda } = await supabaseAdmin
       .from('vendas')
       .select('*')
       .eq('id', id)
       .maybeSingle();
 
+    if (erroVenda) throw erroVenda;
     if (!venda) {
-      // Tenta buscar por id curto/sufixo
-      const { data: vendasLista } = await supabaseAdmin
-        .from('vendas')
-        .select('*');
-
-      venda = vendasLista?.find((v: any) => v.id.endsWith(id) || v.id.slice(-6).toUpperCase() === id.toUpperCase()) || null;
+      return NextResponse.json({ error: 'Recibo não encontrado' }, { status: 404, headers: semCache });
     }
 
-    if (!venda) {
-      return NextResponse.json({ error: 'Recibo não encontrado' }, { status: 404 });
-    }
-
-    // 2. Buscar dados da loja vinculada
-    let loja = null;
-    const targetLojaId = venda.loja_id || venda.lojaId;
-
-    if (targetLojaId) {
-      const { data: lojaData } = await supabaseAdmin
+    // Só a loja da própria venda. O fallback antigo ("primeira loja" ou "loja
+    // personalizada") mostrava nome, CNPJ e Pix de outra loja no recibo.
+    let loja: Record<string, unknown> | null = null;
+    if (venda.loja_id) {
+      const { data } = await supabaseAdmin
         .from('lojas')
-        .select('*')
-        .eq('id', targetLojaId)
+        .select(CAMPOS_LOJA_RECIBO.join(', '))
+        .eq('id', venda.loja_id)
         .maybeSingle();
-      if (lojaData) loja = lojaData;
+      loja = data as unknown as Record<string, unknown> | null;
     }
 
-    // Fallback inteligente: Se o loja_id não estiver salvo na venda antiga, tenta encontrar a loja do vendedor em perfis
-    if (!loja && (venda.vendedor || venda.usuario_email)) {
-      const termoVendedor = venda.vendedor || venda.usuario_email;
-      const { data: perfil } = await supabaseAdmin
-        .from('perfis')
-        .select('loja_id')
-        .or(`email.ilike.%${termoVendedor}%,nome.ilike.%${termoVendedor}%`)
-        .maybeSingle();
-
-      if (perfil?.loja_id) {
-        const { data: lojaPerfil } = await supabaseAdmin
-          .from('lojas')
-          .select('*')
-          .eq('id', perfil.loja_id)
-          .maybeSingle();
-        if (lojaPerfil) loja = lojaPerfil;
-      }
-    }
-
-    // Se ainda não encontrou, busca a loja com nome personalizado (que não seja a 'Phone Center' genérica de id 00000)
-    if (!loja) {
-      const { data: lojaPersonalizada } = await supabaseAdmin
-        .from('lojas')
-        .select('*')
-        .neq('nome', 'Phone Center')
-        .limit(1)
-        .maybeSingle();
-
-      if (lojaPersonalizada) {
-        loja = lojaPersonalizada;
-      } else {
-        const { data: primeiraLoja } = await supabaseAdmin
-          .from('lojas')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-        if (primeiraLoja) loja = primeiraLoja;
-      }
-    }
-
-    // 3. Buscar dados do cliente vinculado
-    let cliente = null;
-    const targetClienteId = venda.cliente_id || venda.clienteId;
-    if (targetClienteId) {
-      const { data: clienteData } = await supabaseAdmin
+    let cliente: Record<string, unknown> | null = null;
+    const clienteId = venda.clienteId || venda.cliente_id;
+    if (clienteId && venda.loja_id) {
+      const { data } = await supabaseAdmin
         .from('clientes')
-        .select('*')
-        .eq('id', targetClienteId)
+        .select('nome, cpf, telefone, email')
+        .eq('id', clienteId)
+        .eq('loja_id', venda.loja_id)
         .maybeSingle();
-      if (clienteData) cliente = clienteData;
+      cliente = data;
     }
 
-    return NextResponse.json({ venda, loja, cliente });
-  } catch (error: any) {
-    console.error('Erro na API publica de recibo:', error);
-    return NextResponse.json({ error: 'Erro ao carregar recibo' }, { status: 500 });
+    return NextResponse.json(montarReciboPublico(venda, loja, cliente), { headers: semCache });
+  } catch (error) {
+    console.error('Erro na API pública de recibo:', error);
+    return NextResponse.json({ error: 'Erro ao carregar recibo' }, { status: 500, headers: semCache });
   }
 }

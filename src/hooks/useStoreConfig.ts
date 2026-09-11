@@ -65,7 +65,7 @@ export function useStoreConfig(providedLojaId?: string | null) {
 
       let currentLojaId: string | null = providedLojaId || activeLojaId;
 
-      // Se não foi passado via parâmetro, busca da sessão + tabela 'perfis' ou pega a primeira loja cadastrada no banco
+      // Se não foi passado via parâmetro, busca a loja do usuário logado na tabela 'perfis'.
       if (!currentLojaId) {
         const { data: { session } } = await supabase.auth.getSession();
         const userEmail = session?.user?.email;
@@ -83,18 +83,8 @@ export function useStoreConfig(providedLojaId?: string | null) {
         }
       }
 
-      if (!currentLojaId) {
-        const { data: primeiraLoja } = await supabase
-          .from('lojas')
-          .select('id')
-          .limit(1)
-          .maybeSingle();
-
-        if (primeiraLoja?.id) {
-          currentLojaId = String(primeiraLoja.id);
-        }
-      }
-
+      // Sem loja identificada fica a configuração padrão. Pegar a "primeira loja" do banco
+      // mostrava nome, CNPJ e chave Pix de outra loja no recibo e na cobrança de fiado.
       let lojaDb: any = null;
       if (currentLojaId) {
         setActiveLojaId(currentLojaId);
@@ -104,18 +94,6 @@ export function useStoreConfig(providedLojaId?: string | null) {
           .eq('id', currentLojaId)
           .maybeSingle();
         lojaDb = foundLoja;
-      }
-
-      if (!lojaDb) {
-        const { data: fallbackLoja } = await supabase
-          .from('lojas')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-        if (fallbackLoja) {
-          lojaDb = fallbackLoja;
-          setActiveLojaId(String(fallbackLoja.id));
-        }
       }
 
       if (lojaDb) {
@@ -175,15 +153,6 @@ export function useStoreConfig(providedLojaId?: string | null) {
             .maybeSingle();
           if (perfil?.loja_id) targetId = String(perfil.loja_id);
         }
-      }
-
-      if (!targetId) {
-        const { data: primeiraLoja } = await supabase
-          .from('lojas')
-          .select('id')
-          .limit(1)
-          .maybeSingle();
-        if (primeiraLoja?.id) targetId = String(primeiraLoja.id);
       }
 
       const updatePayload: Record<string, any> = {};

@@ -23,28 +23,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Loja não encontrada' }, { status: 404 });
     }
 
-    // 1. Tentar buscar token da própria loja
-    let tokenMercadoPago = loja.mp_access_token?.trim();
-
-    // 2. Se não tiver na própria loja, buscar de qualquer loja configurada no banco
-    if (!tokenMercadoPago) {
-      const { data: anyLojaWithMp } = await supabaseAdmin
-        .from('lojas')
-        .select('mp_access_token')
-        .not('mp_access_token', 'is', null)
-        .neq('mp_access_token', '')
-        .limit(1)
-        .maybeSingle();
-
-      if (anyLojaWithMp?.mp_access_token) {
-        tokenMercadoPago = anyLojaWithMp.mp_access_token.trim();
-      }
-    }
-
-    // 3. Se ainda não tiver, buscar do process.env
-    if (!tokenMercadoPago) {
-      tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
-    }
+    // A assinatura do Phone Center é paga na conta da plataforma. Usar o token da loja (ou o de
+    // "qualquer loja com token") mandava o dinheiro para a conta errada, e uma loja com o
+    // próprio token pagaria a si mesma e ganharia o plano.
+    const tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
 
     // Se for ID numérico do Mercado Pago e temos token
     if (tokenMercadoPago && /^\d+$/.test(paymentId)) {

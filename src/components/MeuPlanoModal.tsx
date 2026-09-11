@@ -30,6 +30,9 @@ import {
   Crown
 } from 'lucide-react';
 import { useStorePlan } from '@/hooks/useStorePlan';
+import { useAuth } from '@/hooks/useAuth';
+import { CancelarAssinaturaCard } from '@/components/plano/CancelarAssinaturaCard';
+import { podeGerenciarAssinatura } from '@/lib/planos/assinatura';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -57,8 +60,10 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     refetchPlan,
     historicoPagamentos,
     loadingHistorico,
-    refetchHistorico
+    refetchHistorico,
+    alterarAssinatura
   } = useStorePlan();
+  const { usuario } = useAuth();
 
   // Estados de navegação interna
   const [activeModalTab, setActiveModalTab] = useState<'planos' | 'pagamento' | 'historico'>('planos');
@@ -444,6 +449,17 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
               ) : null}
             </div>
           </div>
+
+          {/* Cancelamento sem fidelidade, como a página de assinatura promete */}
+          {!planData.isVitalicio && planData.dataVencimento && (
+            <CancelarAssinaturaCard
+              assinatura={planData.assinatura}
+              dataVencimento={planData.dataVencimento}
+              podeGerenciar={podeGerenciarAssinatura(usuario?.role)}
+              formatarData={formatarData}
+              onAlterar={alterarAssinatura}
+            />
+          )}
 
           {/* Seletor de Abas Principais */}
           <div className="flex items-center gap-2 border-b border-slate-800 pb-2">

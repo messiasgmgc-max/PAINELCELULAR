@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { TipoPlano, PeriodoFaturamento, obterPlanoPorTipo } from '@/lib/planos-config';
+import { lerAssinatura, type AcaoAssinatura, type EstadoAssinatura } from '@/lib/planos/assinatura';
 
 export interface StorePlanData {
   lojaId: string | null;
@@ -25,6 +26,8 @@ export interface StorePlanData {
   diasParaVencer: number;
   isBloqueado: boolean;
   isVitalicio: boolean;
+  /** Cancelamento pelo painel: a loja segue liberada até o vencimento já pago. */
+  assinatura: EstadoAssinatura;
 }
 
 const DEFAULT_PLAN: StorePlanData = {
@@ -47,6 +50,7 @@ const DEFAULT_PLAN: StorePlanData = {
   diasParaVencer: 30,
   isBloqueado: false,
   isVitalicio: false,
+  assinatura: lerAssinatura(null, null),
 };
 
 export function useStorePlan() {
@@ -59,15 +63,7 @@ export function useStorePlan() {
       setLoading(true);
       let targetLojaId = usuario?.lojaId;
 
-      if (!targetLojaId) {
-        const { data: firstStore } = await supabase
-          .from('lojas')
-          .select('id')
-          .limit(1)
-          .maybeSingle();
-        targetLojaId = firstStore?.id || null;
-      }
-
+      // Sem loja do usuário, fica o plano padrão: a "primeira loja" do banco é de outra pessoa.
       if (!targetLojaId) {
         setPlanData(DEFAULT_PLAN);
         return;
@@ -159,6 +155,7 @@ export function useStorePlan() {
         diasParaVencer,
         isBloqueado,
         isVitalicio,
+        assinatura: lerAssinatura(loja.configuracoes, loja.data_vencimento),
       });
     } catch (err) {
       console.error('Erro ao carregar dados do plano:', err);
@@ -295,6 +292,23 @@ export function useStorePlan() {
     return data;
   };
 
+  // Cancela ou desfaz o cancelamento. A loja é a do usuário logado (conferida no servidor).
+  const alterarAssinatura = async (acao: AcaoAssinatura, motivo?: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('Entre de novo para alterar a assinatura.');
+
+    const res = await fetch('/api/planos/assinatura', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ acao, motivo }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Não foi possível alterar a assinatura.');
+
+    await fetchPlanData();
+    return data;
+  };
+
   return {
     planData,
     loading,
@@ -304,6 +318,7 @@ export function useStorePlan() {
     refetchHistorico: fetchHistorico,
     enviarSolicitacaoLiberacao,
     solicitarTrial,
-    iniciarCheckoutCartao
+    iniciarCheckoutCartao,
+    alterarAssinatura
   };
 }

@@ -35,23 +35,10 @@ export async function POST(request: Request) {
     const valorCobranca = Number(planoInfo.valorTotal.toFixed(2));
 
     // Token Mercado Pago
-    let tokenMercadoPago = loja.mp_access_token?.trim();
-    if (!tokenMercadoPago) {
-      const { data: anyLojaWithMp } = await supabaseAdmin
-        .from('lojas')
-        .select('mp_access_token')
-        .not('mp_access_token', 'is', null)
-        .neq('mp_access_token', '')
-        .limit(1)
-        .maybeSingle();
-
-      if (anyLojaWithMp?.mp_access_token) {
-        tokenMercadoPago = anyLojaWithMp.mp_access_token.trim();
-      }
-    }
-    if (!tokenMercadoPago) {
-      tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
-    }
+    // A assinatura do Phone Center é paga na conta da plataforma. Usar o token da loja (ou o de
+    // "qualquer loja com token") mandava o dinheiro para a conta errada, e uma loja com o
+    // próprio token pagaria a si mesma e ganharia o plano.
+    const tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
 
     if (!tokenMercadoPago) {
       return NextResponse.json({ 

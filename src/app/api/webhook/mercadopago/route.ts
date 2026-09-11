@@ -31,7 +31,8 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     const loja = historico?.lojas;
-    const tokenMercadoPago = loja?.mp_access_token || process.env.MERCADO_PAGO_ACCESS_TOKEN;
+    // Pagamentos de assinatura são consultados na conta da plataforma, nunca na da loja.
+    const tokenMercadoPago = process.env.MERCADO_PAGO_ACCESS_TOKEN;
 
     if (!tokenMercadoPago) {
       console.warn('Webhook recebido mas nenhum Access Token configurado para consultar MP ID:', paymentId);
