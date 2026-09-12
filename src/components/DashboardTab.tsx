@@ -1,28 +1,40 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { vendaConta } from '@/lib/vendas/situacao';
-import { buscarTodasPaginas } from '@/lib/supabase/paginar';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useOrdensServico } from '@/hooks/useOrdensServico';
 import { usePecas } from '@/hooks/usePecas';
 import { useTecnicos } from '@/hooks/useTecnicos';
 import { GlassCard } from '@/components/GlassCard';
 import { Badge } from '@/components/ui/badge';
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, Users, Zap, Package, DollarSign, Target, Calendar, ShoppingBag, Wrench } from 'lucide-react';
+import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { TrendingUp, Users, Zap, DollarSign, Target, Calendar, ShoppingBag, Wrench, AlertTriangle, PackageSearch, CreditCard, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/hooks/useAuth';
 import { canViewFinancials } from '@/lib/utils';
+import {
+  filtrarOsDoPeriodo,
+  formatarReais,
+  mensagemErroResumo,
+  montarGraficoDiario,
+  normalizarResumoDashboard,
+  resumoVazio,
+  somarOsPorDia,
+  type ResumoDashboard,
+} from '@/lib/dashboard/resumo';
 
 export function DashboardTab() {
   const { usuario } = useAuth();
   const { ordensServico, fetchOrdensServico } = useOrdensServico();
   const { pecas, fetchPecas } = usePecas();
   const { tecnicos, fetchTecnicos } = useTecnicos();
+  const veFinanceiro = canViewFinancials(usuario);
 
   const [isMounted, setIsMounted] = useState(false);
-  const [vendas, setVendas] = useState<any[]>([]);
-  
+  const [resumo, setResumo] = useState<ResumoDashboard>(resumoVazio);
+  const [carregandoResumo, setCarregandoResumo] = useState(true);
+  const [erroResumo, setErroResumo] = useState<string | null>(null);
+  const [mostrarTodoCapital, setMostrarTodoCapital] = useState(false);
+
   // Função auxiliar para pegar data local YYYY-MM-DD
   const getLocalDate = (date: Date) => {
     const offset = date.getTimezoneOffset() * 60000;
@@ -43,60 +55,53 @@ export function DashboardTab() {
     fetchOrdensServico();
     fetchPecas();
     fetchTecnicos();
-    
-    const fetchVendas = async () => {
-      if (!usuario?.lojaId) return;
-      const lojaId = usuario.lojaId;
-      try {
-        // Paginado: com mais de 1000 vendas o faturamento ficava menor que o real.
-        setVendas(await buscarTodasPaginas((de, ate) =>
-          supabase.from('vendas').select('*').eq('loja_id', lojaId).order('id').range(de, ate)
-        ));
-      } catch (err) {
-        console.error('Erro ao carregar vendas do dashboard:', err);
-      }
-    };
-    fetchVendas();
-  }, [usuario?.lojaId]);
+  }, []);
 
-  // Filtrar dados pelo período
-  const filteredData = useMemo(() => {
-    // Criar datas considerando o início e fim do dia no fuso local
-    const start = new Date(`${dateRange.start}T00:00:00`);
-    const end = new Date(`${dateRange.end}T23:59:59.999`);
+  // Vendas agregadas no banco (RPC dashboard_resumo, respeita a RLS da loja).
+  // Antes baixava todas as vendas e somava no navegador: venda sem data virava "hoje".
+  const carregarResumo = useCallback(async () => {
+    if (!usuario?.lojaId || !dateRange.start || !dateRange.end) return;
+    setCarregandoResumo(true);
+    setErroResumo(null);
+    try {
+      const { data, error } = await supabase.rpc('dashboard_resumo', {
+        p_inicio: dateRange.start,
+        p_fim: dateRange.end,
+        p_loja_id: usuario.lojaId,
+      });
+      if (error) throw error;
+      setResumo(normalizarResumoDashboard(data));
+    } catch (err) {
+      console.error('Erro ao carregar resumo do dashboard:', err);
+      setResumo(resumoVazio());
+      setErroResumo(mensagemErroResumo(err));
+    } finally {
+      setCarregandoResumo(false);
+    }
+  }, [usuario?.lojaId, dateRange.start, dateRange.end]);
 
-    const osFiltradas = ordensServico.filter(os => {
-      // Usa dataEntrada ou createdAt ou hoje como fallback
-      const dataStr = os.dataEntrada || (os as any).createdAt || new Date().toISOString();
-      const date = new Date(dataStr);
-      return date >= start && date <= end;
-    });
+  useEffect(() => {
+    carregarResumo();
+  }, [carregarResumo]);
 
-    const vendasFiltradas = vendas.filter(v => {
-      // Venda cancelada fica no histórico, mas não é faturamento.
-      if (!vendaConta(v)) return false;
-      const date = v.dataPagamento ? new Date(v.dataPagamento) : new Date();
-      return date >= start && date <= end;
-    });
-
-    return { os: osFiltradas, vendas: vendasFiltradas };
-  }, [ordensServico, vendas, dateRange]);
+  // OS do período pela data de entrada (sem data não entra)
+  const osDoPeriodo = useMemo(
+    () => filtrarOsDoPeriodo(ordensServico, dateRange.start, dateRange.end),
+    [ordensServico, dateRange]
+  );
 
   // Calcula KPIs
   const kpis = useMemo(() => {
-    const { os, vendas } = filteredData;
-
     // OS (Considerar apenas ENTREGUE para financeiro)
-    const osEntregues = os.filter(item => item.status === 'entregue');
+    const osEntregues = osDoPeriodo.filter(item => item.status === 'entregue');
     const osReceita = osEntregues.reduce((sum, item) => sum + (item.precoVenda || 0), 0);
     const osLucro = osEntregues.reduce((sum, item) => sum + (item.lucro || 0), 0);
-    const osCount = os.length;
+    const osCount = osDoPeriodo.length;
     const osEntregueCount = osEntregues.length;
 
-    // Vendas (valores em reais/float)
-    const vendasReceita = vendas.reduce((sum, item) => sum + (item.valor || 0), 0);
-    const vendasLucro = vendas.reduce((sum, item) => sum + (item.lucro || 0), 0);
-    const vendasCount = vendas.length;
+    const vendasReceita = resumo.totais.faturamento;
+    const vendasLucro = resumo.totais.lucroLiquido;
+    const vendasCount = resumo.totais.quantidade;
 
     // Totais
     const totalReceita = osReceita + vendasReceita;
@@ -119,32 +124,13 @@ export function DashboardTab() {
       somaEstoque,
       techCount: tecnicos.length
     };
-  }, [filteredData, pecas, tecnicos]);
+  }, [osDoPeriodo, resumo, pecas, tecnicos]);
 
-  // Dados por período para o gráfico
-  const chartData = useMemo(() => {
-    const dataMap: Record<string, { date: string; receitaOS: number; lucroOS: number; receitaVendas: number; lucroVendas: number }> = {};
-    
-    // Preencher com dados de OS
-    filteredData.os.forEach(os => {
-      const dateStr = os.dataEntrada ? new Date(os.dataEntrada).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-      if (!dataMap[dateStr]) dataMap[dateStr] = { date: new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), receitaOS: 0, lucroOS: 0, receitaVendas: 0, lucroVendas: 0 };
-      if (os.status === 'entregue') {
-        dataMap[dateStr].receitaOS += (os.precoVenda || 0);
-        dataMap[dateStr].lucroOS += (os.lucro || 0);
-      }
-    });
-
-    // Preencher com dados de Vendas
-    filteredData.vendas.forEach(v => {
-      const dateStr = v.dataPagamento ? new Date(v.dataPagamento).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-      if (!dataMap[dateStr]) dataMap[dateStr] = { date: new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), receitaOS: 0, lucroOS: 0, receitaVendas: 0, lucroVendas: 0 };
-      dataMap[dateStr].receitaVendas += (v.valor || 0);
-      dataMap[dateStr].lucroVendas += (v.lucro || 0);
-    });
-
-    return Object.values(dataMap).sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredData]);
+  // Série diária: vendas do banco + OS, todos os dias do período em ordem de data
+  const chartData = useMemo(
+    () => montarGraficoDiario(dateRange.start, dateRange.end, resumo.porDia, somarOsPorDia(osDoPeriodo)),
+    [dateRange, resumo.porDia, osDoPeriodo]
+  );
 
   // Top 5 técnicos por número de OS
   const topTecnicos = useMemo(() => {
@@ -199,6 +185,8 @@ export function DashboardTab() {
   }, [ordensServico]);
 
   const colors = ['#EF4444', '#F97316', '#EAB308', '#3B82F6', '#10B981'];
+  const capital = resumo.capitalParado;
+  const gruposCapital = mostrarTodoCapital ? capital.grupos : capital.grupos.slice(0, 8);
 
   if (!isMounted) return null;
 
@@ -213,8 +201,8 @@ export function DashboardTab() {
         <div className="grid grid-cols-2 gap-4 w-full sm:w-auto">
           <div>
             <label className="text-xs font-medium text-gray-500 block mb-1">Data Inicial</label>
-            <input 
-              type="date" 
+            <input
+              type="date"
               value={dateRange.start}
               onChange={e => setDateRange(prev => ({ ...prev, start: e.target.value }))}
               className="w-full border rounded p-2 text-sm bg-background"
@@ -222,15 +210,25 @@ export function DashboardTab() {
           </div>
           <div>
             <label className="text-xs font-medium text-gray-500 block mb-1">Data Final</label>
-            <input 
-              type="date" 
+            <input
+              type="date"
               value={dateRange.end}
               onChange={e => setDateRange(prev => ({ ...prev, end: e.target.value }))}
               className="w-full border rounded p-2 text-sm bg-background"
             />
           </div>
         </div>
+        <div className="sm:ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          {carregandoResumo && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+          <span>{carregandoResumo ? 'Calculando no banco...' : 'Vendas canceladas não entram. Dia no fuso de Brasília.'}</span>
+        </div>
       </GlassCard>
+
+      {erroResumo && (
+        <GlassCard className="border border-amber-400/40 text-amber-700 dark:text-amber-300 text-sm flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> {erroResumo}
+        </GlassCard>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -240,19 +238,21 @@ export function DashboardTab() {
             <p className="text-sm font-medium text-muted-foreground">Faturamento Geral</p>
             <DollarSign className="w-5 h-5 text-blue-600" />
           </div>
-          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">R$ {kpis.totalReceita.toFixed(2).replace('.', ',')}</p>
+          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatarReais(kpis.totalReceita)}</p>
           <p className="text-xs text-muted-foreground">OS + Vendas</p>
         </GlassCard>
 
         {/* Lucro Geral (Apenas Administradores) ou Metas (Vendedores) */}
-        {canViewFinancials(usuario) ? (
+        {veFinanceiro ? (
           <GlassCard className="space-y-2" hoverEffect={true}>
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-muted-foreground">Lucro Líquido</p>
               <TrendingUp className="w-5 h-5 text-green-600" />
             </div>
-            <p className="text-2xl font-bold text-green-600 dark:text-green-400">R$ {kpis.totalLucro.toFixed(2).replace('.', ',')}</p>
-            <p className="text-xs text-muted-foreground">Margem Global: {kpis.margemLucro}%</p>
+            <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatarReais(kpis.totalLucro)}</p>
+            <p className="text-xs text-muted-foreground">
+              Margem Global: {kpis.margemLucro}%{resumo.totais.taxas > 0 ? ` · taxas de cartão ${formatarReais(resumo.totais.taxas)} já descontadas` : ''}
+            </p>
           </GlassCard>
         ) : (
           <GlassCard className="space-y-2" hoverEffect={true}>
@@ -260,8 +260,8 @@ export function DashboardTab() {
               <p className="text-sm font-medium text-muted-foreground">Volume de Vendas</p>
               <Target className="w-5 h-5 text-emerald-500" />
             </div>
-            <p className="text-2xl font-bold text-emerald-400">{kpis.vendasCount} aparelhos</p>
-            <p className="text-xs text-muted-foreground">Vendas realizadas no período</p>
+            <p className="text-2xl font-bold text-emerald-400">{kpis.vendasCount} vendas</p>
+            <p className="text-xs text-muted-foreground">Ticket médio {formatarReais(resumo.totais.ticketMedio)}</p>
           </GlassCard>
         )}
 
@@ -271,10 +271,10 @@ export function DashboardTab() {
             <p className="text-sm font-medium text-muted-foreground">Serviços (OS)</p>
             <Wrench className="w-5 h-5 text-purple-600" />
           </div>
-          <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">R$ {kpis.osReceita.toFixed(2).replace('.', ',')}</p>
+          <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{formatarReais(kpis.osReceita)}</p>
           <div className="flex justify-between text-xs text-muted-foreground font-medium">
-            {canViewFinancials(usuario) ? (
-              <span>Lucro: R$ {kpis.osLucro.toFixed(2)}</span>
+            {veFinanceiro ? (
+              <span>Lucro: {formatarReais(kpis.osLucro)}</span>
             ) : (
               <span>{kpis.osCount} OS no total</span>
             )}
@@ -288,12 +288,12 @@ export function DashboardTab() {
             <p className="text-sm font-medium text-muted-foreground">Vendas Diretas</p>
             <ShoppingBag className="w-5 h-5 text-amber-600" />
           </div>
-          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">R$ {kpis.vendasReceita.toFixed(2).replace('.', ',')}</p>
+          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{formatarReais(kpis.vendasReceita)}</p>
           <div className="flex justify-between text-xs text-muted-foreground">
-            {canViewFinancials(usuario) ? (
-              <span>Lucro: R$ {kpis.vendasLucro.toFixed(2)}</span>
+            {veFinanceiro ? (
+              <span>Lucro líquido: {formatarReais(kpis.vendasLucro)}</span>
             ) : (
-              <span>Produtos & Aparelhos</span>
+              <span>Ticket médio {formatarReais(resumo.totais.ticketMedio)}</span>
             )}
             <span>{kpis.vendasCount} Vendas</span>
           </div>
@@ -308,9 +308,9 @@ export function DashboardTab() {
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+              <XAxis dataKey="rotulo" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(value: number) => `R$ ${value.toFixed(2)}`} />
+              <Tooltip formatter={(value: number) => formatarReais(value)} />
               <Legend />
               <Line
                 type="monotone"
@@ -328,7 +328,7 @@ export function DashboardTab() {
                 dot={false}
                 strokeWidth={2}
               />
-              {canViewFinancials(usuario) && (
+              {veFinanceiro && (
                 <>
                   <Line
                     type="monotone"
@@ -391,6 +391,109 @@ export function DashboardTab() {
         </GlassCard>
       </div>
 
+      {/* Formas de pagamento e capital parado */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <GlassCard className="space-y-3">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-blue-600" />
+            Vendas por forma de pagamento
+          </h3>
+          {resumo.porFormaPagamento.length === 0 ? (
+            <p className="text-sm text-gray-500">Nenhuma venda no período.</p>
+          ) : (
+            <div className="space-y-2">
+              {resumo.porFormaPagamento.map((f) => {
+                const pct = resumo.totais.faturamento > 0 ? (f.valor / resumo.totais.faturamento) * 100 : 0;
+                return (
+                  <div key={f.forma} className="text-sm">
+                    <div className="flex justify-between">
+                      <span className="font-medium">{f.rotulo}</span>
+                      <span className="text-gray-600 dark:text-gray-300">{formatarReais(f.valor)} <span className="text-xs text-gray-500">({f.quantidade})</span></span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-200 dark:bg-slate-800 mt-1 overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </GlassCard>
+
+        <GlassCard className="lg:col-span-2 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <PackageSearch className="w-4 h-4 text-amber-600" />
+              Capital parado no estoque
+            </h3>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span>{capital.quantidade} aparelho(s)</span>
+              {veFinanceiro && <span className="font-semibold text-amber-600 dark:text-amber-400">{formatarReais(capital.custoParado)} em custo</span>}
+              {capital.acimaLimite > 0 && (
+                <Badge variant="secondary" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 gap-1">
+                  <AlertTriangle className="w-3 h-3" /> {capital.acimaLimite} há mais de {capital.limiteDias} dias
+                </Badge>
+              )}
+            </div>
+          </div>
+          {capital.grupos.length === 0 ? (
+            <p className="text-sm text-gray-500">Nenhum aparelho disponível no estoque.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500 border-b border-gray-200 dark:border-slate-800">
+                    <th className="py-2 pr-3 font-medium">Modelo</th>
+                    <th className="py-2 pr-3 font-medium text-right">Qtd</th>
+                    {veFinanceiro && <th className="py-2 pr-3 font-medium text-right">Custo parado</th>}
+                    <th className="py-2 pr-3 font-medium text-right">Dias (médio / maior)</th>
+                    <th className="py-2 font-medium text-right">Alerta</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                  {gruposCapital.map((g) => (
+                    <tr key={`${g.modelo}|${g.capacidade}`} className={g.alerta ? 'bg-red-50/60 dark:bg-red-950/30' : ''}>
+                      <td className="py-2 pr-3">
+                        <span className="font-medium">{g.modelo}</span>
+                        {g.capacidade && <span className="text-gray-500"> {g.capacidade}</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-right">{g.quantidade}</td>
+                      {veFinanceiro && (
+                        <td className="py-2 pr-3 text-right">
+                          {formatarReais(g.custoParado)}
+                          {g.semCusto > 0 && <span className="block text-[10px] text-gray-500">{g.semCusto} sem custo cadastrado</span>}
+                        </td>
+                      )}
+                      <td className="py-2 pr-3 text-right text-gray-600 dark:text-gray-300">
+                        {g.diasMedio ?? '—'} / {g.diasMaisAntigo ?? '—'}
+                      </td>
+                      <td className="py-2 text-right">
+                        {g.alerta ? (
+                          <Badge variant="secondary" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                            {g.acimaLimite} parado(s)
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-gray-400">ok</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {capital.grupos.length > 8 && (
+                <button
+                  type="button"
+                  onClick={() => setMostrarTodoCapital((v) => !v)}
+                  className="mt-2 text-xs text-blue-600 hover:underline"
+                >
+                  {mostrarTodoCapital ? 'Mostrar menos' : `Ver todos os ${capital.grupos.length} modelos`}
+                </button>
+              )}
+            </div>
+          )}
+        </GlassCard>
+      </div>
+
       {/* Top Técnicos e Peças */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Top Técnicos */}
@@ -409,7 +512,7 @@ export function DashboardTab() {
                   </div>
                   <div className="text-right">
                     <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                      R$ {tec.lucro.toFixed(2).replace('.', ',')}
+                      {formatarReais(tec.lucro)}
                     </Badge>
                   </div>
                 </div>
@@ -436,7 +539,7 @@ export function DashboardTab() {
                   </div>
                   <div className="text-right">
                     <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                      R$ {pec.receita.toFixed(2).replace('.', ',')}
+                      {formatarReais(pec.receita)}
                     </Badge>
                   </div>
                 </div>

@@ -1,51 +1,61 @@
 import { NextResponse } from 'next/server';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
+import { filtroTextoLogs, lerFiltrosLogs, separarPagina } from '@/lib/auditoria/filtros';
 
+/**
+ * GET /api/logs — atividades gravadas pelo app (logs_sistema), paginadas e
+ * filtradas no servidor: período, tipo, usuário e texto/IMEI. Sempre restrito
+ * à loja do usuário; só o administrador da plataforma escolhe a loja.
+ * Resposta: { logs, temMais, proximoOffset, total }.
+ */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const acesso = await exigirAcesso(request, {});
     if (!acesso.ok) return acesso.resposta;
-    // 'todas' só para o administrador da plataforma: os demais veem só a própria loja.
-    const lojaId = acesso.usuario.superAdmin ? searchParams.get('lojaId') : acesso.usuario.lojaId;
-    const tipo = searchParams.get('tipo');
-    const termo = searchParams.get('termo');
-    const limit = parseInt(searchParams.get('limit') || '50', 10);
 
+    const filtros = lerFiltrosLogs(searchParams, acesso.usuario);
+    if (!filtros.lojaId && !acesso.usuario.superAdmin) {
+      return NextResponse.json({ logs: [], temMais: false, proximoOffset: 0, total: 0, error: 'Seu usuário não está ligado a nenhuma loja.' }, { status: 403 });
+    }
+
+    // Uma linha a mais para saber se existe próxima página; contagem só na primeira.
     let query = supabaseAdmin
       .from('logs_sistema')
-      .select('*')
+      .select('*', { count: filtros.offset === 0 ? 'exact' : undefined })
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('id', { ascending: false })
+      .range(filtros.offset, filtros.offset + filtros.limite);
 
-    if (lojaId && lojaId !== 'todas') {
-      query = query.eq('loja_id', lojaId);
-    }
+    if (filtros.lojaId) query = query.eq('loja_id', filtros.lojaId);
+    if (filtros.tipo) query = query.eq('tipo_evento', filtros.tipo);
+    if (filtros.usuario) query = query.ilike('usuario_email', filtros.usuario);
+    if (filtros.inicio) query = query.gte('created_at', filtros.inicio);
+    if (filtros.fim) query = query.lte('created_at', filtros.fim);
+    const filtroTexto = filtroTextoLogs(filtros.termo);
+    if (filtroTexto) query = query.or(filtroTexto);
 
-    if (tipo && tipo !== 'todos') {
-      query = query.eq('tipo_evento', tipo);
-    }
-
-    if (termo && termo.trim()) {
-      const cleanTerm = `%${termo.trim().toLowerCase()}%`;
-      query = query.or(`acao.ilike.${cleanTerm},detalhes.ilike.${cleanTerm},usuario_email.ilike.${cleanTerm},usuario_nome.ilike.${cleanTerm}`);
-    }
-
-    const { data: logs, error } = await query;
+    const { data, error, count } = await query;
 
     if (error) {
       // Se a tabela ainda não tiver sido criada pelo SQL
       if (error.code === '42P01') {
-        return NextResponse.json({ logs: [] });
+        return NextResponse.json({ logs: [], temMais: false, proximoOffset: 0, total: 0 });
       }
       throw error;
     }
 
-    return NextResponse.json({ logs: logs || [] });
+    const pagina = separarPagina(data || [], filtros.limite, filtros.offset);
+    return NextResponse.json({
+      logs: pagina.itens,
+      temMais: pagina.temMais,
+      proximoOffset: pagina.proximoOffset,
+      total: typeof count === 'number' ? count : null,
+    });
   } catch (error: any) {
     console.error('Erro na API de consulta de logs:', error);
-    return NextResponse.json({ logs: [], error: error?.message }, { status: 500 });
+    return NextResponse.json({ logs: [], temMais: false, proximoOffset: 0, error: error?.message }, { status: 500 });
   }
 }
 

@@ -151,7 +151,7 @@ async function executarSincronizacao(lojaId?: string) {
         novosLogs.push({
           loja_id: os.loja_id || null,
           tipo_evento: 'os',
-          acao: `Ordem de Serviço #${os.numero_os || 'S/N'}`,
+          acao: `Ordem de Serviço #${os.numeroOS || 'S/N'}`,
           detalhes: `OS para ${os.cliente_nome || 'Cliente'} (${os.aparelho_modelo || 'Aparelho'}) - Status: ${os.status} - R$ ${Number(os.valor_total || 0).toFixed(2).replace('.', ',')} [ref:${refKey}]`.trim(),
           created_at: os.created_at || new Date().toISOString(),
         });
