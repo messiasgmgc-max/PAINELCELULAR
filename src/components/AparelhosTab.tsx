@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { EdicaoMassaModal } from '@/components/estoque/EdicaoMassaModal';
+import { DesfazerLoteModal } from '@/components/estoque/DesfazerLoteModal';
 import { conflitoPodeReentrar } from '@/lib/estoque/remontagem';
+import { validarCadastroManual } from '@/lib/estoque/cadastroManual';
+import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
 import { bateriaParaLista, observacaoParaLista } from '@/lib/estoque/listaWhatsapp';
 import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
 import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
@@ -28,10 +31,9 @@ import { supabase } from "@/lib/supabaseClient";
 import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue, formatarSaudeBateria } from "@/lib/utils";
 import { devolverAparelhoAoEstoque } from "@/lib/devolucaoEstoque";
 import { ConfirmarAcaoEstoqueModal, type AcaoConfirmacao, type LinhaResumo } from "@/components/ConfirmarAcaoEstoqueModal";
-import { useStoreConfig } from "@/hooks/useStoreConfig";
 import { registrarLog } from "@/lib/logger";
 import { estaNoEstoque, patchRestauracao, patchSaida } from "@/lib/estoque/ciclo";
-import { aplicarMudancaEstoque, registrarEntradaEstoque } from "@/lib/estoque/movimentacoes";
+import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from "@/lib/estoque/movimentacoes";
 import {
   executarPlanoRemontagem,
   planejarRemontagem,
@@ -51,7 +53,20 @@ import {
 
 export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: string[]) => void } = {}) {
   const { usuario } = useAuth();
-  const { aparelhos, loading, error, fetchAparelhos, criarAparelho, atualizarAparelho, deletarAparelho } = useAparelhos();
+  const {
+    aparelhos,
+    loading,
+    fetchAparelhos,
+    criarAparelho,
+    atualizarAparelho,
+    criarAparelhoComResultado,
+    atualizarAparelhoComResultado,
+    deletarAparelho,
+  } = useAparelhos();
+  // Erro do formulário de cadastro/edição: a mensagem real do banco, sem fechar o modal.
+  const [erroFormulario, setErroFormulario] = useState<string | null>(null);
+  const [showDesfazerLote, setShowDesfazerLote] = useState(false);
+  const [confirmacaoFornecedor, setConfirmacaoFornecedor] = useState<{ aparelhos: any[] } | null>(null);
   const { clientes, fetchClientes, criarCliente } = useClientes();
   const [showForm, setShowForm] = useState(false);
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
@@ -73,7 +88,6 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [mercadoPhoneText, setMercadoPhoneText] = useState("");
   const [mercadoPhoneMargem, setMercadoPhoneMargem] = useState("300");
   const [importingMercadoPhone, setImportingMercadoPhone] = useState(false);
-  const { config: configLoja } = useStoreConfig(usuario?.lojaId || null);
   // `reentrada`: ids dos aparelhos vendidos que a pessoa marcou para voltar como entrada nova.
   const [planoMercadoPhone, setPlanoMercadoPhone] = useState<{ modo: 'importar' | 'remontar'; plano: PlanoRemontagem; reentrada: string[] } | null>(null);
   // Aparelhos da última lista aplicada que ainda não têm etiqueta impressa.
@@ -81,7 +95,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [confirmacaoRestauracao, setConfirmacaoRestauracao] = useState<SelecaoRestauracao<any> | null>(null);
   const [confirmacaoBaixaTotal, setConfirmacaoBaixaTotal] = useState<{ ids: string[] } | null>(null);
   const [executandoAcaoEstoque, setExecutandoAcaoEstoque] = useState<
-    null | 'mercadophone_com_baixa' | 'mercadophone_sem_baixa' | 'restaurar' | 'baixa_total'
+    null | 'mercadophone_com_baixa' | 'mercadophone_sem_baixa' | 'restaurar' | 'baixa_total' | 'fornecedor'
   >(null);
   const [showOptionalFields, setShowOptionalFields] = useState(false);
   const [supplierListText, setSupplierListText] = useState("");
@@ -934,9 +948,27 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErroFormulario(null);
 
-    if (!formData.marca || !formData.modelo) {
-      alert("Preencha marca e modelo/nome do produto!");
+    const categoria = formData.categoria || 'aparelho';
+    const emEdicao = editingId ? aparelhos.find((a) => a.id === editingId) : null;
+    // IMEI (dígito verificador e duplicidade no estoque), marca, modelo e grafia
+    // padronizada: a regra fica em src/lib/estoque/cadastroManual.ts.
+    const validacao = validarCadastroManual(
+      {
+        categoria,
+        marca: formData.marca,
+        modelo: formData.modelo,
+        imei: categoria === 'aparelho' || categoria === 'outro' ? formData.imei : '',
+        numeroSerie: formData.numeroSerie,
+        capacidade: categoria === 'perfume' ? formData.tamanho_ml : categoria === 'acessorio' ? formData.tipo_acessorio : formData.capacidade,
+        cor: categoria === 'perfume' ? formData.tipo_perfume || 'Perfume' : formData.cor,
+      },
+      { aparelhos: aparelhos as any[], editandoId: editingId, imeiOriginal: emEdicao?.imei ?? null }
+    );
+    if (!validacao.ok) {
+      setErroFormulario(validacao.erro);
+      toast.error(validacao.erro);
       return;
     }
 
@@ -947,11 +979,10 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
     const payload = {
       ...formData,
-      categoria: formData.categoria || 'aparelho',
+      ...validacao.dados,
+      categoria,
       quantidade: qtd,
-      capacidade: formData.categoria === 'perfume' ? formData.tamanho_ml : (formData.categoria === 'acessorio' ? formData.tipo_acessorio : formData.capacidade),
-      cor: formData.categoria === 'perfume' ? (formData.tipo_perfume || 'Perfume') : (formData.cor || 'Padrão'),
-      condicao: (formData.categoria === 'perfume' || formData.categoria === 'acessorio') ? 'novo' as const : formData.condicao,
+      condicao: (categoria === 'perfume' || categoria === 'acessorio') ? 'novo' as const : formData.condicao,
       preco: precoNumerico,
       precoAtacado: precoAtacadoNumerico,
       custo: custoNumerico,
@@ -961,16 +992,27 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       ativo: true,
     };
 
+    let resultado: { error: string | null };
     if (editingId) {
       // Editar dados não mexe no ciclo de vida: sem `ativo`, um aparelho vendido
       // ou baixado continua fora do estoque em vez de voltar por causa de uma edição.
       const dadosEdicao: Partial<typeof payload> = { ...payload };
       delete dadosEdicao.ativo;
-      await atualizarAparelho(editingId, dadosEdicao);
+      resultado = await atualizarAparelhoComResultado(editingId, dadosEdicao as any);
     } else {
-      await criarAparelho(payload);
+      // Código de 8 dígitos da etiqueta: antes era sorteado no hook e descartado,
+      // e o aparelho cadastrado à mão ficava sem código para etiqueta e conferência.
+      resultado = await criarAparelhoComResultado({ ...payload, codigo: gerarCodigoEtiqueta(aparelhos) } as any);
     }
 
+    if (resultado.error) {
+      // O formulário fica aberto com o que foi digitado e mostra o erro real.
+      setErroFormulario(resultado.error);
+      toast.error(resultado.error, { duration: 8000 });
+      return;
+    }
+
+    toast.success(editingId ? 'Aparelho atualizado.' : 'Aparelho cadastrado no estoque.');
     handleCancel();
     await fetchAparelhos();
   };
@@ -1303,7 +1345,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           currentModel = fullModel.replace(capMatch[0], "").trim();
         } else {
           currentModel = fullModel;
-          currentCapacity = "N/A";
+          // Sem capacidade na linha: fica vazio e vai para o banco como null, nunca 'N/A'.
+          currentCapacity = "";
         }
         pendingColors = []; // Reset colors for new model
         continue;
@@ -1327,7 +1370,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           // Clona as cores pendentes ou detecta a cor da linha
           const colorsToProcess = [...pendingColors];
           if (colorsToProcess.length === 0) {
-            let detectedColor = "N/A";
+            let detectedColor = "";
             if (line.includes("⚫")) detectedColor = "Preto";
             else if (line.includes("⚪")) detectedColor = "Branco/Prata";
             else if (line.includes("🔵")) detectedColor = "Azul";
@@ -1386,10 +1429,10 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         loja_id: currentLojaId,
         marca,
         modelo,
-        imei: "",
-        numeroSerie: "",
-        cor,
-        capacidade,
+        imei: null,
+        numeroSerie: null,
+        cor: cor || null,
+        capacidade: capacidade || null,
         condicao,
         preco: finalPrice,
         custo: representativePrice,
@@ -1407,45 +1450,55 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       return;
     }
 
-    if (confirm(`Identificados ${aparelhosParaCriar.length} modelos únicos por cor. Deseja cadastrar todos com margem de R$ 300,00?`)) {
-      console.log("🚀 Iniciando cadastro em massa...", aparelhosParaCriar);
+    // Nada é gravado aqui: a confirmação pede a quantidade digitada.
+    setConfirmacaoFornecedor({ aparelhos: aparelhosParaCriar });
+  };
 
+  const executarCadastroFornecedorConfirmado = async () => {
+    if (!confirmacaoFornecedor) return;
+    const aparelhosParaCriar = confirmacaoFornecedor.aparelhos;
+    setExecutandoAcaoEstoque('fornecedor');
+    const toastId = toast.loading(`Cadastrando ${aparelhosParaCriar.length} aparelho(s)...`);
+
+    try {
+      // Realiza o insert de todos os aparelhos em uma única chamada ao banco.
+      // Cadastro: as linhas criadas são registradas logo abaixo com registrarEntradaEstoque.
+      const { data: criados, error: bulkError } = await supabase
+        .from('aparelhos') // estoque-guard: auditado
+        .insert(aparelhosParaCriar)
+        .select('id, loja_id, ativo, status, condicao');
+
+      if (bulkError) throw bulkError;
+
+      // Os aparelhos já existem: falha na auditoria só avisa, não vira "erro ao cadastrar".
+      // Um lote só para a lista inteira: aparece em "Desfazer operação".
       try {
-        // Realiza o insert de todos os aparelhos em uma única chamada ao banco.
-        // Cadastro: as linhas criadas são registradas logo abaixo com registrarEntradaEstoque.
-        const { data: criados, error: bulkError } = await supabase
-          .from('aparelhos') // estoque-guard: auditado
-          .insert(aparelhosParaCriar)
-          .select('id, loja_id, ativo, status, condicao');
-
-        if (bulkError) throw bulkError;
-
-        // Os aparelhos já existem: falha na auditoria só avisa, não vira "erro ao cadastrar".
-        try {
-          const entrada = await registrarEntradaEstoque(supabase, {
-            aparelhos: criados || [],
-            origem: 'manual',
-            lojaId: usuario?.lojaId || null,
-            usuarioId: usuario?.id || null,
-            usuarioNome: usuario?.nome || null,
-            observacao: 'Cadastro em massa por lista de fornecedor',
-          });
-          if (!entrada.auditoriaRegistrada) throw new Error(entrada.erroAuditoria || 'auditoria incompleta');
-        } catch (erroAuditoria: any) {
-          toast.warning('Aparelhos cadastrados, mas a entrada no estoque não foi gravada inteira na auditoria. Avise o suporte.', {
-            description: erroAuditoria?.message,
-          });
-        }
-
-        alert(`Sucesso! ${aparelhosParaCriar.length} aparelhos foram cadastrados de uma vez.`);
-      } catch (err: any) {
-        console.error("❌ Erro no cadastro em massa:", err);
-        alert(`Erro ao cadastrar: ${err.message || 'Erro desconhecido'}`);
+        const entrada = await registrarEntradaEstoque(supabase, {
+          aparelhos: criados || [],
+          origem: 'manual',
+          loteId: gerarLoteId(),
+          lojaId: usuario?.lojaId || null,
+          usuarioId: usuario?.id || null,
+          usuarioNome: usuario?.nome || null,
+          observacao: 'Cadastro em massa por lista de fornecedor',
+        });
+        if (!entrada.auditoriaRegistrada) throw new Error(entrada.erroAuditoria || 'auditoria incompleta');
+      } catch (erroAuditoria: any) {
+        toast.warning('Aparelhos cadastrados, mas a entrada no estoque não foi gravada inteira na auditoria. Avise o suporte.', {
+          description: erroAuditoria?.message,
+        });
       }
 
+      toast.success(`${aparelhosParaCriar.length} aparelho(s) cadastrados de uma vez.`, { id: toastId });
+      setConfirmacaoFornecedor(null);
       setShowSupplierModal(false);
       setSupplierListText("");
       await fetchAparelhos();
+    } catch (err: any) {
+      console.error("❌ Erro no cadastro em massa:", err);
+      toast.error(`Erro ao cadastrar: ${err?.message || 'Erro desconhecido'}`, { id: toastId });
+    } finally {
+      setExecutandoAcaoEstoque(null);
     }
   };
 
@@ -1590,6 +1643,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
+    setErroFormulario(null);
     setShowOptionalFields(false);
     setFormData({
       categoria: "aparelho",
@@ -1974,6 +2028,17 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     <div>
                       <div className="font-bold text-xs text-white">Reativar Desativados</div>
                       <div className="text-[10px] text-slate-400">Mostra a contagem antes de aplicar</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => setShowDesfazerLote(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <Undo2 className="h-4 w-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white">Desfazer Operação em Massa</div>
+                      <div className="text-[10px] text-slate-400">Últimas 24 h: remontagem, baixa total, conferência...</div>
                     </div>
                   </DropdownMenuItem>
 
@@ -2904,7 +2969,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                   </Button>
                 </div>
 
-                {error && <p className="text-sm text-red-400 text-center font-medium">{error}</p>}
+                {erroFormulario && (
+                  <p role="alert" className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-xl p-3 font-medium">
+                    {erroFormulario}
+                  </p>
+                )}
               </form>
             </div>
           </div>
@@ -2996,6 +3065,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 variante: 'perigo',
                 onClick: () => executarPlanoMercadoPhone(true),
                 desabilitada: bloqueada,
+                exigeDigitacao: true,
                 carregando: executandoAcaoEstoque === 'mercadophone_com_baixa',
               }
             );
@@ -3024,6 +3094,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 )
               }
               resumo={resumo}
+              quantidadeConfirmacao={ehRemontar && baixas > 0 && !bloqueada ? baixas : undefined}
+              rotuloQuantidade="aparelhos que sairão do estoque"
               bloqueio={
                 bloqueada
                   ? `${plano.trava.motivo} Nenhum aparelho será baixado. Aplique só os encontrados e dê baixa manualmente no que de fato saiu.`
@@ -3179,6 +3251,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             },
             { rotulo: 'Em manutenção', valor: confirmacaoRestauracao.ignoradosManutencao.length },
           ]}
+          quantidadeConfirmacao={confirmacaoRestauracao.restaurar.length || undefined}
+          rotuloQuantidade="aparelhos que voltarão ao estoque"
           detalhes={
             confirmacaoRestauracao.ignoradosAmbiguos.length > 0 ? (
               <p className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5">
@@ -3198,6 +3272,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
               rotulo: `Reativar ${confirmacaoRestauracao.restaurar.length}`,
               variante: 'primaria',
               onClick: executarRestauracaoConfirmada,
+              exigeDigitacao: true,
               desabilitada: confirmacaoRestauracao.restaurar.length === 0,
               carregando: executandoAcaoEstoque === 'restaurar',
             },
@@ -3222,7 +3297,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             </>
           }
           resumo={[{ rotulo: 'Aparelhos que sairão', valor: confirmacaoBaixaTotal.ids.length, tom: 'perigo' }]}
-          textoConfirmacao={configLoja?.nomeLoja || 'CONFIRMAR'}
+          quantidadeConfirmacao={confirmacaoBaixaTotal.ids.length}
+          rotuloQuantidade="aparelhos que sairão do estoque"
           acoes={[
             {
               rotulo: 'Cancelar',
@@ -3243,6 +3319,44 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           }}
         />
       )}
+
+      {/* Confirmação — cadastro em massa pela lista de fornecedor */}
+      {confirmacaoFornecedor && (
+        <ConfirmarAcaoEstoqueModal
+          aberto
+          tom="aviso"
+          titulo="Cadastrar lista de fornecedor"
+          descricao={`${confirmacaoFornecedor.aparelhos.length} modelo(s) únicos por cor serão cadastrados com margem de R$ 300,00 sobre o custo. Nada foi gravado ainda.`}
+          resumo={[{ rotulo: 'Aparelhos a cadastrar', valor: confirmacaoFornecedor.aparelhos.length, tom: 'positivo' }]}
+          quantidadeConfirmacao={confirmacaoFornecedor.aparelhos.length}
+          rotuloQuantidade="aparelhos a cadastrar"
+          acoes={[
+            {
+              rotulo: 'Cancelar',
+              variante: 'secundaria',
+              onClick: () => setConfirmacaoFornecedor(null),
+              desabilitada: executandoAcaoEstoque !== null,
+            },
+            {
+              rotulo: `Cadastrar ${confirmacaoFornecedor.aparelhos.length}`,
+              variante: 'primaria',
+              exigeDigitacao: true,
+              onClick: executarCadastroFornecedorConfirmado,
+              carregando: executandoAcaoEstoque === 'fornecedor',
+            },
+          ]}
+          onFechar={() => {
+            if (executandoAcaoEstoque === null) setConfirmacaoFornecedor(null);
+          }}
+        />
+      )}
+
+      <DesfazerLoteModal
+        aberto={showDesfazerLote}
+        lojaId={usuario?.lojaId || null}
+        onFechar={() => setShowDesfazerLote(false)}
+        onEstoqueAtualizado={() => fetchAparelhos()}
+      />
 
       {/* Modal Importar MercadoPhone */}
       {showMercadoPhoneModal && (
