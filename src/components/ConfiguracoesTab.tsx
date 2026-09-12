@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck, LayoutGrid, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
+import { Settings, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck, LayoutGrid, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
@@ -17,6 +17,7 @@ import { useTecnicos } from '@/hooks/useTecnicos';
 import { useMotoboys } from '@/hooks/useMotoboys';
 import { useTabOrder } from '@/hooks/useTabOrder';
 import { ConfiguracaoFiscalSection } from '@/components/ConfiguracaoFiscalSection';
+import { BackupLojaSection } from '@/components/configuracoes/BackupLojaSection';
 import { toast } from 'sonner';
 
 interface Configuracao {
@@ -63,11 +64,6 @@ export function ConfiguracoesTab() {
   const [assinaturaLoja, setAssinaturaLoja] = useState<string | null>(null);
   const [previewAssinatura, setPreviewAssinatura] = useState<string | null>(null);
   
-  const [notificacoesEmail, setNotificacoesEmail] = useState(true);
-  const [notificacoesWhatsapp, setNotificacoesWhatsapp] = useState(false);
-  const [notificacoesOS, setNotificacoesOS] = useState(true);
-  const [notificacoesGarantia, setNotificacoesGarantia] = useState(true);
-
   // Recibo em PDF no WhatsApp do cliente ao finalizar a venda.
   const [reciboWhatsappAtivo, setReciboWhatsappAtivo] = useState(false);
   const [reciboWhatsappMensagem, setReciboWhatsappMensagem] = useState(MENSAGEM_RECIBO_PADRAO);
@@ -117,9 +113,6 @@ export function ConfiguracoesTab() {
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   
-  const [backup, setBackup] = useState(false);
-  const [ultimoBackup, setUltimoBackup] = useState<Date | null>(null);
-
   // Sincroniza os dados do formulário com as configurações reais do Supabase
   useEffect(() => {
     if (config) {
@@ -278,17 +271,6 @@ export function ConfiguracoesTab() {
     }
   };
 
-  const handleSalvarNotificacoes = () => {
-    // Salvar configurações de notificações
-    console.log('Notificações salvas:', {
-      notificacoesEmail,
-      notificacoesWhatsapp,
-      notificacoesOS,
-      notificacoesGarantia,
-    });
-    alert('Preferências de notificações salvas com sucesso!');
-  };
-
   const handleAlterarSenha = async () => {
     if (novaSenha !== confirmarSenha) {
       alert('As senhas não correspondem!');
@@ -306,23 +288,6 @@ export function ConfiguracoesTab() {
     setSenhaAtual('');
     setNovaSenha('');
     setConfirmarSenha('');
-  };
-
-  const handleFazerBackup = async () => {
-    try {
-      setBackup(true);
-      console.log('Iniciando backup...');
-      
-      // Simular backup
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      setUltimoBackup(new Date());
-      alert('Backup realizado com sucesso!');
-    } catch (error) {
-      alert('Erro ao fazer backup!');
-    } finally {
-      setBackup(false);
-    }
   };
 
   const toCSV = (rows: any[]) => {
@@ -1159,115 +1124,49 @@ export function ConfiguracoesTab() {
             </div>
           </TabsContent>
 
-          {/* Notificações */}
+          {/* Notificações — cada bloco é uma seção independente; outras funções (pós-venda,
+              vitrine...) entram como novos componentes aqui dentro. Só fica na tela o que
+              tem efeito real: os antigos switches de e-mail/WhatsApp/OS/garantia só gravavam
+              no console e foram retirados. */}
           <TabsContent value="notificacoes">
             <GlassCard className="rounded-3xl">
               <div className="pb-4 border-b border-white/10 mb-4">
-                <h3 className="text-base sm:text-lg font-bold">Preferências de Notificações</h3>
+                <h3 className="text-base sm:text-lg font-bold">Notificações</h3>
                 <p className="text-xs sm:text-sm text-muted-foreground">
-                  Configure como você quer ser notificado
+                  Mensagens automáticas que a loja envia
                 </p>
               </div>
-              <div>
-                <div className="space-y-4 sm:space-y-6">
-                  {/* Canais de Notificação */}
-                  <div className="border-b dark:border-slate-700 pb-4 sm:pb-6">
-                    <h3 className="text-sm sm:text-base font-semibold mb-4">Canais de Comunicação</h3>
-                    <div className="space-y-3 sm:space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Bell className="w-4 h-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">Notificações por E-mail</p>
-                            <p className="text-xs text-muted-foreground">Receba alertas por e-mail</p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={notificacoesEmail}
-                          onCheckedChange={setNotificacoesEmail}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Bell className="w-4 h-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">Notificações por WhatsApp</p>
-                            <p className="text-xs text-muted-foreground">Receba alertas por WhatsApp</p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={notificacoesWhatsapp}
-                          onCheckedChange={setNotificacoesWhatsapp}
-                        />
-                      </div>
+              <div className="space-y-4 sm:space-y-6">
+                {/* Recibo em PDF no WhatsApp do cliente (src/lib/whatsapp/reciboWhatsapp.ts) */}
+                <section className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm sm:text-base font-semibold">Recibo no WhatsApp do cliente</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Ao finalizar a venda, envia o recibo em PDF para o WhatsApp cadastrado do cliente, pelo número
+                        conectado da loja.
+                      </p>
                     </div>
+                    <Switch checked={reciboWhatsappAtivo} onCheckedChange={setReciboWhatsappAtivo} />
                   </div>
-
-                  {/* Recibo em PDF no WhatsApp do cliente */}
-                  <div className="border-b dark:border-slate-700 pb-4 sm:pb-6 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm sm:text-base font-semibold">Recibo no WhatsApp do cliente</h3>
-                        <p className="text-xs text-muted-foreground">
-                          Ao finalizar a venda, envia o recibo em PDF para o WhatsApp cadastrado do cliente, pelo número
-                          conectado da loja.
-                        </p>
-                      </div>
-                      <Switch checked={reciboWhatsappAtivo} onCheckedChange={setReciboWhatsappAtivo} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label htmlFor="recibo-whatsapp-mensagem" className="text-xs font-semibold">
-                        Mensagem enviada junto do PDF
-                      </label>
-                      <textarea
-                        id="recibo-whatsapp-mensagem"
-                        rows={4}
-                        maxLength={1000}
-                        value={reciboWhatsappMensagem}
-                        onChange={(e) => setReciboWhatsappMensagem(e.target.value)}
-                        className="input-glass w-full text-sm resize-y"
-                      />
-                      <p className="text-[11px] text-muted-foreground">Pode usar: {VARIAVEIS_RECIBO.join('  ')}</p>
-                    </div>
-                    <Button type="button" size="sm" onClick={salvarReciboWhatsapp} disabled={salvandoReciboWhatsapp}>
-                      {salvandoReciboWhatsapp ? 'Salvando…' : 'Salvar recibo no WhatsApp'}
-                    </Button>
+                  <div className="space-y-1.5">
+                    <label htmlFor="recibo-whatsapp-mensagem" className="text-xs font-semibold">
+                      Mensagem enviada junto do PDF
+                    </label>
+                    <textarea
+                      id="recibo-whatsapp-mensagem"
+                      rows={4}
+                      maxLength={1000}
+                      value={reciboWhatsappMensagem}
+                      onChange={(e) => setReciboWhatsappMensagem(e.target.value)}
+                      className="input-glass w-full text-sm resize-y"
+                    />
+                    <p className="text-[11px] text-muted-foreground">Pode usar: {VARIAVEIS_RECIBO.join('  ')}</p>
                   </div>
-
-                  {/* Tipos de Notificação */}
-                  <div>
-                    <h3 className="text-sm sm:text-base font-semibold mb-4">Notificar sobre</h3>
-                    <div className="space-y-3 sm:space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Ordens de Serviço</p>
-                          <p className="text-xs text-muted-foreground">Novas OS e atualizações</p>
-                        </div>
-                        <Switch
-                          checked={notificacoesOS}
-                          onCheckedChange={setNotificacoesOS}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Garantias</p>
-                          <p className="text-xs text-muted-foreground">Vencimento de garantias</p>
-                        </div>
-                        <Switch
-                          checked={notificacoesGarantia}
-                          onCheckedChange={setNotificacoesGarantia}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button 
-                    onClick={handleSalvarNotificacoes}
-                    className="w-full h-10 sm:h-auto"
-                  >
-                    Salvar Preferências
+                  <Button type="button" size="sm" onClick={salvarReciboWhatsapp} disabled={salvandoReciboWhatsapp}>
+                    {salvandoReciboWhatsapp ? 'Salvando…' : 'Salvar recibo no WhatsApp'}
                   </Button>
-                </div>
+                </section>
               </div>
             </GlassCard>
           </TabsContent>
@@ -1352,33 +1251,8 @@ export function ConfiguracoesTab() {
           {/* Dados */}
           <TabsContent value="dados">
             <div className="space-y-4 sm:space-y-6">
-              {/* Backup */}
-              <GlassCard className="rounded-3xl">
-                <div className="pb-4 border-b border-white/10 mb-4">
-                  <h3 className="text-base sm:text-lg font-bold">Backup de Dados</h3>
-                  <p className="text-xs sm:text-sm text-muted-foreground">
-                    Faça backup de todos os seus dados
-                  </p>
-                </div>
-                <div>
-                  <div className="space-y-4">
-                    {ultimoBackup && (
-                      <div className="bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-800 rounded-lg p-3 sm:p-4">
-                        <p className="text-sm text-green-800 dark:text-green-300">
-                          ✓ Último backup: {ultimoBackup.toLocaleDateString('pt-BR')} às {ultimoBackup.toLocaleTimeString('pt-BR')}
-                        </p>
-                      </div>
-                    )}
-                    <Button 
-                      onClick={handleFazerBackup}
-                      disabled={backup}
-                      className="w-full h-10 sm:h-auto"
-                    >
-                      {backup ? 'Fazendo backup...' : 'Fazer Backup Agora'}
-                    </Button>
-                  </div>
-                </div>
-              </GlassCard>
+              {/* Backup real: GET /api/backup e cópias diárias do Storage */}
+              <BackupLojaSection />
 
               {/* Exportar Dados */}
               <GlassCard className="rounded-3xl">
