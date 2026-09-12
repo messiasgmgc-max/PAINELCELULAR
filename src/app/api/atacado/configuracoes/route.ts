@@ -3,27 +3,25 @@ import { lojaEfetiva, PAPEIS_GESTAO } from '@/lib/auth/acesso';
 import { exigirAcesso } from '@/lib/auth/servidor';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 
+const ERRO_SEM_LOJA = 'Seu usuário não está ligado a nenhuma loja. Peça ao suporte para vincular sua loja.';
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const acesso = await exigirAcesso(request, { lojaId: null });
     if (!acesso.ok) return acesso.resposta;
-    // Sem loja informada, a rota pegava a loja mais recente do banco (de outra pessoa).
-    let lojaId = lojaEfetiva(acesso.usuario, url.searchParams.get('lojaId'));
-
-    let lojaQuery = supabaseAdmin
-      .from('lojas')
-      .select('id, nome, chave_pix, chave_pix_cobranca, config_atacado');
-
-    if (lojaId) {
-      lojaQuery = lojaQuery.eq('id', lojaId);
-    } else {
-      lojaQuery = lojaQuery.order('created_at', { ascending: false }).limit(1);
+    // Sem loja resolvida pelo usuário logado, erro claro: nunca a loja de outra pessoa
+    // (antes caía na loja mais recente do banco).
+    const lojaId = lojaEfetiva(acesso.usuario, url.searchParams.get('lojaId'));
+    if (!lojaId) {
+      return NextResponse.json({ error: ERRO_SEM_LOJA }, { status: 403 });
     }
 
-    const { data: lojas, error } = await lojaQuery;
-
-    const loja = Array.isArray(lojas) ? lojas[0] : lojas;
+    const { data: loja, error } = await supabaseAdmin
+      .from('lojas')
+      .select('id, nome, chave_pix, chave_pix_cobranca, config_atacado')
+      .eq('id', lojaId)
+      .maybeSingle();
 
     if (error || !loja) {
       return NextResponse.json({ error: 'Loja não encontrada' }, { status: 404 });
@@ -75,22 +73,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const acesso = await exigirAcesso(request, { lojaId: null, papeis: PAPEIS_GESTAO });
     if (!acesso.ok) return acesso.resposta;
-    let lojaId = lojaEfetiva(acesso.usuario, body.lojaId || (body.configAtacado && body.configAtacado.lojaId));
-
+    const lojaId = lojaEfetiva(acesso.usuario, body.lojaId || (body.configAtacado && body.configAtacado.lojaId));
     if (!lojaId) {
-      // Fallback para obter a loja ativa
-      const { data: lojaRecente } = await supabaseAdmin
-        .from('lojas')
-        .select('id')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (lojaRecente?.id) {
-        lojaId = lojaRecente.id;
-      } else {
-        return NextResponse.json({ error: 'ID da loja é obrigatório' }, { status: 400 });
-      }
+      // Sem fallback: gravar na "loja mais recente" era gravar na loja de outra pessoa.
+      return NextResponse.json({ error: ERRO_SEM_LOJA }, { status: 403 });
     }
 
     const configPayload = body.configAtacado ? { ...body.configAtacado } : { ...body };

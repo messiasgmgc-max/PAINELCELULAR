@@ -57,13 +57,16 @@ export function useOrdensServico() {
   const criarOrdemServico = useCallback(async (dados: Partial<OrdemServico>) => {
     setError(null);
     try {
-      // Remover campos que não existem no banco ou que são gerados automaticamente
-      // fotosEntrada e fotosSaida estão no form mas não no banco ainda
+      if (!usuario?.lojaId) throw new Error('Loja não autenticada');
+      // Remover campos que não existem no banco ou que são gerados automaticamente.
+      // numeroOS é dado pelo banco: trigger numerar_ordem_servico, sequência por loja
+      // (migration 20260913_dados_numeracao_os). fotosEntrada e fotosSaida estão no form
+      // mas não no banco ainda.
       const { lojaId, id, numeroOS, fotosEntrada, fotosSaida, ...dadosLimpos } = dados as any;
 
       const { data, error } = await supabase
         .from('ordens_servico')
-        .insert([{ ...dadosLimpos, ...(usuario?.lojaId ? { loja_id: usuario.lojaId } : {}) }])
+        .insert([{ ...dadosLimpos, loja_id: usuario.lojaId }])
         .select()
         .single();
       if (error) throw error;
@@ -82,6 +85,7 @@ export function useOrdensServico() {
     setError(null);
     try {
       // Remover campos que não devem ser atualizados ou não existem no banco
+      // (o número da OS não muda depois de criado).
       const { lojaId, id: _id, numeroOS, fotosEntrada, fotosSaida, ...dadosLimpos } = dados as any;
 
       const { data, error } = await supabase

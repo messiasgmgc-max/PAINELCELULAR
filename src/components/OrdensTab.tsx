@@ -15,6 +15,7 @@ import { ModalPortal } from '@/components/ModalPortal';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Trash2, Edit2, Plus, Search, X, GripVertical, Camera, MessageCircle, Printer, FileText, FileCheck } from 'lucide-react';
 import type { OrdemServico, PecaUtilizada } from '@/lib/db/types';
+import { toast } from 'sonner';
 
 const STATUS_MAP: Record<string, { label: string; emoji: string; color: string }> = {
   aguardando_pecas: { label: 'Aguardando Peças', emoji: '📦', color: 'bg-yellow-100 text-yellow-800' },
@@ -412,15 +413,19 @@ export function OrdensTab() {
       if (editingId) {
         await atualizarOrdemServico(editingId, dados);
       } else {
-        await criarOrdemServico(dados);
+        // O número vem do banco (sequência por loja): só dá para mostrar depois de criar.
+        const criada = await criarOrdemServico(dados);
+        const numero = Number(criada?.numeroOS);
+        toast.success(numero > 0 ? `OS #${numero} criada para ${criada.clienteNome || 'o cliente'}.` : 'OS criada.');
       }
 
       setFormData(INITIAL_FORM);
       setSelectedPecas([]);
       setEditingId(null);
       setShowForm(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao salvar ordem:', err);
+      toast.error(err?.message || 'Não foi possível salvar a ordem de serviço.');
     }
   };
 
