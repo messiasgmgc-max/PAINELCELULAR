@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmarAcaoEstoqueModal } from '@/components/ConfirmarAcaoEstoqueModal';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
@@ -128,6 +129,8 @@ export function ConferenciaEstoqueModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [salvandoAjustes, setSalvandoAjustes] = useState(false);
+  // Confirmação com a quantidade digitada antes de qualquer escrita em massa.
+  const [confirmandoAjustes, setConfirmandoAjustes] = useState(false);
   const [ordemModelos, setOrdemModelos] = useState<'antigo_para_novo' | 'novo_para_antigo'>('antigo_para_novo');
 
   // Mapeamento de ações para aparelhos faltantes: idAparelho -> AcaoFaltante
@@ -601,7 +604,16 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
     return txt;
   };
 
+  /** Quantos aparelhos vão mudar (tudo que não é "manter"). */
+  const contagemAjustes = useMemo(() => {
+    const porAcao: Record<AcaoFaltante, number> = { manter: 0, vendido: 0, atacado: 0, manutencao: 0, remover: 0 };
+    for (const a of aparelhosFaltantes) porAcao[acoesFaltantes[a.id] || 'remover'] += 1;
+    const total = porAcao.vendido + porAcao.atacado + porAcao.manutencao + porAcao.remover;
+    return { ...porAcao, total };
+  }, [aparelhosFaltantes, acoesFaltantes]);
+
   const handleSalvarAjustesEstoque = async () => {
+    setConfirmandoAjustes(false);
     setSalvandoAjustes(true);
     try {
       let alterados = 0;
@@ -1323,7 +1335,7 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
                 </Button>
 
                 <Button
-                  onClick={handleSalvarAjustesEstoque}
+                  onClick={() => (contagemAjustes.total > 0 ? setConfirmandoAjustes(true) : handleSalvarAjustesEstoque())}
                   disabled={salvandoAjustes}
                   className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs gap-2 px-6 py-2.5 rounded-xl shadow-lg shadow-cyan-900/20 cursor-pointer h-9"
                 >
@@ -1344,6 +1356,42 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
         )}
 
       </div>
+
+      {/* Confirmação quantificada: a pessoa digita quantos aparelhos vão mudar */}
+      {confirmandoAjustes && (
+        <ConfirmarAcaoEstoqueModal
+          aberto
+          tom={contagemAjustes.remover + contagemAjustes.vendido + contagemAjustes.atacado > 0 ? 'perigo' : 'aviso'}
+          titulo="Aplicar ajustes da conferência"
+          descricao={
+            <>
+              <strong className="text-rose-300">{contagemAjustes.total} aparelho(s)</strong> não localizados terão o destino
+              escolhido aplicado agora. Tudo fica num único lote, que pode ser desfeito em até 24 h em
+              Gerenciar &gt; Desfazer Operação em Massa.
+            </>
+          }
+          resumo={[
+            { rotulo: 'Baixa por extravio/perda', valor: contagemAjustes.remover, tom: contagemAjustes.remover ? 'perigo' : 'neutro' },
+            { rotulo: 'Saída como venda (varejo)', valor: contagemAjustes.vendido, tom: contagemAjustes.vendido ? 'aviso' : 'neutro' },
+            { rotulo: 'Saída como venda (atacado)', valor: contagemAjustes.atacado, tom: contagemAjustes.atacado ? 'aviso' : 'neutro' },
+            { rotulo: 'Encaminhados para manutenção', valor: contagemAjustes.manutencao },
+            { rotulo: 'Mantidos no estoque', valor: contagemAjustes.manter, tom: 'positivo' },
+          ]}
+          quantidadeConfirmacao={contagemAjustes.total}
+          rotuloQuantidade="aparelhos que vão mudar"
+          acoes={[
+            { rotulo: 'Voltar', variante: 'secundaria', onClick: () => setConfirmandoAjustes(false) },
+            {
+              rotulo: `Aplicar em ${contagemAjustes.total}`,
+              variante: 'perigo',
+              exigeDigitacao: true,
+              onClick: handleSalvarAjustesEstoque,
+              carregando: salvandoAjustes,
+            },
+          ]}
+          onFechar={() => setConfirmandoAjustes(false)}
+        />
+      )}
     </div>
   );
 }

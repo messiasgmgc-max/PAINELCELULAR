@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  */
 
 type Linha = Record<string, any>;
-type Filtro = [coluna: string, operador: 'eq' | 'neq' | 'in', valor: any];
+type Filtro = [coluna: string, operador: 'eq' | 'neq' | 'in' | 'gte' | 'gt', valor: any];
 
 export interface ChamadaRegistrada {
   tabela: string;
@@ -29,11 +29,21 @@ export function criarSupabaseFake(inicial: Record<string, Linha[]> = {}, opcoes:
     let operacao: ChamadaRegistrada['operacao'] = 'select';
     let payload: any;
     let colunas = '*';
+    let intervalo: [number, number] | null = null;
     const filtros: Filtro[] = [];
 
+    // gte/gt comparam texto: servem para datas ISO no mesmo formato.
     const casa = (l: Linha) =>
       filtros.every(([c, op, v]) =>
-        op === 'eq' ? l[c] === v : op === 'neq' ? l[c] !== v : (v as any[]).includes(l[c])
+        op === 'eq'
+          ? l[c] === v
+          : op === 'neq'
+            ? l[c] !== v
+            : op === 'gte'
+              ? String(l[c] ?? '') >= String(v)
+              : op === 'gt'
+                ? String(l[c] ?? '') > String(v)
+                : (v as any[]).includes(l[c])
       );
 
     const projetar = (l: Linha) => {
@@ -50,7 +60,8 @@ export function criarSupabaseFake(inicial: Record<string, Linha[]> = {}, opcoes:
       const linhas = (tabelas[tabela] ??= []);
 
       if (operacao === 'select') {
-        return { data: linhas.filter(casa).map(projetar), error: null };
+        const achadas = linhas.filter(casa).map(projetar);
+        return { data: intervalo ? achadas.slice(intervalo[0], intervalo[1] + 1) : achadas, error: null };
       }
       if (operacao === 'update') {
         if (opcoes.falharUpdateEm?.includes(tabela)) return { data: null, error: { message: 'falha simulada' } };
@@ -97,6 +108,18 @@ export function criarSupabaseFake(inicial: Record<string, Linha[]> = {}, opcoes:
       },
       in(c: string, v: any[]) {
         filtros.push([c, 'in', v]);
+        return api;
+      },
+      gte(c: string, v: any) {
+        filtros.push([c, 'gte', v]);
+        return api;
+      },
+      gt(c: string, v: any) {
+        filtros.push([c, 'gt', v]);
+        return api;
+      },
+      range(de: number, ate: number) {
+        intervalo = [de, ate];
         return api;
       },
       order() {

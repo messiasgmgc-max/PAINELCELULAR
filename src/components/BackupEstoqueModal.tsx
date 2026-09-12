@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmarAcaoEstoqueModal } from '@/components/ConfirmarAcaoEstoqueModal';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -218,6 +219,7 @@ export function BackupEstoqueModal({
   const [carregandoConteudo, setCarregandoConteudo] = useState(false);
   const [executando, setExecutando] = useState(false);
   const [criandoPonto, setCriandoPonto] = useState(false);
+  const [confirmandoRestauracao, setConfirmandoRestauracao] = useState(false);
 
   const selecionar = useCallback(async (ponto: PontoBackup | null) => {
     setBackupSelecionado(ponto);
@@ -319,6 +321,7 @@ export function BackupEstoqueModal({
   const handleConfirmarRestauracao = async () => {
     if (!backupSelecionado?.aparelhos) return;
 
+    setConfirmandoRestauracao(false);
     setExecutando(true);
     const { paraReativar, comAlteracao, novosParaDesativar } = relatorioDiff;
     const total = paraReativar.length + comAlteracao.length + (novosParaDesativar.length ? 1 : 0);
@@ -609,7 +612,7 @@ export function BackupEstoqueModal({
                   Cancelar
                 </Button>
                 <Button
-                  onClick={handleConfirmarRestauracao}
+                  onClick={() => setConfirmandoRestauracao(true)}
                   disabled={executando || !conteudoPronto || totalAlteracoes === 0}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-2 px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-950/40 cursor-pointer"
                 >
@@ -621,6 +624,34 @@ export function BackupEstoqueModal({
           </div>
         )}
       </div>
+
+      {/* Confirmação quantificada: digitar quantos aparelhos mudam */}
+      {confirmandoRestauracao && backupSelecionado && (
+        <ConfirmarAcaoEstoqueModal
+          aberto
+          tom={relatorioDiff.novosParaDesativar.length > 0 ? 'perigo' : 'aviso'}
+          titulo="Restaurar ponto de backup"
+          descricao={`O estoque volta ao backup "${backupSelecionado.motivo}" de ${backupSelecionado.dataHora}. ${totalAlteracoes} aparelho(s) mudam; tudo fica num lote que pode ser desfeito em até 24 h.`}
+          resumo={[
+            { rotulo: 'Voltam ao estoque', valor: relatorioDiff.paraReativar.length, tom: 'positivo' },
+            { rotulo: 'Valores revertidos', valor: relatorioDiff.comAlteracao.length, tom: relatorioDiff.comAlteracao.length ? 'aviso' : 'neutro' },
+            { rotulo: 'Cadastrados depois (serão baixados)', valor: relatorioDiff.novosParaDesativar.length, tom: relatorioDiff.novosParaDesativar.length ? 'perigo' : 'neutro' },
+          ]}
+          quantidadeConfirmacao={totalAlteracoes}
+          rotuloQuantidade="aparelhos que vão mudar"
+          acoes={[
+            { rotulo: 'Voltar', variante: 'secundaria', onClick: () => setConfirmandoRestauracao(false) },
+            {
+              rotulo: `Restaurar ${totalAlteracoes}`,
+              variante: relatorioDiff.novosParaDesativar.length > 0 ? 'perigo' : 'primaria',
+              exigeDigitacao: true,
+              onClick: handleConfirmarRestauracao,
+              carregando: executando,
+            },
+          ]}
+          onFechar={() => setConfirmandoRestauracao(false)}
+        />
+      )}
     </div>
   );
 }

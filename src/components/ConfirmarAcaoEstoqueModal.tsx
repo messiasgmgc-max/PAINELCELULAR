@@ -5,14 +5,16 @@ import { AlertTriangle, Loader2, ShieldAlert, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModalPortal } from '@/components/ModalPortal';
 import { cn } from '@/lib/utils';
+import { quantidadeDigitadaConfere } from '@/lib/estoque/confirmacao';
 
 /**
  * Confirmação para operações que mexem em muitos aparelhos de uma vez.
  *
  * Substitui o `confirm()` genérico que protegia (sem proteger) as baixas em
  * massa. A regra aqui é mostrar números reais antes de qualquer escrita, e,
- * para o que é irreversível, exigir que a pessoa digite algo (ex.: o nome da
- * loja) em vez de só clicar.
+ * para o que é irreversível, exigir que a pessoa digite a QUANTIDADE de
+ * aparelhos afetados. Antes pedia o nome da loja, que se digita no automático;
+ * o número obriga a ler quantos aparelhos vão mudar.
  */
 
 export interface LinhaResumo {
@@ -28,7 +30,7 @@ export interface AcaoConfirmacao {
   desabilitada?: boolean;
   /** Mostra spinner neste botão e trava os demais. */
   carregando?: boolean;
-  /** Exige a digitação de `textoConfirmacao` para habilitar. */
+  /** Exige a digitação de `quantidadeConfirmacao` para habilitar. */
   exigeDigitacao?: boolean;
 }
 
@@ -42,8 +44,10 @@ interface Props {
   bloqueio?: string | null;
   detalhes?: ReactNode;
   acoes: AcaoConfirmacao[];
-  /** Texto que precisa ser digitado para liberar ações com `exigeDigitacao`. */
-  textoConfirmacao?: string;
+  /** Quantidade de aparelhos afetados; precisa ser digitada para liberar ações com `exigeDigitacao`. */
+  quantidadeConfirmacao?: number;
+  /** O que a quantidade representa (padrão: "aparelhos afetados"). */
+  rotuloQuantidade?: string;
   onFechar: () => void;
 }
 
@@ -63,7 +67,8 @@ export function ConfirmarAcaoEstoqueModal({
   bloqueio,
   detalhes,
   acoes,
-  textoConfirmacao,
+  quantidadeConfirmacao,
+  rotuloQuantidade = 'aparelhos afetados',
   onFechar,
 }: Props) {
   const [digitado, setDigitado] = useState('');
@@ -75,9 +80,9 @@ export function ConfirmarAcaoEstoqueModal({
   if (!aberto) return null;
 
   const algumCarregando = acoes.some((a) => a.carregando);
-  const normalizar = (s: string) => s.trim().toLocaleLowerCase('pt-BR');
-  const digitacaoOk = !textoConfirmacao || normalizar(digitado) === normalizar(textoConfirmacao);
-  const precisaDigitar = Boolean(textoConfirmacao) && acoes.some((a) => a.exigeDigitacao);
+  const temQuantidade = typeof quantidadeConfirmacao === 'number';
+  const digitacaoOk = !temQuantidade || quantidadeDigitadaConfere(digitado, quantidadeConfirmacao);
+  const precisaDigitar = temQuantidade && acoes.some((a) => a.exigeDigitacao);
   const Icone = tom === 'perigo' ? ShieldAlert : AlertTriangle;
 
   return (
@@ -134,11 +139,14 @@ export function ConfirmarAcaoEstoqueModal({
           {precisaDigitar && (
             <label className="block space-y-1.5">
               <span className="text-xs text-slate-400">
-                Para confirmar, digite <strong className="text-white">{textoConfirmacao}</strong>
+                Para confirmar, digite a quantidade de {rotuloQuantidade}:{' '}
+                <strong className="text-white tabular-nums">{quantidadeConfirmacao}</strong>
               </span>
               <input
                 value={digitado}
                 onChange={(e) => setDigitado(e.target.value)}
+                inputMode="numeric"
+                placeholder={`Digite ${quantidadeConfirmacao}`}
                 autoComplete="off"
                 spellCheck={false}
                 className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-rose-500"

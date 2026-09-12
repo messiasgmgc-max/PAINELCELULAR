@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   CAMPOS_CICLO,
   EstadoCicloAparelho,
+  LinhaMovimentacao,
   OrigemMovimentacao,
   PatchCiclo,
   TipoMovimentacao,
@@ -84,12 +85,16 @@ export async function aplicarMudancaEstoque(
   const ids = [...new Set((opcoes.ids || []).filter(Boolean))];
   if (ids.length === 0) return { afetados: 0, loteId, auditoriaRegistrada: true };
 
-  const campos = [...new Set<string>([...CAMPOS_CICLO, ...(opcoes.camposAuditados || [])])];
-  const colunas = ['id', 'loja_id', ...campos].join(', ');
+  // Todo campo do patch entra no antes/depois: sem isso, desfazer o lote não saberia
+  // o valor anterior de observacoes, cor etc. (ver desfazerLote.ts).
+  const campos = [
+    ...new Set<string>([...CAMPOS_CICLO, ...(opcoes.camposAuditados || []), ...Object.keys(opcoes.patch)]),
+  ];
   const alterados: EstadoCicloAparelho[] = [];
 
   for (const parte of fatiar(ids, TAMANHO_LOTE_IDS)) {
-    let leitura = supabase.from('aparelhos').select(colunas).in('id', parte);
+    // Linha inteira: vira `antes` na auditoria, o estado anterior completo do aparelho.
+    let leitura = supabase.from('aparelhos').select('*').in('id', parte);
     if (opcoes.lojaId) leitura = leitura.eq('loja_id', opcoes.lojaId);
     const { data: estadoAtual, error: erroLeitura } = await leitura;
     if (erroLeitura) {
@@ -118,7 +123,8 @@ export async function aplicarMudancaEstoque(
     alterados.push(...encontrados);
   }
 
-  const linhas = montarMovimentacoes({
+  const porId = new Map(alterados.map((a) => [String(a.id), a]));
+  const linhas: LinhaGravavel[] = montarMovimentacoes({
     antes: alterados,
     patch: opcoes.patch,
     tipo: opcoes.tipo,
@@ -129,7 +135,7 @@ export async function aplicarMudancaEstoque(
     usuarioId: opcoes.usuarioId,
     usuarioNome: opcoes.usuarioNome,
     observacao: opcoes.observacao,
-  });
+  }).map((linha) => ({ ...linha, antes: (linha.aparelho_id && porId.get(linha.aparelho_id)) || null }));
 
   const auditoria = await gravarMovimentacoes(supabase, linhas);
   const semLoja = alterados.length - linhas.length;
@@ -187,12 +193,35 @@ export async function registrarEntradaEstoque(
   };
 }
 
+/** Linha de auditoria; `antes` é a linha inteira do aparelho antes da mudança (só em aplicarMudancaEstoque). */
+type LinhaGravavel = LinhaMovimentacao & { antes?: Record<string, unknown> | null };
+
+function semColunaAntes(linha: LinhaGravavel): LinhaMovimentacao {
+  const copia = { ...linha };
+  delete copia.antes;
+  return copia;
+}
+
+/** PostgREST recusa coluna desconhecida (PGRST204) antes da migration 20260913_estoque_movimentacoes_antes. */
+function faltaColunaAntes(erro: { message?: string; code?: string }): boolean {
+  return erro.code === 'PGRST204' && /'antes'/.test(String(erro.message || ''));
+}
+
 async function gravarMovimentacoes(
   supabase: SupabaseClient,
-  linhas: ReturnType<typeof montarMovimentacoes>
+  linhas: LinhaGravavel[]
 ): Promise<{ ok: boolean; erro?: string }> {
+  let semAntes = false;
   for (const parte of fatiar(linhas, TAMANHO_LOTE_INSERT)) {
-    const { error } = await supabase.from('movimentacoes_estoque').insert(parte);
+    const tentar = (payload: LinhaGravavel[]) => supabase.from('movimentacoes_estoque').insert(payload);
+    let { error } = await tentar(semAntes ? parte.map(semColunaAntes) : parte);
+    if (error && !semAntes && faltaColunaAntes(error)) {
+      // Só a coluna nova e só até a migration ser aplicada: a mudança já foi feita e
+      // perder a auditoria inteira seria pior do que perder o estado completo.
+      console.warn('[Estoque] movimentacoes_estoque.antes ainda não existe; auditoria gravada sem o estado completo.');
+      semAntes = true;
+      ({ error } = await tentar(parte.map(semColunaAntes)));
+    }
     if (error) {
       console.error('[Estoque] Mudança aplicada, mas a auditoria falhou:', error.message);
       return { ok: false, erro: error.message };
