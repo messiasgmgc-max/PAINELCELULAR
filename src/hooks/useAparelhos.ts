@@ -15,6 +15,7 @@ import {
   type TipoMovimentacao,
 } from "@/lib/estoque/ciclo";
 import { aplicarMudancaEstoque, registrarEntradaEstoque } from "@/lib/estoque/movimentacoes";
+import { mensagemErroGravacaoAparelho } from "@/lib/estoque/cadastroManual";
 import { useAuth } from "./useAuth";
 
 /** Contexto opcional de um cadastro, usado na auditoria da entrada no estoque. */
@@ -30,18 +31,32 @@ export interface OpcoesCadastroAparelho {
   lancarErro?: boolean;
 }
 
+/** Resultado de uma gravação: `error` traz a mensagem real do banco, já traduzida para a pessoa. */
+export type ResultadoGravacaoAparelho = { data: Aparelho; error: null } | { data: null; error: string };
+
+type DadosNovoAparelho = Omit<Aparelho, "id" | "dataCadastro" | "lojaId">;
+
 interface UseAparelhosReturn {
   aparelhos: Aparelho[];
   loading: boolean;
   error: string | null;
   fetchAparelhos: () => Promise<void>;
   buscarAparelhos: (termo: string) => Promise<void>;
-  criarAparelho: (
-    dados: Omit<Aparelho, "id" | "dataCadastro" | "lojaId">,
-    opcoes?: OpcoesCadastroAparelho
-  ) => Promise<Aparelho | null>;
+  /** Grava exatamente o que foi enviado; nunca descarta coluna para "passar". */
+  criarAparelhoComResultado: (dados: DadosNovoAparelho, opcoes?: OpcoesCadastroAparelho) => Promise<ResultadoGravacaoAparelho>;
+  atualizarAparelhoComResultado: (id: string, dados: Partial<Aparelho>) => Promise<ResultadoGravacaoAparelho>;
+  /** Atalhos que devolvem só o aparelho (null em erro; a mensagem fica em `error`). */
+  criarAparelho: (dados: DadosNovoAparelho, opcoes?: OpcoesCadastroAparelho) => Promise<Aparelho | null>;
   atualizarAparelho: (id: string, dados: Partial<Aparelho>) => Promise<Aparelho | null>;
   deletarAparelho: (id: string) => Promise<boolean>;
+}
+
+function mensagemDeErro(err: unknown): string {
+  if (err && typeof err === "object" && ("code" in err || "details" in err)) {
+    return mensagemErroGravacaoAparelho(err as { message?: string; code?: string; details?: string });
+  }
+  if (err instanceof Error) return err.message;
+  return String(err || "Não foi possível salvar o aparelho.");
 }
 
 /**
@@ -213,15 +228,14 @@ export function useAparelhos(): UseAparelhosReturn {
     }
   }, [usuario?.lojaId]);
 
-  const criarAparelho = useCallback(
-    async (dados: Omit<Aparelho, "id" | "dataCadastro" | "lojaId">, opcoes: OpcoesCadastroAparelho = {}) => {
-      if (!usuario?.lojaId) return null;
+  const criarAparelhoComResultado = useCallback(
+    async (dados: DadosNovoAparelho, opcoes: OpcoesCadastroAparelho = {}): Promise<ResultadoGravacaoAparelho> => {
+      if (!usuario?.lojaId) return { data: null, error: 'Seu usuário não está ligado a nenhuma loja.' };
       setLoading(true);
       setError(null);
       try {
         const uniqueId = (dados as any)?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `ap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
-        const codigo8Digitos = String(Math.floor(10000000 + Math.random() * 90000000));
-        const rawPayload: Record<string, any> = {
+        const payload: Record<string, any> = {
           id: uniqueId,
           ...dados,
           loja_id: usuario.lojaId,
@@ -231,51 +245,29 @@ export function useAparelhos(): UseAparelhosReturn {
         };
 
         // `codigo` só vai quando informado: sem ele, a etiqueta continua usando o ID importado
-        // (observações/numeroSerie). Colunas inexistentes caem no retry abaixo.
-        if (!rawPayload.codigo) delete rawPayload.codigo;
-        delete rawPayload.saudeBateria;
+        // (observações/numeroSerie).
+        if (!payload.codigo) delete payload.codigo;
+        delete payload.saudeBateria;
 
         // Evita enviar string vazia para colunas opcionais.
-        Object.keys(rawPayload).forEach((key) => {
-          if (typeof rawPayload[key] === 'string' && rawPayload[key].trim() === '') {
-            delete rawPayload[key];
+        Object.keys(payload).forEach((key) => {
+          if (typeof payload[key] === 'string' && payload[key].trim() === '') {
+            delete payload[key];
           }
         });
 
-        let payload = { ...rawPayload };
-        let data: any = null;
-        let lastError: any = null;
+        // Uma tentativa só. A versão anterior, quando o banco recusava uma coluna,
+        // apagava a coluna do payload e gravava sem ela em silêncio: o aparelho
+        // entrava sem o que foi digitado e ninguém ficava sabendo.
+        // Cadastro: a linha criada é registrada logo abaixo com registrarEntradaEstoque.
+        const { data, error: erroInsert } = await supabase
+          .from('aparelhos') // estoque-guard: auditado
+          .insert([payload])
+          .select()
+          .single();
 
-        for (let tentativa = 0; tentativa < 5; tentativa += 1) {
-          // Cadastro: a linha criada é registrada logo abaixo com registrarEntradaEstoque.
-          const response = await supabase
-            .from('aparelhos') // estoque-guard: auditado
-            .insert([payload])
-            .select()
-            .single();
-
-          if (!response.error) {
-            data = response.data;
-            lastError = null;
-            break;
-          }
-
-          lastError = response.error;
-
-          const errorText = `${response.error.message || ''} ${response.error.details || ''}`;
-          const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
-          const invalidColumn = columnMatch?.[1];
-
-          if (invalidColumn && Object.prototype.hasOwnProperty.call(payload, invalidColumn)) {
-            delete payload[invalidColumn];
-            continue;
-          }
-
-          break;
-        }
-
-        if (lastError || !data) {
-          throw lastError || new Error('Falha ao inserir aparelho');
+        if (erroInsert || !data) {
+          throw erroInsert || new Error('Falha ao inserir aparelho');
         }
 
         // O aparelho já existe: falha na auditoria só gera aviso, nunca desfaz o cadastro.
@@ -314,11 +306,12 @@ export function useAparelhos(): UseAparelhosReturn {
 
         const aparelhoCriado = { ...data, custo: data?.custo ?? (dados as any)?.custo ?? 0 } as Aparelho;
         setAparelhos((prev) => [...prev, aparelhoCriado]);
-        return aparelhoCriado;
+        return { data: aparelhoCriado, error: null };
       } catch (err: any) {
-        setError(err?.message || "Erro ao criar aparelho");
+        const mensagem = mensagemDeErro(err);
+        setError(mensagem);
         if (opcoes.lancarErro) throw err;
-        return null;
+        return { data: null, error: mensagem };
       } finally {
         setLoading(false);
       }
@@ -326,9 +319,15 @@ export function useAparelhos(): UseAparelhosReturn {
     [usuario?.lojaId, usuario?.id, usuario?.nome]
   );
 
-  const atualizarAparelho = useCallback(
-    async (id: string, dados: Partial<Aparelho>) => {
-      if (!usuario?.lojaId) return null;
+  const criarAparelho = useCallback(
+    async (dados: DadosNovoAparelho, opcoes: OpcoesCadastroAparelho = {}) =>
+      (await criarAparelhoComResultado(dados, opcoes)).data,
+    [criarAparelhoComResultado]
+  );
+
+  const atualizarAparelhoComResultado = useCallback(
+    async (id: string, dados: Partial<Aparelho>): Promise<ResultadoGravacaoAparelho> => {
+      if (!usuario?.lojaId) return { data: null, error: 'Seu usuário não está ligado a nenhuma loja.' };
       const lojaId = usuario.lojaId;
       setLoading(true);
       setError(null);
@@ -357,40 +356,20 @@ export function useAparelhos(): UseAparelhosReturn {
         let data: any = null;
 
         if (Object.keys(payload).length > 0) {
-          let lastError: any = null;
+          // Sem retry que apaga colunas: ou grava tudo o que foi pedido, ou devolve o erro.
+          // ativo/status/data_saida/motivo_saida foram retirados do payload acima.
+          const { data: atualizado, error: erroUpdate } = await supabase
+            .from('aparelhos') // estoque-guard: sem-ciclo
+            .update(payload)
+            .eq('id', id)
+            .eq('loja_id', lojaId)
+            .select()
+            .single();
 
-          for (let tentativa = 0; tentativa < 5; tentativa += 1) {
-            // ativo/status/data_saida/motivo_saida foram retirados do payload acima.
-            const response = await supabase
-              .from('aparelhos') // estoque-guard: sem-ciclo
-              .update(payload)
-              .eq('id', id)
-              .eq('loja_id', lojaId)
-              .select()
-              .single();
-
-            if (!response.error) {
-              data = response.data;
-              lastError = null;
-              break;
-            }
-
-            lastError = response.error;
-            const errorText = `${response.error.message || ''} ${response.error.details || ''}`;
-            const columnMatch = errorText.match(/'([^']+)' column/) || errorText.match(/'([^']+)'/);
-            const invalidColumn = columnMatch?.[1];
-
-            if (invalidColumn && Object.prototype.hasOwnProperty.call(payload, invalidColumn)) {
-              delete payload[invalidColumn];
-              continue;
-            }
-
-            break;
+          if (erroUpdate || !atualizado) {
+            throw erroUpdate || new Error('Falha ao atualizar aparelho');
           }
-
-          if (lastError || !data) {
-            throw lastError || new Error('Falha ao atualizar aparelho');
-          }
+          data = atualizado;
         }
 
         if (plano && estadoAntes) {
@@ -432,15 +411,21 @@ export function useAparelhos(): UseAparelhosReturn {
         setAparelhos((prev) =>
           prev.map((a) => (a.id === id ? data : a))
         );
-        return data;
+        return { data: data as Aparelho, error: null };
       } catch (err: any) {
-        setError(err?.message || "Erro ao atualizar aparelho");
-        return null;
+        const mensagem = mensagemDeErro(err);
+        setError(mensagem);
+        return { data: null, error: mensagem };
       } finally {
         setLoading(false);
       }
     },
     [usuario?.lojaId, usuario?.id, usuario?.nome]
+  );
+
+  const atualizarAparelho = useCallback(
+    async (id: string, dados: Partial<Aparelho>) => (await atualizarAparelhoComResultado(id, dados)).data,
+    [atualizarAparelhoComResultado]
   );
 
   /**
@@ -510,6 +495,8 @@ export function useAparelhos(): UseAparelhosReturn {
     error,
     fetchAparelhos,
     buscarAparelhos,
+    criarAparelhoComResultado,
+    atualizarAparelhoComResultado,
     criarAparelho,
     atualizarAparelho,
     deletarAparelho,
