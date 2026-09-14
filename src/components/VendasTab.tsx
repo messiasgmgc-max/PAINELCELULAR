@@ -505,6 +505,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showReenviarNotinhaPrompt, setShowReenviarNotinhaPrompt] = useState(false);
   const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');
+  // Estados para o modal "Completar com Formulário" (preenche dados + envia recibo)
+  const [showCompletarFormularioModal, setShowCompletarFormularioModal] = useState(false);
+  const [vendaParaCompletarFormulario, setVendaParaCompletarFormulario] = useState<Venda | null>(null);
+  const [textoFormularioPedido, setTextoFormularioPedido] = useState('');
+  const [processandoFormulario, setProcessandoFormulario] = useState(false);
   const [processingAiText, setProcessingAiText] = useState(false);
   // Fotos da venda inteligente (etiqueta, caixa, tela Sobre), já reduzidas para envio.
   const [fotosVenda, setFotosVenda] = useState<string[]>([]);
@@ -714,6 +719,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       event.preventDefault();
       if (showImportarPedidoModal) {
         setShowImportarPedidoModal(false);
+        return;
+      }
+      if (showCompletarFormularioModal && !processandoFormulario) {
+        setShowCompletarFormularioModal(false);
         return;
       }
       if (showNovoCliente) {
@@ -2054,6 +2063,97 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       toast.warning(`Recibo enviado por ${enviados.join(' e ')}.`, { id: toastId, description: descricao });
     } else {
       toast.error('Recibo não enviado.', { id: toastId, description: descricao });
+    }
+  };
+
+  /** Abre o modal "Completar com Formulário" para uma venda específica. */
+  const abrirCompletarFormulario = (venda: Venda) => {
+    setVendaParaCompletarFormulario(venda);
+    setTextoFormularioPedido('');
+    setShowCompletarFormularioModal(true);
+  };
+
+  /**
+   * Processa o formulário de pedido via IA (Groq), atualiza os dados da venda
+   * no Supabase e dispara o envio do recibo por WhatsApp + e-mail.
+   */
+  const handleSubmitCompletarFormulario = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vendaParaCompletarFormulario) return;
+    if (!textoFormularioPedido.trim()) {
+      toast.error('Cole o formulário de pedido antes de continuar.');
+      return;
+    }
+
+    setProcessandoFormulario(true);
+    const toastId = toast.loading('IA lendo o formulário…');
+
+    try {
+      // 1. Enviar para a IA extrair os dados estruturados
+      const res = await fetch('/api/ai/parse-venda', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto: textoFormularioPedido, imagens: [] }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.ok) throw new Error(result.error || 'Falha ao ler o formulário com a IA.');
+
+      const parsed = result.data;
+
+      // 2. Montar o payload de atualização da venda
+      const clienteNomeNovo = parsed.cliente?.nome?.trim() || vendaParaCompletarFormulario.clienteNome || '';
+      const clienteTelNovo = parsed.cliente?.telefone?.trim() || '';
+      const valorTotalNovo = parsed.valorTotal ? Number(parsed.valorTotal) : vendaParaCompletarFormulario.valor;
+      const metodoPgtoNovo = parsed.formaPagamento || vendaParaCompletarFormulario.metodo || 'pix';
+
+      const vendaId = vendaParaCompletarFormulario.id;
+
+      // 3. Atualizar dados na tabela 'vendas'
+      const { error: errVenda } = await supabase
+        .from('vendas')
+        .update({
+          clienteNome: clienteNomeNovo || undefined,
+          valor: valorTotalNovo,
+          metodo: metodoPgtoNovo,
+          dados_cliente_pendente: false,
+          ...(parsed.observacoes ? { descricao: parsed.observacoes } : {}),
+        })
+        .eq('id', vendaId);
+
+      if (errVenda) throw new Error(`Erro ao atualizar venda: ${errVenda.message}`);
+
+      // 4. Se a IA retornou um telefone e o cliente está cadastrado, atualizar o cliente
+      if (clienteTelNovo && vendaParaCompletarFormulario.clienteId) {
+        await supabase
+          .from('clientes')
+          .update({ nome: clienteNomeNovo || undefined, telefone: clienteTelNovo })
+          .eq('id', vendaParaCompletarFormulario.clienteId)
+          .then(({ error: errCli }) => {
+            if (errCli) console.warn('Aviso ao atualizar cliente:', errCli.message);
+          });
+      }
+
+      toast.success('Dados da venda atualizados!', { id: toastId });
+
+      // 5. Recarregar lista de vendas para obter o objeto atualizado
+      await carregarVendas();
+
+      // 6. Fechar o modal e enviar o recibo
+      setShowCompletarFormularioModal(false);
+
+      // Busca a venda atualizada na lista para ter o clienteId correto
+      const vendaAtualizada: Venda = {
+        ...vendaParaCompletarFormulario,
+        clienteNome: clienteNomeNovo || vendaParaCompletarFormulario.clienteNome,
+        valor: valorTotalNovo,
+        metodo: metodoPgtoNovo,
+      };
+
+      void handleReenviarRecibo(vendaAtualizada, 'todos');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao processar formulário.', { id: toastId });
+    } finally {
+      setProcessandoFormulario(false);
     }
   };
 
@@ -4421,6 +4521,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <Edit className="mr-2 h-4 w-4 text-amber-400" />
                                 Editar Custos / Dados
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => abrirCompletarFormulario(venda)}>
+                                <Sparkles className="mr-2 h-4 w-4 text-orange-400" />
+                                Completar c/ Formulário
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEdit(venda)} disabled={vendaCancelada(venda)}>
                                 <Repeat className="mr-2 h-4 w-4 text-blue-400" />
                                 Reabrir no PDV
@@ -4709,6 +4813,82 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       />
 
       {/* Modal Importar Pedido via Groq IA */}
+      {/* Modal: Completar com Formulário (IA extrai dados → salva venda → envia recibo) */}
+      {isClient && showCompletarFormularioModal && vendaParaCompletarFormulario && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[60]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title flex items-center gap-2 text-orange-400 font-bold">
+                  <Sparkles className="w-5 h-5 text-orange-400 animate-pulse" /> Completar com Formulário
+                </h3>
+                <p className="modal-subtitle">
+                  Cole o formulário padrão de pedido e o valor total. A IA vai ler, preencher os dados da venda e já enviar o comprovante (PDF) por WhatsApp e e-mail para o cliente.
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowCompletarFormularioModal(false)} disabled={processandoFormulario}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="modal-body-scroll">
+              <form onSubmit={handleSubmitCompletarFormulario} className="space-y-4">
+                {/* Resumo da venda atual */}
+                <div className="rounded-lg bg-white/5 border border-white/10 p-3 flex flex-col gap-1 text-xs text-slate-300">
+                  <span className="font-bold text-slate-100 text-sm">Venda #{vendaParaCompletarFormulario.id?.slice(-6).toUpperCase()}</span>
+                  <span>Cliente atual: <span className="text-amber-300">{vendaParaCompletarFormulario.clienteNome || '—'}</span></span>
+                  <span>Valor atual: <span className="text-green-400 font-mono">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaCompletarFormulario.valor || 0)}</span></span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300">Formulário de pedido</label>
+                  <textarea
+                    className="input-glass min-h-[200px] font-sans text-sm p-3 border-orange-500/20 focus:border-orange-500"
+                    placeholder={"Cole aqui o formulário padrão de pedido com os dados do cliente, aparelho e valor total.\n\nEx:\nNome: João Silva\nTelefone: (11) 99999-9999\nModelo: iPhone 14 Pro\nValor: R$ 4.500,00\nForma de pagamento: PIX"}
+                    value={textoFormularioPedido}
+                    onChange={(e) => setTextoFormularioPedido(e.target.value)}
+                    disabled={processandoFormulario}
+                    autoFocus
+                  />
+                </div>
+
+                <p className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+                  Após processar, os dados da venda são atualizados e o comprovante em PDF é enviado automaticamente por WhatsApp e e-mail (caso o cliente tenha esses dados cadastrados).
+                </p>
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setShowCompletarFormularioModal(false)}
+                    disabled={processandoFormulario}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={processandoFormulario || !textoFormularioPedido.trim()}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 font-bold gap-2 shadow-lg shadow-orange-500/20"
+                  >
+                    {processandoFormulario ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" /> Processando com IA…
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" /> Processar e Enviar Recibo
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
       {isClient && showImportarPedidoModal && createPortal(
         <div className="modal-overlay modal-overlay-fit z-[60]">
           <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
