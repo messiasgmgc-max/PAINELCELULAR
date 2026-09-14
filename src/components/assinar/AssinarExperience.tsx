@@ -104,24 +104,34 @@ function CenaComRolagem({ mobile }: { mobile: boolean }) {
       <div ref={containerRef} className="relative z-10" style={{ height: `${alturaVh}dvh` }}>
         <div
           className="sticky top-0 h-[100dvh]"
-          style={{ visibility: entrou ? 'hidden' : 'visible', pointerEvents: entrou ? 'none' : 'auto' }}
+          style={{
+            display: entrou ? 'none' : 'block',
+            pointerEvents: entrou ? 'none' : 'auto',
+          }}
           aria-hidden={entrou}
         >
           <NotebookScene progresso={scrollYProgress} mobile={mobile} onEntrar={entrar}>
-            {/* A página real, só para ver: sem foco, sem cliques, sem leitura por leitores de tela. */}
+            {/* A página real, só para ver: sem botões fixos vazando, sem foco, sem cliques, sem leitura por leitores de tela. */}
             <div
               aria-hidden
               className="pointer-events-none h-full w-full select-none overflow-hidden"
               {...({ inert: true } as Record<string, boolean>)}
             >
-              <AssinarPage />
+              <AssinarPage botoesFixos={false} />
             </div>
           </NotebookScene>
         </div>
       </div>
 
       {/* A página real, alinhada ao topo do palco no fim da animação. */}
-      <div className="relative z-0" style={{ marginTop: '-100dvh' }}>
+      <div
+        className="relative z-0"
+        style={{
+          marginTop: '-100dvh',
+          display: entrou ? 'block' : 'none',
+          pointerEvents: entrou ? 'auto' : 'none',
+        }}
+      >
         <AssinarPage />
       </div>
     </div>

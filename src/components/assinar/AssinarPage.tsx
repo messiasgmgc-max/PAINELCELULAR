@@ -39,7 +39,11 @@ import {
   WHATSAPP_SUPORTE_URL 
 } from '@/lib/planos-config';
 
-export default function AssinarPage() {
+interface AssinarPageProps {
+  botoesFixos?: boolean;
+}
+
+export default function AssinarPage({ botoesFixos = true }: AssinarPageProps = {}) {
   // Configuração de Plano e Ciclo
   const [planoSelecionado, setPlanoSelecionado] = useState<TipoPlano>('intermediario');
   const [periodoSelecionado, setPeriodoSelecionado] = useState<PeriodoFaturamento>('mensal');
@@ -868,43 +872,47 @@ export default function AssinarPage() {
       </section>
 
       {/* CTA FINAL MOBILE — barra sticky só no mobile */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-4 py-3 flex gap-3">
-        <a
-          href={WHATSAPP_SUPORTE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shrink-0"
-          aria-label="Suporte WhatsApp"
-        >
-          <MessageCircle className="w-5 h-5" />
-        </a>
-        <a
-          href="#formulario"
-          className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm shadow-lg shadow-blue-600/30"
-        >
-          <Zap className="w-4 h-4 text-amber-300" /> Criar Loja Grátis
-        </a>
-      </div>
+      {botoesFixos && (
+        <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800 px-4 py-3 flex gap-3">
+          <a
+            href={WHATSAPP_SUPORTE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shrink-0"
+            aria-label="Suporte WhatsApp"
+          >
+            <MessageCircle className="w-5 h-5" />
+          </a>
+          <a
+            href="#formulario"
+            className="flex-1 flex items-center justify-center gap-2 h-12 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-sm shadow-lg shadow-blue-600/30"
+          >
+            <Zap className="w-4 h-4 text-amber-300" /> Criar Loja Grátis
+          </a>
+        </div>
+      )}
 
       {/* BOTÃO FLUTUANTE WHATSAPP — apenas desktop */}
-      <div className="hidden sm:block fixed bottom-5 right-5 z-50">
-        <a
-          href={WHATSAPP_SUPORTE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2.5 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-2xl shadow-emerald-600/40 font-bold text-xs transition-all hover:scale-105"
-        >
-          <div className="relative">
-            <MessageCircle className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white rounded-full animate-ping" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white rounded-full" />
-          </div>
-          <span>Dúvidas? Fale no WhatsApp</span>
-        </a>
-      </div>
+      {botoesFixos && (
+        <div className="hidden sm:block fixed bottom-5 right-5 z-50">
+          <a
+            href={WHATSAPP_SUPORTE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2.5 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-2xl shadow-emerald-600/40 font-bold text-xs transition-all hover:scale-105"
+          >
+            <div className="relative">
+              <MessageCircle className="w-5 h-5" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white rounded-full animate-ping" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white rounded-full" />
+            </div>
+            <span>Dúvidas? Fale no WhatsApp</span>
+          </a>
+        </div>
+      )}
 
       {/* Espaço extra no mobile para a barra sticky */}
-      <div className="h-20 sm:h-0" />
+      {botoesFixos && <div className="h-20 sm:h-0" />}
 
       {/* FOOTER */}
       <footer className="border-t border-slate-800/80 py-6 px-4 text-center text-xs text-slate-500 space-y-1">

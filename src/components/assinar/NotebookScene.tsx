@@ -160,7 +160,7 @@ export function NotebookScene({ progresso, mobile, children, onEntrar }: Props) 
 
           {/* A tela. */}
           <motion.div
-            className="absolute inset-0 overflow-hidden bg-slate-950"
+            className="absolute inset-0 overflow-hidden bg-slate-950 transform-gpu will-change-transform"
             style={{ borderRadius: raio, contain: 'paint', backfaceVisibility: 'hidden' }}
           >
             {children}
