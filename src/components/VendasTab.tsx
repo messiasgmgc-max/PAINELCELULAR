@@ -4578,14 +4578,25 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 </DropdownMenuPortal>
                               </DropdownMenuSub>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
-                                <FileText className="mr-2 h-4 w-4 text-blue-400" />
-                                Emitir NFC-e (Fiscal)
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleConsultarFiscalManual(venda)}>
-                                <ShieldCheck className="mr-2 h-4 w-4 text-emerald-400" />
-                                Ver / Consultar DANFE
-                              </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="font-normal">
+                                  <FileText className="mr-2 h-4 w-4 text-blue-400" />
+                                  Nota Fiscal
+                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                  <DropdownMenuSubContent className="w-48">
+                                    <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
+                                      <FileText className="mr-2 h-4 w-4 text-blue-400" />
+                                      Emitir NFC-e (Fiscal)
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleConsultarFiscalManual(venda)}>
+                                      <ShieldCheck className="mr-2 h-4 w-4 text-emerald-400" />
+                                      Ver / Consultar DANFE
+                                    </DropdownMenuItem>
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                              </DropdownMenuSub>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => handleTrocarItem(venda)}>
                                 <Repeat className="mr-2 h-4 w-4" />
