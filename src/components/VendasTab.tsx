@@ -4521,26 +4521,39 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <Edit className="mr-2 h-4 w-4 text-amber-400" />
                                 Editar Custos / Dados
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => abrirCompletarFormulario(venda)}>
-                                <Sparkles className="mr-2 h-4 w-4 text-orange-400" />
-                                Completar c/ Formulário
-                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEdit(venda)} disabled={vendaCancelada(venda)}>
                                 <Repeat className="mr-2 h-4 w-4 text-blue-400" />
                                 Reabrir no PDV
                               </DropdownMenuItem>
+                              {isPendente && (
+                                <DropdownMenuItem onClick={() => abrirCompletarFormulario(venda)}>
+                                  <Sparkles className="mr-2 h-4 w-4 text-orange-400" />
+                                  Completar c/ Formulário
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}>
                                 <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
                                 Chamar no WhatsApp
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
-                                <Printer className="mr-2 h-4 w-4" />
-                                Cupom Térmico
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleGerarReciboA4(venda)}>
-                                <FileText className="mr-2 h-4 w-4" />
-                                Recibo A4
-                              </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="font-normal">
+                                  <Printer className="mr-2 h-4 w-4" />
+                                  Imprimir Recibo
+                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                  <DropdownMenuSubContent className="w-44">
+                                    <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
+                                      <Printer className="mr-2 h-4 w-4" />
+                                      Cupom Térmico
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleGerarReciboA4(venda)}>
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      Recibo A4
+                                    </DropdownMenuItem>
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                              </DropdownMenuSub>
                               <DropdownMenuSub>
                                 <DropdownMenuSubTrigger className="font-normal">
                                   <Mail className="mr-2 h-4 w-4" />
