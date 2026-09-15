@@ -4497,7 +4497,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
+                            <DropdownMenuContent align="end" className="w-56 space-y-0.5">
                               <DropdownMenuItem
                                 onClick={() => {
                                   const itemPrincipal = venda.itens?.[0];
