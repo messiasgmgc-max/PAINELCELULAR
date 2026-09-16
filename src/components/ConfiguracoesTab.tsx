@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck, LayoutGrid, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
+import { Settings, Bell, Eye, Lock, Database, LogOut, X, Palette, User, Plus, Repeat, Copy, ExternalLink, QrCode, Smartphone, Truck, LayoutGrid, ArrowUp, ArrowDown, RotateCcw, Wrench, Package, ShieldCheck, DollarSign, Calendar, ShoppingCart, CheckCheck, Layers, MessageSquare, AlertCircle, Check, Loader2, Mail, FileText, Filter } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
@@ -65,9 +65,37 @@ export function ConfiguracoesTab() {
   
   const [notificacoesEmail, setNotificacoesEmail] = useState(true);
   const [notificacoesWhatsapp, setNotificacoesWhatsapp] = useState(false);
+  const [notificacoesWebPush, setNotificacoesWebPush] = useState(true);
   const [notificacoesOS, setNotificacoesOS] = useState(true);
   const [notificacoesGarantia, setNotificacoesGarantia] = useState(true);
   const [salvandoNotificacoes, setSalvandoNotificacoes] = useState(false);
+  const [categoriaNotificacaoFiltro, setCategoriaNotificacaoFiltro] = useState<string>('todas');
+
+  const [notifDetalhadas, setNotifDetalhadas] = useState({
+    // Vendas
+    vendaNova: true,
+    vendaCancelada: true,
+    vendaPendente: true,
+    vendaDesconto: true,
+    // OS
+    osNova: true,
+    osAprovada: true,
+    osPronta: true,
+    osEntregue: true,
+    // Estoque
+    estoqueBaixo: true,
+    estoqueEntrada: true,
+    estoqueManutencao: true,
+    // Garantias
+    garantiaVencimento: true,
+    garantiaAcionada: true,
+    // Financeiro
+    financeiroVencido: true,
+    financeiroCobranca: true,
+    // Agendamentos
+    agendamentoNovo: true,
+    agendamentoLembrete: true,
+  });
 
   // Recibo em PDF no WhatsApp do cliente ao finalizar a venda.
   const [reciboWhatsappAtivo, setReciboWhatsappAtivo] = useState(false);
@@ -95,8 +123,14 @@ export function ConfiguracoesTab() {
         const notifSalvas = configObj.notificacoes || {};
         if (typeof notifSalvas.email === 'boolean') setNotificacoesEmail(notifSalvas.email);
         if (typeof notifSalvas.whatsapp === 'boolean') setNotificacoesWhatsapp(notifSalvas.whatsapp);
+        if (typeof notifSalvas.webPush === 'boolean') setNotificacoesWebPush(notifSalvas.webPush);
         if (typeof notifSalvas.os === 'boolean') setNotificacoesOS(notifSalvas.os);
         if (typeof notifSalvas.garantia === 'boolean') setNotificacoesGarantia(notifSalvas.garantia);
+
+        setNotifDetalhadas(prev => ({
+          ...prev,
+          ...notifSalvas,
+        }));
       });
     return () => {
       cancelado = true;
@@ -306,8 +340,10 @@ export function ConfiguracoesTab() {
       const novasConfiguracoes = {
         ...configuracoesAtuais,
         notificacoes: {
+          ...notifDetalhadas,
           email: notificacoesEmail,
           whatsapp: notificacoesWhatsapp,
+          webPush: notificacoesWebPush,
           os: notificacoesOS,
           garantia: notificacoesGarantia,
         },
@@ -316,13 +352,28 @@ export function ConfiguracoesTab() {
       const { error: erroUpdate } = await supabase.from('lojas').update({ configuracoes: novasConfiguracoes }).eq('id', usuario.lojaId);
       if (erroUpdate) throw erroUpdate;
 
-      toast.success('Preferências de notificações salvas com sucesso!');
+      toast.success('Todas as preferências de notificações salvas com sucesso!');
     } catch (err: any) {
       console.error('Erro ao salvar notificações:', err);
       toast.error('Erro ao salvar preferências: ' + (err?.message || 'Falha de conexão'));
     } finally {
       setSalvandoNotificacoes(false);
     }
+  };
+
+  const toggleNotifItem = (key: keyof typeof notifDetalhadas) => {
+    setNotifDetalhadas(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const toggleGrupoNotificacoes = (keys: (keyof typeof notifDetalhadas)[], ativar: boolean) => {
+    setNotifDetalhadas(prev => {
+      const next = { ...prev };
+      keys.forEach(k => { next[k] = ativar; });
+      return next;
+    });
   };
 
   const handleAlterarSenha = async () => {
@@ -1197,114 +1248,496 @@ export function ConfiguracoesTab() {
 
           {/* Notificações */}
           <TabsContent value="notificacoes">
-            <GlassCard className="rounded-3xl">
-              <div className="pb-4 border-b border-white/10 mb-4">
-                <h3 className="text-base sm:text-lg font-bold">Preferências de Notificações</h3>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  Configure como você quer ser notificado
-                </p>
-              </div>
-              <div>
-                <div className="space-y-4 sm:space-y-6">
-                  {/* Canais de Notificação */}
-                  <div className="border-b dark:border-slate-700 pb-4 sm:pb-6">
-                    <h3 className="text-sm sm:text-base font-semibold mb-4">Canais de Comunicação</h3>
-                    <div className="space-y-3 sm:space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Bell className="w-4 h-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">Notificações por E-mail</p>
-                            <p className="text-xs text-muted-foreground">Receba alertas por e-mail</p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={notificacoesEmail}
-                          onCheckedChange={setNotificacoesEmail}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Bell className="w-4 h-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">Notificações por WhatsApp</p>
-                            <p className="text-xs text-muted-foreground">Receba alertas por WhatsApp</p>
-                          </div>
-                        </div>
-                        <Switch
-                          checked={notificacoesWhatsapp}
-                          onCheckedChange={setNotificacoesWhatsapp}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Recibo em PDF no WhatsApp do cliente */}
-                  <div className="border-b dark:border-slate-700 pb-4 sm:pb-6 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm sm:text-base font-semibold">Recibo no WhatsApp do cliente</h3>
-                        <p className="text-xs text-muted-foreground">
-                          Ao finalizar a venda, envia o recibo em PDF para o WhatsApp cadastrado do cliente, pelo número
-                          conectado da loja.
-                        </p>
-                      </div>
-                      <Switch checked={reciboWhatsappAtivo} onCheckedChange={setReciboWhatsappAtivo} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label htmlFor="recibo-whatsapp-mensagem" className="text-xs font-semibold">
-                        Mensagem enviada junto do PDF
-                      </label>
-                      <textarea
-                        id="recibo-whatsapp-mensagem"
-                        rows={4}
-                        maxLength={1000}
-                        value={reciboWhatsappMensagem}
-                        onChange={(e) => setReciboWhatsappMensagem(e.target.value)}
-                        className="input-glass w-full text-sm resize-y"
-                      />
-                      <p className="text-[11px] text-muted-foreground">Pode usar: {VARIAVEIS_RECIBO.join('  ')}</p>
-                    </div>
-                    <Button type="button" size="sm" onClick={salvarReciboWhatsapp} disabled={salvandoReciboWhatsapp}>
-                      {salvandoReciboWhatsapp ? 'Salvando…' : 'Salvar recibo no WhatsApp'}
-                    </Button>
-                  </div>
-
-                  {/* Tipos de Notificação */}
-                  <div>
-                    <h3 className="text-sm sm:text-base font-semibold mb-4">Notificar sobre</h3>
-                    <div className="space-y-3 sm:space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Ordens de Serviço</p>
-                          <p className="text-xs text-muted-foreground">Novas OS e atualizações</p>
-                        </div>
-                        <Switch
-                          checked={notificacoesOS}
-                          onCheckedChange={setNotificacoesOS}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium">Garantias</p>
-                          <p className="text-xs text-muted-foreground">Vencimento de garantias</p>
-                        </div>
-                        <Switch
-                          checked={notificacoesGarantia}
-                          onCheckedChange={setNotificacoesGarantia}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button 
-                    onClick={handleSalvarNotificacoes}
-                    disabled={salvandoNotificacoes}
-                    className="w-full h-10 sm:h-auto font-bold bg-blue-600 hover:bg-blue-700"
-                  >
-                    {salvandoNotificacoes ? 'Salvando...' : 'Salvar Preferências'}
-                  </Button>
+            <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-6">
+              <div className="pb-4 border-b border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base sm:text-xl font-bold flex items-center gap-2 text-white">
+                    <Bell className="w-5 h-5 text-blue-400" /> Central de Notificações & Automações
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
+                    Defina quais canais usar e exatamente sobre quais eventos do sistema você quer ser notificado por WhatsApp, E-mail ou Pop-ups.
+                  </p>
                 </div>
+                <Button
+                  onClick={handleSalvarNotificacoes}
+                  disabled={salvandoNotificacoes}
+                  className="font-bold bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-500/20 shrink-0"
+                >
+                  {salvandoNotificacoes ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCheck className="w-4 h-4 mr-2" /> Salvar Preferências
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {/* 1. Canais de Comunicação Globais */}
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-blue-400" /> Canais Globais de Comunicação
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* WhatsApp */}
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10">
+                    <div className="flex items-center gap-3">
+                      <MessageSquare className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-bold text-white">Notificações por WhatsApp</p>
+                        <p className="text-xs text-slate-300">Via Evolution API da Loja</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={notificacoesWhatsapp}
+                      onCheckedChange={setNotificacoesWhatsapp}
+                    />
+                  </div>
+
+                  {/* E-mail */}
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-blue-500/20 bg-blue-500/10">
+                    <div className="flex items-center gap-3">
+                      <Mail className="w-5 h-5 text-blue-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-bold text-white">Notificações por E-mail</p>
+                        <p className="text-xs text-slate-300">Receba resumos e relatórios</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={notificacoesEmail}
+                      onCheckedChange={setNotificacoesEmail}
+                    />
+                  </div>
+
+                  {/* Push / Web */}
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-amber-500/20 bg-amber-500/10">
+                    <div className="flex items-center gap-3">
+                      <Bell className="w-5 h-5 text-amber-400 shrink-0" />
+                      <div>
+                        <p className="text-sm font-bold text-white">Notificações de Navegador</p>
+                        <p className="text-xs text-slate-300">Pop-ups no painel do sistema</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={notificacoesWebPush}
+                      onCheckedChange={setNotificacoesWebPush}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Recibo Automático no WhatsApp do Cliente */}
+              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-emerald-400" /> Recibo em PDF no WhatsApp do Cliente (PDV)
+                    </h4>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Ao finalizar qualquer venda no PDV, o sistema gera o recibo em PDF e envia automaticamente para o WhatsApp do cliente cadastrado.
+                    </p>
+                  </div>
+                  <Switch checked={reciboWhatsappAtivo} onCheckedChange={setReciboWhatsappAtivo} />
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  <label htmlFor="recibo-whatsapp-mensagem" className="text-xs font-semibold text-slate-300">
+                    Mensagem enviada junto com o arquivo PDF:
+                  </label>
+                  <textarea
+                    id="recibo-whatsapp-mensagem"
+                    rows={3}
+                    maxLength={1000}
+                    value={reciboWhatsappMensagem}
+                    onChange={(e) => setReciboWhatsappMensagem(e.target.value)}
+                    className="input-glass w-full text-xs font-mono resize-y"
+                  />
+                  <p className="text-[11px] text-muted-foreground">Variáveis disponíveis: {VARIAVEIS_RECIBO.join('  ')}</p>
+                </div>
+                <Button type="button" size="sm" onClick={salvarReciboWhatsapp} disabled={salvandoReciboWhatsapp} className="bg-emerald-600 hover:bg-emerald-700 text-xs font-bold">
+                  {salvandoReciboWhatsapp ? 'Salvando…' : 'Salvar Mensagem do Recibo'}
+                </Button>
+              </div>
+
+              {/* 3. Submenu de Categorias de Eventos */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-blue-400" /> Filtrar Eventos por Categoria
+                  </h4>
+                </div>
+
+                {/* Submenu Tabs / Chips */}
+                <div className="flex flex-wrap gap-1.5 p-1 bg-black/40 border border-white/10 rounded-xl text-xs font-medium">
+                  {[
+                    { id: 'todas', label: 'Todas as Categorias', icon: Bell },
+                    { id: 'vendas', label: 'Vendas & PDV', icon: ShoppingCart },
+                    { id: 'os', label: 'Ordens de Serviço (OS)', icon: Wrench },
+                    { id: 'estoque', label: 'Estoque & Peças', icon: Package },
+                    { id: 'garantias', label: 'Garantias', icon: ShieldCheck },
+                    { id: 'financeiro', label: 'Financeiro', icon: DollarSign },
+                    { id: 'agendamentos', label: 'Agendamentos', icon: Calendar },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    const isSelected = categoriaNotificacaoFiltro === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setCategoriaNotificacaoFiltro(tab.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                          isSelected
+                            ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-500/30'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Grid de Seções de Notificações */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  {/* Category 1: Vendas */}
+                  {(categoriaNotificacaoFiltro === 'todas' || categoriaNotificacaoFiltro === 'vendas') && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                          <ShoppingCart className="w-4 h-4 text-emerald-400" /> Vendas & PDV
+                        </h5>
+                        <div className="flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['vendaNova', 'vendaCancelada', 'vendaPendente', 'vendaDesconto'], true)}
+                            className="text-emerald-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Ativar Todos
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['vendaNova', 'vendaCancelada', 'vendaPendente', 'vendaDesconto'], false)}
+                            className="text-rose-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Desativar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Nova Venda Realizada</p>
+                            <p className="text-[11px] text-slate-400">Notifica a conclusão de venda no PDV ou formulário</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.vendaNova} onCheckedChange={() => toggleNotifItem('vendaNova')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Venda Cancelada ou Desfeita</p>
+                            <p className="text-[11px] text-slate-400">Alerta quando uma venda for cancelada no painel</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.vendaCancelada} onCheckedChange={() => toggleNotifItem('vendaCancelada')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Venda Pendente / Fiado Criado</p>
+                            <p className="text-[11px] text-slate-400">Avisa quando uma venda for registrada sem pagamento total</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.vendaPendente} onCheckedChange={() => toggleNotifItem('vendaPendente')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Alerta de Desconto Alto Concedido</p>
+                            <p className="text-[11px] text-slate-400">Alerta quando o vendedor der desconto acima da média</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.vendaDesconto} onCheckedChange={() => toggleNotifItem('vendaDesconto')} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category 2: Ordens de Serviço */}
+                  {(categoriaNotificacaoFiltro === 'todas' || categoriaNotificacaoFiltro === 'os') && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                          <Wrench className="w-4 h-4 text-blue-400" /> Ordens de Serviço (OS)
+                        </h5>
+                        <div className="flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['osNova', 'osAprovada', 'osPronta', 'osEntregue'], true)}
+                            className="text-emerald-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Ativar Todos
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['osNova', 'osAprovada', 'osPronta', 'osEntregue'], false)}
+                            className="text-rose-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Desativar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Nova OS Cadastrada</p>
+                            <p className="text-[11px] text-slate-400">Avisa os técnicos e a loja ao abrir uma nova OS</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.osNova} onCheckedChange={() => toggleNotifItem('osNova')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Orçamento Aprovado pelo Cliente</p>
+                            <p className="text-[11px] text-slate-400">Notifica o técnico quando o cliente aprova o conserto</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.osAprovada} onCheckedChange={() => toggleNotifItem('osAprovada')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">OS Pronta para Retirada</p>
+                            <p className="text-[11px] text-slate-400">Dispara mensagem para o cliente buscar o aparelho</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.osPronta} onCheckedChange={() => toggleNotifItem('osPronta')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">OS Entregue / Concluída</p>
+                            <p className="text-[11px] text-slate-400">Notifica a finalização da entrega do aparelho</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.osEntregue} onCheckedChange={() => toggleNotifItem('osEntregue')} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category 3: Estoque */}
+                  {(categoriaNotificacaoFiltro === 'todas' || categoriaNotificacaoFiltro === 'estoque') && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                          <Package className="w-4 h-4 text-amber-400" /> Estoque & Peças
+                        </h5>
+                        <div className="flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['estoqueBaixo', 'estoqueEntrada', 'estoqueManutencao'], true)}
+                            className="text-emerald-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Ativar Todos
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['estoqueBaixo', 'estoqueEntrada', 'estoqueManutencao'], false)}
+                            className="text-rose-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Desativar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Alerta de Estoque Baixo</p>
+                            <p className="text-[11px] text-slate-400">Avisa quando modelos ou peças estiverem acabando</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.estoqueBaixo} onCheckedChange={() => toggleNotifItem('estoqueBaixo')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Entrada de Novos Aparelhos / Lote</p>
+                            <p className="text-[11px] text-slate-400">Notifica quando um novo lote for adicionado ao estoque</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.estoqueEntrada} onCheckedChange={() => toggleNotifItem('estoqueEntrada')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Aparelho enviado para Manutenção</p>
+                            <p className="text-[11px] text-slate-400">Alerta movimentações de aparelhos com técnicos/terceiros</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.estoqueManutencao} onCheckedChange={() => toggleNotifItem('estoqueManutencao')} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category 4: Garantias */}
+                  {(categoriaNotificacaoFiltro === 'todas' || categoriaNotificacaoFiltro === 'garantias') && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-purple-400" /> Garantias & Pós-Venda
+                        </h5>
+                        <div className="flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['garantiaVencimento', 'garantiaAcionada'], true)}
+                            className="text-emerald-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Ativar Todos
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['garantiaVencimento', 'garantiaAcionada'], false)}
+                            className="text-rose-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Desativar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Lembrete de Vencimento de Garantia (7 dias)</p>
+                            <p className="text-[11px] text-slate-400">Avisa o fim do período de garantia para pós-venda</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.garantiaVencimento} onCheckedChange={() => toggleNotifItem('garantiaVencimento')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Acionamento de Garantia pelo Cliente</p>
+                            <p className="text-[11px] text-slate-400">Alerta quando o cliente der entrada em garantia</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.garantiaAcionada} onCheckedChange={() => toggleNotifItem('garantiaAcionada')} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category 5: Financeiro */}
+                  {(categoriaNotificacaoFiltro === 'todas' || categoriaNotificacaoFiltro === 'financeiro') && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-emerald-400" /> Financeiro & Cobrança
+                        </h5>
+                        <div className="flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['financeiroVencido', 'financeiroCobranca'], true)}
+                            className="text-emerald-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Ativar Todos
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['financeiroVencido', 'financeiroCobranca'], false)}
+                            className="text-rose-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Desativar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Contas & Recebimentos Vencidos</p>
+                            <p className="text-[11px] text-slate-400">Alerta quando houver parcelas ou títulos atrasados</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.financeiroVencido} onCheckedChange={() => toggleNotifItem('financeiroVencido')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Lembrete Automático de Cobrança (Fiados)</p>
+                            <p className="text-[11px] text-slate-400">Dispara mensagem amigável de cobrança no WhatsApp</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.financeiroCobranca} onCheckedChange={() => toggleNotifItem('financeiroCobranca')} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category 6: Agendamentos */}
+                  {(categoriaNotificacaoFiltro === 'todas' || categoriaNotificacaoFiltro === 'agendamentos') && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-cyan-400" /> Agendamentos & Atendimento
+                        </h5>
+                        <div className="flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['agendamentoNovo', 'agendamentoLembrete'], true)}
+                            className="text-emerald-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Ativar Todos
+                          </button>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleGrupoNotificacoes(['agendamentoNovo', 'agendamentoLembrete'], false)}
+                            className="text-rose-400 hover:underline px-1.5 py-0.5"
+                          >
+                            Desativar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Novo Agendamento Cadastrado</p>
+                            <p className="text-[11px] text-slate-400">Notifica o cadastro de novo compromisso ou visita</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.agendamentoNovo} onCheckedChange={() => toggleNotifItem('agendamentoNovo')} />
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-medium text-white">Lembrete de Agendamentos do Dia</p>
+                            <p className="text-[11px] text-slate-400">Envia resumo diário dos agendamentos da loja pela manhã</p>
+                          </div>
+                          <Switch checked={notifDetalhadas.agendamentoLembrete} onCheckedChange={() => toggleNotifItem('agendamentoLembrete')} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Botão de Ação Salvar Preferências no Rodapé */}
+              <div className="pt-4 border-t border-white/10 flex justify-end">
+                <Button
+                  onClick={handleSalvarNotificacoes}
+                  disabled={salvandoNotificacoes}
+                  size="lg"
+                  className="w-full sm:w-auto font-bold bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-500/20 px-8"
+                >
+                  {salvandoNotificacoes ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando todas as preferências...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCheck className="w-5 h-5 mr-2" /> Salvar Todas as Preferências de Notificação
+                    </>
+                  )}
+                </Button>
               </div>
             </GlassCard>
           </TabsContent>
