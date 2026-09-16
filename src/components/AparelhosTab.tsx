@@ -27,6 +27,7 @@ import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
 import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue, formatarSaudeBateria } from "@/lib/utils";
 import { devolverAparelhoAoEstoque } from "@/lib/devolucaoEstoque";
+import { filtrarESortearAparelhos } from "@/lib/buscaEstoque";
 import { ConfirmarAcaoEstoqueModal, type AcaoConfirmacao, type LinhaResumo } from "@/components/ConfirmarAcaoEstoqueModal";
 import { useStoreConfig } from "@/hooks/useStoreConfig";
 import { registrarLog } from "@/lib/logger";
@@ -276,24 +277,9 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
     });
   }, [aparelhos, categoriaFiltro, filtroStatus]);
 
-  const aparelhosFiltrados = aparelhosAtivos.filter((aparelho) => {
-    const cod = (getAparelhoCodigo(aparelho) || '').toLowerCase();
-    const term = (searchTerm || '').toLowerCase();
-    const modeloStr = String(aparelho?.modelo || '').toLowerCase();
-    const marcaStr = String(aparelho?.marca || '').toLowerCase();
-    const imeiStr = String(aparelho?.imei || '');
-    const numSerieStr = String(aparelho?.numeroSerie || '');
-    const clienteStr = String(aparelho?.cliente || '').toLowerCase();
-
-    return (
-      modeloStr.includes(term) ||
-      marcaStr.includes(term) ||
-      cod.includes(term) ||
-      imeiStr.includes(searchTerm) ||
-      numSerieStr.includes(searchTerm) ||
-      clienteStr.includes(term)
-    );
-  });
+  const aparelhosFiltrados = useMemo(() => {
+    return filtrarESortearAparelhos(aparelhosAtivos, searchTerm);
+  }, [aparelhosAtivos, searchTerm]);
 
   const romOptions = ["64GB", "128GB", "256GB", "512GB", "1TB", "2TB"];
 

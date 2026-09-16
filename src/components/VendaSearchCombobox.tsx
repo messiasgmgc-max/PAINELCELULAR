@@ -188,46 +188,26 @@ export function VendaSearchCombobox({
   // Filtro inteligente multi-campo (IMEI, Nome, CPF, Telefone, Modelo, Data, etc.)
   const vendasFiltradas = useMemo(() => {
     const termo = searchTerm.trim().toLowerCase();
-    const termoDigitos = searchTerm.replace(/\D/g, "");
-
     if (!termo) {
       return vendasEnriquecidas;
     }
 
+    const tokens = termo.split(/\s+/).filter(Boolean);
+
     return vendasEnriquecidas.filter((item) => {
-      // 1. Busca por IMEI (muito importante)
-      if (item.imei) {
-        const imeiLimpo = item.imei.toLowerCase();
-        if (imeiLimpo.includes(termo)) return true;
-        if (termoDigitos && item.imei.replace(/\D/g, "").includes(termoDigitos)) return true;
-      }
+      const textoLivre = [
+        item.venda.id,
+        item.clienteNome,
+        item.clienteTelefone,
+        item.clienteCpf,
+        item.aparelhoFormatado,
+        item.modelo,
+        item.imei,
+        item.dataVendaFormatada,
+        item.valorFormatado,
+      ].filter(Boolean).join(' ').toLowerCase();
 
-      // 2. Busca por Nome do Cliente
-      if (item.clienteNome.toLowerCase().includes(termo)) return true;
-
-      // 3. Busca por Telefone / Celular
-      if (item.clienteTelefone) {
-        if (item.clienteTelefone.toLowerCase().includes(termo)) return true;
-        if (termoDigitos && item.clienteTelefone.replace(/\D/g, "").includes(termoDigitos)) return true;
-      }
-
-      // 4. Busca por CPF
-      if (item.clienteCpf) {
-        if (item.clienteCpf.toLowerCase().includes(termo)) return true;
-        if (termoDigitos && item.clienteCpf.replace(/\D/g, "").includes(termoDigitos)) return true;
-      }
-
-      // 5. Busca por Modelo / Descrição do Aparelho
-      if (item.aparelhoFormatado.toLowerCase().includes(termo)) return true;
-      if (item.modelo && item.modelo.toLowerCase().includes(termo)) return true;
-
-      // 6. Busca por Data da Venda (ex: 05/09 ou 05/09/2026)
-      if (item.dataVendaFormatada.includes(termo)) return true;
-
-      // 7. Busca pelo ID da venda
-      if (item.venda.id.toLowerCase().includes(termo)) return true;
-
-      return false;
+      return tokens.every((t) => textoLivre.includes(t));
     });
   }, [searchTerm, vendasEnriquecidas]);
 

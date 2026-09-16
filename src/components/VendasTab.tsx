@@ -2347,7 +2347,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         .join(' ')
         .toLowerCase();
 
-      const matchBusca = !busca || textoLivre.includes(busca);
+      const tokensBusca = busca.split(/\s+/).filter(Boolean);
+      const matchBusca = tokensBusca.length === 0 || tokensBusca.every((t) => textoLivre.includes(t));
       const matchStatus = !filtroStatus || venda.status === filtroStatus;
       const matchMetodo = !filtroMetodo || venda.metodo === filtroMetodo;
       const matchVendedor = !filtroVendedor || vendedor.toLowerCase().includes(filtroVendedor.toLowerCase());

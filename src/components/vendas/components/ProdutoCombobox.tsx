@@ -5,6 +5,8 @@ import { Aparelho } from '@/lib/db/types';
 import { Search, ChevronDown, Check } from 'lucide-react';
 import { formatarMoeda } from '../utils/vendasUtils';
 
+import { filtrarESortearAparelhos } from '@/lib/buscaEstoque';
+
 interface ProdutoComboboxProps {
   aparelhos: Aparelho[];
   value: string;
@@ -17,17 +19,7 @@ export function ProdutoCombobox({ aparelhos, value, onChange }: ProdutoComboboxP
 
   const selectedAparelho = aparelhos.find((a) => a.id === value);
 
-  const filtered = aparelhos.filter((a) => {
-    const q = query.toLowerCase();
-    return (
-      a.modelo.toLowerCase().includes(q) ||
-      a.marca.toLowerCase().includes(q) ||
-      (a.imei && a.imei.toLowerCase().includes(q)) ||
-      (a.numeroSerie && a.numeroSerie.toLowerCase().includes(q)) ||
-      (a.cor && a.cor.toLowerCase().includes(q)) ||
-      (a.capacidade && a.capacidade.toLowerCase().includes(q))
-    );
-  });
+  const filtered = filtrarESortearAparelhos(aparelhos, query);
 
   return (
     <div className="relative w-full">
