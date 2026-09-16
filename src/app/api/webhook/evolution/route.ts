@@ -28,6 +28,7 @@ import {
   type PapelUsuario,
 } from './capabilities';
 import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
+import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 
@@ -2954,7 +2955,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       // Consulta estritamente os aparelhos DESTA LOJA (zero fallbacks para outras lojas!)
       const { data: aparelhosBrutos } = await supabase
         .from('aparelhos')
-        .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
+        .select('*')
         .eq('loja_id', resolvedLojaId)
         .eq('ativo', true)
         .not('status', 'in', '(vendido,baixado)');
@@ -2967,47 +2968,16 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         return NextResponse.json({ status: 'ok', message: 'Estoque vazio.' }, { status: 200 });
       }
 
-      // Ordena por modelo normalizado
-      aparelhos.sort((a, b) => normalizarModelo(a.modelo).localeCompare(normalizarModelo(b.modelo)));
-
-      let ultimoModelo = '';
-      const linhasEstoque: string[] = [];
-
-      aparelhos.forEach((a) => {
-        const modNorm = normalizarModelo(a.modelo);
-        if (ultimoModelo && ultimoModelo !== modNorm) {
-          linhasEstoque.push('');
-        }
-        ultimoModelo = modNorm;
-
-        const { emoji, nomeCor } = formatarCorEEmoji(a.cor);
-        const cap = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
-        const batVal = a.saude_bateria || (a as any).saudeBateria;
-        const batNum = batVal ? String(batVal).replace(/\D/g, '') : '';
-        const bat = batNum ? `(${batNum}%)` : '';
-        const modCap = [modNorm, cap].filter(Boolean).join(' ');
-        const extras = [nomeCor, bat].filter(Boolean).join(' ');
-
-        if (isCompleto) {
-          const cod = a.codigo || (a.imei ? `...${String(a.imei).slice(-4)}` : `#${String(a.id).slice(0, 4)}`);
-          const precoAtacadoVal = a.preco_atacado || (a as any).precoAtacado || a.preco;
-          const atacadoFmt = precoAtacadoVal ? `R$ ${Number(precoAtacadoVal).toFixed(2).replace('.', ',')}` : 'Consulte';
-          linhasEstoque.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''} | Cód: ${cod} | Atacado: ${atacadoFmt}`.replace(/\s+/g, ' ').trim());
-        } else {
-          linhasEstoque.push(`${emoji} ${modCap}${extras ? ` - ${extras}` : ''}`.replace(/\s+/g, ' ').trim());
-        }
+      const mensagemBase = gerarListaEstoqueWhatsApp(aparelhos, {
+        modoAtacado: isCompleto,
+        nomeLoja: loja?.nome || 'PHONE CENTER',
       });
-
-      const nomeExibicao = (loja?.nome || 'PHONE CENTER').trim().toUpperCase();
-      const cabecalho = isCompleto
-        ? `📋 *ESTOQUE COMPLETO (ATACADO) - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`
-        : `📋 *ESTOQUE DISPONÍVEL - ${nomeExibicao}*\nTotal: *${aparelhos.length} aparelhos* em estoque\n\n`;
 
       const rodape = isCompleto
         ? `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`
         : `\n\n💡 _Para ver códigos e preços de atacado envie:_ *!estoque completo*`;
 
-      const mensagemEstoque = cabecalho + linhasEstoque.join('\n') + rodape;
+      const mensagemEstoque = mensagemBase + rodape;
       await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemEstoque);
       return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens).` }, { status: 200 });
     }
