@@ -67,6 +67,7 @@ export function ConfiguracoesTab() {
   const [notificacoesWhatsapp, setNotificacoesWhatsapp] = useState(false);
   const [notificacoesOS, setNotificacoesOS] = useState(true);
   const [notificacoesGarantia, setNotificacoesGarantia] = useState(true);
+  const [salvandoNotificacoes, setSalvandoNotificacoes] = useState(false);
 
   // Recibo em PDF no WhatsApp do cliente ao finalizar a venda.
   const [reciboWhatsappAtivo, setReciboWhatsappAtivo] = useState(false);
@@ -83,9 +84,19 @@ export function ConfiguracoesTab() {
       .maybeSingle()
       .then(({ data }) => {
         if (cancelado || !data) return;
+        const configObj = (data.configuracoes && typeof data.configuracoes === 'object' && !Array.isArray(data.configuracoes))
+          ? (data.configuracoes as Record<string, any>)
+          : {};
+
         const salvo = lerConfigReciboWhatsapp(data.configuracoes);
         setReciboWhatsappAtivo(salvo.ativo);
         setReciboWhatsappMensagem(salvo.mensagem);
+
+        const notifSalvas = configObj.notificacoes || {};
+        if (typeof notifSalvas.email === 'boolean') setNotificacoesEmail(notifSalvas.email);
+        if (typeof notifSalvas.whatsapp === 'boolean') setNotificacoesWhatsapp(notifSalvas.whatsapp);
+        if (typeof notifSalvas.os === 'boolean') setNotificacoesOS(notifSalvas.os);
+        if (typeof notifSalvas.garantia === 'boolean') setNotificacoesGarantia(notifSalvas.garantia);
       });
     return () => {
       cancelado = true;
@@ -278,15 +289,40 @@ export function ConfiguracoesTab() {
     }
   };
 
-  const handleSalvarNotificacoes = () => {
-    // Salvar configurações de notificações
-    console.log('Notificações salvas:', {
-      notificacoesEmail,
-      notificacoesWhatsapp,
-      notificacoesOS,
-      notificacoesGarantia,
-    });
-    alert('Preferências de notificações salvas com sucesso!');
+  const handleSalvarNotificacoes = async () => {
+    if (!usuario?.lojaId) {
+      toast.error('Loja não encontrada.');
+      return;
+    }
+    setSalvandoNotificacoes(true);
+    try {
+      const { data, error } = await supabase.from('lojas').select('configuracoes').eq('id', usuario.lojaId).maybeSingle();
+      if (error) throw error;
+      
+      const configuracoesAtuais = (data?.configuracoes && typeof data.configuracoes === 'object' && !Array.isArray(data.configuracoes))
+        ? (data.configuracoes as Record<string, unknown>)
+        : {};
+
+      const novasConfiguracoes = {
+        ...configuracoesAtuais,
+        notificacoes: {
+          email: notificacoesEmail,
+          whatsapp: notificacoesWhatsapp,
+          os: notificacoesOS,
+          garantia: notificacoesGarantia,
+        },
+      };
+
+      const { error: erroUpdate } = await supabase.from('lojas').update({ configuracoes: novasConfiguracoes }).eq('id', usuario.lojaId);
+      if (erroUpdate) throw erroUpdate;
+
+      toast.success('Preferências de notificações salvas com sucesso!');
+    } catch (err: any) {
+      console.error('Erro ao salvar notificações:', err);
+      toast.error('Erro ao salvar preferências: ' + (err?.message || 'Falha de conexão'));
+    } finally {
+      setSalvandoNotificacoes(false);
+    }
   };
 
   const handleAlterarSenha = async () => {
@@ -1263,9 +1299,10 @@ export function ConfiguracoesTab() {
 
                   <Button 
                     onClick={handleSalvarNotificacoes}
-                    className="w-full h-10 sm:h-auto"
+                    disabled={salvandoNotificacoes}
+                    className="w-full h-10 sm:h-auto font-bold bg-blue-600 hover:bg-blue-700"
                   >
-                    Salvar Preferências
+                    {salvandoNotificacoes ? 'Salvando...' : 'Salvar Preferências'}
                   </Button>
                 </div>
               </div>
