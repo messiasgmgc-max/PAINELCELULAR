@@ -575,6 +575,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [vendaRegistroParaEditar, setVendaRegistroParaEditar] = useState<VendaEditavelData | null>(null);
   const [vendaParaDesfazer, setVendaParaDesfazer] = useState<Venda | null>(null);
   const [desfazendoVenda, setDesfazendoVenda] = useState(false);
+  const [vendaParaExcluirCancelada, setVendaParaExcluirCancelada] = useState<Venda | null>(null);
+  const [excluindoVendaCancelada, setExcluindoVendaCancelada] = useState(false);
+  const [vendaParaDescancelar, setVendaParaDescancelar] = useState<Venda | null>(null);
+  const [descancelandoVenda, setDescancelandoVenda] = useState(false);
 
   const formatCurrencyField = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -1881,6 +1885,75 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       toast.error('Erro ao desfazer venda: ' + (error?.message || 'Falha no servidor'));
     } finally {
       setDesfazendoVenda(false);
+    }
+  };
+
+  const handleConfirmarExcluirVendaCancelada = async () => {
+    if (!vendaParaExcluirCancelada) return;
+    setExcluindoVendaCancelada(true);
+
+    try {
+      const venda = vendaParaExcluirCancelada;
+
+      const { error } = await supabase
+        .from('vendas')
+        .delete()
+        .eq('id', venda.id);
+
+      if (error) throw error;
+
+      await registrarLog({
+        loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipo_evento: 'venda',
+        acao: 'Venda Cancelada Excluída',
+        detalhes: `Venda #${venda.id.slice(-6).toUpperCase()} (${venda.clienteNome || 'Cliente'}) de R$ ${venda.valor || 0} excluída permanentemente.`,
+      });
+
+      toast.success('Venda cancelada excluída permanentemente!');
+      setVendaParaExcluirCancelada(null);
+      await carregarVendas();
+    } catch (error: any) {
+      console.error('Erro ao excluir venda cancelada:', error);
+      toast.error('Erro ao excluir venda cancelada: ' + (error?.message || 'Falha no servidor'));
+    } finally {
+      setExcluindoVendaCancelada(false);
+    }
+  };
+
+  const handleConfirmarDescancelarVenda = async () => {
+    if (!vendaParaDescancelar) return;
+    setDescancelandoVenda(true);
+
+    try {
+      const venda = vendaParaDescancelar;
+
+      const { error } = await supabase
+        .from('vendas')
+        .update({
+          status: 'pago',
+          cancelada_em: null,
+          motivo_cancelamento: null,
+          cancelada_por: null,
+        })
+        .eq('id', venda.id);
+
+      if (error) throw error;
+
+      await registrarLog({
+        loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipo_evento: 'venda',
+        acao: 'Venda Reativada',
+        detalhes: `Venda #${venda.id.slice(-6).toUpperCase()} (${venda.clienteNome || 'Cliente'}) de R$ ${venda.valor || 0} reativada (descancelada).`,
+      });
+
+      toast.success('Venda reativada (descancelada) com sucesso!');
+      setVendaParaDescancelar(null);
+      await carregarVendas();
+    } catch (error: any) {
+      console.error('Erro ao reativar venda:', error);
+      toast.error('Erro ao reativar venda: ' + (error?.message || 'Falha no servidor'));
+    } finally {
+      setDescancelandoVenda(false);
     }
   };
 
@@ -4481,7 +4554,28 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       </td>
                       <td className="py-3 px-2 text-right">
                         <div className="flex gap-1 justify-end">
-                          {!vendaCancelada(venda) && (
+                          {vendaCancelada(venda) ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Reativar / Descancelar venda"
+                                onClick={() => setVendaParaDescancelar(venda)}
+                                className="h-8 w-8 p-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Excluir venda cancelada permanentemente"
+                                onClick={() => setVendaParaExcluirCancelada(venda)}
+                                className="h-8 w-8 p-0 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          ) : (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -4603,13 +4697,32 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <Repeat className="mr-2 h-4 w-4" />
                                 Trocar Item
                               </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleCancelarVenda(venda)}
-                                className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
-                              >
-                                <Undo2 className="mr-2 h-4 w-4" />
-                                Desfazer Venda
-                              </DropdownMenuItem>
+                              {vendaCancelada(venda) ? (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => setVendaParaDescancelar(venda)}
+                                    className="text-emerald-400 focus:bg-emerald-500/10 focus:text-emerald-300 font-semibold"
+                                  >
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Reativar Venda (Descancelar)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => setVendaParaExcluirCancelada(venda)}
+                                    className="text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 font-semibold"
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Excluir Venda Cancelada
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => handleCancelarVenda(venda)}
+                                  className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
+                                >
+                                  <Undo2 className="mr-2 h-4 w-4" />
+                                  Desfazer Venda
+                                </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -4718,6 +4831,146 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 ) : (
                   <>
                     <Undo2 className="mr-2 h-4 w-4" /> Desfazer e devolver ao estoque
+                  </>
+                )}
+              </Button>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal de Confirmação — Excluir Venda Cancelada */}
+      {isClient && vendaParaExcluirCancelada && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[80]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4 border-rose-500/30">
+            <div className="modal-header bg-rose-500/10 border-b border-rose-500/20">
+              <h3 className="modal-title flex items-center gap-2 text-rose-400 font-bold">
+                <Trash2 className="w-5 h-5 text-rose-400" /> Excluir Venda Cancelada
+              </h3>
+              <button
+                type="button"
+                onClick={() => setVendaParaExcluirCancelada(null)}
+                disabled={excluindoVendaCancelada}
+                className="text-slate-400 hover:text-white disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body p-4 space-y-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                <p className="text-sm font-bold text-white">
+                  Venda #{vendaParaExcluirCancelada.id.slice(-6).toUpperCase()}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {vendaParaExcluirCancelada.clienteNome} ·{' '}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaExcluirCancelada.valor)}
+                  {' · '}
+                  {getVendaDataExibicao(vendaParaExcluirCancelada).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 space-y-1 text-xs text-rose-200">
+                <p className="font-bold text-rose-300">⚠️ Atenção: Ação Irreversível</p>
+                <p>
+                  Esta venda cancelada será removida definitivamente do banco de dados. Os relatórios históricos desta venda serão apagados.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end p-4 border-t border-white/10">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setVendaParaExcluirCancelada(null)}
+                disabled={excluindoVendaCancelada}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleConfirmarExcluirVendaCancelada}
+                disabled={excluindoVendaCancelada}
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+              >
+                {excluindoVendaCancelada ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Excluindo...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="mr-2 h-4 w-4" /> Confirmar Exclusão
+                  </>
+                )}
+              </Button>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal de Confirmação — Reativar (Descancelar) Venda */}
+      {isClient && vendaParaDescancelar && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[80]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4 border-emerald-500/30">
+            <div className="modal-header bg-emerald-500/10 border-b border-emerald-500/20">
+              <h3 className="modal-title flex items-center gap-2 text-emerald-400 font-bold">
+                <RotateCcw className="w-5 h-5 text-emerald-400" /> Reativar Venda (Descancelar)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setVendaParaDescancelar(null)}
+                disabled={descancelandoVenda}
+                className="text-slate-400 hover:text-white disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body p-4 space-y-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                <p className="text-sm font-bold text-white">
+                  Venda #{vendaParaDescancelar.id.slice(-6).toUpperCase()}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {vendaParaDescancelar.clienteNome} ·{' '}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaDescancelar.valor)}
+                  {' · '}
+                  {getVendaDataExibicao(vendaParaDescancelar).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-1 text-xs text-emerald-200">
+                <p className="font-bold text-emerald-300">ℹ️ Restauração de Status</p>
+                <p>
+                  O status desta venda retornará para <strong className="text-emerald-300">Pago</strong> e ela voltará a contabilizar normalmente no faturamento da loja.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end p-4 border-t border-white/10">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setVendaParaDescancelar(null)}
+                disabled={descancelandoVenda}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleConfirmarDescancelarVenda}
+                disabled={descancelandoVenda}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              >
+                {descancelandoVenda ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reativando...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="mr-2 h-4 w-4" /> Reativar Venda
                   </>
                 )}
               </Button>
