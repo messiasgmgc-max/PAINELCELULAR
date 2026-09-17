@@ -176,6 +176,37 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
           <span>Instalar App Web</span>
         </DropdownMenuItem>
 
+        {/* Checar Atualizações do Sistema */}
+        <DropdownMenuItem 
+          onClick={async () => {
+            try {
+              const res = await fetch(`/api/version?t=${Date.now()}`, { cache: 'no-store' });
+              const data = await res.json();
+              const versaoRemota = data?.version;
+              const versaoLocal = localStorage.getItem('phonecenter_app_build_version');
+              if (versaoLocal && versaoRemota && versaoLocal !== versaoRemota) {
+                if (confirm('Uma nova atualização foi encontrada no servidor! Deseja recarregar o sistema agora para aplicar as novidades?')) {
+                  localStorage.setItem('phonecenter_app_build_version', versaoRemota);
+                  if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map(k => caches.delete(k)));
+                  }
+                  window.location.reload();
+                }
+              } else {
+                localStorage.setItem('phonecenter_app_build_version', versaoRemota || 'latest');
+                alert('Você já está utilizando a versão mais recente do Phone Center!');
+              }
+            } catch (e) {
+              alert('Não foi possível checar atualizações no momento.');
+            }
+          }}
+          className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-cyan-300"
+        >
+          <RefreshCw className="w-4 h-4 text-cyan-400" />
+          <span>Buscar Atualizações</span>
+        </DropdownMenuItem>
+
         <DropdownMenuSeparator className="bg-slate-800 my-1" />
 
         {/* Trocar de Conta / Ir para Login */}

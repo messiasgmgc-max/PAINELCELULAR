@@ -505,6 +505,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [showReenviarNotinhaPrompt, setShowReenviarNotinhaPrompt] = useState(false);
   const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');
+  // Estados para o modal "Completar com Formulário" (preenche dados + envia recibo)
+  const [showCompletarFormularioModal, setShowCompletarFormularioModal] = useState(false);
+  const [vendaParaCompletarFormulario, setVendaParaCompletarFormulario] = useState<Venda | null>(null);
+  const [textoFormularioPedido, setTextoFormularioPedido] = useState('');
+  const [processandoFormulario, setProcessandoFormulario] = useState(false);
   const [processingAiText, setProcessingAiText] = useState(false);
   // Fotos da venda inteligente (etiqueta, caixa, tela Sobre), já reduzidas para envio.
   const [fotosVenda, setFotosVenda] = useState<string[]>([]);
@@ -570,6 +575,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [vendaRegistroParaEditar, setVendaRegistroParaEditar] = useState<VendaEditavelData | null>(null);
   const [vendaParaDesfazer, setVendaParaDesfazer] = useState<Venda | null>(null);
   const [desfazendoVenda, setDesfazendoVenda] = useState(false);
+  const [vendaParaExcluirCancelada, setVendaParaExcluirCancelada] = useState<Venda | null>(null);
+  const [excluindoVendaCancelada, setExcluindoVendaCancelada] = useState(false);
+  const [vendaParaDescancelar, setVendaParaDescancelar] = useState<Venda | null>(null);
+  const [descancelandoVenda, setDescancelandoVenda] = useState(false);
 
   const formatCurrencyField = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -714,6 +723,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       event.preventDefault();
       if (showImportarPedidoModal) {
         setShowImportarPedidoModal(false);
+        return;
+      }
+      if (showCompletarFormularioModal && !processandoFormulario) {
+        setShowCompletarFormularioModal(false);
         return;
       }
       if (showNovoCliente) {
@@ -1875,6 +1888,75 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
+  const handleConfirmarExcluirVendaCancelada = async () => {
+    if (!vendaParaExcluirCancelada) return;
+    setExcluindoVendaCancelada(true);
+
+    try {
+      const venda = vendaParaExcluirCancelada;
+
+      const { error } = await supabase
+        .from('vendas')
+        .delete()
+        .eq('id', venda.id);
+
+      if (error) throw error;
+
+      await registrarLog({
+        loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipo_evento: 'venda',
+        acao: 'Venda Cancelada Excluída',
+        detalhes: `Venda #${venda.id.slice(-6).toUpperCase()} (${venda.clienteNome || 'Cliente'}) de R$ ${venda.valor || 0} excluída permanentemente.`,
+      });
+
+      toast.success('Venda cancelada excluída permanentemente!');
+      setVendaParaExcluirCancelada(null);
+      await carregarVendas();
+    } catch (error: any) {
+      console.error('Erro ao excluir venda cancelada:', error);
+      toast.error('Erro ao excluir venda cancelada: ' + (error?.message || 'Falha no servidor'));
+    } finally {
+      setExcluindoVendaCancelada(false);
+    }
+  };
+
+  const handleConfirmarDescancelarVenda = async () => {
+    if (!vendaParaDescancelar) return;
+    setDescancelandoVenda(true);
+
+    try {
+      const venda = vendaParaDescancelar;
+
+      const { error } = await supabase
+        .from('vendas')
+        .update({
+          status: 'pago',
+          cancelada_em: null,
+          motivo_cancelamento: null,
+          cancelada_por: null,
+        })
+        .eq('id', venda.id);
+
+      if (error) throw error;
+
+      await registrarLog({
+        loja_id: usuario?.lojaId || (usuario as any)?.loja_id,
+        tipo_evento: 'venda',
+        acao: 'Venda Reativada',
+        detalhes: `Venda #${venda.id.slice(-6).toUpperCase()} (${venda.clienteNome || 'Cliente'}) de R$ ${venda.valor || 0} reativada (descancelada).`,
+      });
+
+      toast.success('Venda reativada (descancelada) com sucesso!');
+      setVendaParaDescancelar(null);
+      await carregarVendas();
+    } catch (error: any) {
+      console.error('Erro ao reativar venda:', error);
+      toast.error('Erro ao reativar venda: ' + (error?.message || 'Falha no servidor'));
+    } finally {
+      setDescancelandoVenda(false);
+    }
+  };
+
   // Função auxiliar para gerar o HTML do recibo A4
   const getReciboA4Html = (venda: Venda, clienteVenda?: Cliente, isForEmail: boolean = false, overrideStoreData?: any) => {
     const storeObj = overrideStoreData || {
@@ -2054,6 +2136,97 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       toast.warning(`Recibo enviado por ${enviados.join(' e ')}.`, { id: toastId, description: descricao });
     } else {
       toast.error('Recibo não enviado.', { id: toastId, description: descricao });
+    }
+  };
+
+  /** Abre o modal "Completar com Formulário" para uma venda específica. */
+  const abrirCompletarFormulario = (venda: Venda) => {
+    setVendaParaCompletarFormulario(venda);
+    setTextoFormularioPedido('');
+    setShowCompletarFormularioModal(true);
+  };
+
+  /**
+   * Processa o formulário de pedido via IA (Groq), atualiza os dados da venda
+   * no Supabase e dispara o envio do recibo por WhatsApp + e-mail.
+   */
+  const handleSubmitCompletarFormulario = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vendaParaCompletarFormulario) return;
+    if (!textoFormularioPedido.trim()) {
+      toast.error('Cole o formulário de pedido antes de continuar.');
+      return;
+    }
+
+    setProcessandoFormulario(true);
+    const toastId = toast.loading('IA lendo o formulário…');
+
+    try {
+      // 1. Enviar para a IA extrair os dados estruturados
+      const res = await fetch('/api/ai/parse-venda', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto: textoFormularioPedido, imagens: [] }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.ok) throw new Error(result.error || 'Falha ao ler o formulário com a IA.');
+
+      const parsed = result.data;
+
+      // 2. Montar o payload de atualização da venda
+      const clienteNomeNovo = parsed.cliente?.nome?.trim() || vendaParaCompletarFormulario.clienteNome || '';
+      const clienteTelNovo = parsed.cliente?.telefone?.trim() || '';
+      const valorTotalNovo = parsed.valorTotal ? Number(parsed.valorTotal) : vendaParaCompletarFormulario.valor;
+      const metodoPgtoNovo = parsed.formaPagamento || vendaParaCompletarFormulario.metodo || 'pix';
+
+      const vendaId = vendaParaCompletarFormulario.id;
+
+      // 3. Atualizar dados na tabela 'vendas'
+      const { error: errVenda } = await supabase
+        .from('vendas')
+        .update({
+          clienteNome: clienteNomeNovo || undefined,
+          valor: valorTotalNovo,
+          metodo: metodoPgtoNovo,
+          dados_cliente_pendente: false,
+          ...(parsed.observacoes ? { descricao: parsed.observacoes } : {}),
+        })
+        .eq('id', vendaId);
+
+      if (errVenda) throw new Error(`Erro ao atualizar venda: ${errVenda.message}`);
+
+      // 4. Se a IA retornou um telefone e o cliente está cadastrado, atualizar o cliente
+      if (clienteTelNovo && vendaParaCompletarFormulario.clienteId) {
+        await supabase
+          .from('clientes')
+          .update({ nome: clienteNomeNovo || undefined, telefone: clienteTelNovo })
+          .eq('id', vendaParaCompletarFormulario.clienteId)
+          .then(({ error: errCli }) => {
+            if (errCli) console.warn('Aviso ao atualizar cliente:', errCli.message);
+          });
+      }
+
+      toast.success('Dados da venda atualizados!', { id: toastId });
+
+      // 5. Recarregar lista de vendas para obter o objeto atualizado
+      await carregarVendas();
+
+      // 6. Fechar o modal e enviar o recibo
+      setShowCompletarFormularioModal(false);
+
+      // Busca a venda atualizada na lista para ter o clienteId correto
+      const vendaAtualizada: Venda = {
+        ...vendaParaCompletarFormulario,
+        clienteNome: clienteNomeNovo || vendaParaCompletarFormulario.clienteNome,
+        valor: valorTotalNovo,
+        metodo: metodoPgtoNovo,
+      };
+
+      void handleReenviarRecibo(vendaAtualizada, 'todos');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao processar formulário.', { id: toastId });
+    } finally {
+      setProcessandoFormulario(false);
     }
   };
 
@@ -2247,7 +2420,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         .join(' ')
         .toLowerCase();
 
-      const matchBusca = !busca || textoLivre.includes(busca);
+      const tokensBusca = busca.split(/\s+/).filter(Boolean);
+      const matchBusca = tokensBusca.length === 0 || tokensBusca.every((t) => textoLivre.includes(t));
       const matchStatus = !filtroStatus || venda.status === filtroStatus;
       const matchMetodo = !filtroMetodo || venda.metodo === filtroMetodo;
       const matchVendedor = !filtroVendedor || vendedor.toLowerCase().includes(filtroVendedor.toLowerCase());
@@ -4380,7 +4554,28 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       </td>
                       <td className="py-3 px-2 text-right">
                         <div className="flex gap-1 justify-end">
-                          {!vendaCancelada(venda) && (
+                          {vendaCancelada(venda) ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Reativar / Descancelar venda"
+                                onClick={() => setVendaParaDescancelar(venda)}
+                                className="h-8 w-8 p-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Excluir venda cancelada permanentemente"
+                                onClick={() => setVendaParaExcluirCancelada(venda)}
+                                className="h-8 w-8 p-0 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          ) : (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -4397,7 +4592,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
+                            <DropdownMenuContent align="end" className="w-56 space-y-0.5">
                               <DropdownMenuItem
                                 onClick={() => {
                                   const itemPrincipal = venda.itens?.[0];
@@ -4425,18 +4620,35 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 <Repeat className="mr-2 h-4 w-4 text-blue-400" />
                                 Reabrir no PDV
                               </DropdownMenuItem>
+                              {isPendente && (
+                                <DropdownMenuItem onClick={() => abrirCompletarFormulario(venda)}>
+                                  <Sparkles className="mr-2 h-4 w-4 text-orange-400" />
+                                  Completar c/ Formulário
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}>
                                 <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
                                 Chamar no WhatsApp
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
-                                <Printer className="mr-2 h-4 w-4" />
-                                Cupom Térmico
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleGerarReciboA4(venda)}>
-                                <FileText className="mr-2 h-4 w-4" />
-                                Recibo A4
-                              </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="font-normal">
+                                  <Printer className="mr-2 h-4 w-4" />
+                                  Imprimir Recibo
+                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                  <DropdownMenuSubContent className="w-44">
+                                    <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
+                                      <Printer className="mr-2 h-4 w-4" />
+                                      Cupom Térmico
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleGerarReciboA4(venda)}>
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      Recibo A4
+                                    </DropdownMenuItem>
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                              </DropdownMenuSub>
                               <DropdownMenuSub>
                                 <DropdownMenuSubTrigger className="font-normal">
                                   <Mail className="mr-2 h-4 w-4" />
@@ -4461,26 +4673,56 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                                 </DropdownMenuPortal>
                               </DropdownMenuSub>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
-                                <FileText className="mr-2 h-4 w-4 text-blue-400" />
-                                Emitir NFC-e (Fiscal)
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleConsultarFiscalManual(venda)}>
-                                <ShieldCheck className="mr-2 h-4 w-4 text-emerald-400" />
-                                Ver / Consultar DANFE
-                              </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="font-normal">
+                                  <FileText className="mr-2 h-4 w-4 text-blue-400" />
+                                  Nota Fiscal
+                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                  <DropdownMenuSubContent className="w-48">
+                                    <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
+                                      <FileText className="mr-2 h-4 w-4 text-blue-400" />
+                                      Emitir NFC-e (Fiscal)
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleConsultarFiscalManual(venda)}>
+                                      <ShieldCheck className="mr-2 h-4 w-4 text-emerald-400" />
+                                      Ver / Consultar DANFE
+                                    </DropdownMenuItem>
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                              </DropdownMenuSub>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => handleTrocarItem(venda)}>
                                 <Repeat className="mr-2 h-4 w-4" />
                                 Trocar Item
                               </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleCancelarVenda(venda)}
-                                className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
-                              >
-                                <Undo2 className="mr-2 h-4 w-4" />
-                                Desfazer Venda
-                              </DropdownMenuItem>
+                              {vendaCancelada(venda) ? (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => setVendaParaDescancelar(venda)}
+                                    className="text-emerald-400 focus:bg-emerald-500/10 focus:text-emerald-300 font-semibold"
+                                  >
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Reativar Venda (Descancelar)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => setVendaParaExcluirCancelada(venda)}
+                                    className="text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 font-semibold"
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Excluir Venda Cancelada
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => handleCancelarVenda(venda)}
+                                  className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
+                                >
+                                  <Undo2 className="mr-2 h-4 w-4" />
+                                  Desfazer Venda
+                                </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -4589,6 +4831,146 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 ) : (
                   <>
                     <Undo2 className="mr-2 h-4 w-4" /> Desfazer e devolver ao estoque
+                  </>
+                )}
+              </Button>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal de Confirmação — Excluir Venda Cancelada */}
+      {isClient && vendaParaExcluirCancelada && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[80]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4 border-rose-500/30">
+            <div className="modal-header bg-rose-500/10 border-b border-rose-500/20">
+              <h3 className="modal-title flex items-center gap-2 text-rose-400 font-bold">
+                <Trash2 className="w-5 h-5 text-rose-400" /> Excluir Venda Cancelada
+              </h3>
+              <button
+                type="button"
+                onClick={() => setVendaParaExcluirCancelada(null)}
+                disabled={excluindoVendaCancelada}
+                className="text-slate-400 hover:text-white disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body p-4 space-y-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                <p className="text-sm font-bold text-white">
+                  Venda #{vendaParaExcluirCancelada.id.slice(-6).toUpperCase()}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {vendaParaExcluirCancelada.clienteNome} ·{' '}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaExcluirCancelada.valor)}
+                  {' · '}
+                  {getVendaDataExibicao(vendaParaExcluirCancelada).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 space-y-1 text-xs text-rose-200">
+                <p className="font-bold text-rose-300">⚠️ Atenção: Ação Irreversível</p>
+                <p>
+                  Esta venda cancelada será removida definitivamente do banco de dados. Os relatórios históricos desta venda serão apagados.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end p-4 border-t border-white/10">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setVendaParaExcluirCancelada(null)}
+                disabled={excluindoVendaCancelada}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleConfirmarExcluirVendaCancelada}
+                disabled={excluindoVendaCancelada}
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+              >
+                {excluindoVendaCancelada ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Excluindo...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="mr-2 h-4 w-4" /> Confirmar Exclusão
+                  </>
+                )}
+              </Button>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal de Confirmação — Reativar (Descancelar) Venda */}
+      {isClient && vendaParaDescancelar && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[80]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4 border-emerald-500/30">
+            <div className="modal-header bg-emerald-500/10 border-b border-emerald-500/20">
+              <h3 className="modal-title flex items-center gap-2 text-emerald-400 font-bold">
+                <RotateCcw className="w-5 h-5 text-emerald-400" /> Reativar Venda (Descancelar)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setVendaParaDescancelar(null)}
+                disabled={descancelandoVenda}
+                className="text-slate-400 hover:text-white disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body p-4 space-y-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
+                <p className="text-sm font-bold text-white">
+                  Venda #{vendaParaDescancelar.id.slice(-6).toUpperCase()}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {vendaParaDescancelar.clienteNome} ·{' '}
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaDescancelar.valor)}
+                  {' · '}
+                  {getVendaDataExibicao(vendaParaDescancelar).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-1 text-xs text-emerald-200">
+                <p className="font-bold text-emerald-300">ℹ️ Restauração de Status</p>
+                <p>
+                  O status desta venda retornará para <strong className="text-emerald-300">Pago</strong> e ela voltará a contabilizar normalmente no faturamento da loja.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end p-4 border-t border-white/10">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setVendaParaDescancelar(null)}
+                disabled={descancelandoVenda}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleConfirmarDescancelarVenda}
+                disabled={descancelandoVenda}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              >
+                {descancelandoVenda ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reativando...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="mr-2 h-4 w-4" /> Reativar Venda
                   </>
                 )}
               </Button>
@@ -4709,6 +5091,82 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       />
 
       {/* Modal Importar Pedido via Groq IA */}
+      {/* Modal: Completar com Formulário (IA extrai dados → salva venda → envia recibo) */}
+      {isClient && showCompletarFormularioModal && vendaParaCompletarFormulario && createPortal(
+        <div className="modal-overlay modal-overlay-fit z-[60]">
+          <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title flex items-center gap-2 text-orange-400 font-bold">
+                  <Sparkles className="w-5 h-5 text-orange-400 animate-pulse" /> Completar com Formulário
+                </h3>
+                <p className="modal-subtitle">
+                  Cole o formulário padrão de pedido e o valor total. A IA vai ler, preencher os dados da venda e já enviar o comprovante (PDF) por WhatsApp e e-mail para o cliente.
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowCompletarFormularioModal(false)} disabled={processandoFormulario}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="modal-body-scroll">
+              <form onSubmit={handleSubmitCompletarFormulario} className="space-y-4">
+                {/* Resumo da venda atual */}
+                <div className="rounded-lg bg-white/5 border border-white/10 p-3 flex flex-col gap-1 text-xs text-slate-300">
+                  <span className="font-bold text-slate-100 text-sm">Venda #{vendaParaCompletarFormulario.id?.slice(-6).toUpperCase()}</span>
+                  <span>Cliente atual: <span className="text-amber-300">{vendaParaCompletarFormulario.clienteNome || '—'}</span></span>
+                  <span>Valor atual: <span className="text-green-400 font-mono">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(vendaParaCompletarFormulario.valor || 0)}</span></span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300">Formulário de pedido</label>
+                  <textarea
+                    className="input-glass min-h-[200px] font-sans text-sm p-3 border-orange-500/20 focus:border-orange-500"
+                    placeholder={"Cole aqui o formulário padrão de pedido com os dados do cliente, aparelho e valor total.\n\nEx:\nNome: João Silva\nTelefone: (11) 99999-9999\nModelo: iPhone 14 Pro\nValor: R$ 4.500,00\nForma de pagamento: PIX"}
+                    value={textoFormularioPedido}
+                    onChange={(e) => setTextoFormularioPedido(e.target.value)}
+                    disabled={processandoFormulario}
+                    autoFocus
+                  />
+                </div>
+
+                <p className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+                  Após processar, os dados da venda são atualizados e o comprovante em PDF é enviado automaticamente por WhatsApp e e-mail (caso o cliente tenha esses dados cadastrados).
+                </p>
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => setShowCompletarFormularioModal(false)}
+                    disabled={processandoFormulario}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={processandoFormulario || !textoFormularioPedido.trim()}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 font-bold gap-2 shadow-lg shadow-orange-500/20"
+                  >
+                    {processandoFormulario ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" /> Processando com IA…
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" /> Processar e Enviar Recibo
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </GlassCard>
+        </div>,
+        document.body
+      )}
+
       {isClient && showImportarPedidoModal && createPortal(
         <div className="modal-overlay modal-overlay-fit z-[60]">
           <GlassCard className="modal-panel modal-panel-fit modal-panel-md w-full my-4">
