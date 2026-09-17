@@ -13,7 +13,6 @@ import {
   Send,
   X,
   Loader2,
-  ChevronDown,
   Minimize2,
   Maximize2,
   Building2,
@@ -21,15 +20,13 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
-  HelpCircle,
-  Check,
   CheckCheck,
   Search,
 } from 'lucide-react';
 
 export interface MensagemChat {
   id: string;
-  loja_id: string;
+  loja_id?: string | null;
   usuario_id?: string;
   autor_nome: string;
   autor_email: string;
@@ -83,8 +80,8 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-      osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15);
       gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
       osc.connect(gain);
@@ -96,14 +93,13 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
     }
   };
 
-  // Scroll automático para a última mensagem
   const scrollToBottom = (smooth = true) => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
     }
   };
 
-  // Carrega mensagens sem cache (force-fresh)
+  // Carrega mensagens sem cache
   const carregarMensagens = async (isPolling = false) => {
     if (!usuario) return;
     if (!isPolling) setLoading(true);
@@ -113,7 +109,9 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
       const token = session.data.session?.access_token;
       if (!token) return;
 
-      const targetLoja = isSuperAdmin ? selectedLojaId : usuario.loja_id;
+      const userLoja = usuario?.lojaId || (usuario as any)?.loja_id;
+      const targetLoja = isSuperAdmin ? selectedLojaId : userLoja;
+      
       const url = targetLoja
         ? `/api/chat-suporte?loja_id=${targetLoja}&t=${Date.now()}`
         : `/api/chat-suporte?t=${Date.now()}`;
@@ -132,7 +130,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
       if (data.mensagens) {
         const novasMensagens: MensagemChat[] = data.mensagens;
         
-        // Se chegou mensagem nova vinda da outra ponta, toca som
         if (
           isPolling &&
           novasMensagens.length > previousMessageCount.current &&
@@ -183,13 +180,12 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
     }
   };
 
-  // Inicialização e Polling em Tempo Real (3 segundos)
   useEffect(() => {
     if (!isOpen) return;
 
-    // Se for lojista comum, fixa na loja dele
-    if (!isSuperAdmin && usuario?.loja_id) {
-      setSelectedLojaId(usuario.loja_id);
+    const userLoja = usuario?.lojaId || (usuario as any)?.loja_id;
+    if (!isSuperAdmin && userLoja) {
+      setSelectedLojaId(userLoja);
     }
 
     carregarMensagens(false);
@@ -205,12 +201,10 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
     return () => clearInterval(interval);
   }, [isOpen, selectedLojaId, isSuperAdmin, usuario]);
 
-  // Scroll sempre que as mensagens mudarem
   useEffect(() => {
     scrollToBottom(true);
   }, [mensagens]);
 
-  // Foco no input ao abrir
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 150);
@@ -225,8 +219,11 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
     const mensagemTexto = (textoCustom || texto).trim();
     if (!mensagemTexto || enviando) return;
 
-    const targetLoja = isSuperAdmin ? selectedLojaId : usuario?.loja_id;
-    if (!targetLoja) {
+    const userLoja = usuario?.lojaId || (usuario as any)?.loja_id;
+    const targetLoja = isSuperAdmin ? selectedLojaId : userLoja;
+
+    // Apenas para Super Admin verificamos se uma loja foi selecionada
+    if (isSuperAdmin && !targetLoja) {
       toast.error('Selecione uma loja para responder.');
       return;
     }
@@ -235,7 +232,7 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
     const tempId = `temp_${Date.now()}`;
     const mensagemOtimista: MensagemChat = {
       id: tempId,
-      loja_id: targetLoja,
+      loja_id: targetLoja || null,
       autor_nome: usuario?.nome || (isSuperAdmin ? 'Suporte Phone Center' : 'Lojista'),
       autor_email: usuario?.email || '',
       remetente: isSuperAdmin ? 'suporte' : 'cliente',
@@ -244,7 +241,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
       created_at: new Date().toISOString(),
     };
 
-    // Atualização otimista imediata na UI
     setMensagens((prev) => [...prev, mensagemOtimista]);
     setTexto('');
 
@@ -267,7 +263,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Falha ao enviar mensagem.');
 
-      // Substitui mensagem temporária pela oficial persistida no banco
       if (data.mensagem) {
         setMensagens((prev) => prev.map((m) => (m.id === tempId ? data.mensagem : m)));
       }
@@ -275,7 +270,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
       if (isSuperAdmin) carregarConversasAdmin();
     } catch (err: any) {
       toast.error(err.message || 'Erro ao enviar mensagem.');
-      // Remove mensagem otimista em caso de falha
       setMensagens((prev) => prev.filter((m) => m.id !== tempId));
       setTexto(mensagemTexto);
     } finally {
@@ -313,7 +307,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
                 {isSuperAdmin ? <Shield className="w-5 h-5 text-indigo-400" /> : <LifeBuoy className="w-5 h-5 text-cyan-400" />}
               </div>
             </div>
-            {/* Status Online Pulse */}
             <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-slate-950"></span>
@@ -345,7 +338,7 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition"
+            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition cursor-pointer"
             title={soundEnabled ? 'Desativar som' : 'Ativar som'}
           >
             {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
@@ -353,7 +346,7 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
 
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition hidden sm:block"
+            className="p-1.5 rounded-xl hover:bg-white/10 text-slate-400 hover:text-white transition hidden sm:block cursor-pointer"
             title={isExpanded ? 'Reduzir' : 'Expandir'}
           >
             {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -361,7 +354,7 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl hover:bg-red-500/20 text-slate-400 hover:text-red-300 transition"
+            className="p-1.5 rounded-xl hover:bg-red-500/20 text-slate-400 hover:text-red-300 transition cursor-pointer"
             title="Fechar Chat"
           >
             <X className="w-5 h-5" />
@@ -433,7 +426,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
         {/* CONTAINER DE MENSAGENS */}
         <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-slate-950/80 via-slate-900/40 to-slate-950/90">
           <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
-            {/* Aviso de Persistência e Notificação por E-mail */}
             <div className="p-3 rounded-2xl bg-cyan-950/30 border border-cyan-500/20 text-center space-y-1">
               <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-cyan-300">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
@@ -461,7 +453,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
                   </p>
                 </div>
 
-                {/* Sugestões Rápidas de Dúvidas */}
                 {!isSuperAdmin && (
                   <div className="pt-2 flex flex-wrap gap-1.5 justify-center max-w-sm mx-auto">
                     {sugestoesRapidas.map((sug, i) => (
@@ -490,7 +481,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
                     key={msg.id || index}
                     className={`flex flex-col ${isMinhaMensagem ? 'items-end' : 'items-start'}`}
                   >
-                    {/* Header da Mensagem com Nome */}
                     <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px] text-slate-400">
                       <span className="font-semibold text-slate-300">
                         {msg.remetente === 'suporte' ? '🛡️ Suporte Phone Center' : msg.autor_nome || 'Lojista'}
@@ -499,7 +489,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
                       <span>{horaFormatada}</span>
                     </div>
 
-                    {/* Balão da Mensagem */}
                     <div
                       className={`max-w-[85%] sm:max-w-[75%] p-3.5 rounded-3xl text-xs leading-relaxed break-words shadow-md ${
                         isMinhaMensagem
@@ -509,7 +498,6 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
                     >
                       <p className="whitespace-pre-wrap">{msg.mensagem}</p>
 
-                      {/* Status de Envio */}
                       <div className="flex items-center justify-end gap-1 mt-1 text-[9px] text-white/70">
                         <span>{horaFormatada}</span>
                         {isMinhaMensagem && (
@@ -548,7 +536,7 @@ export function ChatSuporteWidget({ isOpen, onClose, overrideLojaId }: ChatSupor
               type="submit"
               size="sm"
               disabled={enviando || !texto.trim()}
-              className="h-10 px-4 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 font-bold text-white shadow-lg shadow-cyan-500/25 shrink-0"
+              className="h-10 px-4 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 font-bold text-white shadow-lg shadow-cyan-500/25 shrink-0 cursor-pointer"
             >
               {enviando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>

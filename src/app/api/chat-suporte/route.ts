@@ -28,7 +28,18 @@ async function obterUsuario(request: Request) {
     .eq('email', email)
     .maybeSingle();
 
-  return perfil ? { ...perfil, email } : { id: data.user.id, email, role: 'admin', loja_id: null, nome: email.split('@')[0] };
+  const lojaIdFromMeta = data.user.user_metadata?.lojaId || data.user.user_metadata?.loja_id;
+  const lojaId = perfil?.loja_id || lojaIdFromMeta || null;
+
+  return perfil
+    ? { ...perfil, loja_id: lojaId, email }
+    : {
+        id: data.user.id,
+        email,
+        role: (data.user.user_metadata?.role as any) || 'operador',
+        loja_id: lojaId,
+        nome: perfil?.nome || data.user.user_metadata?.nome || email.split('@')[0],
+      };
 }
 
 /**
@@ -101,28 +112,47 @@ export async function GET(request: Request) {
     }
 
     // DETERMINA QUAL LOJA CONSULTAR
-    let targetLojaId = usuario.loja_id;
-    if (isSuperAdmin && requestedLojaId) {
-      targetLojaId = requestedLojaId;
-    }
+    let targetLojaId = (isSuperAdmin && requestedLojaId) ? requestedLojaId : (requestedLojaId || usuario.loja_id);
 
+    // Se o usuário não tiver loja_id explicitamente no perfil, busca pela primeira loja associada
     if (!targetLojaId) {
-      return NextResponse.json({ mensagens: [], loja: null }, { headers: NO_CACHE_HEADERS });
+      const { data: lojasPerfil } = await supabaseAdmin
+        .from('perfis')
+        .select('loja_id')
+        .eq('email', usuario.email)
+        .not('loja_id', 'is', null)
+        .limit(1)
+        .maybeSingle();
+
+      if (lojasPerfil?.loja_id) {
+        targetLojaId = lojasPerfil.loja_id;
+      }
     }
 
-    // Busca detalhes da loja
-    const { data: loja } = await supabaseAdmin
-      .from('lojas')
-      .select('id, nome, logo_url, telefone, subtitulo')
-      .eq('id', targetLojaId)
-      .maybeSingle();
+    // Busca detalhes da loja se houver
+    let loja = null;
+    if (targetLojaId) {
+      const { data: lojaDb } = await supabaseAdmin
+        .from('lojas')
+        .select('id, nome, logo_url, telefone, subtitulo')
+        .eq('id', targetLojaId)
+        .maybeSingle();
+      loja = lojaDb;
+    }
 
-    // Busca histórico completo de mensagens da loja
-    const { data: mensagens, error } = await supabaseAdmin
+    // Busca histórico de mensagens
+    let query = supabaseAdmin
       .from('chat_suporte_mensagens')
       .select('*')
-      .eq('loja_id', targetLojaId)
       .order('created_at', { ascending: true });
+
+    if (targetLojaId) {
+      query = query.eq('loja_id', targetLojaId);
+    } else {
+      query = query.eq('autor_email', usuario.email);
+    }
+
+    const { data: mensagens, error } = await query;
 
     if (error) {
       console.warn('Aviso busca mensagens chat:', error.message);
@@ -159,20 +189,41 @@ export async function POST(request: Request) {
     }
 
     const isSuperAdmin = usuario.role === 'super_admin' || usuario.email === 'guiguigamer125@gmail.com';
-    const lojaId = (isSuperAdmin && overrideLojaId) ? overrideLojaId : usuario.loja_id;
+    
+    // Resolve loja_id de forma inteligente
+    let lojaId = overrideLojaId || usuario.loja_id;
 
-    if (!lojaId) {
-      return NextResponse.json({ error: 'Loja não identificada.' }, { status: 400, headers: NO_CACHE_HEADERS });
+    if (!lojaId && !isSuperAdmin) {
+      // Busca primeira loja vinculada ao perfil do usuário
+      const { data: perfilDono } = await supabaseAdmin
+        .from('perfis')
+        .select('loja_id')
+        .eq('email', usuario.email)
+        .not('loja_id', 'is', null)
+        .limit(1)
+        .maybeSingle();
+
+      if (perfilDono?.loja_id) {
+        lojaId = perfilDono.loja_id;
+      }
+    }
+
+    // Se for superadmin e não passou lojaId, impede
+    if (isSuperAdmin && !lojaId) {
+      return NextResponse.json({ error: 'Selecione uma loja para responder.' }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
     // Busca dados da loja
-    const { data: loja } = await supabaseAdmin
-      .from('lojas')
-      .select('id, nome')
-      .eq('id', lojaId)
-      .maybeSingle();
+    let nomeLoja = 'Minha Loja';
+    if (lojaId) {
+      const { data: loja } = await supabaseAdmin
+        .from('lojas')
+        .select('id, nome')
+        .eq('id', lojaId)
+        .maybeSingle();
+      if (loja?.nome) nomeLoja = loja.nome;
+    }
 
-    const nomeLoja = loja?.nome || 'Phone Center';
     const remetenteTipo = isSuperAdmin ? 'suporte' : 'cliente';
     const autorNome = usuario.nome || (isSuperAdmin ? 'Suporte Phone Center' : 'Lojista');
     const autorEmail = usuario.email;
@@ -180,7 +231,7 @@ export async function POST(request: Request) {
     const messageId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const novaMensagem = {
       id: messageId,
-      loja_id: lojaId,
+      loja_id: lojaId || null,
       usuario_id: usuario.id,
       autor_nome: autorNome,
       autor_email: autorEmail,
@@ -206,13 +257,13 @@ export async function POST(request: Request) {
     if (remetenteTipo === 'cliente') {
       // Notifica o time técnico/admin que um lojista enviou mensagem
       enviarMensagemChatSuporteParaAdminEmail({
-        lojaId,
+        lojaId: lojaId || undefined,
         nomeLoja,
         lojistaEmail: autorEmail,
         lojistaNome: autorNome,
         mensagem: mensagem.trim(),
       }).catch((e) => console.warn('Aviso envio e-mail suporte admin:', e));
-    } else {
+    } else if (lojaId) {
       // Suporte respondeu: busca o e-mail do lojista principal da loja para notificá-lo
       (async () => {
         try {

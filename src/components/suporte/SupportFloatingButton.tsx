@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { LifeBuoy, MessageSquare, Sparkles } from 'lucide-react';
+import { LifeBuoy } from 'lucide-react';
 import { ChatSuporteWidget } from './ChatSuporteWidget';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabaseClient';
@@ -12,7 +12,6 @@ export function SupportFloatingButton() {
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Consulta se há novas mensagens não lidas
   const checarNaoLidas = async () => {
     if (!usuario) return;
     try {
@@ -21,9 +20,12 @@ export function SupportFloatingButton() {
       if (!token) return;
 
       const isSuperAdmin = checkIsSuperAdmin(usuario);
+      const userLoja = usuario?.lojaId || (usuario as any)?.loja_id;
       const url = isSuperAdmin
         ? `/api/chat-suporte?conversas=true&t=${Date.now()}`
-        : `/api/chat-suporte?loja_id=${usuario.loja_id}&t=${Date.now()}`;
+        : userLoja
+        ? `/api/chat-suporte?loja_id=${userLoja}&t=${Date.now()}`
+        : `/api/chat-suporte?t=${Date.now()}`;
 
       const res = await fetch(url, {
         headers: {
@@ -53,7 +55,6 @@ export function SupportFloatingButton() {
     return () => clearInterval(interval);
   }, [usuario]);
 
-  // Listener global para abrir o chat via evento personalizado
   useEffect(() => {
     const handleAbrirChat = () => setIsOpen(true);
     window.addEventListener('phonecenter:abrir-chat-suporte', handleAbrirChat);
@@ -64,7 +65,6 @@ export function SupportFloatingButton() {
 
   return (
     <>
-      {/* BOTÃO FLUTUANTE DE SUPORTE */}
       <div className="fixed bottom-5 right-5 z-[990] flex items-center group">
         <button
           onClick={() => setIsOpen(true)}
@@ -90,7 +90,6 @@ export function SupportFloatingButton() {
         </button>
       </div>
 
-      {/* MODAL / DRAWER DO CHAT */}
       <ChatSuporteWidget isOpen={isOpen} onClose={() => setIsOpen(false)} />
     </>
   );
