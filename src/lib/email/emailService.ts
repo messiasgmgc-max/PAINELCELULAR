@@ -799,3 +799,113 @@ export async function enviarRespostaTicketSuporteEmail({
     html,
   });
 }
+
+/**
+ * 9. Notificação de Nova Mensagem no Chat de Suporte ao Vivo (Para Admin / Equipe de Atendimento)
+ */
+export async function enviarMensagemChatSuporteParaAdminEmail({
+  lojaId,
+  nomeLoja,
+  lojistaEmail,
+  lojistaNome,
+  mensagem,
+}: {
+  lojaId?: string;
+  nomeLoja: string;
+  lojistaEmail: string;
+  lojistaNome?: string;
+  mensagem: string;
+}) {
+  const conteudoHtml = `
+    <p>Uma nova mensagem foi enviada no <strong>Chat de Suporte ao Vivo</strong> por um lojista:</p>
+    
+    <div class="info-box">
+      <div class="info-row">
+        <span class="info-label">Loja / Cliente:</span>
+        <span class="info-value" style="font-weight: 700; color: #38bdf8;">${nomeLoja}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Usuário:</span>
+        <span class="info-value">${lojistaNome || 'Lojista'} (${lojistaEmail})</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Horário:</span>
+        <span class="info-value">${new Date().toLocaleString('pt-BR')}</span>
+      </div>
+    </div>
+    
+    <div style="background: rgba(30, 41, 59, 0.7); border-left: 3px solid #38bdf8; padding: 14px; margin: 16px 0; border-radius: 8px;">
+      <p style="margin: 0; font-size: 13.5px; color: #f1f5f9; white-space: pre-wrap; line-height: 1.6;">${mensagem}</p>
+    </div>
+    
+    <p style="font-size: 12px; color: #94a3b8;">
+      💡 Acesse o painel administrativo para responder em tempo real através do chat de atendimento.
+    </p>
+  `;
+
+  const html = wrapBaseTemplate({
+    titulo: 'Nova Mensagem no Chat de Suporte',
+    subtitulo: `${nomeLoja} está aguardando atendimento`,
+    badge: '💬 Chat Suporte',
+    badgeColor: '#0ea5e9',
+    conteudoHtml,
+    botaoTexto: 'Abrir Chat e Responder',
+    botaoUrl: `${APP_URL}/superadmin`,
+  });
+
+  return sendEmail({
+    type: 'suporte',
+    to: ADMIN_ALERT_EMAIL,
+    subject: `💬 [Chat Suporte] Nova mensagem de ${nomeLoja} (${lojistaNome || lojistaEmail})`,
+    html,
+  });
+}
+
+/**
+ * 10. Notificação de Resposta no Chat de Suporte (Para o Lojista)
+ */
+export async function enviarRespostaChatSuporteParaLojistaEmail({
+  para,
+  nomeLoja,
+  atendenteNome = 'Equipe Phone Center',
+  mensagem,
+}: {
+  para: string;
+  nomeLoja: string;
+  atendenteNome?: string;
+  mensagem: string;
+}) {
+  const conteudoHtml = `
+    <p>Olá, equipe <strong>${nomeLoja}</strong>!</p>
+    <p>Você recebeu uma nova mensagem da equipe de suporte do <strong>Phone Center</strong> no seu chat de atendimento:</p>
+    
+    <div style="background: rgba(14, 165, 233, 0.08); border-left: 3px solid #0ea5e9; padding: 16px; margin: 16px 0; border-radius: 8px;">
+      <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase;">
+        🛡️ ${atendenteNome} respondeu:
+      </p>
+      <p style="margin: 0; font-size: 13.5px; color: #f8fafc; white-space: pre-wrap; line-height: 1.6;">${mensagem}</p>
+    </div>
+    
+    <p style="font-size: 12px; color: #94a3b8;">
+      Para continuar a conversa ou tirar mais dúvidas, basta abrir o chat de suporte no seu painel.
+    </p>
+  `;
+
+  const html = wrapBaseTemplate({
+    titulo: 'Nova Resposta do Suporte Phone Center',
+    subtitulo: 'Nossa equipe acabou de responder no chat',
+    badge: '💬 Suporte Online',
+    badgeColor: '#10b981',
+    conteudoHtml,
+    botaoTexto: 'Acessar Chat no Sistema',
+    botaoUrl: `${APP_URL}/`,
+  });
+
+  return sendEmail({
+    type: 'suporte',
+    to: para,
+    subject: `💬 [Suporte Phone Center] Nova mensagem no chat da sua loja`,
+    html,
+  });
+}
+

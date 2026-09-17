@@ -31,6 +31,7 @@ import { MeuPlanoModal } from '@/components/MeuPlanoModal';
 import { PlanPaywallModal } from '@/components/PlanPaywallModal';
 import { PwaInstallPrompt } from '@/components/PwaInstallPrompt';
 import { CommandPaletteModal } from '@/components/CommandPaletteModal';
+import { SupportFloatingButton } from '@/components/suporte/SupportFloatingButton';
 import { useColorTheme } from '@/components/ThemeProvider';
 import { 
   Smartphone, 
@@ -351,7 +352,7 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Modais Globais de Plano, PWA, Paywall e Palette Estilo Railway */}
+      {/* Modais Globais de Plano, PWA, Paywall, Palette e Botão Flutuante de Suporte */}
       <MeuPlanoModal isOpen={showMeuPlanoModal} onClose={() => setShowMeuPlanoModal(false)} />
       <PlanPaywallModal />
       <PwaInstallPrompt />
@@ -360,6 +361,7 @@ export default function Home() {
         onClose={() => setShowCommandPalette(false)}
         onSelectTab={handleSelectTabFromPalette}
       />
+      <SupportFloatingButton />
     </div>
   );
 }

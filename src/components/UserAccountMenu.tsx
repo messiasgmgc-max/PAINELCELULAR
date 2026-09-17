@@ -17,7 +17,8 @@ import {
   SlidersHorizontal,
   Sun,
   Moon,
-  LifeBuoy
+  LifeBuoy,
+  MessageCircle
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStorePlan } from '@/hooks/useStorePlan';
@@ -25,6 +26,7 @@ import { usePanelMode } from '@/hooks/usePanelMode';
 import { useColorTheme } from '@/components/ThemeProvider';
 import { checkIsSuperAdmin } from '@/lib/utils';
 import { TicketsModal } from '@/components/suporte/TicketsModal';
+import { ChatSuporteWidget } from '@/components/suporte/ChatSuporteWidget';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +50,7 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
   const { isModoSimples, toggleModoSimples } = usePanelMode();
   const { colorTheme, setColorTheme } = useColorTheme();
   const [showTicketsModal, setShowTicketsModal] = useState(false);
+  const [showChatSuporte, setShowChatSuporte] = useState(false);
 
   if (!usuario) return null;
 
@@ -116,13 +119,27 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
             </Badge>
           </DropdownMenuItem>
 
+          {/* Chat de Suporte ao Vivo */}
+          <DropdownMenuItem 
+            onClick={() => setShowChatSuporte(true)}
+            className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-cyan-400"
+          >
+            <div className="flex items-center gap-2">
+              <MessageCircle className="w-4 h-4 text-cyan-400" />
+              <span>Chat de Suporte ao Vivo</span>
+            </div>
+            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[9px] px-1.5 py-0 h-4">
+              Online
+            </Badge>
+          </DropdownMenuItem>
+
           {/* Suporte & Chamados Técnicos */}
           <DropdownMenuItem 
             onClick={() => setShowTicketsModal(true)}
-            className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-emerald-400"
+            className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-slate-300"
           >
-            <LifeBuoy className="w-4 h-4 text-emerald-400" />
-            <span>Suporte & Chamados</span>
+            <LifeBuoy className="w-4 h-4 text-slate-400" />
+            <span>Chamados & Tickets</span>
           </DropdownMenuItem>
 
           <DropdownMenuSeparator className="bg-slate-800 my-1" />
@@ -241,6 +258,7 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
       </DropdownMenu>
 
       <TicketsModal open={showTicketsModal} onOpenChange={setShowTicketsModal} />
+      <ChatSuporteWidget isOpen={showChatSuporte} onClose={() => setShowChatSuporte(false)} />
     </>
   );
 }
