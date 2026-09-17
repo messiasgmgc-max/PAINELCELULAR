@@ -1,29 +1,43 @@
 import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 
-// Remetentes padrão segmentados por finalidade
-const SENDER_RECIBOS = process.env.EMAIL_FROM_RECIBOS || 'Phone Center Recibos <recibos@phonecenter.tech>';
-const SENDER_NOTIFICACOES = process.env.EMAIL_FROM_NOTIFICACOES || 'Phone Center Notificações <notificacoes@phonecenter.tech>';
-const SENDER_SUPORTE = process.env.EMAIL_FROM_SUPORTE || 'Phone Center Suporte <suporte@phonecenter.tech>';
-const SENDER_CONTATO = process.env.EMAIL_FROM_CONTATO || 'Phone Center Contato <contato@phonecenter.tech>';
-const ADMIN_ALERT_EMAIL = process.env.ADMIN_ALERT_EMAIL || 'guiguigamer125@gmail.com';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.phonecenter.tech';
+function cleanEnvString(val: string | undefined, defaultVal = ''): string {
+  if (!val || typeof val !== 'string') return defaultVal;
+  let clean = val.trim();
+  // Remove aspas simples ou duplas extras no início e fim
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim();
+  }
+  return clean || defaultVal;
+}
+
+// Remetentes padrão segmentados por finalidade com sanitização automática
+const SENDER_RECIBOS = cleanEnvString(process.env.EMAIL_FROM_RECIBOS, 'Phone Center Recibos <recibos@phonecenter.tech>');
+const SENDER_NOTIFICACOES = cleanEnvString(process.env.EMAIL_FROM_NOTIFICACOES, 'Phone Center Notificações <notificacoes@phonecenter.tech>');
+const SENDER_SUPORTE = cleanEnvString(process.env.EMAIL_FROM_SUPORTE, 'Phone Center Suporte <suporte@phonecenter.tech>');
+const SENDER_CONTATO = cleanEnvString(process.env.EMAIL_FROM_CONTATO, 'Phone Center Contato <contato@phonecenter.tech>');
+const ADMIN_ALERT_EMAIL = cleanEnvString(process.env.ADMIN_ALERT_EMAIL, 'guiguigamer125@gmail.com');
+const APP_URL = cleanEnvString(process.env.NEXT_PUBLIC_APP_URL, 'https://app.phonecenter.tech');
 
 export type EmailSenderType = 'recibos' | 'notificacoes' | 'suporte' | 'contato';
 
 function getSender(type: EmailSenderType): string {
+  let sender = SENDER_NOTIFICACOES;
   switch (type) {
     case 'recibos':
-      return SENDER_RECIBOS;
+      sender = SENDER_RECIBOS;
+      break;
     case 'notificacoes':
-      return SENDER_NOTIFICACOES;
+      sender = SENDER_NOTIFICACOES;
+      break;
     case 'suporte':
-      return SENDER_SUPORTE;
+      sender = SENDER_SUPORTE;
+      break;
     case 'contato':
-      return SENDER_CONTATO;
-    default:
-      return SENDER_NOTIFICACOES;
+      sender = SENDER_CONTATO;
+      break;
   }
+  return sender;
 }
 
 /**
@@ -51,9 +65,11 @@ export async function sendEmail({
   const from = getSender(type);
   const recipients = Array.isArray(to) ? to : [to];
 
-  if (process.env.RESEND_API_KEY) {
+  const resendApiKey = cleanEnvString(process.env.RESEND_API_KEY);
+
+  if (resendApiKey) {
     try {
-      const resend = new Resend(process.env.RESEND_API_KEY);
+      const resend = new Resend(resendApiKey);
       const resendAttachments = attachments.map((att) => ({
         filename: att.filename,
         content: att.content,
