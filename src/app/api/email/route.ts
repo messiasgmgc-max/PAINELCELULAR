@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { exigirAcesso } from '@/lib/auth/servidor';
+import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 
 export const dynamic = 'force-dynamic';
@@ -13,16 +14,6 @@ export async function POST(request: Request) {
     if (pdfUrl && !/^https?:\/\//i.test(String(pdfUrl))) {
       return NextResponse.json({ error: 'Anexo precisa ser um link http(s).' }, { status: 400 });
     }
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT) || 587,
-      secure: false,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
 
     let htmlContent = mensagem || '';
     const anexos: any[] = [];
@@ -42,7 +33,6 @@ export async function POST(request: Request) {
     }
 
     // Processa imagens Base64 no corpo do HTML e converte em anexos inline (CID)
-    // Isso garante suporte total em provedores como Gmail, Outlook e Yahoo!
     const base64Regex = /src=["'](data:image\/(png|jpeg|jpg|webp|svg\+xml);base64,([^"']+))["']/gi;
     let match;
     let imgCounter = 1;
@@ -63,6 +53,42 @@ export async function POST(request: Request) {
       imgCounter++;
     }
 
+    // 1. Se configurado Resend (preferencial)
+    if (process.env.RESEND_API_KEY) {
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const fromEmail = process.env.RESEND_FROM_EMAIL || 'Phone Center <contato@phonecenter.tech>';
+
+      const { data, error } = await resend.emails.send({
+        from: fromEmail,
+        to: para,
+        subject: assunto,
+        html: htmlContent,
+        attachments: anexos.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          path: a.path,
+        })),
+      });
+
+      if (error) {
+        console.error('Erro Resend API:', error);
+        throw new Error(error.message);
+      }
+
+      return NextResponse.json({ message: 'Email enviado com sucesso via Resend!', id: data?.id }, { status: 200 });
+    }
+
+    // 2. Fallback para Nodemailer / SMTP
+    const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST,
+      port: Number(process.env.EMAIL_PORT) || 587,
+      secure: false,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: para,
@@ -71,7 +97,7 @@ export async function POST(request: Request) {
       attachments: anexos,
     });
 
-    return NextResponse.json({ message: 'Email enviado com sucesso!' }, { status: 200 });
+    return NextResponse.json({ message: 'Email enviado com sucesso via SMTP!' }, { status: 200 });
   } catch (error: any) {
     console.error('Erro ao enviar e-mail:', error);
     return NextResponse.json({ error: error?.message || 'Erro ao enviar e-mail.' }, { status: 500 });

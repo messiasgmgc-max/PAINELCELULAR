@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { supabase } from '@/lib/supabaseClient';
 import { calcularValoresPlano, TipoPlano, PeriodoFaturamento, DIAS_TESTE_GRATIS, METODO_PAGAMENTO_TESTE, fimDoTesteGratis } from '@/lib/planos-config';
+import { enviarBoasVindasLojaEmail } from '@/lib/email/emailService';
 
 export async function POST(request: Request) {
   try {
@@ -155,6 +156,14 @@ export async function POST(request: Request) {
         observacao: `🎁 Cadastro de nova loja com Teste Grátis de ${DIAS_TESTE_GRATIS} dias do Plano ${infoPlano.nomePlano}! Válido até ${vencimentoStr}`
       });
     }
+
+    // Enviar e-mail de boas-vindas assincronamente (sem travar a resposta)
+    enviarBoasVindasLojaEmail({
+      para: cleanEmail,
+      nomeLoja: cleanNomeLoja,
+      plano: infoPlano.nomePlano,
+      loginEmail: cleanEmail,
+    }).catch((e) => console.warn('Aviso: falha ao enviar e-mail de boas-vindas da loja:', e));
 
     return NextResponse.json({
       success: true,

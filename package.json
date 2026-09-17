@@ -63,6 +63,7 @@
     "cmdk": "1.0.4",
     "date-fns": "^3.0.0",
     "dotenv": "^17.2.3",
+    "electron-updater": "^6.3.9",
     "embla-carousel-react": "8.5.1",
     "framer-motion": "latest",
     "groq-sdk": "^1.4.1",
@@ -83,6 +84,7 @@
     "react-hot-toast": "2.4.1",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.0",
+    "resend": "^6.28.1",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "sonner": "^1.7.1",
@@ -92,10 +94,13 @@
     "uuid": "^13.0.0",
     "vaul": "^0.9.6",
     "xlsx": "^0.18.5",
-    "zod": "^3.24.1",
-    "electron-updater": "^6.3.9"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/next": "^8.0.7",
@@ -103,17 +108,13 @@
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9",
     "eslint-config-next": "15.2.4",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5",
-    "electron": "^34.0.0",
-    "electron-builder": "^25.1.8",
-    "@capacitor/core": "^7.0.0",
-    "@capacitor/cli": "^7.0.0",
-    "@capacitor/android": "^7.0.0",
-    "@capacitor/ios": "^7.0.0"
+    "typescript": "^5"
   },
   "main": "electron/main.js"
 }
