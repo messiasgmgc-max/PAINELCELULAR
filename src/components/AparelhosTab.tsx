@@ -190,10 +190,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
           || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
 
-        // A data de saída só é confiável quando existe a marca BAIXA_ESTOQUE.
-        // Antes caía para dataCadastro, e a tela exibia a data de ENTRADA
-        // rotulada como saída — o que fazia baixas antigas parecerem recentes.
-        let dataSaida: string | null = matchBaixa?.[1] || null;
+        // A data de saída utiliza a marca BAIXA_ESTOQUE das observações ou a coluna data_saida gravada no banco.
+        let dataSaida: string | null = matchBaixa?.[1] || aparelho.data_saida || (aparelho as any).dataSaida || null;
         if (dataSaida && /^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataSaida)) {
           dataSaida += ':00:00';
         }
