@@ -3050,6 +3050,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           descricao,
           garantia: garantiaPadrao,
           descontoTotal: 0,
+          taxa_cartao: 0,
           loja_id: usuario.lojaId,
         });
       }

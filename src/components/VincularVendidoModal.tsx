@@ -147,6 +147,7 @@ export function VincularVendidoModal({
         descricao: `Venda VAREJO - ${aparelhoSelecionado.marca} ${aparelhoSelecionado.modelo} para ${clienteNome.trim()}`,
         garantia: '90 dias',
         descontoTotal: 0,
+        taxa_cartao: 0,
         dados_cliente_pendente: false,
         itens: [
           {

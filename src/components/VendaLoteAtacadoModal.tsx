@@ -336,6 +336,7 @@ export function VendaLoteAtacadoModal({
         descricao: `Venda ATACADO (Lote ${itensSelecionados.length} itens) para ${compradorFinal}`,
         garantia: 'Garantia de Atacado (Teste)',
         descontoTotal: 0,
+        taxa_cartao: 0,
         itens: itensSelecionados.map((item) => {
           const p = getPrecoItem(item);
           const c = item.custo || 0;

@@ -148,7 +148,8 @@ begin
         'taxaJurosMensal', 0,
         'valorJuros', 0,
         'historicoAbatimentos', '[]'::jsonb,
-        'dados_cliente_pendente', false
+        'dados_cliente_pendente', false,
+        'taxa_cartao', 0
       ) || v_payload
     )).*
     returning * into v_venda;

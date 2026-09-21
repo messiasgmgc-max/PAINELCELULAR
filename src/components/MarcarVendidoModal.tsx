@@ -227,6 +227,7 @@ export function MarcarVendidoModal({
         descricao: `Venda ${tipoVenda.toUpperCase()} - ${aparelho.marca} ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''})`,
         garantia: tipoVenda === 'atacado' ? 'Garantia de Atacado (Teste)' : '90 dias',
         descontoTotal: 0,
+        taxa_cartao: 0,
         dados_cliente_pendente: isDadosPendente,
         itens: [
           {

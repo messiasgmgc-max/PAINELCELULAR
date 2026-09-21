@@ -6,7 +6,7 @@ import { DesfazerLoteModal } from '@/components/estoque/DesfazerLoteModal';
 import { conflitoPodeReentrar } from '@/lib/estoque/remontagem';
 import { validarCadastroManual } from '@/lib/estoque/cadastroManual';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
-import { bateriaParaLista, observacaoParaLista } from '@/lib/estoque/listaWhatsapp';
+import { bateriaParaLista, observacaoParaLista, gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
 import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
@@ -1083,7 +1083,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
     const texto = gerarListaEstoqueWhatsApp(aparelhosAtivos, {
       modoAtacado,
-      nomeLoja: storeConfig?.nome || 'PHONE CENTER',
+      nomeLoja: 'PHONE CENTER',
     });
 
     // Copia para clipboard

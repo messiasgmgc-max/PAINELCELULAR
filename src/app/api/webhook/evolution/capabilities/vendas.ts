@@ -146,6 +146,7 @@ export const capabilitiesVendas: Capability[] = [
           },
         ],
         ativo: true,
+        taxa_cartao: 0,
       };
 
       // Com aparelho identificado, venda e baixa vão numa transação só: se ele já saiu do

@@ -667,6 +667,7 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
             saldoDevedor: 0,
             valorPago: precoNum,
             dados_cliente_pendente: acao === 'vendido',
+            taxa_cartao: 0,
             descricao: `Baixa na conferência de estoque: ${aparelho.modelo}`,
             itens: [{
               id: `${Date.now()}_${aparelho.id}`,
@@ -689,6 +690,7 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
         }
       };
 
+      const dataIso = new Date().toISOString();
       const dataBr = new Date().toLocaleDateString('pt-BR');
       const saidas: Array<{
         acao: 'vendido' | 'atacado' | 'remover';
@@ -698,19 +700,19 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
       }> = [
         {
           acao: 'vendido',
-          patch: { ...patchSaida('vendido', 'venda'), observacoes: `Baixa automática na conferência de estoque: Marcado como Vendido em ${dataBr}` },
+          patch: { ...patchSaida('vendido', 'venda'), observacoes: `BAIXA_ESTOQUE:${dataIso}:Baixa automática na conferência de estoque - Marcado como Vendido Varejo em ${dataBr}` },
           tipo: 'venda',
           observacao: 'Conferência de estoque: saída como venda (varejo)',
         },
         {
           acao: 'atacado',
-          patch: { ...patchSaida('vendido', 'venda'), observacoes: `Vendido no atacado (Baixa na conferência de estoque em ${dataBr})` },
+          patch: { ...patchSaida('vendido', 'venda'), observacoes: `BAIXA_ESTOQUE:${dataIso}:Vendido no atacado (Baixa na conferência de estoque em ${dataBr})` },
           tipo: 'venda',
           observacao: 'Conferência de estoque: saída como venda no atacado',
         },
         {
           acao: 'remover',
-          patch: { ...patchSaida('baixado', 'baixa_manual'), observacoes: `Removido do estoque por extravio/perda na conferência em ${dataBr}` },
+          patch: { ...patchSaida('baixado', 'baixa_manual'), observacoes: `BAIXA_ESTOQUE:${dataIso}:Removido do estoque por extravio/perda na conferência em ${dataBr}` },
           tipo: 'baixa',
           observacao: 'Conferência de estoque: baixa por extravio/perda',
         },

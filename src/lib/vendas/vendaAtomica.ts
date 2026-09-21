@@ -74,8 +74,16 @@ export function montarArgumentosVenda(p: ParametrosVendaAtomica): Record<string,
     if (UUID.test(id) && valor) campos[id] = valor;
   }
 
+  const vendaPayload = {
+    taxa_cartao: 0,
+    ...(p.venda || {}),
+  };
+  if (vendaPayload.taxa_cartao === null || vendaPayload.taxa_cartao === undefined) {
+    vendaPayload.taxa_cartao = 0;
+  }
+
   return {
-    p_venda: p.venda,
+    p_venda: vendaPayload,
     p_aparelho_ids: soUuids(p.aparelhoIds),
     p_venda_id: p.vendaId && UUID.test(p.vendaId) ? p.vendaId : null,
     p_permitir_fora_do_estoque: soUuids(p.permitirForaDoEstoque),
