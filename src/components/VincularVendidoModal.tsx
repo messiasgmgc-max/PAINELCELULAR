@@ -25,6 +25,7 @@ import { useCompradores } from '@/hooks/useCompradores';
 import { useAuth } from '@/hooks/useAuth';
 import { estaNoEstoque, patchSaida } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
+import { filtrarESortearAparelhos } from '@/lib/buscaEstoque';
 
 interface VincularVendidoModalProps {
   isOpen: boolean;
@@ -65,14 +66,7 @@ export function VincularVendidoModal({
 
   const filtrados = useMemo(() => {
     if (!buscaAparelho.trim()) return aparelhosVendidos.slice(0, 30);
-    const termo = buscaAparelho.toLowerCase();
-    return aparelhosVendidos.filter(a => {
-      const id = getAparelhoCodigo(a).toLowerCase();
-      const imei = (a.imei || a.numeroSerie || '').toLowerCase();
-      const mod = `${a.marca} ${a.modelo}`.toLowerCase();
-      const cli = (a.cliente || '').toLowerCase();
-      return id.includes(termo) || imei.includes(termo) || mod.includes(termo) || cli.includes(termo);
-    }).slice(0, 30);
+    return filtrarESortearAparelhos(aparelhosVendidos, buscaAparelho).slice(0, 50);
   }, [aparelhosVendidos, buscaAparelho]);
 
   const aparelhoSelecionado = useMemo(() => {

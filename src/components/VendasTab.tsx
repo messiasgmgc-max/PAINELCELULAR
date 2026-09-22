@@ -43,6 +43,7 @@ import { Aparelho, Cliente, Venda, VendaItem } from '@/lib/db/types';
 import { cn, canViewFinancials, getAparelhoCodigo, obterDataHoraVenda, getVendaDataExibicao, extrairAparelhoEImeiDaVenda } from '@/lib/utils';
 import { condicaoAoDevolver, limparObservacoesDeVenda } from '@/lib/vendasDevolucao';
 import { estaNoEstoque, patchRestauracao, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
+import { filtrarESortearAparelhos } from '@/lib/buscaEstoque';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { toast } from 'sonner';
 import { registrarLog } from '@/lib/logger';
@@ -170,25 +171,7 @@ function ProdutoCombobox({
     : aparelhos.filter(aparelhoNoEstoque);
   const selecionado = aparelhos.find(a => a.id === value);
 
-  const filtrados = disponiveis.filter(a => {
-    if (!searchTerm.trim()) return true;
-    const term = searchTerm.toLowerCase();
-    const codigoStr = getAparelhoCodigo(a).toLowerCase();
-    const imeiStr = (a.imei || a.numeroSerie || '').toLowerCase();
-    const modeloStr = (a.modelo || '').toLowerCase();
-    const marcaStr = (a.marca || '').toLowerCase();
-    const corStr = (a.cor || '').toLowerCase();
-    const capStr = (a.capacidade || '').toLowerCase();
-    return (
-      codigoStr.includes(term) ||
-      imeiStr.includes(term) ||
-      modeloStr.includes(term) ||
-      marcaStr.includes(term) ||
-      corStr.includes(term) ||
-      capStr.includes(term) ||
-      `${marcaStr} ${modeloStr}`.includes(term)
-    );
-  });
+  const filtrados = filtrarESortearAparelhos(disponiveis, searchTerm);
 
   const formatSelectedText = (a: Aparelho) => {
     const cod = getAparelhoCodigo(a);
@@ -246,7 +229,7 @@ function ProdutoCombobox({
                 onChange={(e) => setBuscarVendidosSemCliente(e.target.checked)}
                 className="rounded border-amber-500 text-amber-500 focus:ring-amber-500"
               />
-              <span>🔗 Buscar também aparelhos já baixados/vendidos sem cliente vinculado</span>
+              <span>🔗 Buscar também entre aparelhos já baixados / vendidos</span>
             </label>
           </div>
 
@@ -5318,7 +5301,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   <ShoppingCart className="w-4 h-4" /> Selecionar Aparelho do Estoque (Opcional)
                 </label>
                 <ComboboxAparelhos
-                  aparelhos={aparelhos.filter(aparelhoNoEstoque)}
+                  aparelhos={aparelhos}
                   value={selectedStockAparelhoId}
                   onChange={(selectedId) => {
                     setSelectedStockAparelhoId(selectedId);
