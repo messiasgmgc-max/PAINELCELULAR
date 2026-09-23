@@ -505,6 +505,15 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
       setCameraActive(false);
       await stopScannerInstance(instance, p);
     }
+    setAcoesFaltantes((prev) => {
+      const novao: Record<string, AcaoFaltante> = { ...prev };
+      aparelhosFaltantes.forEach((a) => {
+        if (!novao[a.id]) {
+          novao[a.id] = 'remover';
+        }
+      });
+      return novao;
+    });
     setEtapa('relatorio');
   };
 
@@ -636,8 +645,8 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
         manutencao: [],
       };
       for (const aparelho of aparelhosFaltantes) {
-        const acao = acoesFaltantes[aparelho.id];
-        if (!acao || acao === 'manter') continue;
+        const acao = acoesFaltantes[aparelho.id] || 'remover';
+        if (acao === 'manter') continue;
         porAcao[acao].push(aparelho);
       }
 
