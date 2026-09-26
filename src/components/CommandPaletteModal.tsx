@@ -93,7 +93,7 @@ export function CommandPaletteModal({
     { id: 'act-exportar-csv', label: 'Exportar Estoque (CSV)', description: 'Baixar planilha completa do estoque atual', category: 'Aparelhos', icon: FileSpreadsheet, tabId: 'aparelhos', actionId: 'exportar-csv', keywords: ['download', 'excel', 'planilha'] },
     { id: 'act-exportar-wpp', label: 'Gerar Lista para WhatsApp', description: 'Copiar lista formatada do estoque para enviar em grupos', category: 'Aparelhos', icon: MessageCircle, tabId: 'aparelhos', actionId: 'exportar-wpp', keywords: ['mensagem', 'grupo', 'tabela'] },
     { id: 'act-saidas-estoque', label: 'Histórico de Saídas', description: 'Ver aparelhos baixados, vendidos ou removidos', category: 'Aparelhos', icon: History, tabId: 'aparelhos', actionId: 'ver-saidas', keywords: ['baixados', 'vendidos', 'removidos'] },
-    { id: 'act-mercadophone', label: 'Importar MercadoPhone', description: 'Importar lista de produtos formatada do MercadoPhone', category: 'Aparelhos', icon: Download, tabId: 'aparelhos', actionId: 'mercadophone', keywords: ['importar', 'txt', 'mkt'] },
+    { id: 'act-mercadophone', label: 'Importar Lista Simples', description: 'Importar lista simples de produtos e atualizar estoque', category: 'Aparelhos', icon: Download, tabId: 'aparelhos', actionId: 'mercadophone', keywords: ['importar', 'txt', 'mkt', 'lista simples', 'mercadophone'] },
     { id: 'act-fornecedor', label: 'Importar Lista Fornecedor', description: 'Conversor automático de listas de fornecedores', category: 'Aparelhos', icon: List, tabId: 'aparelhos', actionId: 'fornecedor', keywords: ['lista', 'fornecedor', 'txt'] },
 
     // --- VENDAS & PDV ---

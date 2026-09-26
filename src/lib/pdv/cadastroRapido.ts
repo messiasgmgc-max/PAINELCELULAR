@@ -119,6 +119,12 @@ const CAPACIDADES_LANCAMENTOS_RECENTES: Record<string, string[]> = {
   'iPhone Air': ['256GB', '512GB', '1TB'],
   'iPhone 17 Pro': ['256GB', '512GB', '1TB'],
   'iPhone 17 Pro Max': ['256GB', '512GB', '1TB', '2TB'],
+  'iPhone 18': ['256GB', '512GB', '1TB'],
+  'iPhone 18 Pro': ['256GB', '512GB', '1TB'],
+  'iPhone 18 Pro Max': ['256GB', '512GB', '1TB', '2TB'],
+  'iPhone 19': ['256GB', '512GB', '1TB'],
+  'iPhone 19 Pro': ['256GB', '512GB', '1TB'],
+  'iPhone 19 Pro Max': ['256GB', '512GB', '1TB', '2TB'],
 };
 
 export const CAPACIDADES_PADRAO = ['64GB', '128GB', '256GB', '512GB', '1TB', '2TB'];

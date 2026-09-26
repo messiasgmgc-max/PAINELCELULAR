@@ -465,67 +465,63 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       return { marca: 'Motorola', modelo, cor };
     }
 
-    // 7. IPHONES (Gerações 7 a 17)
-    const iphonePatterns = [
-      { regex: /\b17\s*pro\s*max\b/i, name: 'iPhone 17 Pro Max' },
-      { regex: /\b17\s*pro\b/i, name: 'iPhone 17 Pro' },
-      { regex: /\b17\s*plus\b/i, name: 'iPhone 17 Plus' },
-      { regex: /\b17\s*e\b/i, name: 'iPhone 17e' },
-      { regex: /\b17e\b/i, name: 'iPhone 17e' },
-      { regex: /\b17\b/i, name: 'iPhone 17' },
+    // 7. IPHONES (Suporte dinâmico para 11, 12, 13, 14, 15, 16, 17, 18, 19, 20... e sufixos Pro Max / Pro / Plus / Mini / e / etc.)
+    const nonAppleBrandRegex = /\b(samsung|galaxy|xiaomi|redmi|poco|motorola|moto|realme|infinix|oppo|oneplus|asus|google|pixel|nokia|huawei|honor|sony|microsoft|nintendo)\b/i;
 
-      { regex: /\b16\s*pro\s*max\b/i, name: 'iPhone 16 Pro Max' },
-      { regex: /\b16\s*pro\b/i, name: 'iPhone 16 Pro' },
-      { regex: /\b16\s*plus\b/i, name: 'iPhone 16 Plus' },
-      { regex: /\b16\s*e\b/i, name: 'iPhone 16e' },
-      { regex: /\b16e\b/i, name: 'iPhone 16e' },
-      { regex: /\b16\b/i, name: 'iPhone 16' },
+    if (!nonAppleBrandRegex.test(cleanStr)) {
+      // Modelos especiais não numéricos do iPhone
+      const specialIphones = [
+        { regex: /\b(?:iphone\s*)?se\s*4\b/i, name: 'iPhone SE 4' },
+        { regex: /\b(?:iphone\s*)?se\s*3\b/i, name: 'iPhone SE 3' },
+        { regex: /\b(?:iphone\s*)?se\s*2\b/i, name: 'iPhone SE 2' },
+        { regex: /\b(?:iphone\s*)?se\b/i, name: 'iPhone SE' },
+        { regex: /\b(?:iphone\s*)?xs\s*max\b/i, name: 'iPhone XS Max' },
+        { regex: /\b(?:iphone\s*)?xs\b/i, name: 'iPhone XS' },
+        { regex: /\b(?:iphone\s*)?xr\b/i, name: 'iPhone XR' },
+        { regex: /\b(?:iphone\s*)?x\b/i, name: 'iPhone X' },
+        { regex: /\b(?:iphone\s*)?6s\s*plus\b/i, name: 'iPhone 6s Plus' },
+        { regex: /\b(?:iphone\s*)?6s\b/i, name: 'iPhone 6s' },
+        { regex: /\b(?:iphone\s*)?6\s*plus\b/i, name: 'iPhone 6 Plus' },
+        { regex: /\b(?:iphone\s*)?6\b/i, name: 'iPhone 6' },
+        { regex: /\b(?:iphone\s*)?5s\b/i, name: 'iPhone 5s' },
+        { regex: /\b(?:iphone\s*)?5c\b/i, name: 'iPhone 5c' },
+        { regex: /\b(?:iphone\s*)?5\b/i, name: 'iPhone 5' },
+      ];
 
-      { regex: /\b15\s*pro\s*max\b/i, name: 'iPhone 15 Pro Max' },
-      { regex: /\b15\s*pro\b/i, name: 'iPhone 15 Pro' },
-      { regex: /\b15\s*plus\b/i, name: 'iPhone 15 Plus' },
-      { regex: /\b15\s*e\b/i, name: 'iPhone 15e' },
-      { regex: /\b15e\b/i, name: 'iPhone 15e' },
-      { regex: /\b15\b/i, name: 'iPhone 15' },
+      for (const p of specialIphones) {
+        if (p.regex.test(cleanStr)) {
+          const rest = cleanStr.replace(p.regex, '').replace(/iphone/gi, '').trim();
+          return {
+            marca: 'Apple',
+            modelo: p.name,
+            cor: rest || 'Padrão'
+          };
+        }
+      }
 
-      { regex: /\b14\s*pro\s*max\b/i, name: 'iPhone 14 Pro Max' },
-      { regex: /\b14\s*pro\b/i, name: 'iPhone 14 Pro' },
-      { regex: /\b14\s*plus\b/i, name: 'iPhone 14 Plus' },
-      { regex: /\b14\b/i, name: 'iPhone 14' },
+      // iPhones numéricos dinâmicos (ex: 7..99 com Pro Max, Pro, Plus, Mini, e, etc.)
+      const matchNumIphone = cleanStr.match(/\b(?:iphone\s*)?(\d{1,2})\s*(pm|promax|pro\s*max|pro|plus|mini|e)?\b/i);
+      if (matchNumIphone) {
+        const num = matchNumIphone[1];
+        const rawVariant = (matchNumIphone[2] || '').toLowerCase().replace(/\s+/g, '');
+        let variant = '';
+        if (rawVariant === 'pm' || rawVariant === 'promax') {
+          variant = ' Pro Max';
+        } else if (rawVariant === 'pro') {
+          variant = ' Pro';
+        } else if (rawVariant === 'plus') {
+          variant = ' Plus';
+        } else if (rawVariant === 'mini') {
+          variant = ' Mini';
+        } else if (rawVariant === 'e') {
+          variant = 'e';
+        }
 
-      { regex: /\b13\s*pro\s*max\b/i, name: 'iPhone 13 Pro Max' },
-      { regex: /\b13\s*pro\b/i, name: 'iPhone 13 Pro' },
-      { regex: /\b13\s*mini\b/i, name: 'iPhone 13 Mini' },
-      { regex: /\b13\b/i, name: 'iPhone 13' },
-
-      { regex: /\b12\s*pro\s*max\b/i, name: 'iPhone 12 Pro Max' },
-      { regex: /\b12\s*pro\b/i, name: 'iPhone 12 Pro' },
-      { regex: /\b12\s*mini\b/i, name: 'iPhone 12 Mini' },
-      { regex: /\b12\b/i, name: 'iPhone 12' },
-
-      { regex: /\b11\s*pro\s*max\b/i, name: 'iPhone 11 Pro Max' },
-      { regex: /\b11\s*pro\b/i, name: 'iPhone 11 Pro' },
-      { regex: /\b11\b/i, name: 'iPhone 11' },
-
-      { regex: /\bse\s*3\b/i, name: 'iPhone SE 3' },
-      { regex: /\bse\s*2\b/i, name: 'iPhone SE 2' },
-      { regex: /\bse\b/i, name: 'iPhone SE' },
-      { regex: /\bxr\b/i, name: 'iPhone XR' },
-      { regex: /\bxs\s*max\b/i, name: 'iPhone XS Max' },
-      { regex: /\bxs\b/i, name: 'iPhone XS' },
-      { regex: /\bx\b/i, name: 'iPhone X' },
-      { regex: /\b8\s*plus\b/i, name: 'iPhone 8 Plus' },
-      { regex: /\b8\b/i, name: 'iPhone 8' },
-      { regex: /\b7\s*plus\b/i, name: 'iPhone 7 Plus' },
-      { regex: /\b7\b/i, name: 'iPhone 7' },
-    ];
-
-    for (const p of iphonePatterns) {
-      if (p.regex.test(cleanStr)) {
-        const rest = cleanStr.replace(p.regex, '').replace(/iphone/gi, '').trim();
+        const modelName = `iPhone ${num}${variant}`;
+        const rest = cleanStr.replace(matchNumIphone[0], '').replace(/iphone/gi, '').trim();
         return {
           marca: 'Apple',
-          modelo: p.name,
+          modelo: modelName,
           cor: rest || 'Padrão'
         };
       }
@@ -1753,8 +1749,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                   >
                     <RefreshCw className="h-4 w-4 text-emerald-400 shrink-0" />
                     <div>
-                      <div className="font-bold text-xs text-white">Lista MercadoPhone (Remontar)</div>
-                      <div className="text-[10px] text-slate-400">Importar lista formatada e atualizar</div>
+                      <div className="font-bold text-xs text-white">Lista Simples (Remontar / Importar)</div>
+                      <div className="text-[10px] text-slate-400">Importar lista simples de produtos e atualizar</div>
                     </div>
                   </DropdownMenuItem>
 
@@ -2943,7 +2939,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             <ConfirmarAcaoEstoqueModal
               aberto
               tom={baixas > 0 ? 'perigo' : 'aviso'}
-              titulo={ehRemontar ? 'Remontar estoque pela lista' : 'Importar lista do MercadoPhone'}
+              titulo={ehRemontar ? 'Remontar estoque pela Lista Simples' : 'Importar Lista Simples'}
               descricao={
                 ehRemontar && baixas > 0 && !bloqueada ? (
                   <>
@@ -3226,7 +3222,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
                 <h3 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
-                  <Smartphone className="h-5 w-5" /> Importar Aparelhos (Formato MercadoPhone)
+                  <Smartphone className="h-5 w-5" /> Importar Aparelhos (Lista Simples)
                 </h3>
                 <Button variant="ghost" size="icon" onClick={() => setShowMercadoPhoneModal(false)} className="text-slate-400 hover:text-white rounded-full">
                   <X className="h-5 w-5" />
