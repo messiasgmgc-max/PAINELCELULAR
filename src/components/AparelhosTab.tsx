@@ -3414,7 +3414,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         <ConferenciaEstoqueModal
           isOpen={showConferenciaModal}
           onClose={() => setShowConferenciaModal(false)}
-          aparelhosEstoque={aparelhosAtivos as any}
+          aparelhosEstoque={aparelhos.filter((a: any) => estaNoEstoque(a as any)) as any}
           lojaId={usuario?.lojaId || (usuario as any)?.loja_id || null}
           onEstoqueAtualizado={fetchAparelhos}
         />

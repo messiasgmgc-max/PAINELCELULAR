@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Search, ChevronDown, ChevronRight, CheckSquare, Square, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { formatarSaudeBateria, getAparelhoCodigo, cn } from '@/lib/utils';
+import { formatarSaudeBateria, getAparelhoCodigo, cn, sortModelosCronologico, parseCapacidadeGB } from '@/lib/utils';
 
 interface ConferenciaManualViewProps {
   aparelhosEstoque: any[];
@@ -65,7 +65,7 @@ export function ConferenciaManualView({
     });
   }, [aparelhosEstoque, idsConfirmadosSet, filtroStatus, busca]);
 
-  // Agrupamento por modelo
+  // Agrupamento por modelo ordenado rigorosamente do mais ANTIGO para o mais NOVO
   const grupos = useMemo(() => {
     const map: Record<string, any[]> = {};
     aparelhosFiltrados.forEach((item) => {
@@ -74,12 +74,26 @@ export function ConferenciaManualView({
       map[nome].push(item);
     });
 
-    return Object.entries(map).map(([modelo, itens]) => ({
-      modelo,
-      itens,
-      confirmados: itens.filter((i) => idsConfirmadosSet.has(i.id)).length,
-      total: itens.length,
-    }));
+    return Object.entries(map)
+      .map(([modelo, itens]) => {
+        // Ordena itens dentro do modelo por capacidade crescente, cor e IMEI
+        itens.sort((a, b) => {
+          const capA = parseCapacidadeGB(a.capacidade);
+          const capB = parseCapacidadeGB(b.capacidade);
+          if (capA !== capB) return capA - capB;
+          const corComp = (a.cor || '').localeCompare(b.cor || '', 'pt-BR');
+          if (corComp !== 0) return corComp;
+          return (a.imei || '').localeCompare(b.imei || '');
+        });
+
+        return {
+          modelo,
+          itens,
+          confirmados: itens.filter((i) => idsConfirmadosSet.has(i.id)).length,
+          total: itens.length,
+        };
+      })
+      .sort((a, b) => sortModelosCronologico(a.modelo, b.modelo, 'antigo_para_novo'));
   }, [aparelhosFiltrados, idsConfirmadosSet]);
 
   const toggleGrupo = (modelo: string) => {

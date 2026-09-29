@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { ConfirmarAcaoEstoqueModal } from '@/components/ConfirmarAcaoEstoqueModal';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
+import { cn, sortModelosCronologico, getAparelhoCodigo, parseCapacidadeGB } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { estaNoEstoque, patchSaida } from '@/lib/estoque/ciclo';
 import type { PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
@@ -85,6 +85,20 @@ export function ConferenciaEstoqueModal({
   const [confirmandoAjustes, setConfirmandoAjustes] = useState(false);
   const [ordemModelos] = useState<'antigo_para_novo' | 'novo_para_antigo'>('antigo_para_novo');
 
+  // Filtro de escopo: por padrão apenas 'celulares' para contagem rigorosa sem poluição de outros itens
+  const [filtroCategoria, setFiltroCategoria] = useState<'celulares' | 'todos'>('celulares');
+
+  const totalCelulares = useMemo(() => {
+    return aparelhosEstoque.filter((a) => !a.categoria || a.categoria === 'aparelho').length;
+  }, [aparelhosEstoque]);
+
+  const aparelhosAlvo = useMemo(() => {
+    if (filtroCategoria === 'celulares') {
+      return aparelhosEstoque.filter((a) => !a.categoria || a.categoria === 'aparelho');
+    }
+    return aparelhosEstoque;
+  }, [aparelhosEstoque, filtroCategoria]);
+
   // Rascunho persistente em localStorage
   const [rascunhoPendente, setRascunhoPendente] = useState<RascunhoConferencia | null>(null);
 
@@ -110,9 +124,9 @@ export function ConferenciaEstoqueModal({
   // Salva rascunho automaticamente a cada mudança
   useEffect(() => {
     if (isOpen && escaneados.length > 0) {
-      salvarRascunho(lojaId, usuario?.id, escaneados, aparelhosEstoque.length);
+      salvarRascunho(lojaId, usuario?.id, escaneados, aparelhosAlvo.length);
     }
-  }, [escaneados, isOpen, lojaId, usuario?.id, aparelhosEstoque.length]);
+  }, [escaneados, isOpen, lojaId, usuario?.id, aparelhosAlvo.length]);
 
   const dispararFlash = (cor: FlashColor) => {
     setFlashColor(cor);
@@ -126,8 +140,15 @@ export function ConferenciaEstoqueModal({
     const clean = rawCode.trim();
     if (!clean) return;
 
+    const inputLower = clean.toLowerCase();
+    const cleanDigits = clean.replace(/\D/g, '');
+
     // 1. Checa se já foi escaneado nesta conferência
-    const jaBipado = escaneados.some((item) => item.codigoLido.toLowerCase() === clean.toLowerCase());
+    const jaBipado = escaneados.some((item) => {
+      if (item.codigoLido.toLowerCase() === inputLower) return true;
+      if (cleanDigits && cleanDigits.length >= 4 && item.codigoLido.replace(/\D/g, '') === cleanDigits) return true;
+      return false;
+    });
     if (jaBipado) {
       toast.info(`O código "${clean}" já foi bipado anteriormente.`);
       dispararFlash('yellow');
@@ -136,26 +157,66 @@ export function ConferenciaEstoqueModal({
       return;
     }
 
-    const inputLower = clean.toLowerCase();
-    const cleanDigits = clean.replace(/\D/g, '');
-
-    // 2. Busca exata no estoque
-    let encontrados = aparelhosEstoque.filter((a) => {
-      const c1 = (a.codigo || '').trim().toLowerCase();
-      const c2 = (a.imei || '').trim().toLowerCase();
-      const c3 = (a.numeroSerie || '').trim().toLowerCase();
-      const c4 = (a.id || '').trim().toLowerCase();
-      return c1 === inputLower || c2 === inputLower || c3 === inputLower || c4 === inputLower;
-    });
-
-    // 3. Se não achou exato e tem dígitos suficientes (4 a 10 dígitos), busca por terminação (ex: últimos 4 ou 6 dígitos do IMEI)
-    if (encontrados.length === 0 && cleanDigits.length >= 4 && cleanDigits.length <= 10) {
-      encontrados = aparelhosEstoque.filter((a) => {
-        const imeiClean = (a.imei || '').replace(/\D/g, '');
-        const codClean = (a.codigo || getAparelhoCodigo(a) || '').replace(/\D/g, '');
-        const numClean = (a.numeroSerie || '').replace(/\D/g, '');
-        return imeiClean.endsWith(cleanDigits) || codClean.endsWith(cleanDigits) || numClean.endsWith(cleanDigits);
+    const buscarCandidatos = (lista: AparelhoAuditoria[]) => {
+      // 1. Busca exata de texto (código, IMEI, número de série ou ID)
+      let match = lista.filter((a) => {
+        const c1 = (a.codigo || '').trim().toLowerCase();
+        const c2 = (a.imei || '').trim().toLowerCase();
+        const c3 = (a.numeroSerie || '').trim().toLowerCase();
+        const c4 = (a.id || '').trim().toLowerCase();
+        return c1 === inputLower || c2 === inputLower || c3 === inputLower || c4 === inputLower;
       });
+
+      // 2. Se não achou exato por texto e temos dígitos limpos (mínimo 4 dígitos)
+      if (match.length === 0 && cleanDigits.length >= 4) {
+        // 2a. Dígitos numéricos exatos (ex: IMEI no banco com formatação vs leitor limpo)
+        match = lista.filter((a) => {
+          const imeiClean = (a.imei || '').replace(/\D/g, '');
+          const codClean = (a.codigo || getAparelhoCodigo(a) || '').replace(/\D/g, '');
+          const numClean = (a.numeroSerie || '').replace(/\D/g, '');
+          return (
+            (imeiClean && imeiClean === cleanDigits) ||
+            (codClean && codClean === cleanDigits) ||
+            (numClean && numClean === cleanDigits)
+          );
+        });
+
+        // 2b. Match de IMEI completo com leitor longo com dígito verificador ou código de barras de 14+ dígitos
+        if (match.length === 0 && cleanDigits.length >= 14) {
+          match = lista.filter((a) => {
+            const imeiClean = (a.imei || '').replace(/\D/g, '');
+            if (!imeiClean || imeiClean.length < 14) return false;
+            return imeiClean.includes(cleanDigits) || cleanDigits.includes(imeiClean);
+          });
+        }
+
+        // 2c. Match por final do IMEI / código (últimos 4 a 13 dígitos)
+        if (match.length === 0 && cleanDigits.length >= 4 && cleanDigits.length < 14) {
+          match = lista.filter((a) => {
+            const imeiClean = (a.imei || '').replace(/\D/g, '');
+            const codClean = (a.codigo || getAparelhoCodigo(a) || '').replace(/\D/g, '');
+            const numClean = (a.numeroSerie || '').replace(/\D/g, '');
+            return (
+              (imeiClean && imeiClean.endsWith(cleanDigits)) ||
+              (codClean && codClean.endsWith(cleanDigits)) ||
+              (numClean && numClean.endsWith(cleanDigits))
+            );
+          });
+        }
+      }
+
+      return match;
+    };
+
+    let encontrados = buscarCandidatos(aparelhosAlvo);
+
+    // Se não achou na lista alvo (ex: celulares), mas está cadastrado em outra categoria (perfume/acessório)
+    if (encontrados.length === 0 && aparelhosAlvo.length !== aparelhosEstoque.length) {
+      const emOutros = buscarCandidatos(aparelhosEstoque);
+      if (emOutros.length > 0) {
+        setFiltroCategoria('todos');
+        encontrados = emOutros;
+      }
     }
 
     // Caso 1: Vários aparelhos encontrados (Ambiguidade)
@@ -170,6 +231,15 @@ export function ConferenciaEstoqueModal({
     // Caso 2: Exatamente 1 aparelho encontrado
     if (encontrados.length === 1) {
       const aparelho = encontrados[0];
+      const jaConfirmado = idsConfirmadosSet.has(aparelho.id);
+      if (jaConfirmado) {
+        toast.info(`✓ ${aparelho.modelo} já foi conferido anteriormente!`);
+        dispararFlash('yellow');
+        triggerHaptic('aviso');
+        playBeepFeedback(soundEnabled);
+        return;
+      }
+
       toast.success(`✓ ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''}) conferido!`);
       dispararFlash('green');
       triggerHaptic('sucesso');
@@ -222,25 +292,55 @@ export function ConferenciaEstoqueModal({
 
   // Aparelhos que foram confirmados / encontrados no escaneamento
   const aparelhosConfirmados = useMemo(() => {
-    return aparelhosEstoque.filter((aparelho) => {
-      return escaneados.some((e) => {
-        if (e.aparelhoEncontrado?.id === aparelho.id) return true;
-        const c1 = (aparelho.codigo || '').trim().toLowerCase();
-        const c2 = (aparelho.imei || '').trim().toLowerCase();
-        const c3 = (aparelho.numeroSerie || '').trim().toLowerCase();
-        const input = e.codigoLido.toLowerCase();
-        return c1 === input || c2 === input || c3 === input;
-      });
-    });
-  }, [aparelhosEstoque, escaneados]);
+    return aparelhosAlvo
+      .filter((aparelho) => {
+        const imeiClean = (aparelho.imei || '').replace(/\D/g, '');
+        const codClean = (aparelho.codigo || getAparelhoCodigo(aparelho) || '').replace(/\D/g, '');
+        const numClean = (aparelho.numeroSerie || '').trim().toLowerCase();
 
-  // Aparelhos ativos no banco que NÃO foram bipados (Faltantes)
+        return escaneados.some((e) => {
+          if (e.aparelhoEncontrado?.id === aparelho.id) return true;
+          const inputLower = (e.codigoLido || '').trim().toLowerCase();
+          const inputDigits = inputLower.replace(/\D/g, '');
+
+          if (inputLower === (aparelho.id || '').toLowerCase()) return true;
+          if (inputLower === (aparelho.codigo || '').trim().toLowerCase()) return true;
+          if (inputLower === (aparelho.imei || '').trim().toLowerCase()) return true;
+          if (inputLower === numClean) return true;
+
+          if (inputDigits.length >= 4) {
+            if (imeiClean && imeiClean === inputDigits) return true;
+            if (codClean && codClean === inputDigits) return true;
+            if (inputDigits.length < 14 && imeiClean.endsWith(inputDigits)) return true;
+            if (inputDigits.length >= 14 && imeiClean && (imeiClean.includes(inputDigits) || inputDigits.includes(imeiClean))) return true;
+          }
+          return false;
+        });
+      })
+      .sort((a, b) => {
+        const cron = sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos);
+        if (cron !== 0) return cron;
+        const capA = parseCapacidadeGB(a.capacidade);
+        const capB = parseCapacidadeGB(b.capacidade);
+        if (capA !== capB) return capA - capB;
+        return (a.cor || '').localeCompare(b.cor || '', 'pt-BR');
+      });
+  }, [aparelhosAlvo, escaneados, ordemModelos]);
+
+  // Aparelhos ativos no banco que NÃO foram bipados (Faltantes) ordenados rigorosamente do mais antigo para o mais novo
   const aparelhosFaltantes = useMemo(() => {
     const idsConfirmados = new Set(aparelhosConfirmados.map((a) => a.id));
-    return aparelhosEstoque
+    return aparelhosAlvo
       .filter((aparelho) => !idsConfirmados.has(aparelho.id))
-      .sort((a, b) => sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos));
-  }, [aparelhosEstoque, aparelhosConfirmados, ordemModelos]);
+      .sort((a, b) => {
+        const cron = sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos);
+        if (cron !== 0) return cron;
+        const capA = parseCapacidadeGB(a.capacidade);
+        const capB = parseCapacidadeGB(b.capacidade);
+        if (capA !== capB) return capA - capB;
+        return (a.cor || '').localeCompare(b.cor || '', 'pt-BR');
+      });
+  }, [aparelhosAlvo, aparelhosConfirmados, ordemModelos]);
 
   // Códigos bipados que NÃO correspondem a nenhum aparelho ativo no banco
   const codigosSobrando = useMemo(() => {
@@ -327,7 +427,7 @@ export function ConferenciaEstoqueModal({
 
   const gerarTextoSaidasGrupo = () => {
     const nomeLoja = 'LOJA';
-    return gerarTextoWhatsAppFaltantes(nomeLoja, aparelhosEstoque.length, aparelhosConfirmados.length, aparelhosFaltantes);
+    return gerarTextoWhatsAppFaltantes(nomeLoja, aparelhosAlvo.length, aparelhosConfirmados.length, aparelhosFaltantes);
   };
 
   const contagemAjustes = useMemo(() => {
@@ -542,19 +642,19 @@ export function ConferenciaEstoqueModal({
 
         {/* 2. BARRA DE PROGRESSO FIXA */}
         {etapa === 'escaneamento' && (
-          <div className="py-2.5 px-3 bg-slate-950/80 rounded-2xl border border-slate-800/80 shrink-0 my-2 space-y-1.5">
+          <div className="py-2.5 px-3 bg-slate-950/80 rounded-2xl border border-slate-800/80 shrink-0 my-2 space-y-2">
             <div className="flex items-center justify-between text-xs font-bold">
               <span className="text-slate-300 flex items-center gap-1.5">
                 <Package className="w-3.5 h-3.5 text-cyan-400" /> Progresso da Conferência
               </span>
               <span className="text-cyan-400 font-mono">
-                {aparelhosConfirmados.length} / {aparelhosEstoque.length} conferidos
+                {aparelhosConfirmados.length} / {aparelhosAlvo.length} conferidos
               </span>
             </div>
             <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
               <div 
                 className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-300 rounded-full"
-                style={{ width: `${Math.min(100, Math.round((aparelhosConfirmados.length / (aparelhosEstoque.length || 1)) * 100))}%` }}
+                style={{ width: `${Math.min(100, Math.round((aparelhosConfirmados.length / (aparelhosAlvo.length || 1)) * 100))}%` }}
               />
             </div>
             <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
@@ -562,6 +662,37 @@ export function ConferenciaEstoqueModal({
               <span>Faltantes: <strong className="text-amber-400">{aparelhosFaltantes.length}</strong></span>
               <span>Sobrando: <strong className="text-purple-400">{codigosSobrando.length}</strong></span>
             </div>
+
+            {/* Alternador de Categoria de Estoque (Celulares vs Todos) */}
+            {totalCelulares < aparelhosEstoque.length && (
+              <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800/80">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase">Auditar:</span>
+                <button
+                  type="button"
+                  onClick={() => setFiltroCategoria('celulares')}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer",
+                    filtroCategoria === 'celulares'
+                      ? "bg-cyan-500 text-slate-950 shadow-sm"
+                      : "bg-slate-900 text-slate-400 hover:text-white"
+                  )}
+                >
+                  📱 Celulares ({totalCelulares})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroCategoria('todos')}
+                  className={cn(
+                    "px-2.5 py-0.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer",
+                    filtroCategoria === 'todos'
+                      ? "bg-cyan-500 text-slate-950 shadow-sm"
+                      : "bg-slate-900 text-slate-400 hover:text-white"
+                  )}
+                >
+                  📦 Todos ({aparelhosEstoque.length})
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -590,7 +721,7 @@ export function ConferenciaEstoqueModal({
                   : "text-slate-400 hover:text-white"
               )}
             >
-              <CheckSquare className="w-3.5 h-3.5" /> Seleção Manual ({aparelhosConfirmados.length}/{aparelhosEstoque.length})
+              <CheckSquare className="w-3.5 h-3.5" /> Seleção Manual ({aparelhosConfirmados.length}/{aparelhosAlvo.length})
             </button>
           </div>
         )}
@@ -657,7 +788,7 @@ export function ConferenciaEstoqueModal({
 
           {etapa === 'escaneamento' && modoConferencia === 'manual' && (
             <ConferenciaManualView
-              aparelhosEstoque={aparelhosEstoque}
+              aparelhosEstoque={aparelhosAlvo}
               idsConfirmadosSet={idsConfirmadosSet}
               onToggleItem={toggleItemManual}
               onMarcarGrupo={handleMarcarGrupo}

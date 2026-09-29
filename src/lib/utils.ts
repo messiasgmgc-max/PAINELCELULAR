@@ -148,22 +148,28 @@ export function parseMonetaryValue(rawVal: any): number {
 
 /**
  * Retorna uma pontuação cronológica crescente do modelo (do mais ANTIGO para o mais NOVO).
- * Quanto menor o número, mais antigo é o modelo (ex: iPhone 7 = 7.1, iPhone 12 = 12.1, iPhone 14 Pro Max = 14.6).
+ * Quanto menor o número, mais antigo é o modelo (ex: iPhone 4 = 4.1, iPhone 6s = 6.3, iPhone 11 = 11.1, iPhone 16 Pro Max = 16.6).
  */
 export function getModeloOrdemCronologica(modeloStr: string): number {
   if (!modeloStr) return 9999;
   const mod = modeloStr.toLowerCase().replace(/^apple\s+/i, '').trim();
 
   // Detecta SE (Edições Especiais)
-  if (mod.includes('se 3') || mod.includes('se (3') || mod.includes('se 2022') || mod.includes('se 3ª')) return 12.8;
-  if (mod.includes('se 2') || mod.includes('se (2') || mod.includes('se 2020') || mod.includes('se 2ª')) return 10.8;
+  if (mod.includes('se 3') || mod.includes('se (3') || mod.includes('se 2022') || mod.includes('se 3ª')) return 13.8;
+  if (mod.includes('se 2') || mod.includes('se (2') || mod.includes('se 2020') || mod.includes('se 2ª')) return 11.8;
   if (/\bse\b/i.test(mod)) return 6.5;
 
-  // Detecta geração numérica: 11, 12, 13, 14, 15, 16, 17, 4, 5, 6, 7, 8
-  const matchNum = mod.match(/\b(1[1-7]|[4-9])\b/);
+  // Detecta geração numérica: 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17 (+ sufixos s, c, g)
+  const matchNum = mod.match(/\b(1[1-9]|[4-9])([scg])?(?:\s|$|\b)/i);
   let gen = 0;
+  let isS = false;
+  let isC = false;
+
   if (matchNum) {
     gen = parseInt(matchNum[1], 10);
+    const suf = (matchNum[2] || '').toLowerCase();
+    isS = suf === 's' || mod.includes(`${gen}s`);
+    isC = suf === 'c' || mod.includes(`${gen}c`);
   } else if (mod.includes('xs max') || mod.includes('xsmax')) {
     gen = 10.6;
   } else if (mod.includes('xs')) {
@@ -175,13 +181,23 @@ export function getModeloOrdemCronologica(modeloStr: string): number {
   }
 
   if (gen > 0) {
-    let sub = 0.1; // Modelo base (ex: iPhone 14)
-    if (mod.includes('mini')) sub = 0.0;
-    else if (mod.includes('plus')) sub = 0.2;
-    else if (mod.includes('pro max') || mod.includes('promax')) sub = 0.6;
-    else if (mod.includes('pro')) sub = 0.4;
-
     if (Number.isInteger(gen)) {
+      let sub = 0.1; // Base normal: ex: iPhone 11, iPhone 14
+      if (mod.includes('mini')) {
+        sub = 0.0;
+      } else if (isS && mod.includes('plus')) {
+        sub = 0.4; // 6s Plus
+      } else if (isS) {
+        sub = 0.3; // 4s, 5s, 6s
+      } else if (isC) {
+        sub = 0.2; // 5c
+      } else if (mod.includes('plus')) {
+        sub = 0.2; // 6 Plus, 7 Plus, 8 Plus, 14 Plus, 15 Plus, 16 Plus
+      } else if (mod.includes('pro max') || mod.includes('promax')) {
+        sub = 0.6; // 11 Pro Max ... 16 Pro Max
+      } else if (mod.includes('pro')) {
+        sub = 0.4; // 11 Pro ... 16 Pro
+      }
       return gen + sub;
     }
     return gen;
@@ -196,7 +212,22 @@ export function getModeloOrdemCronologica(modeloStr: string): number {
   // AirPods
   if (mod.includes('airpods') || mod.includes('fone')) return 500;
 
-  return 600;
+  // Celulares Android / Outras marcas conhecidas
+  if (mod.includes('galaxy') || mod.includes('samsung')) return 600;
+  if (mod.includes('xiaomi') || mod.includes('redmi') || mod.includes('poco')) return 620;
+  if (mod.includes('motorola') || mod.includes('moto')) return 640;
+
+  return 700;
+}
+
+/**
+ * Converte string de capacidade (ex: '64GB', '128 GB', '1TB') para valor numérico em GB.
+ */
+export function parseCapacidadeGB(capStr?: string): number {
+  if (!capStr) return 0;
+  const num = parseInt(capStr.replace(/\D/g, ''), 10) || 0;
+  if (/tb/i.test(capStr)) return num * 1024;
+  return num;
 }
 
 /**

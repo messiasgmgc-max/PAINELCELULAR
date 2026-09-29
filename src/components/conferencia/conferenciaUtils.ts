@@ -1,4 +1,5 @@
 import { ItemEscaneado, RascunhoConferencia } from './types';
+import { sortModelosCronologico } from '@/lib/utils';
 
 export function getRascunhoKey(lojaId: string | null | undefined, usuarioId: string | null | undefined): string {
   const lId = lojaId || 'default_loja';
@@ -136,8 +137,10 @@ export function gerarTextoWhatsAppFaltantes(
     map[mod].push(f);
   });
 
-  Object.entries(map).forEach(([modelo, itens]) => {
-    txt += `\n🔹 *${modelo}* (${itens.length} un):\n`;
+  Object.entries(map)
+    .sort(([modA], [modB]) => sortModelosCronologico(modA, modB, 'antigo_para_novo'))
+    .forEach(([modelo, itens]) => {
+      txt += `\n🔹 *${modelo}* (${itens.length} un):\n`;
     itens.forEach((it) => {
       const imei = it.imei ? ` · IMEI final: ...${String(it.imei).slice(-4)}` : '';
       const cap = it.capacidade ? ` · ${it.capacidade}` : '';
