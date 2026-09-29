@@ -11,7 +11,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_VERSION).then((cache) =>
-      cache.addAll(['/manifest.json'])
+      cache.addAll(['/manifest.json', '/manifest-taxas.webmanifest'])
     ).catch(() => {})
   );
 });

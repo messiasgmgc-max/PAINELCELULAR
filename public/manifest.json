@@ -9,7 +9,11 @@
   "theme_color": "#000000",
   "orientation": "any",
   "scope": "/",
-  "categories": ["business", "productivity", "utilities"],
+  "categories": [
+    "business",
+    "productivity",
+    "utilities"
+  ],
   "icons": [
     {
       "src": "/icon-192.png",
@@ -43,6 +47,18 @@
     }
   ],
   "shortcuts": [
+    {
+      "name": "Simulador de Taxas",
+      "short_name": "Taxas",
+      "description": "Calcular parcelamento e taxas da maquininha",
+      "url": "/taxas-maquininha",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
     {
       "name": "Nova Venda",
       "short_name": "Vendas",

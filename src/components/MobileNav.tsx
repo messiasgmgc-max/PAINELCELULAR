@@ -3,14 +3,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
-  Shield, MessageCircle, X, DollarSign, Settings, ChevronRight, Lock, Percent,
-  ChevronLeft, LayoutGrid, Menu, Tag, FileText, Boxes, Layers, Repeat,
-  Sparkles, SlidersHorizontal
+  Shield, X, DollarSign, Settings, ChevronRight, Lock, Percent,
+  ChevronLeft, Menu, Tag, FileText, Boxes, Layers, Repeat,
+  Sparkles, SlidersHorizontal, Home
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useTabOrder } from '@/hooks/useTabOrder';
 import { usePanelMode } from '@/hooks/usePanelMode';
+import { toast } from 'sonner';
 
 export const ABAS_MODO_SIMPLES = new Set([
   'dashboard',
@@ -18,31 +19,35 @@ export const ABAS_MODO_SIMPLES = new Set([
   'vendas',
   'orders',
   'clientes',
+  'taxas-maquininha',
 ]);
 
 interface Tab {
   id: string;
   label: string;
+  shortLabel?: string;
   icon: React.ReactNode;
 }
 
 const TABS: Tab[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 className="w-5 h-5" /> },
-  { id: 'vendas', label: 'Vendas', icon: <DollarSign className="w-5 h-5" /> },
-  { id: 'atacado', label: 'Atacado', icon: <Boxes className="w-5 h-5" /> },
-  { id: 'taxas-maquininha', label: 'Calculadora de Taxa', icon: <Percent className="w-5 h-5" /> },
-  { id: 'calculadora-upgrade', label: 'Calculadora Upgrade', icon: <Repeat className="w-5 h-5" /> },
-  { id: 'clientes', label: 'Clientes', icon: <Users className="w-5 h-5" /> },
-  { id: 'aparelhos', label: 'Estoque Geral', icon: <Package className="w-5 h-5" /> },
-  { id: 'pecas', label: 'Peças', icon: <Layers className="w-5 h-5" /> },
-  { id: 'etiquetas', label: 'Etiquetas', icon: <Tag className="w-5 h-5" /> },
-  { id: 'orders', label: 'OS', icon: <ListTodo className="w-5 h-5" /> },
-  { id: 'tecnicos', label: 'Equipe', icon: <Wrench className="w-5 h-5" /> },
-  { id: 'agendamentos', label: 'Agenda', icon: <Calendar className="w-5 h-5" /> },
-  { id: 'garantias', label: 'Garantias', icon: <Shield className="w-5 h-5" /> },
-  { id: 'logs', label: 'Logs & Auditoria', icon: <FileText className="w-5 h-5" /> },
-  { id: 'configuracoes', label: 'Configurações', icon: <Settings className="w-5 h-5" /> },
+  { id: 'dashboard', label: 'Dashboard', shortLabel: 'Início', icon: <BarChart3 className="w-5 h-5" /> },
+  { id: 'vendas', label: 'Vendas', shortLabel: 'Vendas', icon: <DollarSign className="w-5 h-5" /> },
+  { id: 'atacado', label: 'Atacado', shortLabel: 'Atacado', icon: <Boxes className="w-5 h-5" /> },
+  { id: 'taxas-maquininha', label: 'Calculadora de Taxa', shortLabel: 'Taxas', icon: <Percent className="w-5 h-5" /> },
+  { id: 'calculadora-upgrade', label: 'Calculadora Upgrade', shortLabel: 'Upgrade', icon: <Repeat className="w-5 h-5" /> },
+  { id: 'clientes', label: 'Clientes', shortLabel: 'Clientes', icon: <Users className="w-5 h-5" /> },
+  { id: 'aparelhos', label: 'Estoque Geral', shortLabel: 'Estoque', icon: <Package className="w-5 h-5" /> },
+  { id: 'pecas', label: 'Peças', shortLabel: 'Peças', icon: <Layers className="w-5 h-5" /> },
+  { id: 'etiquetas', label: 'Etiquetas', shortLabel: 'Etiquetas', icon: <Tag className="w-5 h-5" /> },
+  { id: 'orders', label: 'OS', shortLabel: 'OS', icon: <ListTodo className="w-5 h-5" /> },
+  { id: 'tecnicos', label: 'Equipe', shortLabel: 'Equipe', icon: <Wrench className="w-5 h-5" /> },
+  { id: 'agendamentos', label: 'Agenda', shortLabel: 'Agenda', icon: <Calendar className="w-5 h-5" /> },
+  { id: 'garantias', label: 'Garantias', shortLabel: 'Garantias', icon: <Shield className="w-5 h-5" /> },
+  { id: 'logs', label: 'Logs & Auditoria', shortLabel: 'Logs', icon: <FileText className="w-5 h-5" /> },
+  { id: 'configuracoes', label: 'Configurações', shortLabel: 'Config', icon: <Settings className="w-5 h-5" /> },
 ];
+
+const DOCK_DEFAULT_IDS = ['taxas-maquininha', 'vendas', 'aparelhos', 'dashboard'];
 
 interface MobileNavProps {
   currentTab: string;
@@ -53,18 +58,25 @@ interface MobileNavProps {
 
 export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onToggleCollapse }: MobileNavProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
   const [hasModalOpen, setHasModalOpen] = useState(false);
+  const [telaInicialPref, setTelaInicialPref] = useState('dashboard');
   const { usuario } = useAuth();
   const { tabOrder } = useTabOrder();
 
   useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 5);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    if (typeof window !== 'undefined' && usuario?.id) {
+      const saved = localStorage.getItem(`phonecenter_tela_inicial_${usuario.id}`);
+      if (saved) setTelaInicialPref(saved);
+    }
+  }, [usuario?.id]);
+
+  const handleSalvarTelaInicial = (novaTela: string) => {
+    setTelaInicialPref(novaTela);
+    if (typeof window !== 'undefined' && usuario?.id) {
+      localStorage.setItem(`phonecenter_tela_inicial_${usuario.id}`, novaTela);
+      toast.success(`Tela inicial definida para: ${novaTela.toUpperCase()}`);
+    }
+  };
 
   useEffect(() => {
     const checkModal = () => {
@@ -90,7 +102,6 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
       if (tab) list.push(tab);
     });
 
-    // Garante que qualquer aba definida seja incluída se não estiver em tabOrder
     TABS.forEach((t) => {
       if (!list.some((it) => it.id === t.id)) {
         list.push(t);
@@ -98,16 +109,14 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
     });
 
     if (isSuperAdmin) {
-      list.push({ id: 'superadmin', label: 'Super Admin', icon: <Lock className="w-5 h-5 text-red-500" /> });
+      list.push({ id: 'superadmin', label: 'Super Admin', shortLabel: 'Admin', icon: <Lock className="w-5 h-5 text-amber-500" /> });
     }
 
-    // Se for vendedor/operador, oculta abas de gestão administrativa
     let filtered = list;
     if (checkIsVendedor(usuario)) {
       filtered = filtered.filter(t => !['configuracoes', 'tecnicos', 'logs', 'superadmin'].includes(t.id));
     }
 
-    // "Modo Simples" como padrão: foca nas telas essenciais do dia a dia (Estoque, Vendas/PDV, OS, Clientes, Dashboard)
     if (isModoSimples) {
       filtered = filtered.filter(t => ABAS_MODO_SIMPLES.has(t.id) || t.id === currentTab);
     }
@@ -115,13 +124,30 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
     return filtered;
   }, [tabOrder, isSuperAdmin, usuario, isModoSimples, currentTab]);
 
-  const mobileDockTabs: Tab[] = [{ id: 'menu', label: 'Menu', icon: <Menu className="w-5 h-5" /> }, ...tabsToRender];
+  // Dock com no máximo 5 itens: Menu + 4 slots (garantindo que a aba ativa esteja sempre visível)
+  const dockSlots = useMemo(() => {
+    const tabMap = new Map(TABS.map((t) => [t.id, t]));
+    let slotIds = [...DOCK_DEFAULT_IDS];
+
+    // Se a aba atual não estiver entre as 4 padrões e não for 'menu', inclui ela no 4º slot
+    if (currentTab && !slotIds.includes(currentTab) && currentTab !== 'menu') {
+      slotIds = [slotIds[0], slotIds[1], slotIds[2], currentTab];
+    }
+
+    const items: Tab[] = [];
+    slotIds.forEach((id) => {
+      const tab = tabMap.get(id);
+      if (tab) items.push(tab);
+    });
+
+    return items;
+  }, [currentTab]);
 
   const openDrawer = () => setIsOpen(true);
 
   return (
     <>
-      {/* Sidebar Vertical - Desktop (Sempre Aberta) */}
+      {/* Sidebar Vertical - Desktop */}
       <aside 
         className={cn(
           "fixed left-0 top-0 h-screen z-40 hidden md:flex flex-col transition-all duration-300 ease-in-out",
@@ -132,14 +158,15 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
         <div className="p-6 flex items-center justify-between border-b border-white/10">
           {!isCollapsed && (
             <div className="flex flex-col">
-              <span className="font-bold text-lg text-blue-600">Menu</span>
+              <span className="font-bold text-lg text-cyan-400">Menu</span>
               <span className="text-[10px] uppercase tracking-wider text-gray-500">Navegação</span>
             </div>
           )}
           <button 
+            type="button"
             onClick={onToggleCollapse}
             className={cn(
-              "p-2 hover:bg-white/10 rounded-xl transition-colors text-gray-500",
+              "p-2 hover:bg-white/10 rounded-xl transition-colors text-gray-400 cursor-pointer",
               isCollapsed && "mx-auto"
             )}
           >
@@ -151,68 +178,53 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
           {tabsToRender.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => onTabChange(tab.id)}
               className={cn(
-                "w-full flex items-center gap-3 p-3 rounded-2xl transition-all duration-300 group relative overflow-hidden",
+                "w-full flex items-center gap-3 p-3 rounded-2xl transition-all duration-200 group relative overflow-hidden cursor-pointer",
                 currentTab === tab.id
-                  ? "bg-blue-600/90 text-white shadow-lg shadow-blue-500/40 backdrop-blur-md border border-white/20"
-                  : "text-gray-500 hover:bg-white/20 hover:text-gray-900 dark:hover:text-gray-200 border border-transparent hover:border-white/10"
+                  ? "bg-cyan-600 text-white shadow-lg shadow-cyan-900/30 backdrop-blur-md border border-cyan-400/30 font-bold"
+                  : "text-slate-400 hover:bg-white/10 hover:text-white border border-transparent"
               )}
             >
               <div className={cn(
                 "flex-shrink-0 transition-transform duration-200 group-hover:scale-110",
-                currentTab === tab.id ? "text-white" : "text-gray-400 group-hover:text-blue-500"
+                currentTab === tab.id ? "text-white" : "text-slate-400 group-hover:text-cyan-400"
               )}>
                 {tab.icon}
               </div>
               {!isCollapsed && (
-                <span className="font-bold text-sm whitespace-nowrap">{tab.label}</span>
+                <span className="text-sm whitespace-nowrap">{tab.label}</span>
               )}
               {!isCollapsed && currentTab === tab.id && (
-                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white" />
+                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-cyan-300" />
               )}
             </button>
           ))}
         </nav>
 
-        {/* Toggle de Modo Simples vs Modo Completo */}
+        {/* Toggle de Modo Simples vs Completo */}
         <div className="px-3 pb-2 pt-1 border-t border-white/10">
-          {isModoSimples ? (
-            <button
-              onClick={toggleModoSimples}
-              className={cn(
-                "w-full flex items-center justify-between p-2.5 rounded-2xl transition-all duration-300",
-                "bg-gradient-to-r from-blue-600/15 via-indigo-600/15 to-purple-600/15 hover:from-blue-600/25 hover:to-purple-600/25",
-                "border border-blue-500/30 text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 shadow-sm group cursor-pointer"
-              )}
-              title="Ativar modo completo com todas as ferramentas"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0 group-hover:rotate-12 transition-transform" />
-                {!isCollapsed && (
-                  <span className="text-xs font-bold truncate">Ver mais recursos</span>
-                )}
-              </div>
+          <button
+            type="button"
+            onClick={toggleModoSimples}
+            className={cn(
+              "w-full flex items-center justify-between p-2.5 rounded-2xl transition-all duration-200 cursor-pointer",
+              isModoSimples
+                ? "bg-cyan-950/40 hover:bg-cyan-950/60 border border-cyan-500/30 text-cyan-300"
+                : "bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
+            )}
+            title={isModoSimples ? "Ativar todas as ferramentas" : "Focar no essencial"}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              {isModoSimples ? <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" /> : <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />}
               {!isCollapsed && (
-                <span className="text-[10px] bg-blue-500/20 text-blue-600 dark:text-blue-300 font-extrabold px-2 py-0.5 rounded-full">
-                  +10
+                <span className="text-xs font-bold truncate">
+                  {isModoSimples ? "Ver mais recursos (+8)" : "Modo Simples"}
                 </span>
               )}
-            </button>
-          ) : (
-            <button
-              onClick={toggleModoSimples}
-              className={cn(
-                "w-full flex items-center justify-center gap-2 p-2 rounded-xl transition-all cursor-pointer",
-                "bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10",
-                "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs font-medium border border-transparent hover:border-white/10"
-              )}
-              title="Voltar para o Modo Simples (focar no essencial)"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5 flex-shrink-0 text-slate-500" />
-              {!isCollapsed && <span>Modo Simples</span>}
-            </button>
-          )}
+            </div>
+          </button>
         </div>
 
         {!isCollapsed && (
@@ -224,43 +236,38 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
         )}
       </aside>
 
-      {/* Dock Mobile (Ocultado automaticamente quando qualquer modal/popup estiver aberto) */}
+      {/* Dock Mobile: Estritamente 5 botões fixos, SEM scroll horizontal, toque mínimo 44px */}
       {!hasModalOpen && (
-        <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pointer-events-none mobile-nav-dock transition-all duration-300">
-          <div className={cn(
-            "pointer-events-auto border shadow-2xl rounded-[1.75rem] p-2 transition-all duration-300",
-            "bg-white/95 dark:bg-slate-950/98 border-slate-200/80 dark:border-slate-700/70",
-            "backdrop-filter backdrop-blur-xl",
-            scrolled ? "translate-y-0 opacity-100" : "translate-y-0 opacity-100"
-          )}>
-            <div className="flex gap-1 overflow-x-auto scrollbar-soft snap-x snap-mandatory">
-              {mobileDockTabs.map((tab) => {
-                if (tab.id === 'menu') {
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={openDrawer}
-                      className="snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10 transition-all"
-                    >
-                      <Menu className="w-5 h-5" />
-                      <span>Menu</span>
-                    </button>
-                  );
-                }
+        <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pointer-events-none mobile-nav-dock">
+          <div className="pointer-events-auto border shadow-2xl rounded-2xl p-1.5 bg-slate-950/95 border-slate-800 backdrop-blur-xl">
+            <div className="grid grid-cols-5 gap-1 w-full overflow-hidden">
+              {/* Botão 1: Menu / Mais */}
+              <button
+                type="button"
+                onClick={openDrawer}
+                className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer select-none"
+              >
+                <Menu className="w-4 h-4" />
+                <span className="truncate">Menu</span>
+              </button>
 
+              {/* Botões 2 a 5: Abas Principais + Aba Ativa */}
+              {dockSlots.map((tab) => {
+                const isActive = currentTab === tab.id;
                 return (
                   <button
                     key={tab.id}
+                    type="button"
                     onClick={() => onTabChange(tab.id)}
                     className={cn(
-                      "snap-start min-w-[72px] flex flex-col items-center justify-center gap-1 rounded-2xl py-2.5 text-[10px] font-semibold transition-all",
-                      currentTab === tab.id
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-500/40"
-                        : "text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white hover:bg-blue-500/10 dark:hover:bg-white/10"
+                      "h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold transition-all cursor-pointer select-none",
+                      isActive
+                        ? "bg-cyan-600 text-white shadow-md shadow-cyan-900/40 font-bold"
+                        : "text-slate-400 hover:text-white hover:bg-white/10"
                     )}
                   >
                     {tab.icon}
-                    <span>{tab.label}</span>
+                    <span className="truncate">{tab.shortLabel || tab.label}</span>
                   </button>
                 );
               })}
@@ -277,89 +284,97 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
             onClick={() => setIsOpen(false)}
           />
 
-          <div className="nav-surface relative w-[86%] max-w-[340px] h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-white/20">
+          <div className="nav-surface relative w-[86%] max-w-[340px] h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-300 border-r border-slate-800 bg-slate-950 text-white">
             
-            <div className="p-5 border-b border-white/10 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
               <div>
-                <h2 className="font-bold text-lg text-gray-900 dark:text-white">Menu</h2>
-                <p className="text-xs text-gray-500">Navegação</p>
+                <h2 className="font-bold text-base text-white">Menu Completo</h2>
+                <p className="text-[11px] text-slate-400">Navegação e Ferramentas</p>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsOpen(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-white/10 rounded-full transition-colors"
+                className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white cursor-pointer"
               >
-                <X className="w-5 h-5 text-gray-500" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-2 px-2 pb-[calc(env(safe-area-inset-bottom)+16px)] scrollbar-soft">
+            <div className="flex-1 overflow-y-auto py-2 px-2 pb-4 scrollbar-soft space-y-1">
               {tabsToRender.map((tab) => (
                 <button
                   key={tab.id}
+                  type="button"
                   onClick={() => {
                     onTabChange(tab.id);
                     setIsOpen(false);
                   }}
                   className={cn(
-                    "w-full flex items-center gap-4 px-4 py-3.5 mb-1 rounded-xl text-left transition-all",
+                    "w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-left transition-all cursor-pointer",
                     currentTab === tab.id
-                      ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-                      : "text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-200"
+                      ? "bg-cyan-600 text-white font-bold shadow-md shadow-cyan-900/30"
+                      : "text-slate-400 hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <span className={cn(
-                    "transition-colors",
-                    currentTab === tab.id ? "text-white" : "text-gray-500 dark:text-gray-400 group-hover:text-blue-500"
+                    currentTab === tab.id ? "text-white" : "text-slate-400"
                   )}>
                     {tab.icon}
                   </span>
-                  <span className="font-medium flex-1 text-sm">{tab.label}</span>
-                  {currentTab === tab.id && <ChevronRight className="w-4 h-4 opacity-50" />}
+                  <span className="flex-1 text-xs">{tab.label}</span>
+                  {currentTab === tab.id && <ChevronRight className="w-4 h-4 opacity-70" />}
                 </button>
               ))}
             </div>
             
-            <div className="p-4 border-t border-white/10 space-y-2">
-              <button
-                onClick={() => {
-                  toggleModoSimples();
-                  setIsOpen(false);
-                }}
-                className={cn(
-                  "w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer",
-                  isModoSimples
-                    ? "bg-blue-600/20 border-blue-500/30 text-blue-400 hover:bg-blue-600/30"
-                    : "bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800"
-                )}
-              >
-                {isModoSimples ? (
-                  <>
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Ver mais recursos (+10)</span>
-                  </>
-                ) : (
-                  <>
-                    <SlidersHorizontal className="w-4 h-4 text-slate-400" />
-                    <span>Ativar Modo Simples</span>
-                  </>
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  setIsOpen(false);
-                  const btn = document.querySelector('button[title="Instalar App"]') as HTMLButtonElement;
-                  if (btn) btn.click();
-                  else {
-                    alert('Para instalar o app no celular: no Safari toque em Compartilhar -> "Adicionar à Tela de Início". No Chrome, toque no menu (...) -> "Instalar Aplicativo"!');
-                  }
-                }}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 dark:text-indigo-300 font-bold text-xs rounded-xl border border-indigo-500/30 transition-colors"
-              >
-                <Smartphone className="w-4 h-4" /> Instalar App Web no Celular
-              </button>
-              <p className="text-xs text-center text-gray-400">
-                Phone Center &copy; {new Date().getFullYear()}
-              </p>
+            {/* Seletor de Tela Inicial e Atalhos PWA */}
+            <div className="p-4 border-t border-slate-800 space-y-2.5 bg-slate-900/50">
+              {/* Preferência de Tela Inicial */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Home className="w-3.5 h-3.5 text-cyan-400" /> Tela Inicial ao Abrir:
+                </label>
+                <select
+                  value={telaInicialPref}
+                  onChange={(e) => handleSalvarTelaInicial(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500 cursor-pointer"
+                >
+                  <option value="dashboard">Dashboard (Início)</option>
+                  <option value="taxas-maquininha">Simulador de Taxas</option>
+                  <option value="vendas">Vendas / PDV</option>
+                  <option value="aparelhos">Estoque de Celulares</option>
+                </select>
+              </div>
+
+              {/* Botões de Instalação PWA */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    const btn = document.querySelector('button[title="Instalar App"]') as HTMLButtonElement;
+                    if (btn) btn.click();
+                    else {
+                      alert('Para instalar o Painel: no Safari toque em Compartilhar -> "Adicionar à Tela de Início". No Chrome, toque nos 3 pontinhos -> "Instalar Aplicativo".');
+                    }
+                  }}
+                  className="py-2 px-2 bg-white/10 hover:bg-white/15 text-white font-bold text-[10px] rounded-xl border border-white/10 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-cyan-400" /> App Completo
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onTabChange('taxas-maquininha');
+                    alert('Para instalar o Simulador de Taxas como app próprio: no navegador acesse a rota /taxas-maquininha e toque em Compartilhar -> "Adicionar à Tela de Início" (Safari) ou Menu -> "Instalar" (Chrome).');
+                  }}
+                  className="py-2 px-2 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-bold text-[10px] rounded-xl border border-cyan-500/30 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Percent className="w-3.5 h-3.5 text-cyan-400" /> Só o Simulador
+                </button>
+              </div>
             </div>
           </div>
         </div>

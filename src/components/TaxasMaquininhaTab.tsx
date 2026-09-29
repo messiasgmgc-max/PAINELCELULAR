@@ -77,6 +77,46 @@ export function TaxasMaquininhaTab() {
   
   const [calcResultado, setCalcResultado] = useState<any>(null);
 
+  // Persistência das preferências por usuário em localStorage
+  const storageKey = usuario?.id ? `phonecenter_taxas_prefs_${usuario.id}` : 'phonecenter_taxas_prefs_default';
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.calcPerfil) setCalcPerfil(parsed.calcPerfil);
+        if (parsed.calcBandeira) setCalcBandeira(parsed.calcBandeira);
+        if (parsed.calcParcelaSelecionada) setCalcParcelaSelecionada(parsed.calcParcelaSelecionada);
+        if (parsed.tipoBusca) setTipoBusca(parsed.tipoBusca);
+        if (typeof parsed.modoAvancado === 'boolean') setModoAvancado(parsed.modoAvancado);
+      }
+    } catch (e) {}
+  }, [storageKey]);
+
+  useEffect(() => {
+    try {
+      const prefs = {
+        calcPerfil,
+        calcBandeira,
+        calcParcelaSelecionada,
+        tipoBusca,
+        modoAvancado,
+      };
+      localStorage.setItem(storageKey, JSON.stringify(prefs));
+    } catch (e) {}
+  }, [calcPerfil, calcBandeira, calcParcelaSelecionada, tipoBusca, modoAvancado, storageKey]);
+
+  // Cálculo automático em tempo real com debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (calcPerfil && calcValorBase && parseFloat(calcValorBase) > 0) {
+        calcularMelhorOpcao();
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [calcPerfil, calcValorBase, calcBandeira, calcParcelaSelecionada, calcValorAlvo, calcModoAlvo, tipoBusca]);
+
   const { config } = useStoreConfig();
   const lojaIdAtual = usuario?.lojaId || usuario?.id;
   const [copiedWhatsApp, setCopiedWhatsApp] = useState(false);

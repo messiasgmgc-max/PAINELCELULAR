@@ -84,7 +84,7 @@
     "react-hot-toast": "2.4.1",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.0",
-    "resend": "^6.28.1",
+    "resend": "^6.30.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "sonner": "^1.7.1",

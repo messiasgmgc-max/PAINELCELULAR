@@ -1,41 +1,46 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Camera, 
   X, 
-  Check, 
   Volume2, 
   VolumeX, 
-  Keyboard, 
   RefreshCw, 
   CheckCircle2, 
-  AlertTriangle, 
   Package, 
-  Wrench, 
   Trash2, 
-  ShoppingBag, 
-  ArrowRight,
-  ShieldCheck,
-  Search,
-  Plus,
-  CheckSquare,
-  Square,
-  ArrowUpDown,
-  Copy
+  ShieldCheck, 
+  CheckSquare, 
+  FileSpreadsheet,
+  MessageCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmarAcaoEstoqueModal } from '@/components/ConfirmarAcaoEstoqueModal';
-import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { formatarSaudeBateria, cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
+import { cn, sortModelosCronologico, getAparelhoCodigo } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { estaNoEstoque, patchSaida } from '@/lib/estoque/ciclo';
-import type { EstadoCicloAparelho, PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
+import type { PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 import type { ResultadoMudancaEstoque } from '@/lib/estoque/movimentacoes';
+
+// Subcomponentes extraídos
+import { ConferenciaScannerView } from './conferencia/ConferenciaScannerView';
+import { ConferenciaManualView } from './conferencia/ConferenciaManualView';
+import { ModalEscolhaAmbigua } from './conferencia/ModalEscolhaAmbigua';
+import { 
+  salvarRascunho, 
+  carregarRascunho, 
+  limparRascunho, 
+  playBeepFeedback, 
+  triggerHaptic, 
+  exportarResumoCSV, 
+  gerarTextoWhatsAppFaltantes 
+} from './conferencia/conferenciaUtils';
+import type { ItemEscaneado, FlashColor, AcaoFaltante, RascunhoConferencia } from './conferencia/types';
 
 interface AparelhoAuditoria {
   id: string;
@@ -55,12 +60,6 @@ interface AparelhoAuditoria {
   saudeBateria?: string;
 }
 
-interface ItemEscaneado {
-  codigoLido: string;
-  timestamp: string;
-  aparelhoEncontrado?: AparelhoAuditoria;
-}
-
 interface ConferenciaEstoqueModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -68,49 +67,6 @@ interface ConferenciaEstoqueModalProps {
   lojaId: string | null;
   onEstoqueAtualizado: () => void;
 }
-
-type AcaoFaltante = 'manter' | 'vendido' | 'manutencao' | 'atacado' | 'remover';
-
-const createSafeScanner = (elementId: string) => {
-  const instance = new Html5Qrcode(elementId);
-  const originalStop = instance.stop.bind(instance);
-  const originalClear = instance.clear.bind(instance);
-
-  instance.stop = async () => {
-    try {
-      const state = (instance as any).getState?.();
-      const isScanning = (instance as any).isScanning;
-      // 2 = SCANNING, 3 = PAUSED
-      if (isScanning && (state === 2 || state === 3)) {
-        return await originalStop();
-      }
-    } catch (e) {
-      // Engole erro de transição "Cannot transition to a new state"
-    }
-  };
-
-  instance.clear = () => {
-    try {
-      return originalClear();
-    } catch (e) {}
-  };
-
-  return instance;
-};
-
-const stopScannerInstance = async (
-  scannerInstance: Html5Qrcode | null,
-  startPromise?: Promise<unknown> | null
-) => {
-  if (!scannerInstance) return;
-  try {
-    if (startPromise) {
-      await startPromise.catch(() => {});
-    }
-    await scannerInstance.stop();
-    scannerInstance.clear();
-  } catch (e) {}
-};
 
 export function ConferenciaEstoqueModal({
   isOpen,
@@ -122,227 +78,147 @@ export function ConferenciaEstoqueModal({
   const { usuario } = useAuth();
   const [etapa, setEtapa] = useState<'escaneamento' | 'relatorio'>('escaneamento');
   const [modoConferencia, setModoConferencia] = useState<'scanner' | 'manual'>('scanner');
-  const [buscaManual, setBuscaManual] = useState('');
   const [escaneados, setEscaneados] = useState<ItemEscaneado[]>([]);
-  const [manualCode, setManualCode] = useState('');
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [flashColor, setFlashColor] = useState<FlashColor>('none');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [salvandoAjustes, setSalvandoAjustes] = useState(false);
-  // Confirmação com a quantidade digitada antes de qualquer escrita em massa.
   const [confirmandoAjustes, setConfirmandoAjustes] = useState(false);
-  const [ordemModelos, setOrdemModelos] = useState<'antigo_para_novo' | 'novo_para_antigo'>('antigo_para_novo');
+  const [ordemModelos] = useState<'antigo_para_novo' | 'novo_para_antigo'>('antigo_para_novo');
+
+  // Rascunho persistente em localStorage
+  const [rascunhoPendente, setRascunhoPendente] = useState<RascunhoConferencia | null>(null);
+
+  // Desambiguação de códigos curtos / finais de IMEI
+  const [desambiguacao, setDesambiguacao] = useState<{ codigoDigitado: string; candidatos: AparelhoAuditoria[] } | null>(null);
 
   // Mapeamento de ações para aparelhos faltantes: idAparelho -> AcaoFaltante
   const [acoesFaltantes, setAcoesFaltantes] = useState<Record<string, AcaoFaltante>>({});
 
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const startPromiseRef = useRef<Promise<unknown> | null>(null);
-  const keyBufferRef = useRef<string>('');
-  const keyTimeoutRef = useRef<any>(null);
-  const modalContainerRef = useRef<HTMLDivElement>(null);
+  // Histórico para desfazer ação em lote manual
+  const [historicoLoteAnterior, setHistoricoLoteAnterior] = useState<ItemEscaneado[] | null>(null);
 
-  // Desligar câmera de forma limpa antes de fechar o modal
-  const handleClose = async () => {
-    if (scannerRef.current) {
-      const instance = scannerRef.current;
-      const p = startPromiseRef.current;
-      scannerRef.current = null;
-      startPromiseRef.current = null;
-      setCameraActive(false);
-      await stopScannerInstance(instance, p);
+  // Ao abrir o modal, verifica rascunho anterior
+  useEffect(() => {
+    if (isOpen && escaneados.length === 0) {
+      const r = carregarRascunho(lojaId, usuario?.id);
+      if (r && r.escaneados && r.escaneados.length > 0) {
+        setRascunhoPendente(r);
+      }
     }
-    onClose();
+  }, [isOpen, lojaId, usuario?.id]);
+
+  // Salva rascunho automaticamente a cada mudança
+  useEffect(() => {
+    if (isOpen && escaneados.length > 0) {
+      salvarRascunho(lojaId, usuario?.id, escaneados, aparelhosEstoque.length);
+    }
+  }, [escaneados, isOpen, lojaId, usuario?.id, aparelhosEstoque.length]);
+
+  const dispararFlash = (cor: FlashColor) => {
+    setFlashColor(cor);
+    setTimeout(() => {
+      setFlashColor('none');
+    }, 450);
   };
 
-  // Previnir crash de tela do Next.js se o Html5Qrcode lançar erro de transição não capturado
-  useEffect(() => {
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      const reasonStr = String(event.reason?.message || event.reason || '');
-      if (
-        reasonStr.includes('Cannot transition to a new state') ||
-        reasonStr.includes('already under transition') ||
-        reasonStr.includes('Html5Qrcode')
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    };
-
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    return () => {
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
-  }, []);
-
-  // Garantir que a modal abra no topo absoluto da tela no mobile
-  useEffect(() => {
-    if (isOpen) {
-      if (modalContainerRef.current) {
-        modalContainerRef.current.scrollTop = 0;
-      }
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    }
-  }, [isOpen]);
-
-  // Tocar aviso sonoro de beep
-  const playBeep = () => {
-    if (!soundEnabled) return;
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.15);
-    } catch (e) {}
-  };
-
-  // Processa a leitura de um código de barras / IMEI
+  // Processa a leitura de um código de barras / IMEI com correspondência inteligente
   const processarCodigoLido = (rawCode: string) => {
     const clean = rawCode.trim();
     if (!clean) return;
 
-    setEscaneados((prev) => {
-      if (prev.some((item) => item.codigoLido.toLowerCase() === clean.toLowerCase())) {
-        toast.info(`O código "${clean}" já foi bipado anteriormente nesta conferência.`);
-        return prev;
-      }
-
-      playBeep();
-
-      const encontrado = aparelhosEstoque.find((a) => {
-        const c1 = (a.codigo || '').trim().toLowerCase();
-        const c2 = (a.imei || '').trim().toLowerCase();
-        const c3 = (a.numeroSerie || '').trim().toLowerCase();
-        const c4 = (a.id || '').trim().toLowerCase();
-        const input = clean.toLowerCase();
-        return c1 === input || c2 === input || c3 === input || c4 === input;
-      });
-
-      if (encontrado) {
-        toast.success(`✓ ${encontrado.modelo} bipado com sucesso!`);
-      } else {
-        toast.warning(`⚠️ Código "${clean}" não foi localizado no estoque ativo.`);
-      }
-
-      return [
-        {
-          codigoLido: clean,
-          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          aparelhoEncontrado: encontrado,
-        },
-        ...prev,
-      ];
-    });
-  };
-
-  // Listener global para Leitor de Código de Barras USB
-  useEffect(() => {
-    if (!isOpen || etapa !== 'escaneamento') return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-        if ((activeEl as HTMLElement).id === 'conf-manual-input') {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            processarCodigoLido(manualCode);
-            setManualCode('');
-          }
-        }
-        return;
-      }
-
-      if (e.key === 'Enter') {
-        if (keyBufferRef.current.length >= 3) {
-          e.preventDefault();
-          processarCodigoLido(keyBufferRef.current);
-          keyBufferRef.current = '';
-        }
-      } else if (e.key.length === 1) {
-        keyBufferRef.current += e.key;
-        if (keyTimeoutRef.current) clearTimeout(keyTimeoutRef.current);
-        keyTimeoutRef.current = setTimeout(() => {
-          keyBufferRef.current = '';
-        }, 200);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      if (keyTimeoutRef.current) clearTimeout(keyTimeoutRef.current);
-    };
-  }, [isOpen, etapa, manualCode, aparelhosEstoque]);
-
-  // Inicializar câmera com cancelamento seguro
-  useEffect(() => {
-    let isMounted = true;
-
-    if (!isOpen || etapa !== 'escaneamento') {
-      if (scannerRef.current) {
-        const instance = scannerRef.current;
-        const p = startPromiseRef.current;
-        scannerRef.current = null;
-        startPromiseRef.current = null;
-        setCameraActive(false);
-        stopScannerInstance(instance, p);
-      }
+    // 1. Checa se já foi escaneado nesta conferência
+    const jaBipado = escaneados.some((item) => item.codigoLido.toLowerCase() === clean.toLowerCase());
+    if (jaBipado) {
+      toast.info(`O código "${clean}" já foi bipado anteriormente.`);
+      dispararFlash('yellow');
+      triggerHaptic('aviso');
+      playBeepFeedback(soundEnabled);
       return;
     }
 
-    const startCamera = async () => {
-      try {
-        setCameraError(null);
-        const container = document.getElementById('conf-qr-container');
-        if (!container) return;
+    const inputLower = clean.toLowerCase();
+    const cleanDigits = clean.replace(/\D/g, '');
 
-        const html5QrCode = createSafeScanner('conf-qr-container');
-        scannerRef.current = html5QrCode;
+    // 2. Busca exata no estoque
+    let encontrados = aparelhosEstoque.filter((a) => {
+      const c1 = (a.codigo || '').trim().toLowerCase();
+      const c2 = (a.imei || '').trim().toLowerCase();
+      const c3 = (a.numeroSerie || '').trim().toLowerCase();
+      const c4 = (a.id || '').trim().toLowerCase();
+      return c1 === inputLower || c2 === inputLower || c3 === inputLower || c4 === inputLower;
+    });
 
-        const promise = html5QrCode.start(
-          { facingMode: 'environment' },
-          { fps: 15, qrbox: { width: 260, height: 180 }, aspectRatio: 1.0 },
-          (decodedText) => {
-            if (isMounted) {
-              processarCodigoLido(decodedText);
-            }
-          },
-          () => {}
-        );
+    // 3. Se não achou exato e tem dígitos suficientes (4 a 10 dígitos), busca por terminação (ex: últimos 4 ou 6 dígitos do IMEI)
+    if (encontrados.length === 0 && cleanDigits.length >= 4 && cleanDigits.length <= 10) {
+      encontrados = aparelhosEstoque.filter((a) => {
+        const imeiClean = (a.imei || '').replace(/\D/g, '');
+        const codClean = (a.codigo || getAparelhoCodigo(a) || '').replace(/\D/g, '');
+        const numClean = (a.numeroSerie || '').replace(/\D/g, '');
+        return imeiClean.endsWith(cleanDigits) || codClean.endsWith(cleanDigits) || numClean.endsWith(cleanDigits);
+      });
+    }
 
-        startPromiseRef.current = promise;
-        await promise;
+    // Caso 1: Vários aparelhos encontrados (Ambiguidade)
+    if (encontrados.length > 1) {
+      setDesambiguacao({
+        codigoDigitado: clean,
+        candidatos: encontrados,
+      });
+      return;
+    }
 
-        if (isMounted) setCameraActive(true);
-      } catch (err: any) {
-        if (isMounted) {
-          setCameraError(err?.message || 'Câmera indisponível.');
-          setCameraActive(false);
-        }
-      }
-    };
+    // Caso 2: Exatamente 1 aparelho encontrado
+    if (encontrados.length === 1) {
+      const aparelho = encontrados[0];
+      toast.success(`✓ ${aparelho.modelo} (${aparelho.capacidade || ''} ${aparelho.cor || ''}) conferido!`);
+      dispararFlash('green');
+      triggerHaptic('sucesso');
+      playBeepFeedback(soundEnabled);
 
-    const timer = setTimeout(() => { startCamera(); }, 150);
+      setEscaneados((prev) => [
+        {
+          codigoLido: clean,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          aparelhoEncontrado: aparelho,
+        },
+        ...prev,
+      ]);
+      return;
+    }
 
-    return () => {
-      isMounted = false;
-      clearTimeout(timer);
-      if (scannerRef.current) {
-        const instance = scannerRef.current;
-        const p = startPromiseRef.current;
-        scannerRef.current = null;
-        startPromiseRef.current = null;
-        stopScannerInstance(instance, p);
-      }
-    };
-  }, [isOpen, etapa]);
+    // Caso 3: Não encontrado no estoque ativo (Sobrando / Fora)
+    toast.warning(`⚠️ Código "${clean}" não consta no estoque ativo.`);
+    dispararFlash('red');
+    triggerHaptic('erro');
+    playBeepFeedback(soundEnabled);
+
+    setEscaneados((prev) => [
+      {
+        codigoLido: clean,
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        aparelhoEncontrado: undefined,
+      },
+      ...prev,
+    ]);
+  };
+
+  const handleSelecionarAmbiguidade = (aparelho: AparelhoAuditoria) => {
+    if (!desambiguacao) return;
+    toast.success(`✓ ${aparelho.modelo} selecionado e conferido!`);
+    dispararFlash('green');
+    triggerHaptic('sucesso');
+    playBeepFeedback(soundEnabled);
+
+    setEscaneados((prev) => [
+      {
+        codigoLido: desambiguacao.codigoDigitado,
+        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        aparelhoEncontrado: aparelho,
+      },
+      ...prev,
+    ]);
+    setDesambiguacao(null);
+  };
 
   // Aparelhos que foram confirmados / encontrados no escaneamento
   const aparelhosConfirmados = useMemo(() => {
@@ -358,7 +234,7 @@ export function ConferenciaEstoqueModal({
     });
   }, [aparelhosEstoque, escaneados]);
 
-  // Aparelhos ativos no banco que NÃO foram bipados (Faltantes) - Ordenados cronologicamente do mais antigo para o mais novo
+  // Aparelhos ativos no banco que NÃO foram bipados (Faltantes)
   const aparelhosFaltantes = useMemo(() => {
     const idsConfirmados = new Set(aparelhosConfirmados.map((a) => a.id));
     return aparelhosEstoque
@@ -366,81 +242,16 @@ export function ConferenciaEstoqueModal({
       .sort((a, b) => sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos));
   }, [aparelhosEstoque, aparelhosConfirmados, ordemModelos]);
 
-  // Códigos bipados que NÃO correspondem a nenhum aparelho ativo no banco (Sobrando / Não cadastrado)
+  // Códigos bipados que NÃO correspondem a nenhum aparelho ativo no banco
   const codigosSobrando = useMemo(() => {
     return escaneados.filter((e) => !e.aparelhoEncontrado);
   }, [escaneados]);
 
-  // ── Lógica para Seleção Manual por Lista ──
   const idsConfirmadosSet = useMemo(() => {
     return new Set(aparelhosConfirmados.map((a) => a.id));
   }, [aparelhosConfirmados]);
 
-  const aparelhosFiltradosManual = useMemo(() => {
-    if (!buscaManual.trim()) return aparelhosEstoque;
-    const termo = buscaManual.toLowerCase().trim();
-    return aparelhosEstoque.filter((a) => {
-      const mod = (a.modelo || '').toLowerCase();
-      const mar = (a.marca || '').toLowerCase();
-      const ime = (a.imei || '').toLowerCase();
-      const cod = (a.codigo || '').toLowerCase();
-      const num = (a.numeroSerie || '').toLowerCase();
-      return mod.includes(termo) || mar.includes(termo) || ime.includes(termo) || cod.includes(termo) || num.includes(termo);
-    });
-  }, [aparelhosEstoque, buscaManual]);
-
-function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: string } {
-  if (!nome || !nome.trim()) return { chave: 'outros', exibicao: 'Outros' };
-
-  // Remove marca Apple se estiver no início, espaços extras e caracteres invisíveis (\u00A0)
-  const limpo = nome
-    .replace(/^Apple\s+/i, '')
-    .replace(/[\u00A0\s]+/g, ' ')
-    .trim();
-
-  const chave = limpo.toLowerCase();
-
-  // Padronização estética do nome para exibição unificada
-  let exibicao = limpo;
-  if (/^iphone\b/i.test(limpo)) {
-    const resto = limpo.replace(/^iphone\s*/i, '').trim();
-    exibicao = resto ? `iPhone ${resto}` : 'iPhone';
-  } else if (/^ipad\b/i.test(limpo)) {
-    const resto = limpo.replace(/^ipad\s*/i, '').trim();
-    exibicao = resto ? `iPad ${resto}` : 'iPad';
-  } else {
-    exibicao = limpo.charAt(0).toUpperCase() + limpo.slice(1);
-  }
-
-  return { chave, exibicao };
-}
-
-  // Agrupa e ordena modelos do mais ANTIGO para o mais NOVO (com chave canônica)
-  const gruposModelosOrdenados = useMemo(() => {
-    const map: Record<string, { exibicao: string; itens: AparelhoAuditoria[] }> = {};
-    aparelhosFiltradosManual.forEach((a) => {
-      const { chave, exibicao } = normalizarNomeModelo(a.modelo);
-      if (!map[chave]) {
-        map[chave] = { exibicao, itens: [] };
-      }
-      map[chave].itens.push(a);
-    });
-
-    const entries = Object.values(map).sort((gA, gB) => {
-      return sortModelosCronologico(gA.exibicao, gB.exibicao, ordemModelos);
-    });
-
-    return entries.map(({ exibicao, itens }) => {
-      const itensOrdenados = [...itens].sort((a, b) => {
-        const capNumA = parseInt(String(a.capacidade || '').replace(/\D/g, ''), 10) || 0;
-        const capNumB = parseInt(String(b.capacidade || '').replace(/\D/g, ''), 10) || 0;
-        if (capNumA !== capNumB) return capNumA - capNumB;
-        return (a.cor || '').localeCompare(b.cor || '', 'pt-BR');
-      });
-      return { modelo: exibicao, itens: itensOrdenados };
-    });
-  }, [aparelhosFiltradosManual, ordemModelos]);
-
+  // Ações manuais por lista
   const toggleItemManual = (aparelho: AparelhoAuditoria) => {
     const jaConfirmado = idsConfirmadosSet.has(aparelho.id);
     if (jaConfirmado) {
@@ -449,38 +260,38 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
       const codigo = aparelho.codigo || aparelho.imei || aparelho.numeroSerie || aparelho.id;
       setEscaneados((prev) => [
         {
-          codigoLido: codigo,
+          codigoLido: codigo || 'MANUAL',
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           aparelhoEncontrado: aparelho,
         },
         ...prev,
       ]);
-      playBeep();
     }
   };
 
-  const marcarListaManual = (itens: AparelhoAuditoria[]) => {
-    const novos: ItemEscaneado[] = [];
-    itens.forEach((aparelho) => {
-      if (!idsConfirmadosSet.has(aparelho.id)) {
-        const codigo = aparelho.codigo || aparelho.imei || aparelho.numeroSerie || aparelho.id;
-        novos.push({
-          codigoLido: codigo,
+  const handleMarcarGrupo = (itens: AparelhoAuditoria[], marcar: boolean) => {
+    setHistoricoLoteAnterior([...escaneados]);
+    if (marcar) {
+      const novos = itens
+        .filter((item) => !idsConfirmadosSet.has(item.id))
+        .map((item) => ({
+          codigoLido: item.codigo || item.imei || item.numeroSerie || item.id,
           timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          aparelhoEncontrado: aparelho,
-        });
-      }
-    });
-    if (novos.length > 0) {
+          aparelhoEncontrado: item,
+        }));
       setEscaneados((prev) => [...novos, ...prev]);
-      toast.success(`${novos.length} aparelho(s) marcado(s) como localizado(s)!`);
+    } else {
+      const idsDesmarcar = new Set(itens.map((i) => i.id));
+      setEscaneados((prev) => prev.filter((e) => !e.aparelhoEncontrado || !idsDesmarcar.has(e.aparelhoEncontrado.id)));
     }
   };
 
-  const desmarcarListaManual = (itens: AparelhoAuditoria[]) => {
-    const idsRemover = new Set(itens.map((a) => a.id));
-    setEscaneados((prev) => prev.filter((e) => !e.aparelhoEncontrado || !idsRemover.has(e.aparelhoEncontrado.id)));
-    toast.info(`${itens.length} aparelho(s) desmarcado(s).`);
+  const handleDesfazerLote = () => {
+    if (historicoLoteAnterior) {
+      setEscaneados(historicoLoteAnterior);
+      setHistoricoLoteAnterior(null);
+      toast.success('Ação desfeita com sucesso.');
+    }
   };
 
   const aplicarLoteAcoes = (acao: AcaoFaltante) => {
@@ -489,131 +300,36 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
       novao[a.id] = acao;
     });
     setAcoesFaltantes(novao);
-  };
-
-  const handleFinalizarEConferir = async () => {
-    if (escaneados.length === 0) {
-      if (!confirm('Nenhum aparelho foi escaneado ainda. Deseja avançar para o relatório de qualquer forma?')) {
-        return;
-      }
-    }
-    if (scannerRef.current) {
-      const instance = scannerRef.current;
-      const p = startPromiseRef.current;
-      scannerRef.current = null;
-      startPromiseRef.current = null;
-      setCameraActive(false);
-      await stopScannerInstance(instance, p);
-    }
-    setAcoesFaltantes((prev) => {
-      const novao: Record<string, AcaoFaltante> = { ...prev };
-      aparelhosFaltantes.forEach((a) => {
-        if (!novao[a.id]) {
-          novao[a.id] = 'remover';
-        }
-      });
-      return novao;
-    });
-    setEtapa('relatorio');
+    toast.success(`Ação "${acao.toUpperCase()}" aplicada a todos os faltantes.`);
   };
 
   const copiarParaAreaTransferencia = async (texto: string) => {
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(texto);
         return true;
       }
-    } catch (e) {
-      console.warn('Falha no navigator.clipboard, tentando fallback:', e);
-    }
-
+    } catch (e) {}
     try {
       const textarea = document.createElement('textarea');
       textarea.value = texto;
       textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      textarea.style.top = '0';
+      textarea.style.opacity = '0';
       document.body.appendChild(textarea);
-      textarea.focus();
       textarea.select();
-      const copiado = document.execCommand('copy');
+      const copiou = document.execCommand('copy');
       document.body.removeChild(textarea);
-      return copiado;
-    } catch (errFallback) {
-      console.error('Falha geral no clipboard:', errFallback);
+      return copiou;
+    } catch (e) {
       return false;
     }
   };
 
   const gerarTextoSaidasGrupo = () => {
-    const dataHora = new Date().toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    const itensComSaida = aparelhosFaltantes
-      .map((a) => ({ aparelho: a, acao: acoesFaltantes[a.id] || 'remover' }))
-      .filter((item) => item.acao !== 'manter');
-
-    let txt = `📦 *CONFERÊNCIA DE ESTOQUE - RELATÓRIO DE SAÍDAS*\n`;
-    txt += `📅 *Data/Hora:* ${dataHora}\n`;
-    txt += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    txt += `✅ *Aparelhos no estoque físico:* ${aparelhosConfirmados.length}\n`;
-    txt += `⚠️ *Total de baixas/saídas:* ${itensComSaida.length}\n`;
-    txt += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-
-    if (itensComSaida.length === 0) {
-      txt += `🎉 *NENHUMA SAÍDA REGISTRADA!*\n`;
-      txt += `Todos os ${aparelhosConfirmados.length} aparelhos foram conferidos e localizados fisicamente.\n`;
-    } else {
-      txt += `📋 *DETALHAMENTO DAS SAÍDAS:*\n\n`;
-
-      const porAcao: Record<string, Array<{ aparelho: AparelhoAuditoria; acao: AcaoFaltante }>> = {};
-      itensComSaida.forEach((item) => {
-        if (!porAcao[item.acao]) porAcao[item.acao] = [];
-        porAcao[item.acao].push(item);
-      });
-
-      const titulos: Record<string, { label: string; icon: string }> = {
-        vendido: { label: 'VENDIDOS (VAREJO)', icon: '🛒' },
-        atacado: { label: 'VENDA ATACADO (LOJISTA)', icon: '📦' },
-        manutencao: { label: 'ENCAMINHADOS PARA MANUTENÇÃO', icon: '🛠️' },
-        remover: { label: 'BAIXAS / EXTRAVIOS / REMOVIDOS', icon: '❌' },
-      };
-
-      Object.entries(porAcao).forEach(([acaoKey, lista]) => {
-        const info = titulos[acaoKey] || { label: acaoKey.toUpperCase(), icon: '📍' };
-        txt += `${info.icon} *${info.label} (${lista.length}):*\n`;
-        lista.forEach(({ aparelho }) => {
-          const cod = getAparelhoCodigo(aparelho as any);
-          const imeiStr = aparelho.imei ? ` | IMEI: ${aparelho.imei}` : '';
-          const capStr = aparelho.capacidade ? ` ${aparelho.capacidade}` : '';
-          const corStr = aparelho.cor ? ` ${aparelho.cor}` : '';
-          const bateria = formatarSaudeBateria(aparelho);
-          const batStr = bateria ? ` 🔋 ${bateria}` : '';
-          txt += `• *${aparelho.marca || ''} ${aparelho.modelo}*${capStr}${corStr}${batStr} (ID: ${cod}${imeiStr})\n`;
-        });
-        txt += `\n`;
-      });
-    }
-
-    if (codigosSobrando.length > 0) {
-      txt += `❓ *CÓDIGOS BIPADOS SEM CADASTRO (${codigosSobrando.length}):*\n`;
-      codigosSobrando.forEach((s) => {
-        txt += `• Código: ${s.codigoLido}\n`;
-      });
-      txt += `\n`;
-    }
-
-    txt += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    txt += `📲 _Copiado automaticamente na conferência do estoque._`;
-    return txt;
+    const nomeLoja = 'LOJA';
+    return gerarTextoWhatsAppFaltantes(nomeLoja, aparelhosEstoque.length, aparelhosConfirmados.length, aparelhosFaltantes);
   };
 
-  /** Quantos aparelhos vão mudar (tudo que não é "manter"). */
   const contagemAjustes = useMemo(() => {
     const porAcao: Record<AcaoFaltante, number> = { manter: 0, vendido: 0, atacado: 0, manutencao: 0, remover: 0 };
     for (const a of aparelhosFaltantes) porAcao[acoesFaltantes[a.id] || 'remover'] += 1;
@@ -622,81 +338,34 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
   }, [aparelhosFaltantes, acoesFaltantes]);
 
   const handleSalvarAjustesEstoque = async () => {
-    setConfirmandoAjustes(false);
     setSalvandoAjustes(true);
+    setConfirmandoAjustes(false);
+
     try {
-      let alterados = 0;
-      let auditoriaIncompleta = false;
-      const falhas: string[] = [];
-
-      // Todas as escritas deste salvamento compartilham um lote: a conferência
-      // inteira pode ser auditada (e desfeita) de uma vez.
-      const contexto = {
-        loteId: gerarLoteId(),
-        lojaId: lojaId || usuario?.lojaId || null,
-        usuarioId: usuario?.id ?? null,
-        usuarioNome: usuario?.nome ?? null,
-      };
-
+      const loteId = gerarLoteId();
       const porAcao: Record<Exclude<AcaoFaltante, 'manter'>, AparelhoAuditoria[]> = {
         vendido: [],
         atacado: [],
-        remover: [],
         manutencao: [],
+        remover: [],
       };
+
       for (const aparelho of aparelhosFaltantes) {
         const acao = acoesFaltantes[aparelho.id] || 'remover';
-        if (acao === 'manter') continue;
-        porAcao[acao].push(aparelho);
+        if (acao !== 'manter') porAcao[acao].push(aparelho);
       }
 
+      let alterados = 0;
+      const falhas: string[] = [];
       const contabilizar = (resultado: ResultadoMudancaEstoque) => {
         alterados += resultado.afetados;
-        if (!resultado.auditoriaRegistrada) {
-          auditoriaIncompleta = true;
-          console.warn('[Conferência] Ajuste aplicado sem auditoria completa:', resultado.erroAuditoria);
-        }
       };
 
-      // Registra em vendas, com dados de cliente pendentes, o aparelho que saiu como venda.
-      const registrarVendaConferencia = async (aparelho: AparelhoAuditoria, acao: 'vendido' | 'atacado') => {
-        try {
-          const dataIso = new Date().toISOString();
-          const precoNum = aparelho.preco || 0;
-          await supabase.from('vendas').insert([{
-            clienteNome: acao === 'atacado' ? 'Venda Atacado (Conferência)' : 'Venda Varejo (Conferência)',
-            tipoEntrega: acao === 'atacado' ? 'Atacado / Lojista' : 'Varejo',
-            valor: precoNum,
-            custo: 0,
-            lucro: precoNum,
-            percentualLucro: 100,
-            dataPagamento: dataIso,
-            status: 'pago',
-            metodo: 'dinheiro',
-            saldoDevedor: 0,
-            valorPago: precoNum,
-            dados_cliente_pendente: acao === 'vendido',
-            taxa_cartao: 0,
-            descricao: `Baixa na conferência de estoque: ${aparelho.modelo}`,
-            itens: [{
-              id: `${Date.now()}_${aparelho.id}`,
-              aparelhoId: aparelho.id,
-              descricao: `${aparelho.marca || ''} ${aparelho.modelo} (ID: ${getAparelhoCodigo(aparelho as any)})`,
-              quantidade: 1,
-              valorInterno: 0,
-              valorExibir: precoNum,
-              total: precoNum,
-              // Preserva dados do aparelho para o histórico e para um eventual
-              // "desfazer venda" devolver o aparelho certo.
-              imei: aparelho.imei || '',
-              bateria: formatarSaudeBateria(aparelho),
-              condicaoOriginal: aparelho.condicao || '',
-            }],
-            loja_id: (aparelho as any).loja_id || (aparelho as any).lojaId || null
-          }]);
-        } catch (errV) {
-          console.warn('Registro de venda na conferência:', errV);
-        }
+      const contexto = {
+        loteId,
+        lojaId: lojaId || usuario?.lojaId || null,
+        usuarioId: usuario?.id || null,
+        usuarioNome: usuario?.nome || null,
       };
 
       const dataIso = new Date().toISOString();
@@ -731,12 +400,8 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
         const grupo = porAcao[saida.acao];
         if (grupo.length === 0) continue;
 
-        // Fatias do tamanho das do módulo (150): cada chamada grava a fatia inteira ou
-        // nada, e as vendas da fatia são registradas logo em seguida. Com o grupo numa
-        // chamada só, uma falha na 2ª fatia deixaria a 1ª fora do estoque sem venda.
         for (let inicio = 0; inicio < grupo.length; inicio += 150) {
           const fatia = grupo.slice(inicio, inicio + 150);
-          const idsAlterados = new Set<string>();
           try {
             const resultado = await aplicarMudancaEstoque(supabase, {
               ...contexto,
@@ -745,630 +410,441 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
               tipo: saida.tipo,
               origem: 'conferencia',
               observacao: saida.observacao,
-              // Quem já saiu do estoque entre a contagem e o salvamento fica intocado.
-              filtroElegivel: (estado) => {
-                const elegivel = estaNoEstoque(estado);
-                if (elegivel && estado.id) idsAlterados.add(String(estado.id));
-                return elegivel;
-              },
+              filtroElegivel: (estado) => estaNoEstoque(estado),
             });
             contabilizar(resultado);
           } catch (errGrupo: any) {
             console.error(`Erro ao aplicar "${saida.acao}" na conferência:`, errGrupo);
             falhas.push(`${saida.acao} (${fatia.length}): ${errGrupo?.message || 'falha no servidor'}`);
-            continue;
-          }
-
-          if (saida.acao === 'vendido' || saida.acao === 'atacado') {
-            for (const aparelho of fatia) {
-              if (idsAlterados.has(aparelho.id)) await registrarVendaConferencia(aparelho, saida.acao);
-            }
           }
         }
       }
 
-      // Manutenção não tira o aparelho do estoque (continua sendo da loja): sem
-      // data_saida. Um aparelho por vez porque as observações de cada um mudam.
+      // Manutenção
       for (const aparelho of porAcao.manutencao) {
-        const dataIso = new Date().toISOString();
-        const tagManut = `[MANUTENCAO:status=com_tecnico|tecnico_nome=Oficina / Técnico Responsável|data=${dataIso}|motivo=Encaminhado na conferência de estoque]`;
+        const dataIsoManut = new Date().toISOString();
+        const tagManut = `[MANUTENCAO:status=com_tecnico|tecnico_nome=Oficina / Técnico Responsável|data=${dataIsoManut}|motivo=Encaminhado na conferência de estoque]`;
         const obsAtual = aparelho.observacoes || '';
         const observacoes = obsAtual ? `${obsAtual}\n${tagManut}` : tagManut;
-        const opcoesBase = {
-          ...contexto,
-          ids: [aparelho.id],
-          tipo: 'saida' as const,
-          origem: 'conferencia' as const,
-          observacao: 'Conferência de estoque: encaminhado para manutenção',
-          filtroElegivel: (estado: EstadoCicloAparelho) => estaNoEstoque(estado),
-        };
 
         try {
-          let resultado: ResultadoMudancaEstoque;
-          try {
-            resultado = await aplicarMudancaEstoque(supabase, {
-              ...opcoesBase,
-              patch: {
-                status: 'manutencao',
-                tecnico_nome: 'Oficina / Técnico Responsável',
-                motivo_manutencao: 'Encaminhado na conferência de estoque',
-                data_manutencao: dataIso,
-                observacoes,
-              },
-            });
-          } catch (errColunas) {
-            // Banco sem as colunas de técnico: grava ao menos o status e a tag nas observações.
-            console.warn('Manutenção na conferência sem colunas de técnico:', errColunas);
-            resultado = await aplicarMudancaEstoque(supabase, {
-              ...opcoesBase,
-              patch: { status: 'manutencao', observacoes },
-            });
-          }
+          const resultado = await aplicarMudancaEstoque(supabase, {
+            ...contexto,
+            ids: [aparelho.id],
+            tipo: 'saida',
+            origem: 'conferencia',
+            observacao: 'Conferência de estoque: encaminhado para manutenção',
+            patch: { status: 'manutencao', observacoes },
+            filtroElegivel: (estado) => estaNoEstoque(estado),
+          });
           contabilizar(resultado);
         } catch (errManut: any) {
-          console.error('Erro ao encaminhar para manutenção na conferência:', errManut);
           falhas.push(`manutenção de ${aparelho.modelo}: ${errManut?.message || 'falha no servidor'}`);
         }
       }
 
       if (falhas.length > 0) {
-        toast.error(`Alguns ajustes não foram aplicados: ${falhas.join(' | ')}`, { duration: 10000 });
-      }
-      if (auditoriaIncompleta) {
-        toast.warning('Ajustes aplicados, mas parte do histórico de movimentações do estoque não foi gravada.');
-      }
-
-      // Copia automaticamente o texto das saídas para a área de transferência!
-      const textoSaidas = gerarTextoSaidasGrupo();
-      const copiou = await copiarParaAreaTransferencia(textoSaidas);
-
-      if (copiou) {
-        toast.success(`📋 Todas as saídas (${alterados}) copiadas para a área de transferência! Só colar no grupo WhatsApp!`, {
-          duration: 9000,
-        });
+        toast.error(`Alguns ajustes não foram aplicados: ${falhas.join(' | ')}`);
       } else {
-        toast.success(`🚀 Auditoria concluída! ${alterados} aparelhos tiveram baixa/ajuste no estoque.`);
+        toast.success(`🚀 Conferência concluída! ${alterados} aparelhos ajustados no estoque.`);
       }
+
+      // Limpa rascunho após sucesso
+      limparRascunho(lojaId, usuario?.id);
 
       onEstoqueAtualizado();
-      handleClose();
+      onClose();
     } catch (err: any) {
-      console.error('Erro ao aplicar ajustes na conferência:', err);
       toast.error(`Erro ao aplicar ajustes: ${err?.message || 'Falha no servidor'}`);
     } finally {
       setSalvandoAjustes(false);
     }
   };
 
-  // Manter o container do leitor no DOM para evitar que a remoção do DOM cause erro no Html5Qrcode
-  if (!isOpen) {
-    return (
-      <div style={{ display: 'none' }}>
-        <div id="conf-qr-container" />
-      </div>
-    );
-  }
+  if (!isOpen) return null;
 
   return (
-    <div 
-      ref={modalContainerRef}
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto"
-    >
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-3.5 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col my-auto">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-3.5 sm:p-5 shadow-2xl text-white h-[92dvh] max-h-[92dvh] flex flex-col overflow-hidden">
         
-        {/* CABEÇALHO */}
+        {/* 1. CABEÇALHO FIXO */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold border border-cyan-500/30">
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base sm:text-lg text-white">Conferência de Estoque Física</h3>
-              <p className="text-xs text-slate-400">
+              <h3 className="font-bold text-sm sm:text-base text-white">Conferência de Estoque Física</h3>
+              <p className="text-[11px] text-slate-400">
                 {etapa === 'escaneamento'
-                  ? 'Bipe as etiquetas dos aparelhos na loja para conferir a contagem real'
-                  : 'Relatório de divergências e ajuste do banco de dados'}
+                  ? 'Bipe etiquetas ou marque na lista para conferir contagem real'
+                  : 'Relatório de divergências e ajuste do banco'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {etapa === 'escaneamento' && (
               <button
+                type="button"
                 onClick={() => setSoundEnabled(!soundEnabled)}
-                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
-                title={soundEnabled ? 'Som de beep ativado' : 'Som desativado'}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+                title={soundEnabled ? 'Som ativado' : 'Som desativado'}
               >
                 {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-400" /> : <VolumeX className="w-4 h-4" />}
               </button>
             )}
-            <button onClick={handleClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer"
+            >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* SELETOR DE MODO DE CONFERÊNCIA (Etapa 1) */}
+        {/* BANNER DE RECUPERAÇÃO DE RASCUNHO */}
+        {rascunhoPendente && (
+          <div className="bg-cyan-950/80 border border-cyan-500/50 p-3 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-2.5 shrink-0 my-2 animate-in fade-in">
+            <div className="text-xs">
+              <span className="font-bold text-cyan-300">Conferência em andamento encontrada! </span>
+              <span className="text-slate-300">Há {rascunhoPendente.escaneados.length} itens salvos nesta sessão.</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  limparRascunho(lojaId, usuario?.id);
+                  setRascunhoPendente(null);
+                  setEscaneados([]);
+                  toast.info('Rascunho anterior descartado.');
+                }}
+                className="text-xs h-7 text-slate-400 hover:text-white"
+              >
+                Começar Nova
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEscaneados(rascunhoPendente.escaneados);
+                  setRascunhoPendente(null);
+                  toast.success(`${rascunhoPendente.escaneados.length} itens restaurados!`);
+                }}
+                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs h-7"
+              >
+                Continuar
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 2. BARRA DE PROGRESSO FIXA */}
         {etapa === 'escaneamento' && (
-          <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800 shrink-0">
+          <div className="py-2.5 px-3 bg-slate-950/80 rounded-2xl border border-slate-800/80 shrink-0 my-2 space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-bold">
+              <span className="text-slate-300 flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-cyan-400" /> Progresso da Conferência
+              </span>
+              <span className="text-cyan-400 font-mono">
+                {aparelhosConfirmados.length} / {aparelhosEstoque.length} conferidos
+              </span>
+            </div>
+            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+              <div 
+                className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-300 rounded-full"
+                style={{ width: `${Math.min(100, Math.round((aparelhosConfirmados.length / (aparelhosEstoque.length || 1)) * 100))}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+              <span>Bipados: <strong className="text-white">{escaneados.length}</strong></span>
+              <span>Faltantes: <strong className="text-amber-400">{aparelhosFaltantes.length}</strong></span>
+              <span>Sobrando: <strong className="text-purple-400">{codigosSobrando.length}</strong></span>
+            </div>
+          </div>
+        )}
+
+        {/* 3. SELETOR DE MODO (SCANNER CONTÍNUO VS SELEÇÃO MANUAL) */}
+        {etapa === 'escaneamento' && (
+          <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800 shrink-0 mb-3">
             <button
+              type="button"
               onClick={() => setModoConferencia('scanner')}
               className={cn(
-                "flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer",
+                "flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer",
                 modoConferencia === 'scanner'
-                  ? "bg-cyan-500 text-white shadow-md shadow-cyan-950/40"
-                  : "text-slate-400 hover:text-white hover:bg-slate-900"
+                  ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/40"
+                  : "text-slate-400 hover:text-white"
               )}
             >
-              <Camera className="w-4 h-4" /> Bipar Código de Barras / Câmera
+              <Camera className="w-3.5 h-3.5" /> Bipar / Câmera
             </button>
             <button
+              type="button"
               onClick={() => setModoConferencia('manual')}
               className={cn(
-                "flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer",
+                "flex-1 py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer",
                 modoConferencia === 'manual'
-                  ? "bg-cyan-500 text-white shadow-md shadow-cyan-950/40"
-                  : "text-slate-400 hover:text-white hover:bg-slate-900"
+                  ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/40"
+                  : "text-slate-400 hover:text-white"
               )}
             >
-              <CheckSquare className="w-4 h-4" /> Seleção Manual por Lista ({aparelhosConfirmados.length}/{aparelhosEstoque.length})
+              <CheckSquare className="w-3.5 h-3.5" /> Seleção Manual ({aparelhosConfirmados.length}/{aparelhosEstoque.length})
             </button>
           </div>
         )}
 
-        {/* ETAPA 1 - MODO A: SCANNER CONTÍNUO */}
-        {etapa === 'escaneamento' && modoConferencia === 'scanner' && (
-          <div className="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
-            
-            {/* COLUNA ESQUERDA: CÂMERA E ENTRADA */}
-            <div className="lg:col-span-5 flex flex-col gap-3 min-h-0">
-              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 h-[220px] sm:h-[260px] w-full flex items-center justify-center shrink-0">
-                
-                {/* O container id="conf-qr-container" fica AQUI DENTRO da moldura da esquerda */}
-                <div 
-                  id="conf-qr-container" 
-                  className="w-full h-full [&>video]:w-full [&>video]:h-full [&>video]:object-cover [&>video]:max-h-[260px] [&>video]:rounded-2xl" 
-                />
+        {/* 4. CORPO COM SCROLL PRÓPRIO */}
+        <div className="flex-1 overflow-y-auto min-h-0 pr-1 scrollbar-soft">
+          {etapa === 'escaneamento' && modoConferencia === 'scanner' && (
+            <div className="flex flex-col gap-3 min-h-full">
+              {/* Visão da Câmera Compacta (~28% dvh) */}
+              <ConferenciaScannerView 
+                onScan={processarCodigoLido} 
+                flashColor={flashColor}
+              />
 
-                {/* Elemento visual ou mira da câmera */}
-                {cameraActive && (
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
-                    <div className="w-52 h-36 border-2 border-cyan-400/80 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] relative overflow-hidden">
-                      <div className="absolute inset-x-0 h-0.5 bg-cyan-400 animate-pulse top-1/2 -translate-y-1/2 shadow-[0_0_10px_#22d3ee]" />
-                    </div>
-                  </div>
-                )}
-
-                {cameraError && (
-                  <div className="p-4 text-center space-y-2 z-10">
-                    <Keyboard className="w-7 h-7 text-amber-400 mx-auto opacity-80" />
-                    <p className="text-xs text-amber-300 font-medium">{cameraError}</p>
-                    <p className="text-[11px] text-slate-400">Utilize o Leitor USB ou digite abaixo.</p>
-                  </div>
-                )}
-              </div>
-
-              {/* ENTRADA MANUAL OU LEITOR USB */}
-              <div className="space-y-1.5 shrink-0 bg-slate-950 p-3 rounded-2xl border border-slate-800">
-                <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                  <span>Bipar com Leitor USB ou Digitar</span>
-                  <span className="text-[10px] text-cyan-400 font-mono">IMEI / Código</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="conf-manual-input"
-                    type="text"
-                    placeholder="Bipe ou digite o código..."
-                    value={manualCode}
-                    onChange={(e) => setManualCode(e.target.value)}
-                    className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder:text-slate-500 focus:border-cyan-500 outline-none"
-                  />
-                  <Button
-                    onClick={() => {
-                      processarCodigoLido(manualCode);
-                      setManualCode('');
-                    }}
-                    className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl px-3 text-xs shrink-0"
-                  >
-                    Adicionar
-                  </Button>
+              {/* Lista dos Últimos Itens Bipados */}
+              <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800 space-y-2 flex-1">
+                <div className="flex items-center justify-between text-xs font-bold pb-2 border-b border-slate-800">
+                  <span className="text-slate-300">Últimos Aparelhos Bipados</span>
+                  <Badge variant="outline" className="text-[10px] text-cyan-400 border-cyan-500/30">
+                    {escaneados.length} itens
+                  </Badge>
                 </div>
-              </div>
-            </div>
 
-            {/* COLUNA DIREITA: LISTA EM TEMPO REAL E PROGRESSO */}
-            <div className="lg:col-span-7 flex flex-col gap-3 min-h-0 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
-              
-              {/* Barra de Progresso */}
-              <div className="space-y-2 shrink-0 pb-3 border-b border-slate-800">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-slate-300 flex items-center gap-1.5">
-                    <Package className="w-4 h-4 text-cyan-400" /> Progresso da Conferência
-                  </span>
-                  <span className="text-cyan-400 font-mono text-sm">
-                    {aparelhosConfirmados.length} / {aparelhosEstoque.length} no estoque
-                  </span>
-                </div>
-                <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                  <div 
-                    className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-300 rounded-full"
-                    style={{ width: `${Math.min(100, Math.round((aparelhosConfirmados.length / (aparelhosEstoque.length || 1)) * 100))}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
-                  <span>Total Bipado: <strong className="text-white">{escaneados.length}</strong></span>
-                  <span>Sobrando / Fora: <strong className="text-amber-400">{codigosSobrando.length}</strong></span>
-                </div>
-              </div>
-
-              {/* Lista dos Itens Escaneados */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 max-h-[320px]">
                 {escaneados.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 space-y-2">
-                    <Camera className="w-8 h-8 opacity-40 animate-pulse mx-auto" />
-                    <p className="text-xs font-medium">Nenhum aparelho bipado nesta sessão.</p>
-                    <p className="text-[11px] text-slate-600">Aponte a câmera para o código da etiqueta ou conecte o leitor USB.</p>
+                  <div className="p-6 text-center text-slate-500 text-xs">
+                    Nenhum código lido ainda. Aponte a câmera ou digite no campo acima.
                   </div>
                 ) : (
-                  escaneados.map((item, idx) => (
-                    <div 
-                      key={`${item.codigoLido}-${idx}`}
-                      className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3 text-xs hover:border-slate-700 transition-colors"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-white truncate">{item.codigoLido}</span>
-                          <span className="text-[10px] text-slate-500">{item.timestamp}</span>
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-soft">
+                    {escaneados.map((item, idx) => (
+                      <div
+                        key={`${item.codigoLido}-${idx}`}
+                        className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-white truncate">{item.codigoLido}</span>
+                            <span className="text-[10px] text-slate-500">{item.timestamp}</span>
+                          </div>
+                          {item.aparelhoEncontrado ? (
+                            <p className="text-[11px] text-emerald-400 font-semibold truncate mt-0.5">
+                              ✓ {item.aparelhoEncontrado.modelo} ({item.aparelhoEncontrado.cor || ''} {item.aparelhoEncontrado.capacidade || ''})
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-amber-400 font-medium truncate mt-0.5">
+                              ⚠️ Não consta no estoque ativo
+                            </p>
+                          )}
                         </div>
-                        {item.aparelhoEncontrado ? (
-                          <p className="text-[11px] text-emerald-400 font-semibold truncate mt-0.5">
-                            ✓ {item.aparelhoEncontrado.modelo} ({item.aparelhoEncontrado.imei || item.aparelhoEncontrado.codigo || 'OK'})
-                            {formatarSaudeBateria(item.aparelhoEncontrado) && (
-                              <span className="text-cyan-400 font-bold"> · 🔋 {formatarSaudeBateria(item.aparelhoEncontrado)}</span>
-                            )}
-                          </p>
-                        ) : (
-                          <p className="text-[11px] text-amber-400 font-medium truncate mt-0.5">
-                            ⚠️ Não consta no estoque ativo
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        {item.aparelhoEncontrado ? (
-                          <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px]">
-                            Encontrado
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px]">
-                            Sobrando
-                          </Badge>
-                        )}
                         <button
+                          type="button"
                           onClick={() => setEscaneados((prev) => prev.filter((_, i) => i !== idx))}
-                          className="p-1 text-slate-500 hover:text-red-400 rounded transition-colors"
-                          title="Remover da lista"
+                          className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {etapa === 'escaneamento' && modoConferencia === 'manual' && (
+            <ConferenciaManualView
+              aparelhosEstoque={aparelhosEstoque}
+              idsConfirmadosSet={idsConfirmadosSet}
+              onToggleItem={toggleItemManual}
+              onMarcarGrupo={handleMarcarGrupo}
+              onDesfazerLote={handleDesfazerLote}
+              podeDesfazerLote={!!historicoLoteAnterior}
+            />
+          )}
+
+          {/* ETAPA 2: RELATÓRIO */}
+          {etapa === 'relatorio' && (
+            <div className="space-y-4">
+              {/* Cards de Resumo */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl">
+                  <span className="text-[11px] font-bold text-emerald-400 block uppercase">✓ Encontrados</span>
+                  <p className="text-xl font-extrabold text-white mt-1">{aparelhosConfirmados.length}</p>
+                </div>
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                  <span className="text-[11px] font-bold text-amber-400 block uppercase">⚠️ Faltantes</span>
+                  <p className="text-xl font-extrabold text-white mt-1">{aparelhosFaltantes.length}</p>
+                </div>
+                <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-2xl">
+                  <span className="text-[11px] font-bold text-purple-400 block uppercase">❓ Sobrando / Fora</span>
+                  <p className="text-xl font-extrabold text-white mt-1">{codigosSobrando.length}</p>
+                </div>
+              </div>
+
+              {/* Botões de Ações Rápidas em Massa */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-950 rounded-2xl border border-slate-800">
+                <span className="text-xs font-bold text-slate-300">
+                  Destino dos {aparelhosFaltantes.length} Faltantes:
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => aplicarLoteAcoes('remover')}
+                    className="text-[10px] h-7 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30 font-bold"
+                  >
+                    Baixar Todos
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => aplicarLoteAcoes('vendido')}
+                    className="text-[10px] h-7 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30 font-bold"
+                  >
+                    Marcar Vendidos
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => exportarResumoCSV(aparelhosConfirmados, aparelhosFaltantes, codigosSobrando)}
+                    className="text-[10px] h-7 gap-1 font-semibold"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" /> Exportar CSV
+                  </Button>
+                </div>
+              </div>
+
+              {/* Lista dos Faltantes */}
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 scrollbar-soft">
+                {aparelhosFaltantes.length === 0 ? (
+                  <div className="p-6 text-center text-emerald-400 text-xs font-bold bg-emerald-950/20 rounded-2xl border border-emerald-500/30">
+                    🎉 Nenhum aparelho faltante! O estoque físico corresponde 100% ao sistema!
+                  </div>
+                ) : (
+                  aparelhosFaltantes.map((aparelho) => (
+                    <div
+                      key={aparelho.id}
+                      className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate flex items-center gap-2">
+                          <span>{aparelho.modelo}</span>
+                          {aparelho.capacidade && <span className="text-[10px] text-slate-400">{aparelho.capacidade}</span>}
+                          {aparelho.cor && <span className="text-[10px] text-cyan-400">{aparelho.cor}</span>}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          IMEI: {aparelho.imei || '-'} {aparelho.codigo ? `· Código: ${aparelho.codigo}` : ''}
+                        </div>
+                      </div>
+
+                      <select
+                        value={acoesFaltantes[aparelho.id] || 'remover'}
+                        onChange={(e) => setAcoesFaltantes({ ...acoesFaltantes, [aparelho.id]: e.target.value as AcaoFaltante })}
+                        className="bg-slate-900 text-xs font-semibold text-white border border-slate-700 rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500 shrink-0"
+                      >
+                        <option value="remover">❌ Dar Baixa (Extravio / Perda)</option>
+                        <option value="vendido">🛒 Dar Saída - Vendido</option>
+                        <option value="manutencao">🛠️ Encaminhar Manutenção</option>
+                        <option value="atacado">📦 Dar Saída - Atacado</option>
+                        <option value="manter">🔄 Manter no Estoque</option>
+                      </select>
                     </div>
                   ))
                 )}
               </div>
-
-              {/* Botão Finalizar */}
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between shrink-0">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => {
-                    if (confirm('Deseja limpar todos os itens bipados nesta conferência?')) {
-                      setEscaneados([]);
-                    }
-                  }} 
-                  className="text-xs text-slate-400 hover:text-white"
-                >
-                  Limpar Bipados
-                </Button>
-                <Button 
-                  onClick={handleFinalizarEConferir} 
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-2 px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-900/20"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Finalizar Conferência ({aparelhosConfirmados.length})
-                </Button>
-              </div>
-
             </div>
+          )}
+        </div>
 
-          </div>
-        )}
+        {/* 5. FOOTER FIXO (SEM ESTOURAR LARGURA EM 360PX) */}
+        <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
+          {etapa === 'escaneamento' ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (confirm('Deseja limpar todos os itens bipados nesta conferência?')) {
+                    setEscaneados([]);
+                    limparRascunho(lojaId, usuario?.id);
+                  }
+                }}
+                className="text-xs text-slate-400 hover:text-white justify-center h-9"
+              >
+                Limpar Bipados
+              </Button>
 
-        {/* ETAPA 1 - MODO B: SELEÇÃO MANUAL POR LISTA */}
-        {etapa === 'escaneamento' && modoConferencia === 'manual' && (
-          <div className="flex-1 overflow-hidden flex flex-col gap-3 min-h-0 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
-            
-            {/* Barra de Busca e Ações Rápidas */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0 pb-3 border-b border-slate-800">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Buscar modelo, cor, IMEI ou código..."
-                  value={buscaManual}
-                  onChange={(e) => setBuscaManual(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none"
-                />
-              </div>
-              <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setOrdemModelos((prev) => (prev === 'antigo_para_novo' ? 'novo_para_antigo' : 'antigo_para_novo'))}
-                  className="text-xs bg-slate-900 text-slate-200 border border-slate-700 hover:border-slate-600 font-bold px-3 py-1.5 rounded-xl gap-1.5 flex items-center cursor-pointer transition-colors shadow-sm"
-                  title="Alterar ordem de exibição dos modelos (padrão: mais antigo para o mais novo)"
-                >
-                  <ArrowUpDown className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>{ordemModelos === 'antigo_para_novo' ? 'Mais Antigo ➔ Mais Novo' : 'Mais Novo ➔ Mais Antigo'}</span>
-                </button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => marcarListaManual(aparelhosFiltradosManual)}
-                  className="text-xs bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 font-bold rounded-xl gap-1.5 cursor-pointer"
-                >
-                  <CheckSquare className="w-3.5 h-3.5" /> Marcar Filtrados ({aparelhosFiltradosManual.length})
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => desmarcarListaManual(aparelhosFiltradosManual)}
-                  className="text-xs bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 font-bold rounded-xl gap-1.5 cursor-pointer"
-                >
-                  <Square className="w-3.5 h-3.5 text-slate-400" /> Desmarcar
-                </Button>
-              </div>
-            </div>
-
-            {/* Lista Agrupada por Modelo */}
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-0 max-h-[380px]">
-              {gruposModelosOrdenados.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500 space-y-2">
-                  <Package className="w-8 h-8 opacity-40 mx-auto" />
-                  <p className="text-xs font-medium">Nenhum aparelho localizado com o termo pesquisado.</p>
-                </div>
-              ) : (
-                gruposModelosOrdenados.map(({ modelo, itens }) => {
-                  const todosGrupoConfirmados = itens.every((item) => idsConfirmadosSet.has(item.id));
-                  const confirmadosNoGrupo = itens.filter((item) => idsConfirmadosSet.has(item.id)).length;
-
-                  return (
-                    <div key={modelo} className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-white">{modelo}</span>
-                          <Badge variant="outline" className="bg-slate-800 text-slate-300 text-[10px] border-slate-700">
-                            {confirmadosNoGrupo} / {itens.length} encontrados
-                          </Badge>
-                        </div>
-                        <button
-                          onClick={() => {
-                            if (todosGrupoConfirmados) {
-                              desmarcarListaManual(itens);
-                            } else {
-                              marcarListaManual(itens);
-                            }
-                          }}
-                          className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 bg-slate-800/60 hover:bg-slate-800 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-                        >
-                          {todosGrupoConfirmados ? 'Desmarcar Grupo' : 'Marcar Grupo'}
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                        {itens.map((item) => {
-                          const isChecked = idsConfirmadosSet.has(item.id);
-                          return (
-                            <label
-                              key={item.id}
-                              onClick={() => toggleItemManual(item)}
-                              className={cn(
-                                "p-2.5 rounded-xl border flex items-center gap-3 cursor-pointer transition-all select-none",
-                                isChecked
-                                  ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-100"
-                                  : "bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300"
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => {}}
-                                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 cursor-pointer"
-                              />
-                              <div className="min-w-0 flex-1 text-xs">
-                                <div className="font-bold text-white flex items-center gap-2">
-                                  <span>{item.modelo}</span>
-                                  {item.capacidade && <span className="text-[10px] text-slate-400">{item.capacidade}</span>}
-                                  {item.cor && <span className="text-[10px] text-slate-400">· {item.cor}</span>}
-                                  {formatarSaudeBateria(item) && (
-                                    <span className="text-[10px] font-bold text-cyan-400">🔋 {formatarSaudeBateria(item)}</span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
-                                  IMEI/Cod: {item.codigo || item.imei || item.numeroSerie || item.id}
-                                </div>
-                              </div>
-                              <Badge className={cn("text-[9px] shrink-0", isChecked ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700")}>
-                                {isChecked ? '✓ Encontrado' : 'Faltante'}
-                              </Badge>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Rodapé do Modo Manual */}
-            <div className="pt-3 border-t border-slate-800 flex items-center justify-between shrink-0">
-              <span className="text-xs text-slate-400">
-                Total Localizado: <strong className="text-emerald-400">{aparelhosConfirmados.length}</strong> de <strong className="text-white">{aparelhosEstoque.length}</strong>
-              </span>
-              <Button 
-                onClick={handleFinalizarEConferir} 
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-2 px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-900/20 cursor-pointer"
+              <Button
+                onClick={() => setEtapa('relatorio')}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs gap-2 px-5 h-9 rounded-xl shadow-lg shadow-emerald-900/20 justify-center cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" /> Finalizar Conferência ({aparelhosConfirmados.length})
               </Button>
-            </div>
-
-          </div>
-        )}
-
-        {/* ETAPA 2: RELATÓRIO DE DIVERGÊNCIAS E AJUSTES */}
-        {etapa === 'relatorio' && (
-          <div className="flex-1 overflow-y-auto space-y-5 min-h-0 pr-1">
-            
-            {/* CARDS DE RESUMO */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl">
-                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">✓ Encontrados</span>
-                <p className="text-2xl font-extrabold text-white mt-1">{aparelhosConfirmados.length}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Aparelhos conferidos no estoque físico</p>
-              </div>
-
-              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
-                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider block">⚠️ Faltantes (No banco)</span>
-                <p className="text-2xl font-extrabold text-white mt-1">{aparelhosFaltantes.length}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Ativos no sistema mas não bipados</p>
-              </div>
-
-              <div className="p-3.5 bg-purple-500/10 border border-purple-500/30 rounded-2xl">
-                <span className="text-[11px] font-bold text-purple-400 uppercase tracking-wider block">❓ Sobrando / Fora</span>
-                <p className="text-2xl font-extrabold text-white mt-1">{codigosSobrando.length}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Códigos lidos sem cadastro ativo</p>
-              </div>
-            </div>
-
-            {/* SEÇÃO DE TRATAMENTO DE FALTANTES */}
-            <div className="space-y-3 p-4 bg-slate-950 rounded-2xl border border-slate-800">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-                <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-400" /> O que fazer com os {aparelhosFaltantes.length} Aparelhos Faltantes?
-                  </h4>
-                  <p className="text-xs text-slate-400">Escolha o destino de cada aparelho não localizado durante a varredura física.</p>
-                </div>
-
-                {aparelhosFaltantes.length > 0 && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] text-slate-400">Aplicar a todos:</span>
-                    <button
-                      onClick={() => aplicarLoteAcoes('remover')}
-                      className="px-2 py-1 bg-red-500/20 text-red-300 hover:bg-red-500/30 text-[10px] font-bold rounded-lg"
-                    >
-                      Remover Todos
-                    </button>
-                    <button
-                      onClick={() => aplicarLoteAcoes('vendido')}
-                      className="px-2 py-1 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-[10px] font-bold rounded-lg"
-                    >
-                      Dar Saída Vendido
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {aparelhosFaltantes.length === 0 ? (
-                <div className="p-6 text-center text-emerald-400 text-xs font-bold bg-emerald-950/20 rounded-xl border border-emerald-500/30">
-                  🎉 Nenhum aparelho faltante! O estoque físico corresponde 100% ao banco de dados!
-                </div>
-              ) : (
-                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-                  {aparelhosFaltantes.map((aparelho) => (
-                    <div key={aparelho.id} className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-                      <div className="min-w-0">
-                        <p className="font-bold text-white truncate flex items-center gap-2">
-                          <span className="truncate">{aparelho.modelo}</span>
-                          {formatarSaudeBateria(aparelho) && (
-                            <span className="text-[10px] font-bold text-cyan-400 shrink-0">🔋 {formatarSaudeBateria(aparelho)}</span>
-                          )}
-                        </p>
-                        <p className="text-[11px] text-slate-400 font-mono">
-                          IMEI/Código: {aparelho.imei || aparelho.codigo || aparelho.numeroSerie || aparelho.id}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <select
-                          value={acoesFaltantes[aparelho.id] || 'remover'}
-                          onChange={(e) => setAcoesFaltantes({ ...acoesFaltantes, [aparelho.id]: e.target.value as AcaoFaltante })}
-                          className="bg-slate-950 text-xs font-semibold text-white border border-slate-700 rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500 cursor-pointer"
-                        >
-                          <option value="remover">❌ Remover do Estoque (Baixa)</option>
-                          <option value="vendido">🛒 Dar Saída - Vendido</option>
-                          <option value="manutencao">🛠️ Encaminhar para Manutenção</option>
-                          <option value="atacado">📦 Dar Saída - Venda Atacado</option>
-                          <option value="manter">🔄 Manter no Estoque (Ignorar)</option>
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* BOTÕES DE AÇÃO DO RELATÓRIO */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-slate-800">
-              <Button variant="ghost" size="sm" onClick={() => setEtapa('escaneamento')} className="text-xs text-slate-400 hover:text-white">
-                ← Voltar para Escaneamento
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEtapa('escaneamento')}
+                className="text-xs text-slate-400 hover:text-white justify-center h-9"
+              >
+                ← Voltar
               </Button>
 
               <div className="flex items-center gap-2 flex-wrap justify-end">
                 <Button
-                  type="button"
                   variant="outline"
                   size="sm"
                   onClick={async () => {
                     const txt = gerarTextoSaidasGrupo();
                     const ok = await copiarParaAreaTransferencia(txt);
                     if (ok) {
-                      toast.success('📋 Mensagem de saídas copiada para a área de transferência! Pronta para colar no grupo WhatsApp!');
-                    } else {
-                      toast.error('Não foi possível copiar para a área de transferência.');
+                      toast.success('📋 Resumo formatado copiado! Cole no WhatsApp.');
                     }
                   }}
-                  className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 font-bold text-xs gap-1.5 cursor-pointer h-9 px-4 rounded-xl"
-                  title="Copiar texto formatado das saídas para colar no WhatsApp"
+                  className="text-xs font-bold gap-1.5 border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 h-9 px-3 rounded-xl cursor-pointer"
                 >
-                  <Copy className="w-3.5 h-3.5 text-emerald-400" /> Copiar Saídas p/ WhatsApp
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp
                 </Button>
 
                 <Button
                   onClick={() => (contagemAjustes.total > 0 ? setConfirmandoAjustes(true) : handleSalvarAjustesEstoque())}
                   disabled={salvandoAjustes}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs gap-2 px-6 py-2.5 rounded-xl shadow-lg shadow-cyan-900/20 cursor-pointer h-9"
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs gap-1.5 px-4 h-9 rounded-xl shadow-lg shadow-cyan-900/20 cursor-pointer"
                 >
                   {salvandoAjustes ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" /> Atualizando Estoque...
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Salvando...
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="w-4 h-4" /> Aplicar Ajustes & Copiar Saídas
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Aplicar Ajustes ({contagemAjustes.total})
                     </>
                   )}
                 </Button>
               </div>
-            </div>
-
-          </div>
-        )}
+            </>
+          )}
+        </div>
 
       </div>
 
-      {/* Confirmação quantificada: a pessoa digita quantos aparelhos vão mudar */}
+      {/* Modal de Escolha Ambígua */}
+      {desambiguacao && (
+        <ModalEscolhaAmbigua
+          codigoDigitado={desambiguacao.codigoDigitado}
+          candidatos={desambiguacao.candidatos}
+          onSelecionar={handleSelecionarAmbiguidade}
+          onCancelar={() => setDesambiguacao(null)}
+        />
+      )}
+
+      {/* Modal de Confirmação Final com Quantidade Digitada */}
       {confirmandoAjustes && (
         <ConfirmarAcaoEstoqueModal
           aberto
@@ -1377,8 +853,7 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
           descricao={
             <>
               <strong className="text-rose-300">{contagemAjustes.total} aparelho(s)</strong> não localizados terão o destino
-              escolhido aplicado agora. Tudo fica num único lote, que pode ser desfeito em até 24 h em
-              Gerenciar &gt; Desfazer Operação em Massa.
+              escolhido aplicado agora de forma atômica no banco de dados.
             </>
           }
           resumo={[
@@ -1393,7 +868,7 @@ function normalizarNomeModelo(nome?: string | null): { chave: string; exibicao: 
           acoes={[
             { rotulo: 'Voltar', variante: 'secundaria', onClick: () => setConfirmandoAjustes(false) },
             {
-              rotulo: `Aplicar em ${contagemAjustes.total}`,
+              rotulo: `Confirmar e Aplicar em ${contagemAjustes.total}`,
               variante: 'perigo',
               exigeDigitacao: true,
               onClick: handleSalvarAjustesEstoque,

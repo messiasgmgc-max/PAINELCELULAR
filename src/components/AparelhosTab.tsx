@@ -74,6 +74,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const { clientes, fetchClientes, criarCliente } = useClientes();
   const [showForm, setShowForm] = useState(false);
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
+  const [limiteExibicao, setLimiteExibicao] = useState(40);
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);

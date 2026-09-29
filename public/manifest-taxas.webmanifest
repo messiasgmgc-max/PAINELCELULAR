@@ -1,0 +1,39 @@
+{
+  "name": "Taxas - Simulador de Maquininha",
+  "short_name": "Taxas",
+  "description": "Calculadora rápida de parcelamento e taxas de maquininha de cartão.",
+  "start_url": "/taxas-maquininha",
+  "id": "/taxas-maquininha",
+  "scope": "/taxas-maquininha",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "any",
+  "categories": ["finance", "utilities", "business"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
