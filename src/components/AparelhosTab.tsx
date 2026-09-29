@@ -15,6 +15,9 @@ import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
 import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan } from "lucide-react";
+import { AparelhoCard } from "@/components/aparelhos/AparelhoCard";
+import { AparelhoFiltros } from "@/components/aparelhos/AparelhoFiltros";
+import { BarcodeScannerModal } from "@/components/BarcodeScannerModal";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
@@ -72,6 +75,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [showForm, setShowForm] = useState(false);
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
   const [showConferenciaModal, setShowConferenciaModal] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
   const [showAtacadoModal, setShowAtacadoModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showEdicaoMassa, setShowEdicaoMassa] = useState(false);
@@ -1702,6 +1706,16 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
               </button>
             </div>
             <div className="scroll-row no-scrollbar w-full pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
+
+              {/* Botão Visível: Conferir Estoque */}
+              <Button 
+                onClick={() => setShowConferenciaModal(true)} 
+                className="bg-slate-800/90 hover:bg-slate-700/90 text-emerald-400 hover:text-emerald-300 font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md flex items-center gap-2 border border-emerald-500/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 cursor-pointer"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Conferir Estoque
+              </Button>
+
               {/* 1. Novo Aparelho */}
               <Button 
                 onClick={() => setShowForm(!showForm)} 
@@ -1831,16 +1845,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-64 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
-                  <DropdownMenuItem
-                    onClick={() => setShowConferenciaModal(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <ShieldCheck className="h-4 w-4 text-cyan-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Conferir Estoque</div>
-                      <div className="text-[10px] text-slate-400">Auditoria por câmera, leitor ou lista</div>
-                    </div>
-                  </DropdownMenuItem>
+                  
 
                   <DropdownMenuItem
                     onClick={() => setShowSaidas(true)}
@@ -1917,17 +1922,14 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           </div>
         </div>
         <div className="space-y-4">
-          {/* Barra de Busca */}
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Buscar por marca, modelo, IMEI ou cliente..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="input-glass pl-10"
-            />
-          </div>
+          <AparelhoFiltros 
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            categoriaFiltro={categoriaFiltro}
+            setCategoriaFiltro={setCategoriaFiltro}
+            contagens={contagens}
+            onOpenScanner={() => setShowScanner(true)}
+          />
 
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
@@ -2075,253 +2077,19 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 </p>
               </div>
             ) : (
-              aparelhosFiltrados.map((aparelho) => {
-                const custoNum = (aparelho as any).custo || 0;
-                const precoAtacadoNum = (aparelho as any).precoAtacado;
-                const saudeBat = (aparelho as any).saude_bateria || (aparelho as any).saudeBateria;
-                const qtd = (aparelho as any).quantidade || 1;
-                const dadosManut = extrairDadosManutencao(aparelho);
-                const estaEmManutencao = dadosManut.emManutencao;
+              aparelhosFiltrados.map((aparelho) => (
+                <AparelhoCard 
+                  key={aparelho.id}
+                  aparelho={aparelho}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onPDF={handleGenerateCertificate}
+                  onVender={setAparelhoParaVenda}
+                  onManutencao={setAparelhoParaManutencao}
+                  onRetornoManutencao={setAparelhoParaRetorno}
+                />
+              ))
 
-                return (
-                  <div
-                    key={aparelho.id}
-                    className={cn(
-                      "rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 transition-all shadow-md space-y-3.5",
-                      estaEmManutencao
-                        ? "bg-amber-950/20 hover:bg-amber-950/30 border-2 border-amber-500/60 shadow-amber-950/20"
-                        : "bg-slate-900/90 hover:bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40"
-                    )}
-                  >
-                    {/* TOPO: ID + Categoria + Condição + Data */}
-                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-mono text-[11px] font-bold text-cyan-400 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded-lg shrink-0">
-                          ID: {getAparelhoCodigo(aparelho)}
-                        </span>
-
-                        {/* Categoria Badge */}
-                        {aparelho.categoria === 'perfume' ? (
-                          <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/30 text-[10px] gap-1 font-semibold">
-                            🧴 Perfume
-                          </Badge>
-                        ) : aparelho.categoria === 'acessorio' ? (
-                          <Badge className="bg-purple-500/15 text-purple-300 border-purple-500/30 text-[10px] gap-1 font-semibold">
-                            🎧 Acessório
-                          </Badge>
-                        ) : aparelho.categoria === 'outro' ? (
-                          <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px] gap-1 font-semibold">
-                            📦 Produto
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-blue-500/15 text-blue-300 border-blue-500/30 text-[10px] gap-1 font-semibold">
-                            📱 Celular
-                          </Badge>
-                        )}
-
-                        {/* Condição */}
-                        {aparelho.categoria !== 'perfume' && aparelho.categoria !== 'acessorio' && (
-                          <span className="text-[11px] text-slate-300 font-medium px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/60">
-                            {condicaoEmoji(aparelho.condicao)} {condicaoLabel(aparelho.condicao)}
-                          </span>
-                        )}
-
-                        {estaEmManutencao ? (
-                          <Badge className="bg-amber-500 text-slate-950 font-extrabold text-[10px] gap-1 shrink-0 shadow-sm">
-                            <Wrench className="w-3 h-3" /> COM O TÉCNICO ({dadosManut.tecnicoNome || "Oficina"})
-                          </Badge>
-                        ) : aparelho.clienteId ? (
-                          <Badge variant="outline" className="bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]">
-                            MANUTENÇÃO: {aparelho.cliente}
-                          </Badge>
-                        ) : null}
-                      </div>
-
-                      <span className="text-[11px] text-slate-500 shrink-0 ml-auto font-medium">
-                        {new Date(aparelho.dataCadastro).toLocaleDateString("pt-BR")}
-                      </span>
-                    </div>
-
-                    {/* CORPO: Nome em destaque + Especificações claras */}
-                    <div className="space-y-2">
-                      <h4 className="text-base sm:text-lg font-bold text-white leading-tight">
-                        {aparelho.marca} {aparelho.modelo}
-                      </h4>
-
-                      {/* Chips de especificações */}
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                        {aparelho.categoria === 'perfume' ? (
-                          <>
-                            {aparelho.capacidade && (
-                              <span className="bg-rose-950/40 text-rose-300 border border-rose-500/20 px-2 py-0.5 rounded-lg font-semibold text-[11px]">
-                                💧 {aparelho.capacidade}
-                              </span>
-                            )}
-                            {aparelho.cor && (
-                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
-                                ✨ {aparelho.cor}
-                              </span>
-                            )}
-                            <span className="bg-emerald-950/40 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-bold text-[11px]">
-                              📦 {qtd} un. em estoque
-                            </span>
-                          </>
-                        ) : aparelho.categoria === 'acessorio' ? (
-                          <>
-                            {aparelho.cor && (
-                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
-                                🎨 {aparelho.cor}
-                              </span>
-                            )}
-                            <span className="bg-purple-950/40 text-purple-300 border border-purple-500/20 px-2 py-0.5 rounded-lg font-bold text-[11px]">
-                              📦 {qtd} un. em estoque
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            {aparelho.capacidade && (
-                              <span className="bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded-lg font-bold text-[11px]">
-                                💾 {aparelho.capacidade}
-                              </span>
-                            )}
-                            {aparelho.cor && (
-                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
-                                🎨 {aparelho.cor}
-                              </span>
-                            )}
-                            {saudeBat && (
-                              <span className="bg-emerald-950/40 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-bold text-[11px]">
-                                🔋 Bateria: {saudeBat}
-                              </span>
-                            )}
-                            {aparelho.imei && (
-                              <span className="bg-slate-800/70 text-slate-400 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px] font-mono">
-                                IMEI: {aparelho.imei}
-                              </span>
-                            )}
-                            {aparelho.cliente && (
-                              <span className="bg-slate-800/70 text-slate-300 border border-slate-700/60 px-2 py-0.5 rounded-lg text-[11px]">
-                                👤 {aparelho.cliente}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      {aparelho.descricao && (
-                        <p className="text-xs text-slate-400 bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
-                          📝 {aparelho.descricao}
-                        </p>
-                      )}
-
-                      {/* Banner de Custódia com o Técnico */}
-                      {estaEmManutencao && (
-                        <div className="bg-amber-500/15 border border-amber-500/40 rounded-2xl p-3 space-y-1.5 text-xs">
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-1.5 text-amber-300 font-extrabold text-xs sm:text-sm">
-                              <Wrench className="w-4 h-4 text-amber-400 shrink-0" />
-                              <span>FORA DA LOJA — Em Manutenção</span>
-                            </div>
-                            <span className="text-[10px] font-bold text-amber-300 bg-amber-950/80 border border-amber-500/40 px-2.5 py-0.5 rounded-lg">
-                              Com: {dadosManut.tecnicoNome || "Técnico"}
-                            </span>
-                          </div>
-                          {dadosManut.motivo && (
-                            <p className="text-slate-200 text-xs">
-                              <strong className="text-amber-400">Serviço/Defeito:</strong> {dadosManut.motivo}
-                            </p>
-                          )}
-                          {dadosManut.dataEnvio && (
-                            <p className="text-slate-400 text-[10px]">
-                              Enviado em {new Date(dadosManut.dataEnvio).toLocaleDateString("pt-BR")}
-                              {dadosManut.previsaoRetorno ? ` • Previsão retorno: ${new Date(dadosManut.previsaoRetorno).toLocaleDateString("pt-BR")}` : ""}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* RODAPÉ DO CARD: Preços destacados + Botões de Ação Touch-Friendly */}
-                    <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      {/* Preços */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {canViewFinancials(usuario) && custoNum > 0 && (
-                          <div className="text-xs text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-xl border border-slate-800">
-                            <span className="text-[10px] text-slate-500 block leading-none">Custo</span>
-                            <span className="font-semibold text-slate-300">R$ {custoNum.toFixed(2).replace(".", ",")}</span>
-                          </div>
-                        )}
-
-                        {precoAtacadoNum ? (
-                          <div className="text-xs text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/30">
-                            <span className="text-[10px] text-amber-400/80 block leading-none font-bold">Atacado</span>
-                            <span className="font-bold">R$ {Number(precoAtacadoNum).toFixed(2).replace(".", ",")}</span>
-                          </div>
-                        ) : null}
-
-                        <div className="text-xs text-emerald-300 bg-emerald-500/15 px-3 py-1 rounded-xl border border-emerald-500/30 ml-auto sm:ml-0">
-                          <span className="text-[10px] text-emerald-400/80 block leading-none font-bold">Venda</span>
-                          <span className="font-extrabold text-sm text-emerald-400">R$ {aparelho.preco.toFixed(2).replace(".", ",")}</span>
-                        </div>
-                      </div>
-
-                      {/* Botões de Ação */}
-                      <div className="flex items-center gap-1.5 justify-end flex-wrap pt-1 sm:pt-0">
-                        {estaEmManutencao ? (
-                          <button
-                            onClick={() => setAparelhoParaRetorno(aparelho)}
-                            className="text-xs text-slate-950 font-extrabold flex items-center gap-1.5 bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-emerald-950/30 shrink-0"
-                            title="Confirmar retorno do aparelho para o estoque da loja física"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                            Receber da Manutenção
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => setAparelhoParaVenda(aparelho)}
-                              className="text-xs text-slate-950 font-extrabold flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-amber-950/30 shrink-0"
-                              title="Marcar como vendido e registrar comprador (Atacado/Varejo)"
-                            >
-                              <ShoppingBag className="h-3.5 w-3.5" />
-                              Vender
-                            </button>
-                            <button
-                              onClick={() => setAparelhoParaManutencao(aparelho)}
-                              className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-2 rounded-xl border border-amber-500/20 transition-all cursor-pointer shrink-0"
-                              title="Enviar aparelho para técnico / manutenção fora da loja"
-                            >
-                              <Wrench className="h-3.5 w-3.5" />
-                              Manutenção
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => handleGenerateCertificate(aparelho)}
-                          className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-2 rounded-xl border border-emerald-500/20 transition-all cursor-pointer shrink-0"
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                          PDF
-                        </button>
-                        <button
-                          onClick={() => handleEdit(aparelho)}
-                          className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-2 rounded-xl border border-blue-500/20 transition-all cursor-pointer shrink-0"
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => handleDelete(aparelho.id)}
-                          className="text-xs text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 px-3 py-2 rounded-xl border border-rose-500/20 transition-all cursor-pointer shrink-0"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Deletar
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
 

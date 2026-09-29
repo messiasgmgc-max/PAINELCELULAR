@@ -253,21 +253,98 @@ export function TaxasMaquininhaTab() {
     toast.success('📷 Imagem PNG gerada e baixada com sucesso!');
   };
 
+  const [offlineAt, setOfflineAt] = useState<string | null>(null);
+
   const carregarPerfis = async () => {
     if (!lojaIdAtual) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from('taxas_maquininha')
-      .select('*')
-      .eq('loja_id', lojaIdAtual)
-      .eq('ativo', true)
-      .order('created_at', { ascending: false });
+    setOfflineAt(null);
+    try {
+      const { data, error } = await supabase
+        .from('taxas_maquininha')
+        .select('*')
+        .eq('loja_id', lojaIdAtual)
+        .eq('ativo', true)
+        .order('created_at', { ascending: false });
 
-    if (!error) setPerfis(data || []);
+      if (error) throw error;
+      setPerfis(data || []);
+      if (data && data.length > 0) {
+        localStorage.setItem(`phonecenter_taxas_cache_${lojaIdAtual}`, JSON.stringify({
+          updatedAt: new Date().toISOString(),
+          data
+        }));
+      }
+    } catch (err) {
+      const cachedStr = localStorage.getItem(`phonecenter_taxas_cache_${lojaIdAtual}`);
+      if (cachedStr) {
+        try {
+          const cached = JSON.parse(cachedStr);
+          setPerfis(cached.data);
+          const date = new Date(cached.updatedAt);
+          setOfflineAt(`${date.toLocaleDateString('pt-BR')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`);
+        } catch(e) {}
+      } else {
+        toast.error("Você está offline e não possui taxas salvas.");
+      }
+    }
     setLoading(false);
   };
 
   useEffect(() => { carregarPerfis(); }, [lojaIdAtual]);
+
+  // Load preferences
+  useEffect(() => {
+    if (!usuario?.id) return;
+    try {
+      const prefsStr = localStorage.getItem(`phonecenter_taxas_prefs_${usuario.id}`);
+      if (prefsStr) {
+        const prefs = JSON.parse(prefsStr);
+        if (prefs.calcPerfil) setCalcPerfil(prefs.calcPerfil);
+        if (prefs.calcBandeira) setCalcBandeira(prefs.calcBandeira);
+        if (prefs.calcParcelaSelecionada) setCalcParcelaSelecionada(prefs.calcParcelaSelecionada);
+        if (prefs.modoAvancado !== undefined) setModoAvancado(prefs.modoAvancado);
+      }
+    } catch (e) {}
+  }, [usuario?.id]);
+
+  // Save preferences
+  useEffect(() => {
+    if (!usuario?.id) return;
+    try {
+      localStorage.setItem(`phonecenter_taxas_prefs_${usuario.id}`, JSON.stringify({
+        calcPerfil, calcBandeira, calcParcelaSelecionada, modoAvancado
+      }));
+    } catch (e) {}
+  }, [calcPerfil, calcBandeira, calcParcelaSelecionada, modoAvancado, usuario?.id]);
+
+  // Auto calculate
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      calcularMelhorOpcao();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [calcPerfil, calcValorBase, calcBandeira, calcParcelaSelecionada, calcModoAlvo, calcValorAlvo, tipoBusca]);
+
+  // Input mask value
+  const [displayValorBase, setDisplayValorBase] = useState('');
+  useEffect(() => {
+    if (calcValorBase && !displayValorBase) {
+      setDisplayValorBase((parseFloat(calcValorBase) * 100).toString());
+    }
+  }, [calcValorBase, displayValorBase]);
+
+  const handleValorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value.replace(/\D/g, '');
+    if (!val) {
+      setDisplayValorBase('');
+      setCalcValorBase('');
+      return;
+    }
+    setDisplayValorBase(val);
+    const floatVal = parseFloat(val) / 100;
+    setCalcValorBase(floatVal.toString());
+  };
 
   const perfisAgrupados = useMemo(() => {
     const agrupados = new Map<string, any[]>();
@@ -528,6 +605,11 @@ export function TaxasMaquininhaTab() {
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 px-2 pb-16 font-sans">
+      {offlineAt && (
+        <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs px-4 py-2 rounded-xl mb-4 font-semibold flex items-center justify-center">
+          ⚠️ Você está offline. Exibindo taxas cacheadas em: {offlineAt}
+        </div>
+      )}
       
       <div className="flex flex-col gap-1.5">
         <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Taxas de Maquininha</h1>
@@ -602,7 +684,7 @@ export function TaxasMaquininhaTab() {
             
             <div className="w-full">
               <label className="mb-2 block text-[13px] font-semibold text-slate-300">Valor Produto (R$)</label>
-              <input type="number" className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2.5 text-sm font-medium text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all" placeholder="Ex: 3500" value={calcValorBase} onChange={(e) => setCalcValorBase(e.target.value)} />
+              <input type="text" inputMode="decimal" autoFocus className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2.5 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all" placeholder="R$ 0,00" value={displayValorBase ? 'R$ ' + (parseFloat(displayValorBase) / 100).toLocaleString('pt-BR', {minimumFractionDigits: 2}) : ''} onChange={handleValorChange} />
             </div>
             
             <div className="w-full">
@@ -689,19 +771,7 @@ export function TaxasMaquininhaTab() {
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* CAIXINHA PARA ACTIVAR/DESATIVAR VISUALIZAÇÃO DE LUCROS */}
-                  <label className="flex items-center gap-2 cursor-pointer bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 select-none transition-all font-semibold shadow-sm">
-                    <input 
-                      type="checkbox" 
-                      checked={modoAvancado} 
-                      onChange={(e) => setModoAvancado(e.target.checked)} 
-                      className="rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500 w-4 h-4 cursor-pointer accent-cyan-500" 
-                    />
-                    <span className="flex items-center gap-1.5">
-                      {modoAvancado ? <Eye className="w-3.5 h-3.5 text-amber-400" /> : <EyeOff className="w-3.5 h-3.5 text-emerald-400" />}
-                      {modoAvancado ? 'Exibir Custo/Lucro (Modo Lojista)' : 'Modo Cliente (Lucros Ocultos)'}
-                    </span>
-                  </label>
+
 
                   {/* BOTÃO BAIXAR IMAGEM PNG */}
                   <Button
@@ -722,7 +792,7 @@ export function TaxasMaquininhaTab() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-xs font-medium border-collapse min-w-[500px]">
                   <thead>
                     <tr className="border-b border-white/10 text-slate-400 uppercase text-[10px] tracking-wider">
@@ -793,6 +863,65 @@ export function TaxasMaquininhaTab() {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* MOBILE LIST */}
+              <div className="block md:hidden space-y-2.5 mt-4 max-h-[60vh] overflow-y-auto pr-1 scrollbar-soft">
+                {tabelaTodasParcelas.map((row) => {
+                  const isSelected = calcResultado && (
+                    (row.isDebito && calcResultado.isDebito) ||
+                    (!row.isDebito && !calcResultado.isDebito && row.numParcelas === calcResultado.numParcelas)
+                  );
+                  const isHighlighted = row.numParcelas === 1 || row.numParcelas === 10 || row.numParcelas === 12;
+                  
+                  return (
+                    <div 
+                      key={row.id} 
+                      className={`flex flex-col p-3 rounded-xl border transition-all ${
+                        isSelected 
+                          ? 'border-cyan-400 bg-cyan-950/40 shadow-lg shadow-cyan-900/20' 
+                          : isHighlighted
+                            ? 'border-white/20 bg-white/10'
+                            : 'border-white/5 bg-white/5'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            {row.isDebito ? (
+                              <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                                💵 DÉBITO
+                              </span>
+                            ) : (
+                              <span className="text-white font-extrabold text-sm">{row.labelExibicao}</span>
+                            )}
+                            <span className="text-[10px] font-bold text-cyan-400">{row.taxaCliente.toFixed(2)}% cli</span>
+                          </div>
+                          
+                          <div className="text-[11px] font-medium text-slate-400">
+                            Total máq: R$ {row.valorTotalCobrado.toFixed(2).replace('.', ',')}
+                          </div>
+                        </div>
+                        
+                        <div className="text-right flex flex-col items-end">
+                          <div className={`font-black tracking-tight ${isSelected ? 'text-cyan-300 text-lg' : 'text-white text-base'}`}>
+                            R$ {row.valorDaParcela.toFixed(2).replace('.', ',')}
+                          </div>
+                          {!row.isDebito && <div className="text-[10px] text-slate-500 font-medium">/mês</div>}
+                        </div>
+                      </div>
+                      
+                      {modoAvancado && (
+                        <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between">
+                          <div className="text-[10px] text-slate-400 font-medium">Custo: {row.taxaBase.toFixed(2)}%</div>
+                          <div className={`text-[11px] font-bold ${row.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            Lucro: {row.lucroTaxa > 0 ? '+ ' : ''}R$ {row.lucroTaxa.toFixed(2).replace('.', ',')}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

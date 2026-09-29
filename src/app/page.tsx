@@ -264,7 +264,7 @@ export default function Home() {
                 />
               )}
               <div className="flex min-w-0 flex-col items-start">
-                <h1 className="text-base sm:text-xl font-bold truncate leading-none max-w-[42vw] sm:max-w-[28rem]">{headerNomeLoja || 'Phone Center'}</h1>
+                <h1 className="text-base sm:text-xl font-bold truncate leading-none max-w-[30vw] sm:max-w-[28rem]">{headerNomeLoja || 'Phone Center'}</h1>
                 <p className="text-[10px] sm:text-xs text-muted-foreground truncate leading-none mt-0.5 hidden sm:block">{subtitulo}</p>
               </div>
             </div>
