@@ -58,6 +58,7 @@ interface AparelhoAuditoria {
   observacoes?: string;
   saude_bateria?: string;
   saudeBateria?: string;
+  categoria?: string;
 }
 
 interface ConferenciaEstoqueModalProps {

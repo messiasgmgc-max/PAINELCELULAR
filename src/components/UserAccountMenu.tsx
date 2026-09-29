@@ -25,6 +25,7 @@ import { useStorePlan } from '@/hooks/useStorePlan';
 import { usePanelMode } from '@/hooks/usePanelMode';
 import { useColorTheme } from '@/components/ThemeProvider';
 import { checkIsSuperAdmin } from '@/lib/utils';
+import { obterPlanoPorTipo } from '@/lib/planos-config';
 import { TicketsModal } from '@/components/suporte/TicketsModal';
 import { ChatSuporteWidget } from '@/components/suporte/ChatSuporteWidget';
 import {
@@ -115,7 +116,7 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
               <span>Gerenciar Meu Plano</span>
             </div>
             <Badge variant="outline" className="text-[9px] border-blue-500/30 text-blue-300">
-              {planData.planoNome}
+              {obterPlanoPorTipo(planData.planoTipo)?.nome || planData.planoTipo}
             </Badge>
           </DropdownMenuItem>
 

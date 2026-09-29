@@ -21,6 +21,7 @@ import {
   ShoppingBag,
   Calendar,
   Share2,
+  CreditCard,
 } from 'lucide-react';
 import { MobileHeader } from '@/components/mobile-preview/MobileHeader';
 import { MobileBottomBar } from '@/components/mobile-preview/MobileBottomBar';
@@ -32,6 +33,7 @@ import { MobileSaleRow, MockVenda } from '@/components/mobile-preview/MobileSale
 import { MobileSaleDetailsSheet } from '@/components/mobile-preview/MobileSaleDetailsSheet';
 import { MobileNewSaleSheet } from '@/components/mobile-preview/MobileNewSaleSheet';
 import { MobileImportSaleSheet } from '@/components/mobile-preview/MobileImportSaleSheet';
+import { MobileTaxasView } from '@/components/mobile-preview/MobileTaxasView';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -235,8 +237,8 @@ const MOCK_VENDAS_INICIAL: MockVenda[] = [
 ];
 
 export default function PreviewMobilePage() {
-  // Aba Ativa: Estoque ou Vendas
-  const [activeTab, setActiveTab] = useState<'estoque' | 'vendas'>('vendas');
+  // Aba Ativa: Taxas, Estoque ou Vendas
+  const [activeTab, setActiveTab] = useState<'estoque' | 'vendas' | 'taxas'>('taxas');
 
   // Estados de Estoque
   const [aparelhos, setAparelhos] = useState<MockAparelho[]>(MOCK_APARELHOS);
@@ -332,8 +334,22 @@ export default function PreviewMobilePage() {
       {/* BARRA SUPERIOR DE CONTROLE E TESTE (Exclusiva para você testar) */}
       <div className="w-full bg-slate-900 border-b border-blue-500/20 px-3 py-2.5 z-50 sticky top-0 shadow-lg">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-          {/* Seletor de Aba: Estoque vs Vendas */}
+          {/* Seletor de Aba: Taxas vs Estoque vs Vendas */}
           <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => {
+                setActiveTab('taxas');
+                setBusca('');
+              }}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'taxas'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              Aba Taxas
+            </button>
             <button
               onClick={() => {
                 setActiveTab('vendas');
@@ -408,11 +424,15 @@ export default function PreviewMobilePage() {
         </div>
       </div>
 
-      {/* GUIA DE RECURSOS PARA VENDAS E ESTOQUE */}
+      {/* GUIA DE RECURSOS PARA TAXAS, VENDAS E ESTOQUE */}
       <div className="w-full max-w-4xl px-4 py-2.5 bg-blue-950/20 border-b border-blue-500/10 text-xs text-slate-300">
-        <div className="flex items-center gap-1.5 font-bold text-blue-400">
+        <div className="flex items-center gap-1.5 font-bold text-cyan-400">
           <Info className="w-4 h-4 shrink-0" />
-          {activeTab === 'vendas' ? (
+          {activeTab === 'taxas' ? (
+            <span>
+              <strong>Calculadora de Taxas no Mobile:</strong> Input gigante com botões +100/+500/+1000, alternador instantâneo Modo Cliente (oculta lucros) / Modo Lojista (mostra lucros), linhas de 52px de 1x a 18x e cópia formatada para o WhatsApp em 1 clique!
+            </span>
+          ) : activeTab === 'vendas' ? (
             <span>
               <strong>Como funciona a Aba de Vendas no Mobile:</strong> Resumo financeiro compacto no topo, linhas de 54px (cliente + aparelho + valor), toque na venda abre comprovante instantâneo para enviar no WhatsApp ou gerar PDF, e botão central <strong>"+ Nova Venda"</strong> no polegar!
             </span>
@@ -602,6 +622,16 @@ export default function PreviewMobilePage() {
                 </div>
               </>
             )}
+
+            {/* ======================================= */}
+            {/* SE ESTIVER NA ABA DE TAXAS              */}
+            {/* ======================================= */}
+            {activeTab === 'taxas' && (
+              <MobileTaxasView
+                density={density}
+                onToast={showToast}
+              />
+            )}
           </div>
 
           {/* BARRA INFERIOR FLUTUANTE ADAPTADA */}
@@ -613,11 +643,17 @@ export default function PreviewMobilePage() {
               }
               setIsHeaderVisible(true);
             }}
-            onFilterClick={() => setIsFilterSheetOpen(true)}
+            onFilterClick={() => {
+              if (activeTab === 'taxas') {
+                window.dispatchEvent(new CustomEvent('phonecenter:taxas-action', { detail: { action: 'trocar-maquina' } }));
+              } else {
+                setIsFilterSheetOpen(true);
+              }
+            }}
             onNewDeviceClick={() => {
               if (activeTab === 'vendas') {
                 setIsNewSaleOpen(true);
-              } else {
+              } else if (activeTab === 'estoque') {
                 setIsNewDeviceOpen(true);
               }
             }}
@@ -630,9 +666,20 @@ export default function PreviewMobilePage() {
             }}
             onImportarPedidoClick={() => setIsImportSaleOpen(true)}
             onVincularVendidoClick={() => showToast('Abrindo vinculação de aparelho já baixado do estoque!')}
+            onTaxasWhatsappClick={() => {
+              window.dispatchEvent(new CustomEvent('phonecenter:taxas-action', { detail: { action: 'copy-whatsapp' } }));
+            }}
+            onTaxasToggleModoClick={() => {
+              window.dispatchEvent(new CustomEvent('phonecenter:taxas-action', { detail: { action: 'toggle-modo' } }));
+            }}
+            onTaxasResetClick={() => {
+              window.dispatchEvent(new CustomEvent('phonecenter:taxas-action', { detail: { action: 'zerar' } }));
+            }}
             filtrosAtivosCount={
               activeTab === 'vendas'
                 ? filtroTipoVenda !== 'Todas' ? 1 : 0
+                : activeTab === 'taxas'
+                ? 0
                 : [
                     filtros.categoria !== 'Todas',
                     filtros.capacidade !== 'Todas',
