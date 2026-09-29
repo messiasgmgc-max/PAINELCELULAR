@@ -1360,7 +1360,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           custo: apPreSel ? String((apPreSel as any).custo || 0) : parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
           formaPagamento: parsed.formaPagamento || 'pix',
-          dataVenda: parsed.dataVenda ? String(parsed.dataVenda).slice(0, 10) : new Date().toISOString().slice(0, 10),
+          dataVenda: (() => {
+            const nascNorm = (parsed.cliente?.dataNascimento || (parsed.cliente as any)?.data_nascimento || '').replace(/\D/g, '');
+            const rawVenda = parsed.dataVenda ? String(parsed.dataVenda).slice(0, 10) : '';
+            const ano = parseInt(rawVenda.slice(0, 4), 10);
+            if (rawVenda && (!nascNorm || rawVenda.replace(/\D/g, '') !== nascNorm) && (isNaN(ano) || ano >= 2020)) {
+              return rawVenda;
+            }
+            return new Date().toISOString().slice(0, 10);
+          })(),
           observacoes: parsed.observacoes || '',
         });
         setSelectedStockAparelhoId(matchedStockId);
@@ -5532,6 +5540,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         nome: dadosFaltantesForm.clienteNome,
                         telefone: dadosFaltantesForm.clienteTelefone,
                         email: dadosFaltantesForm.clienteEmail,
+                        cpf: aiParsedData?.cliente?.cpf || null,
+                        dataNascimento: aiParsedData?.cliente?.dataNascimento || (aiParsedData?.cliente as any)?.data_nascimento || null,
                       },
                       aparelho: {
                         marca: dadosFaltantesForm.marca,

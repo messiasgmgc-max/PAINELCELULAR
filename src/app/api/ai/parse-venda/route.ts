@@ -69,7 +69,7 @@ Estrutura JSON obrigatória:
   "cliente": {
     "nome": string ou null (ex: Nome completo do cliente),
     "cpf": string ou null (ex: 01358726698),
-    "dataNascimento": string ou null (ex: 04/04/1982),
+    "dataNascimento": string ou null (ex: 04/04/1982 ou 1982-04-04),
     "telefone": string ou null (ex: 31994848695),
     "email": string ou null (ex: thiagoamorimc10@yahoo.com.br - PROCURE POR E-mail OU email NO TEXTO!)
   },
@@ -87,14 +87,19 @@ Estrutura JSON obrigatória:
   "vendedor": string ou null (nome do funcionário/vendedor),
   "formaPagamento": string ou null (deve ser um de: "pix", "dinheiro", "cartao_credito", "cartao_debito", "parcelado"),
   "valorTotal": number ou null (valor total final da venda em R$),
-  "dataVenda": string ou null (formato YYYY-MM-DD se informado no texto),
+  "dataVenda": string ou null (formato YYYY-MM-DD da data em que a VENDA foi efetuada),
   "observacoes": string ou null,
   "camposFaltantes": string[] (array contendo as chaves dos campos essenciais que NÃO foram informados no texto ou estão em branco)
 }
 
+REGRAS CRÍTICAS DE DIFERENCIAÇÃO ENTRE DATA DE NASCIMENTO E DATA DA VENDA:
+1. "cliente.dataNascimento": Data em que o cliente nasceu (ex: "Data de nascimento: 04/04/1982", "Nasc: 15/05/1990", "aniversário", ou qualquer data com ano anterior a 2020).
+2. "dataVenda": Data em que a venda/negociação do aparelho ocorreu (transação na loja, geralmente ano corrente como 2024, 2025, 2026).
+3. PROIBIÇÃO ABSOLUTA: NUNCA coloque a data de nascimento do cliente em "dataVenda"! Se o cliente forneceu a data de nascimento e NÃO há outra data de venda explícita no texto, deixe "dataVenda": null. NUNCA misture essas duas informações.
+
 Regras para os camposFaltantes:
 - Um celular exige obrigatoriamente: "modelo", "capacidade", "valorTotal", "formaPagamento" e "dataVenda" (O IMEI, CPF e Data de Nascimento são OPCIONAIS, NÃO coloque imei, cpf ou dataNascimento em camposFaltantes).
-- Se algum desses 5 campos cruciais não puder ser identificado com clareza no texto, adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["dataVenda"].
+- Se a dataVenda não puder ser identificada com clareza no texto (lembrando que a data de nascimento NÃO é data de venda), adicione a chave correspondente ao array "camposFaltantes". Exemplo: ["dataVenda"].
 - Se todos estiverem preenchidos no texto, "camposFaltantes" deve ser um array vazio [].
 - Retorne APENAS o JSON puro.`;
 
@@ -285,18 +290,67 @@ Regras para os camposFaltantes:
       }
     }
 
+    // Sanitização pós-IA: Garante que a IA não atribuiu a data de nascimento à data de venda
+    const nascNormalizada = (parsedJson.cliente?.dataNascimento || parsedJson.cliente?.data_nascimento || '').replace(/\D/g, '');
+    if (parsedJson.dataVenda) {
+      const dataVendaLimpa = String(parsedJson.dataVenda).replace(/\D/g, '');
+      let anoVenda = 0;
+      if (parsedJson.dataVenda.includes('-')) {
+        anoVenda = parseInt(parsedJson.dataVenda.split('-')[0], 10);
+      } else if (parsedJson.dataVenda.includes('/')) {
+        anoVenda = parseInt(parsedJson.dataVenda.split('/')[2], 10);
+      }
+      if ((nascNormalizada && dataVendaLimpa === nascNormalizada) || (anoVenda > 0 && anoVenda < 2020)) {
+        console.warn(`[Parse-Venda] IA atribuiu nascimento ou ano antigo (${parsedJson.dataVenda}) à data da venda. Corrigindo.`);
+        parsedJson.dataVenda = null;
+      }
+    }
+
     // 11. Data Venda Regex (ex: YYYY-MM-DD ou DD/MM/YYYY)
     if (!parsedJson.dataVenda) {
-      const dateMatch = trimmedText.match(/\b(\d{2}\/\d{2}\/\d{4})\b/) || trimmedText.match(/\b(\d{4}-\d{2}-\d{2})\b/);
-      if (dateMatch) {
-        if (dateMatch[1].includes('/')) {
-          const [d, m, y] = dateMatch[1].split('/');
+      // 11.1 Busca rótulo explícito de data de venda (Data da venda, Em, Venda realizada em, etc.)
+      const rotuloVendaMatch = trimmedText.match(/(?:Data da Venda|Data Venda|Data do Pedido|Venda realizada em|Data:\s*)(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/i);
+      if (rotuloVendaMatch) {
+        const rawDate = rotuloVendaMatch[1];
+        if (rawDate.includes('/')) {
+          const [d, m, y] = rawDate.split('/');
           parsedJson.dataVenda = `${y}-${m}-${d}`;
         } else {
-          parsedJson.dataVenda = dateMatch[1];
+          parsedJson.dataVenda = rawDate;
         }
       } else {
-        parsedJson.dataVenda = new Date().toISOString().split('T')[0];
+        // 11.2 Varre as datas do texto, DESCONSIDERANDO explicitamente a data de nascimento do cliente
+        const todasDatas = [...trimmedText.matchAll(/\b(\d{2}\/\d{2}\/\d{4})\b|\b(\d{4}-\d{2}-\d{2})\b/g)];
+        let dataValidaVenda: string | null = null;
+        for (const match of todasDatas) {
+          const raw = match[1] || match[2];
+          const rawLimpa = raw.replace(/\D/g, '');
+          if (nascNormalizada && rawLimpa === nascNormalizada) {
+            continue; // É a data de nascimento do cliente!
+          }
+          let ano = 0;
+          if (raw.includes('/')) {
+            ano = parseInt(raw.split('/')[2], 10);
+          } else {
+            ano = parseInt(raw.split('-')[0], 10);
+          }
+          if (ano < 2020) {
+            continue; // Ano típico de data de nascimento de cliente
+          }
+          if (raw.includes('/')) {
+            const [d, m, y] = raw.split('/');
+            dataValidaVenda = `${y}-${m}-${d}`;
+          } else {
+            dataValidaVenda = raw;
+          }
+          break;
+        }
+
+        if (dataValidaVenda) {
+          parsedJson.dataVenda = dataValidaVenda;
+        } else {
+          parsedJson.dataVenda = new Date().toISOString().split('T')[0];
+        }
       }
     }
 

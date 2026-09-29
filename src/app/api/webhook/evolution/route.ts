@@ -522,7 +522,8 @@ async function definirModoChat(remoteJid: string, modo: 'comandos' | 'normal' | 
 // ── AUXILIAR: Resolver Loja e Usuário a partir do Telefone de Quem Enviou ──
 async function resolverLojaEUsuarioPorTelefone(
   authorPhone: string,
-  instanceName?: string
+  instanceName?: string,
+  isGroup: boolean = false
 ): Promise<UsuarioResolvido | null> {
   const variants = obterVariantesTelefone(authorPhone);
   if (variants.length === 0) return null;
@@ -706,8 +707,47 @@ async function resolverLojaEUsuarioPorTelefone(
     console.warn('Erro ao consultar tecnicos:', err);
   }
 
-  // 4. Fallback por instância (especialmente para grupos multi-loja)
-  if (instanceName) {
+  // 3.5. Busca na tabela perfis (usuários do sistema cadastrados no painel web)
+  try {
+    const { data: perfis } = await supabase
+      .from('perfis')
+      .select('id, nome, telefone, loja_id, role');
+
+    if (perfis && perfis.length > 0) {
+      const matchPerfil = perfis.find((p) => {
+        const tel = (p.telefone || '').replace(/\D/g, '');
+        return variants.some((v) => tel && (tel === v || v.endsWith(tel) || tel.endsWith(v)));
+      });
+
+      if (matchPerfil && matchPerfil.loja_id) {
+        const { data: loja } = await supabase
+          .from('lojas')
+          .select('id, nome, plano_status, data_vencimento')
+          .eq('id', matchPerfil.loja_id)
+          .maybeSingle();
+
+        if (loja) {
+          return {
+            lojaId: loja.id,
+            lojaNome: loja.nome || 'Phone Center',
+            usuarioNome: matchPerfil.nome || 'Equipe',
+            papel: matchPerfil.role === 'admin' || matchPerfil.role === 'super_admin' ? 'owner' : 'staff',
+            planoTipo: 'pro',
+            planoStatus: loja.plano_status || 'ativo',
+            dataVencimento: loja.data_vencimento || undefined,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    // segue se perfis não tiver telefone
+  }
+
+  // 4. Fallback por instância (EXCLUSIVO PARA GRUPOS @g.us)
+  // CRÍTICO: Em chat privado (!isGroup), NUNCA fazer fallback por instância.
+  // Fazer fallback em chat privado faria clientes finais que enviam mensagens para o WhatsApp da loja
+  // serem falsamente identificados como 'Lojista', fazendo o bot responder clientes.
+  if (isGroup && instanceName) {
     const lojaIdFallback = await resolverLojaId(instanceName);
     if (lojaIdFallback) {
       const { data: loja } = await supabase
@@ -720,7 +760,7 @@ async function resolverLojaEUsuarioPorTelefone(
         return {
           lojaId: loja.id,
           lojaNome: loja.nome || 'Phone Center',
-          usuarioNome: 'Lojista',
+          usuarioNome: 'Lojista (Grupo)',
           papel: 'staff',
           planoTipo: 'pro',
           planoStatus: loja.plano_status || 'ativo',
@@ -2029,7 +2069,7 @@ export async function POST(request: Request) {
     const modoChat = await obterModoChat(remoteJid);
 
     // ── IDENTIFICAÇÃO MULTI-LOJA DO USUÁRIO PELO NÚMERO DO WHATSAPP ──
-    const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName);
+    const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName, isGroup);
     if (usuarioResolvido?.lojaId) {
       lojaId = usuarioResolvido.lojaId;
     }
@@ -2037,12 +2077,16 @@ export async function POST(request: Request) {
     const nomeUsuario = usuarioResolvido?.usuarioNome || pushName;
     const papelUsuario = ehModeradorMaster ? 'owner' : (usuarioResolvido?.papel || 'staff');
 
-    // ── BLOQUEIO DE SEGURANÇA: NÚMERO NÃO CADASTRADO EM NENHUMA LOJA (CHAT PRIVADO) ──
+    // ── O BOT NÃO RESPONDE CLIENTES EM CHAT PRIVADO ──
+    // O bot é de uso exclusivo da equipe interna cadastrada ou em grupos autorizados.
+    // Clientes que enviarem mensagens privadas (ex: perguntando de notinha, dúvidas, etc.)
+    // são ignorados em silêncio para que a loja responda humanamente sem respostas automáticas indevidas.
     if (!isGroup && !usuarioResolvido && !ehModeradorMaster) {
-      console.warn(`🔒 [Segurança] Acesso negado para telefone não cadastrado: ${authorPhone}`);
-      const msgBloqueio = `🔒 *Acesso Não Vinculado — Phone Center*\n\nOlá! O seu número de WhatsApp (*${authorPhone}*) ainda não possui acesso vinculado a nenhuma loja no sistema.\n\n👉 *Se você já faz parte de uma equipe:* Peça ao administrador/dono da sua loja que cadastre seu número em *Configurações > Equipe* (ou *Técnicos & Vendedores*).\n\n👉 *Se você deseja criar sua própria loja:* Conheça nossos planos e inicie seu teste grátis em:\n🌐 *https://app.phonecenter.tech/assinar*`;
-      await enviarMensagemWhatsApp(instanceName, targetDestination, msgBloqueio);
-      return NextResponse.json({ status: 'unauthorized', message: 'Telefone não vinculado a nenhuma loja.' }, { status: 200 });
+      console.log(`🔇 [Privado] Mensagem de cliente/número não cadastrado (${authorPhone}) ignorada. O bot não responde clientes.`);
+      return NextResponse.json({
+        status: 'ignored',
+        message: 'Mensagem de cliente ignorada em chat privado. O bot responde apenas à equipe cadastrada ou em grupos.'
+      }, { status: 200 });
     }
 
     const messageContent = msgData.message || {};

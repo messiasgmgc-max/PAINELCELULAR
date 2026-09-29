@@ -40,6 +40,7 @@ export function ClientesTab() {
     email: "",
     telefone: "",
     cpf: "",
+    data_nascimento: "",
     endereco: "",
     cidade: "",
     estado: "",
@@ -73,6 +74,7 @@ export function ClientesTab() {
       email: cliente.email,
       telefone: cliente.telefone,
       cpf: cliente.cpf || "",
+      data_nascimento: cliente.data_nascimento || (cliente as any).dataNascimento || "",
       endereco: cliente.endereco || "",
       cidade: cliente.cidade || "",
       estado: cliente.estado || "",
@@ -89,18 +91,20 @@ export function ClientesTab() {
       return;
     }
 
+    const payloadSalvar: Record<string, any> = {
+      ...formData,
+      ativo: true,
+    };
+    if (!payloadSalvar.data_nascimento) {
+      delete payloadSalvar.data_nascimento;
+    }
+
     if (editingId) {
       // Atualizar cliente existente
-      await atualizarCliente(editingId, {
-        ...formData,
-        ativo: true,
-      });
+      await atualizarCliente(editingId, payloadSalvar);
     } else {
       // Criar novo cliente
-      await criarCliente({
-        ...formData,
-        ativo: true,
-      });
+      await criarCliente(payloadSalvar as any);
     }
 
     // Limpar formulário
@@ -109,6 +113,7 @@ export function ClientesTab() {
       email: "",
       telefone: "",
       cpf: "",
+      data_nascimento: "",
       endereco: "",
       cidade: "",
       estado: "",
@@ -133,6 +138,7 @@ export function ClientesTab() {
     { key: "email", label: "Email" },
     { key: "telefone", label: "Telefone" },
     { key: "cpf", label: "CPF" },
+    { key: "data_nascimento", label: "Data de Nascimento" },
     { key: "endereco", label: "Endereco" },
     { key: "cidade", label: "Cidade" },
     { key: "estado", label: "Estado" },
@@ -168,6 +174,7 @@ export function ClientesTab() {
         email: cliente.email,
         telefone: cliente.telefone,
         cpf: cliente.cpf || "",
+        data_nascimento: cliente.data_nascimento || (cliente as any).dataNascimento || "",
         endereco: cliente.endereco || "",
         cidade: cliente.cidade || "",
         estado: cliente.estado || "",
@@ -223,6 +230,7 @@ export function ClientesTab() {
           const telefoneFonte = findByAliases(row, ["telefone", "celular", "fone", "whatsapp", "_col3"]);
           const telefone = telefoneFonte.replace(/\D/g, "") || `000000000${(index % 10)}`;
           const cpf = findByAliases(row, ["cpf", "documento", "cnpj"]);
+          const dataNasc = findByAliases(row, ["data_nascimento", "nascimento", "nasc", "datanascimento", "dt_nasc", "dtnasc"]);
 
           const chave = `${nome.trim().toLowerCase()}|${telefone}|${cpf.replace(/\D/g, "")}`;
           if (!nome || chaveExistente.has(chave) || chaveLote.has(chave)) {
@@ -236,6 +244,7 @@ export function ClientesTab() {
             email: email || `${nome.toLowerCase().replace(/[^a-z0-9]/g, "") || "cliente"}@sem-email.local`,
             telefone,
             cpf,
+            data_nascimento: dataNasc || undefined,
             endereco: findByAliases(row, ["endereco", "logradouro", "rua"]),
             cidade: findByAliases(row, ["cidade"]),
             estado: findByAliases(row, ["estado", "uf"]),
@@ -273,6 +282,7 @@ export function ClientesTab() {
       email: "",
       telefone: "",
       cpf: "",
+      data_nascimento: "",
       endereco: "",
       cidade: "",
       estado: "",
@@ -395,8 +405,8 @@ export function ClientesTab() {
                       </div>
                     </div>
 
-                    {/* Linha 2: Telefone e CPF */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* Linha 2: Telefone, CPF e Data de Nascimento */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                       <div>
                         <label className="text-xs font-semibold text-slate-300 block mb-1">Telefone / WhatsApp *</label>
                         <input
@@ -418,6 +428,17 @@ export function ClientesTab() {
                           value={formData.cpf}
                           onChange={handleInputChange}
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1">Data Nasc. (opcional)</label>
+                        <input
+                          type="text"
+                          name="data_nascimento"
+                          placeholder="DD/MM/AAAA"
+                          value={formData.data_nascimento}
+                          onChange={handleInputChange}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:border-cyan-500 outline-none transition-all"
                         />
                       </div>
                     </div>
@@ -521,6 +542,9 @@ export function ClientesTab() {
                       <span>📧 {cliente.email}</span>
                       <span>📱 {cliente.telefone}</span>
                       {cliente.cpf && <span>📋 {cliente.cpf}</span>}
+                      {(cliente.data_nascimento || (cliente as any).dataNascimento) && (
+                        <span>🎂 {cliente.data_nascimento || (cliente as any).dataNascimento}</span>
+                      )}
                     </div>
                     {cliente.endereco && (
                       <p className="text-xs text-muted-foreground">
