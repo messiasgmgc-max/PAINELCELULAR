@@ -75,7 +75,7 @@ export function getAparelhoCodigo(aparelho: any): string {
 
   // 2. Extrai de observações (ex: "ID: 8665041" ou "ID: 9410244")
   const obs = String(aparelho.observacoes || '');
-  const matchObsId = obs.match(/ID:\s*(\d{6,10})/i);
+  const matchObsId = obs.match(/ID:\s*(\d{6,10})/i) || obs.match(/\[(\d{6,10})\]/);
   if (matchObsId) {
     return matchObsId[1].padStart(8, '0');
   }

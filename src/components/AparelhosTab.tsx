@@ -555,16 +555,23 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       // O ID aleatório abaixo existe só para o cadastro de aparelhos novos.
       // Ele NUNCA pode ser usado para casar com o estoque (ver encontrarEquivalente).
       let idEtiquetaInformado = false;
-      const matchId = line.match(/^(\d{6,8})\s*[-•·:]?\s*/);
-      if (matchId) {
-        idEtiqueta = matchId[1];
-        idEtiquetaInformado = true;
-        line = line.replace(matchId[0], '').trim();
-      } else {
-        idEtiqueta = String(Math.floor(10000000 + Math.random() * 90000000));
-      }
-
-      let mainPart = line;
+        let matchIdEnd = line.match(/\|?\s*ID:\s*(\d{6,10})/i);
+        let matchId = line.match(/^(\d{6,8})\s*[-?:]?\s*/);
+        
+        if (matchIdEnd) {
+          idEtiqueta = matchIdEnd[1];
+          idEtiquetaInformado = true;
+          line = line.replace(matchIdEnd[0], '').trim();
+          if (matchId) line = line.replace(matchId[0], '').trim(); // clear leading ID if both exist
+        } else if (matchId) {
+          idEtiqueta = matchId[1];
+          idEtiquetaInformado = true;
+          line = line.replace(matchId[0], '').trim();
+        } else {
+          idEtiqueta = String(Math.floor(10000000 + Math.random() * 90000000));
+        }
+        
+        let mainPart = line;
       let sufixoSerial = '';
       if (line.includes('-')) {
         const parts = line.split('-');
@@ -614,7 +621,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       }
 
       let capacidade = '';
-      const matchRom = mainPart.match(/\b(\d+gb|\d+tb)\b/i);
+      const matchRom = mainPart.match(/(\d+gb|\d+tb)\b/i);
       if (matchRom) {
         capacidade = matchRom[1].toUpperCase();
         mainPart = mainPart.replace(matchRom[0], '').trim();

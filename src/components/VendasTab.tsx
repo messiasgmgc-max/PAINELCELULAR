@@ -1102,7 +1102,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       }
 
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
-        const disponiveis = aparelhos.filter(aparelhoNoEstoque);
+        const disponiveis = aparelhos;
         // IMEI informado só casa com esse IMEI; sem IMEI, só com um único candidato. Antes
         // qualquer aparelho do mesmo modelo servia, e a venda levava outro 17 Pro Max.
         const escolha = escolherAparelhoParaVendaIA<Aparelho>({ aparelhos: disponiveis, ...parsedData.aparelho });
@@ -1318,7 +1318,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
       // Tenta encontrar e pré-selecionar o aparelho do estoque por Código/ID, IMEI ou Modelo
       let matchedStockId = '';
-      const disponiveis = aparelhos.filter(aparelhoNoEstoque);
+      const disponiveis = aparelhos;
       const codAi = String(parsed.aparelho?.codigo || '').toLowerCase().replace(/\D/g, '');
       if (codAi) {
         const apMatch = disponiveis.find(a => getAparelhoCodigo(a).includes(codAi));
@@ -3015,7 +3015,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           .join(', ');
 
         const descricao = idOrigem
-          ? `Importado MercadoPhone #${idOrigem} - ${resumoItens}`
+          ? `Importado via Lista Simples #${idOrigem} - ${resumoItens}`
           : `Importado - ${resumoItens}`;
 
         payload.push({

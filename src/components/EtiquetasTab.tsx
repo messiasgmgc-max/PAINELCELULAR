@@ -34,7 +34,7 @@ interface ModeloEtiquetaGlobal {
 const DEFAULT_MODELOS: ModeloEtiquetaGlobal[] = [
   {
     id: 'default-3col',
-    nome: 'MercadoPhone 3 colunas',
+    nome: 'Lista Simples 3 colunas',
     colunas: 3,
     larguraPaginaMm: 104,
     alturaPaginaMm: 22,
@@ -117,7 +117,7 @@ export function EtiquetasTab() {
   const aparelhosAtivos = useMemo(() => aparelhos.filter((aparelho) => aparelho.ativo), [aparelhos]);
   const totalSemEtiqueta = useMemo(() => aparelhosAtivos.filter(semEtiqueta).length, [aparelhosAtivos]);
 
-  // Aparelhos vindos do estoque ("Gerar etiquetas" depois de aplicar a lista do MercadoPhone).
+  // Aparelhos vindos do estoque ("Gerar etiquetas" depois de aplicar a lista do Lista Simples).
   const preselecaoRef = useRef<string[] | null>(null);
   const [avisoPreselecao, setAvisoPreselecao] = useState<number | null>(null);
   useEffect(() => {
@@ -855,7 +855,7 @@ export function EtiquetasTab() {
                   className="input-glass w-full"
                   value={modeloEmEdicao.nome}
                   onChange={(event) => setModeloEmEdicao((prev) => ({ ...prev, nome: event.target.value }))}
-                  placeholder="Ex: MercadoPhone 3 Colunas"
+                  placeholder="Ex: Lista Simples 3 Colunas"
                 />
               </div>
               <div>
