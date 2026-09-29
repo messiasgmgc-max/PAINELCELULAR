@@ -5,7 +5,7 @@ import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, X, DollarSign, Settings, ChevronRight, Lock, Percent,
   ChevronLeft, Menu, Tag, FileText, Boxes, Layers, Repeat,
-  Sparkles, SlidersHorizontal, Home
+  Sparkles, SlidersHorizontal, Home, Search, Plus, CheckSquare, QrCode
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -145,6 +145,12 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
 
   const openDrawer = () => setIsOpen(true);
 
+  const triggerPhoneCenterAction = (action: string) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('phonecenter:action', { detail: { action } }));
+    }
+  };
+
   return (
     <>
       {/* Sidebar Vertical - Desktop */}
@@ -240,38 +246,147 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
       {!hasModalOpen && (
         <div className="md:hidden fixed inset-x-0 bottom-0 z-[998] px-2 pb-[calc(env(safe-area-inset-bottom)+8px)] pointer-events-none mobile-nav-dock">
           <div className="pointer-events-auto border shadow-2xl rounded-2xl p-1.5 bg-slate-950/95 border-slate-800 backdrop-blur-xl">
-            <div className="grid grid-cols-5 gap-1 w-full overflow-hidden">
-              {/* Botão 1: Menu / Mais */}
-              <button
-                type="button"
-                onClick={openDrawer}
-                className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer select-none"
-              >
-                <Menu className="w-4 h-4" />
-                <span className="truncate">Menu</span>
-              </button>
+            {/* 1. SE ESTIVER NA ABA DE APARELHOS (ESTOQUE) */}
+            {currentTab === 'aparelhos' ? (
+              <div className="grid grid-cols-5 gap-1 w-full overflow-hidden items-center">
+                {/* 1. Menu Geral */}
+                <button
+                  type="button"
+                  onClick={openDrawer}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <Menu className="w-4 h-4" />
+                  <span className="truncate">Menu</span>
+                </button>
 
-              {/* Botões 2 a 5: Abas Principais + Aba Ativa */}
-              {dockSlots.map((tab) => {
-                const isActive = currentTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => onTabChange(tab.id)}
-                    className={cn(
-                      "h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold transition-all cursor-pointer select-none",
-                      isActive
-                        ? "bg-cyan-600 text-white shadow-md shadow-cyan-900/40 font-bold"
-                        : "text-slate-400 hover:text-white hover:bg-white/10"
-                    )}
-                  >
-                    {tab.icon}
-                    <span className="truncate">{tab.shortLabel || tab.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+                {/* 2. Buscar */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('focar-busca')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-400 hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <Search className="w-4 h-4" />
+                  <span className="truncate">Buscar</span>
+                </button>
+
+                {/* 3. + Novo Aparelho (Central FAB) */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('novo-aparelho')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer select-none"
+                >
+                  <Plus className="w-5 h-5 stroke-[2.5]" />
+                  <span className="truncate">+ Novo</span>
+                </button>
+
+                {/* 4. Conferir Estoque */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('conferir-estoque')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-400 hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <CheckSquare className="w-4 h-4 text-blue-400" />
+                  <span className="truncate">Conferir</span>
+                </button>
+
+                {/* 5. Scanner */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('scanner')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-400 hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span className="truncate">Scanner</span>
+                </button>
+              </div>
+            ) : currentTab === 'vendas' ? (
+              /* 2. SE ESTIVER NA ABA DE VENDAS */
+              <div className="grid grid-cols-5 gap-1 w-full overflow-hidden items-center">
+                {/* 1. Menu Geral */}
+                <button
+                  type="button"
+                  onClick={openDrawer}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <Menu className="w-4 h-4" />
+                  <span className="truncate">Menu</span>
+                </button>
+
+                {/* 2. Importar Pedido c/ IA */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('importar-pedido')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold text-cyan-300 hover:text-cyan-200 bg-cyan-950/40 border border-cyan-500/30 transition-all active:scale-95 cursor-pointer select-none"
+                  title="Importar Pedido do WhatsApp c/ IA"
+                >
+                  <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+                  <span className="truncate">Importar</span>
+                </button>
+
+                {/* 3. + Nova Venda (Central FAB) */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('nova-venda')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer select-none"
+                >
+                  <Plus className="w-5 h-5 stroke-[2.5]" />
+                  <span className="truncate">+ Venda</span>
+                </button>
+
+                {/* 4. Vincular Já Vendido */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('vincular-vendido')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-400 hover:bg-white/10 transition-colors cursor-pointer select-none"
+                  title="Vincular Aparelho Já Vendido"
+                >
+                  <Repeat className="w-4 h-4 text-blue-400" />
+                  <span className="truncate">Vincular</span>
+                </button>
+
+                {/* 5. Buscar */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('focar-busca')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-400 hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <Search className="w-4 h-4" />
+                  <span className="truncate">Buscar</span>
+                </button>
+              </div>
+            ) : (
+              /* 3. DEMAIS ABAS: DOCK PADRÃO */
+              <div className="grid grid-cols-5 gap-1 w-full overflow-hidden">
+                <button
+                  type="button"
+                  onClick={openDrawer}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <Menu className="w-4 h-4" />
+                  <span className="truncate">Menu</span>
+                </button>
+
+                {dockSlots.map((tab) => {
+                  const isActive = currentTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => onTabChange(tab.id)}
+                      className={cn(
+                        "h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold transition-all cursor-pointer select-none",
+                        isActive
+                          ? "bg-blue-600 text-white shadow-md shadow-blue-900/40 font-bold"
+                          : "text-slate-400 hover:text-white hover:bg-white/10"
+                      )}
+                    >
+                      {tab.icon}
+                      <span className="truncate">{tab.shortLabel || tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

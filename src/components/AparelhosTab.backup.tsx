@@ -107,36 +107,6 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [supplierListText, setSupplierListText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [density, setDensity] = useState<'compact' | 'detailed'>('compact');
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.innerWidth >= 640) {
-      setDensity('detailed');
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleCustomAction = (e: any) => {
-      const action = e.detail?.action;
-      if (action === 'novo-aparelho') {
-        setShowForm(true);
-        setEditingId(null);
-      } else if (action === 'conferir-estoque') {
-        setShowConferenciaModal(true);
-      } else if (action === 'scanner') {
-        setShowScanner(true);
-      } else if (action === 'focar-busca') {
-        const input = document.querySelector('input[placeholder*="Buscar"], input[placeholder*="buscar"]') as HTMLInputElement;
-        if (input) {
-          input.focus();
-          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }
-    };
-    window.addEventListener('phonecenter:action', handleCustomAction);
-    return () => window.removeEventListener('phonecenter:action', handleCustomAction);
-  }, []);
-
   const [formData, setFormData] = useState({
     categoria: "aparelho" as "aparelho" | "perfume" | "acessorio" | "outro",
     marca: "",
@@ -2109,21 +2079,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           )}
 
           {/* Lista de Aparelhos / Produtos */}
-          <div className="flex items-center justify-between px-1 mb-2">
-            <span className="text-xs text-slate-400">
-              {aparelhosFiltrados.length} {aparelhosFiltrados.length === 1 ? 'item' : 'itens'} no estoque
-            </span>
-            <button
-              type="button"
-              onClick={() => setDensity(density === 'compact' ? 'detailed' : 'compact')}
-              className="text-[11px] font-bold text-blue-400 hover:text-blue-300 px-2.5 py-1 rounded-xl bg-blue-950/40 border border-blue-500/20 flex items-center gap-1 cursor-pointer transition-all"
-            >
-              <Layers className="w-3 h-3" />
-              {density === 'compact' ? 'Modo Compacto (52px)' : 'Modo Detalhado'}
-            </button>
-          </div>
-
-          <div className={density === 'compact' ? "space-y-1.5" : "space-y-3.5"}>
+          <div className="space-y-3.5">
             {aparelhosFiltrados.length === 0 ? (
               <div className="p-8 text-center bg-slate-900/40 rounded-3xl border border-dashed border-white/10 space-y-2">
                 <Package className="w-8 h-8 text-slate-500 mx-auto" />
@@ -2138,7 +2094,6 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 <AparelhoCard 
                   key={aparelho.id}
                   aparelho={aparelho}
-                  density={density}
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                   onPDF={handleGenerateCertificate}

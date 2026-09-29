@@ -485,29 +485,6 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [confirmDeletePassword, setConfirmDeletePassword] = useState('');
   const [deletingAllVendas, setDeletingAllVendas] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const handleCustomAction = (e: any) => {
-      const action = e.detail?.action;
-      if (action === 'importar-pedido') {
-        setShowImportarPedidoModal(true);
-      } else if (action === 'nova-venda') {
-        if (editingId) setEditingId(null);
-        setShowPOS(true);
-      } else if (action === 'vincular-vendido') {
-        setShowVincularVendidoModal(true);
-      } else if (action === 'focar-busca') {
-        const input = document.querySelector('input[placeholder*="Buscar vendas"], input[placeholder*="Cliente"]') as HTMLInputElement;
-        if (input) {
-          input.focus();
-          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }
-    };
-    window.addEventListener('phonecenter:action', handleCustomAction);
-    return () => window.removeEventListener('phonecenter:action', handleCustomAction);
-  }, [editingId]);
-
   const [showReenviarNotinhaPrompt, setShowReenviarNotinhaPrompt] = useState(false);
   const [vendaEditadaNotinha, setVendaEditadaNotinha] = useState<Venda | null>(null);
   const [textoPedido, setTextoPedido] = useState('');

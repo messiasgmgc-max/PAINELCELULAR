@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 
 interface AparelhoCardProps {
   aparelho: Aparelho;
+  density?: 'compact' | 'detailed';
   onEdit: (aparelho: Aparelho) => void;
   onDelete: (id: string) => void;
   onPDF: (aparelho: Aparelho) => void;
@@ -48,6 +49,7 @@ function extractDataSaida(aparelho: any): string | null {
 
 export function AparelhoCard({ 
   aparelho, 
+  density = 'detailed',
   onEdit, 
   onDelete, 
   onPDF, 
@@ -71,6 +73,73 @@ export function AparelhoCard({
     navigator.clipboard.writeText(aparelho.observacoes || "");
     toast.success("Descrição copiada para a área de transferência!");
   };
+
+  // MODO COMPACTO (52px de altura quando recolhido)
+  if (density === 'compact' && !expanded) {
+    return (
+      <div
+        onClick={() => setExpanded(true)}
+        className={cn(
+          "w-full min-h-[52px] px-3 py-1.5 rounded-xl border transition-all cursor-pointer select-none flex items-center justify-between gap-2.5 group",
+          estaEmManutencao
+            ? "bg-amber-950/20 border-amber-500/50"
+            : "bg-slate-900/80 hover:bg-slate-800/90 active:bg-blue-950/40 border-slate-800/90 hover:border-blue-500/40"
+        )}
+      >
+        {/* ID / Badge */}
+        <div className="w-8 h-8 rounded-lg bg-blue-950/50 border border-blue-500/30 flex items-center justify-center shrink-0 text-blue-400 font-mono text-[10px] font-bold">
+          {getAparelhoCodigo(aparelho).slice(-3)}
+        </div>
+
+        {/* Modelo + Capacidade + Cor */}
+        <div className="flex-1 min-w-0 pr-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-bold text-xs sm:text-sm text-white truncate">
+              {aparelho.modelo}
+            </span>
+            {aparelho.capacidade && (
+              <span className="text-[10px] font-semibold text-blue-400 px-1 py-0.2 bg-blue-950/60 rounded border border-blue-500/20 shrink-0">
+                {aparelho.capacidade}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400 truncate">
+            {aparelho.cor && <span className="truncate">{aparelho.cor}</span>}
+            {saudeBat && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-emerald-400 font-medium">🔋 {saudeBat}</span>
+              </>
+            )}
+            {estaEmManutencao && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-amber-400 font-bold">Manut.</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Preço e Chevron */}
+        <div className="flex items-center gap-2 shrink-0 text-right">
+          <div>
+            <div className="font-bold text-xs sm:text-sm text-emerald-400">
+              R$ {aparelho.preco.toFixed(2).replace(".", ",")}
+            </div>
+            <span className={cn(
+              "text-[9px] px-1.5 py-0.2 font-semibold rounded border block mt-0.5",
+              aparelho.condicao === 'novo' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
+              aparelho.condicao === 'seminovo' ? 'text-blue-300 border-blue-500/30 bg-blue-500/10' :
+              'text-slate-400 border-slate-700 bg-slate-800'
+            )}>
+              {aparelho.condicao === 'novo' ? 'Novo' : aparelho.condicao === 'seminovo' ? 'Seminovo' : 'Usado'}
+            </span>
+          </div>
+          <ChevronDown className="w-4 h-4 text-slate-500 group-hover:text-blue-400 transition-colors" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -139,8 +208,8 @@ export function AparelhoCard({
               </div>
             )}
             {precoAtacadoNum ? (
-              <div className="text-xs text-amber-300 bg-amber-500/10 px-3 py-2 rounded-xl border border-amber-500/30">
-                <span className="text-[10px] text-amber-400/80 block font-bold">Atacado</span>
+              <div className="text-xs text-blue-300 bg-blue-500/10 px-3 py-2 rounded-xl border border-blue-500/30">
+                <span className="text-[10px] text-blue-400/80 block font-bold">Atacado</span>
                 <span className="font-bold">R$ {Number(precoAtacadoNum).toFixed(2).replace(".", ",")}</span>
               </div>
             ) : null}
@@ -168,7 +237,7 @@ export function AparelhoCard({
               <Button
                 size="sm"
                 onClick={(e) => { e.stopPropagation(); onRetornoManutencao(aparelho); }}
-                className="text-xs font-extrabold bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 text-slate-950 px-3 shadow-md h-8"
+                className="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 shadow-md h-8 cursor-pointer"
               >
                 <Check className="h-3.5 w-3.5 mr-1.5" /> Receber Manut.
               </Button>
@@ -177,7 +246,7 @@ export function AparelhoCard({
                 <Button
                   size="sm"
                   onClick={(e) => { e.stopPropagation(); onVender(aparelho); }}
-                  className="text-xs font-extrabold bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 shadow-md h-8"
+                  className="text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white px-3 shadow-md h-8 cursor-pointer"
                 >
                   <ShoppingBag className="h-3.5 w-3.5 mr-1.5" /> Vender
                 </Button>
@@ -185,7 +254,7 @@ export function AparelhoCard({
                   size="sm"
                   variant="outline"
                   onClick={(e) => { e.stopPropagation(); onManutencao(aparelho); }}
-                  className="text-xs text-amber-400 border-amber-500/20 bg-amber-500/10 hover:bg-amber-500/20 hover:text-amber-300 h-8"
+                  className="text-xs text-blue-300 border-blue-500/30 bg-blue-950/20 hover:bg-blue-900/30 h-8 cursor-pointer"
                 >
                   <Wrench className="h-3.5 w-3.5 mr-1" /> Manut.
                 </Button>
@@ -200,7 +269,7 @@ export function AparelhoCard({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48 bg-slate-900 border-slate-800 text-slate-200 z-[9999]">
                 <DropdownMenuItem onClick={() => onPDF(aparelho)} className="cursor-pointer hover:bg-slate-800">
-                  <FileText className="mr-2 h-4 w-4 text-emerald-400" /> PDF Garantia/Etiqueta
+                  <FileText className="mr-2 h-4 w-4 text-blue-400" /> PDF Garantia/Etiqueta
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onEdit(aparelho)} className="cursor-pointer hover:bg-slate-800">
                   <Edit2 className="mr-2 h-4 w-4 text-blue-400" /> Editar Aparelho
