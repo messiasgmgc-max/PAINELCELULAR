@@ -9,6 +9,7 @@ import { Plus, Pencil, Square, CheckSquare, Tag, Printer, Settings, Check, Refre
 import { useAparelhos } from '@/hooks/useAparelhos';
 import { generateCode128SvgString } from '@/lib/barcodeGenerator';
 import { supabase } from '@/lib/supabaseClient';
+import { getAparelhoCodigo } from '@/lib/utils';
 
 type CampoEtiqueta = 'marcaModelo' | 'codigo' | 'codigoBarras' | 'capacidade' | 'condicao' | 'imei' | 'cor' | 'saudeBateria' | 'preco';
 
@@ -139,20 +140,6 @@ export function EtiquetasTab() {
 
     const encontrado = candidatos.find((valor) => typeof valor === 'string' && valor.trim().length > 0);
     return String(encontrado || '').trim();
-  };
-
-  const getAparelhoCodigo = (aparelho: typeof aparelhosAtivos[number]) => {
-    const candidatos = [
-      (aparelho as any).codigo,
-      (aparelho as any).codigoUnico,
-      (aparelho as any).codigo_unico,
-      aparelho.imei,
-      aparelho.numeroSerie,
-      aparelho.id,
-    ];
-
-    const encontrado = candidatos.find((valor) => typeof valor === 'string' && valor.trim().length > 0);
-    return String(encontrado || aparelho.id || '').trim();
   };
 
   const getAparelhoSaudeBateria = (aparelho: typeof aparelhosAtivos[number]) => {

@@ -81,7 +81,7 @@ export function getAparelhoCodigo(aparelho: any): string {
   }
 
   // 3. Extrai de numeroSerie se for numérico de 6 a 10 dígitos
-  const numSerie = String(aparelho.numeroSerie || '').replace(/\D/g, '');
+  const numSerie = String(aparelho.numeroSerie || aparelho.numero_serie || '').replace(/\D/g, '');
   if (numSerie.length >= 6 && numSerie.length <= 10) {
     return numSerie.padStart(8, '0');
   }
