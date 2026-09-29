@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Smartphone,
   SlidersHorizontal,
@@ -15,6 +15,12 @@ import {
   Eye,
   Info,
   X,
+  TrendingUp,
+  DollarSign,
+  Package,
+  ShoppingBag,
+  Calendar,
+  Share2,
 } from 'lucide-react';
 import { MobileHeader } from '@/components/mobile-preview/MobileHeader';
 import { MobileBottomBar } from '@/components/mobile-preview/MobileBottomBar';
@@ -22,10 +28,13 @@ import { MobileDeviceRow, MockAparelho } from '@/components/mobile-preview/Mobil
 import { MobileFiltersSheet } from '@/components/mobile-preview/MobileFiltersSheet';
 import { MobileDeviceDetailsSheet } from '@/components/mobile-preview/MobileDeviceDetailsSheet';
 import { MobileNewDeviceSheet } from '@/components/mobile-preview/MobileNewDeviceSheet';
+import { MobileSaleRow, MockVenda } from '@/components/mobile-preview/MobileSaleRow';
+import { MobileSaleDetailsSheet } from '@/components/mobile-preview/MobileSaleDetailsSheet';
+import { MobileNewSaleSheet } from '@/components/mobile-preview/MobileNewSaleSheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-const MOCK_INICIAL: MockAparelho[] = [
+const MOCK_APARELHOS: MockAparelho[] = [
   {
     id: '1',
     modelo: 'iPhone 11',
@@ -143,30 +152,96 @@ const MOCK_INICIAL: MockAparelho[] = [
     condicao: 'Lacrado 1 Ano Apple',
     categoria: 'iPhones Novos',
   },
+];
+
+const MOCK_VENDAS_INICIAL: MockVenda[] = [
   {
-    id: '10',
-    modelo: 'Xiaomi Redmi Note 13',
-    capacidade: '256GB',
-    cor: 'Verde',
-    bateria: 100,
-    preco_venda: 1290,
-    preco_atacado: 1100,
-    status: 'Em estoque',
-    imei: '861920194820177',
-    condicao: 'Novo Lacrado',
-    categoria: 'Xiaomi',
+    id: '5012',
+    cliente_nome: 'Marcos Vinicius Pereira',
+    cliente_telefone: '(31) 98765-4321',
+    cliente_cpf: '123.456.789-00',
+    aparelho_modelo: 'iPhone 13',
+    aparelho_capacidade: '128GB',
+    aparelho_imei: '354920194820192',
+    valor_total: 2850,
+    lucro: 520,
+    forma_pagamento: 'PIX',
+    tipo_venda: 'Varejo',
+    vendedor: 'Jean Junio',
+    created_at: 'Hoje, 15:20',
+    garantia_dias: 90,
+  },
+  {
+    id: '5011',
+    cliente_nome: 'Fernanda Caroline Silva',
+    cliente_telefone: '(31) 99123-9988',
+    aparelho_modelo: 'iPhone 14 Pro Max',
+    aparelho_capacidade: '256GB',
+    aparelho_imei: '358920194820145',
+    valor_total: 4690,
+    lucro: 680,
+    forma_pagamento: 'Cartão',
+    tipo_venda: 'Varejo',
+    vendedor: 'Lucas Oliveira',
+    created_at: 'Hoje, 14:05',
+    garantia_dias: 90,
+  },
+  {
+    id: '5010',
+    cliente_nome: 'Rodrigo Celulares (Lojista BH)',
+    cliente_telefone: '(31) 97654-3210',
+    aparelho_modelo: 'iPhone 12',
+    aparelho_capacidade: '128GB',
+    aparelho_imei: '357920194820188',
+    valor_total: 2050,
+    lucro: 250,
+    forma_pagamento: 'PIX',
+    tipo_venda: 'Atacado',
+    vendedor: 'Lucas Oliveira',
+    created_at: 'Hoje, 11:30',
+    garantia_dias: 30,
+  },
+  {
+    id: '5009',
+    cliente_nome: 'Camila Eduarda Santos',
+    cliente_telefone: '(31) 98877-6655',
+    aparelho_modelo: 'iPhone 11',
+    aparelho_capacidade: '128GB',
+    aparelho_imei: '351920194820101',
+    valor_total: 1850,
+    lucro: 350,
+    forma_pagamento: 'Dinheiro',
+    tipo_venda: 'Varejo',
+    vendedor: 'Jean Junio',
+    created_at: 'Hoje, 10:15',
+    garantia_dias: 90,
+  },
+  {
+    id: '5008',
+    cliente_nome: 'Gabriel Antunes Rezende',
+    cliente_telefone: '(31) 99345-6789',
+    aparelho_modelo: 'iPhone 15',
+    aparelho_capacidade: '128GB',
+    aparelho_imei: '355920194820155',
+    valor_total: 4390,
+    lucro: 550,
+    forma_pagamento: 'Cartão',
+    tipo_venda: 'Varejo',
+    vendedor: 'Lucas Oliveira',
+    created_at: 'Ontem, 17:40',
+    garantia_dias: 365,
   },
 ];
 
 export default function PreviewMobilePage() {
-  const [aparelhos, setAparelhos] = useState<MockAparelho[]>(MOCK_INICIAL);
-  const [density, setDensity] = useState<'compact' | 'detailed'>('compact');
-  const [frameMode, setFrameMode] = useState<boolean>(true);
-  const [autoHideHeader, setAutoHideHeader] = useState<boolean>(true);
-  const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
+  // Aba Ativa: Estoque ou Vendas
+  const [activeTab, setActiveTab] = useState<'estoque' | 'vendas'>('vendas');
 
-  // Estados de Filtros e Busca
-  const [busca, setBusca] = useState('');
+  // Estados de Estoque
+  const [aparelhos, setAparelhos] = useState<MockAparelho[]>(MOCK_APARELHOS);
+  const [selectedDevice, setSelectedDevice] = useState<MockAparelho | null>(null);
+  const [isNewDeviceOpen, setIsNewDeviceOpen] = useState(false);
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
   const [categoriaAtiva, setCategoriaAtiva] = useState('Todos');
   const [filtros, setFiltros] = useState({
     categoria: 'Todas',
@@ -175,10 +250,18 @@ export default function PreviewMobilePage() {
     status: 'Todos',
   });
 
-  // Modais / Sheets
-  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
-  const [isNewDeviceOpen, setIsNewDeviceOpen] = useState(false);
-  const [selectedDevice, setSelectedDevice] = useState<MockAparelho | null>(null);
+  // Estados de Vendas
+  const [vendas, setVendas] = useState<MockVenda[]>(MOCK_VENDAS_INICIAL);
+  const [selectedVenda, setSelectedVenda] = useState<MockVenda | null>(null);
+  const [isNewSaleOpen, setIsNewSaleOpen] = useState(false);
+  const [filtroTipoVenda, setFiltroTipoVenda] = useState<'Todas' | 'Varejo' | 'Atacado'>('Todas');
+
+  // Configurações da Página de Teste
+  const [density, setDensity] = useState<'compact' | 'detailed'>('compact');
+  const [frameMode, setFrameMode] = useState<boolean>(true);
+  const [autoHideHeader, setAutoHideHeader] = useState<boolean>(true);
+  const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
+  const [busca, setBusca] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
   // Detecção de Scroll para Auto-Hide do Header
@@ -189,18 +272,15 @@ export default function PreviewMobilePage() {
     if (!autoHideHeader) return;
     const currentScrollY = e.currentTarget.scrollTop;
     if (currentScrollY > lastScrollY.current && currentScrollY > 60) {
-      // Rolando para baixo -> esconde header
       setIsHeaderVisible(false);
     } else if (currentScrollY < lastScrollY.current) {
-      // Rolando para cima -> exibe header
       setIsHeaderVisible(true);
     }
     lastScrollY.current = currentScrollY;
   };
 
-  // Filtragem dos aparelhos
+  // Filtragem de Aparelhos
   const aparelhosFiltrados = aparelhos.filter((item) => {
-    // 1. Busca textual
     if (busca.trim()) {
       const termo = busca.toLowerCase();
       const match =
@@ -210,13 +290,7 @@ export default function PreviewMobilePage() {
         (item.imei && item.imei.includes(termo));
       if (!match) return false;
     }
-
-    // 2. Categoria do header
-    if (categoriaAtiva !== 'Todos' && item.categoria !== categoriaAtiva) {
-      return false;
-    }
-
-    // 3. Filtros avançados do Sheet
+    if (categoriaAtiva !== 'Todos' && item.categoria !== categoriaAtiva) return false;
     if (filtros.categoria !== 'Todas' && item.categoria !== filtros.categoria) return false;
     if (filtros.capacidade !== 'Todas' && item.capacidade !== filtros.capacidade) return false;
     if (filtros.status !== 'Todos' && item.status !== filtros.status) return false;
@@ -224,16 +298,27 @@ export default function PreviewMobilePage() {
       const min = Number(filtros.bateriaMin.replace(/\D/g, ''));
       if (item.bateria < min) return false;
     }
-
     return true;
   });
 
-  const totalAtivos = [
-    filtros.categoria !== 'Todas',
-    filtros.capacidade !== 'Todas',
-    filtros.bateriaMin !== 'Todas',
-    filtros.status !== 'Todos',
-  ].filter(Boolean).length;
+  // Filtragem de Vendas
+  const vendasFiltradas = vendas.filter((v) => {
+    if (busca.trim()) {
+      const termo = busca.toLowerCase();
+      const match =
+        v.cliente_nome.toLowerCase().includes(termo) ||
+        v.aparelho_modelo.toLowerCase().includes(termo) ||
+        (v.cliente_telefone && v.cliente_telefone.includes(termo)) ||
+        (v.aparelho_imei && v.aparelho_imei.includes(termo));
+      if (!match) return false;
+    }
+    if (filtroTipoVenda !== 'Todas' && v.tipo_venda !== filtroTipoVenda) return false;
+    return true;
+  });
+
+  // Métricas do Topo de Vendas
+  const totalFaturamento = vendasFiltradas.reduce((acc, curr) => acc + curr.valor_total, 0);
+  const totalLucro = vendasFiltradas.reduce((acc, curr) => acc + (curr.lucro || curr.valor_total * 0.18), 0);
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -242,14 +327,39 @@ export default function PreviewMobilePage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center">
-      {/* BARRA SUPERIOR DE CONTROLE E TESTE (Invisível no app final, exclusiva para você testar) */}
+      {/* BARRA SUPERIOR DE CONTROLE E TESTE (Exclusiva para você testar) */}
       <div className="w-full bg-slate-900 border-b border-blue-500/20 px-3 py-2.5 z-50 sticky top-0 shadow-lg">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="bg-blue-600/30 text-blue-300 font-bold px-2 py-0.5 rounded-full border border-blue-500/30 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              Página de Teste do Plano Mobile
-            </span>
+          {/* Seletor de Aba: Estoque vs Vendas */}
+          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => {
+                setActiveTab('vendas');
+                setBusca('');
+              }}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'vendas'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              Aba Vendas
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('estoque');
+                setBusca('');
+              }}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'estoque'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Package className="w-3.5 h-3.5" />
+              Aba Estoque
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -275,7 +385,7 @@ export default function PreviewMobilePage() {
               }`}
             >
               <Layers className="w-3.5 h-3.5 mr-1" />
-              {density === 'compact' ? 'Modo: Linhas 52px' : 'Modo: Cards 180px'}
+              {density === 'compact' ? 'Modo: Linhas 54px' : 'Modo: Cards 180px'}
             </Button>
 
             {/* Alternar Auto-Hide Header */}
@@ -290,24 +400,25 @@ export default function PreviewMobilePage() {
                 autoHideHeader ? 'text-blue-400 bg-blue-950/30 border-blue-500/30' : 'text-slate-400 bg-slate-800'
               }`}
             >
-              Auto-Hide Header: {autoHideHeader ? 'LIGADO' : 'DESLIGADO'}
+              Auto-Hide: {autoHideHeader ? 'LIGADO' : 'DESLIGADO'}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* ÁREA DE DEMONSTRAÇÃO DOS 5 ITENS DO PLANO */}
-      <div className="w-full max-w-4xl px-4 py-3 bg-blue-950/20 border-b border-blue-500/10 text-xs text-slate-300">
-        <div className="flex items-center gap-1.5 font-bold text-blue-400 mb-1">
+      {/* GUIA DE RECURSOS PARA VENDAS E ESTOQUE */}
+      <div className="w-full max-w-4xl px-4 py-2.5 bg-blue-950/20 border-b border-blue-500/10 text-xs text-slate-300">
+        <div className="flex items-center gap-1.5 font-bold text-blue-400">
           <Info className="w-4 h-4 shrink-0" />
-          Como testar os 5 pontos do plano nesta tela:
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1.5 text-[11px] text-slate-400">
-          <div><strong className="text-white">1. Barra Inferior:</strong> Botões no alcance do polegar na base da tela.</div>
-          <div><strong className="text-white">2. Auto-Hide:</strong> Role a lista para baixo para ver o topo recolher e dar mais tela.</div>
-          <div><strong className="text-white">3. Linha 52px:</strong> Alterne acima para comparar o espaço de 52px contra 180px.</div>
-          <div><strong className="text-white">4. Bottom Sheet:</strong> Toque em qualquer aparelho ou no botão "+ Novo".</div>
-          <div><strong className="text-white">5. Gaveta Filtros:</strong> Toque no botão "Filtros" na barra inferior.</div>
+          {activeTab === 'vendas' ? (
+            <span>
+              <strong>Como funciona a Aba de Vendas no Mobile:</strong> Resumo financeiro compacto no topo, linhas de 54px (cliente + aparelho + valor), toque na venda abre comprovante instantâneo para enviar no WhatsApp ou gerar PDF, e botão central <strong>"+ Nova Venda"</strong> no polegar!
+            </span>
+          ) : (
+            <span>
+              <strong>Aba de Estoque no Mobile:</strong> Linha de 52px com modelo, GB, cor, bateria e status. Toque no item para abrir o Bottom Sheet de detalhes, edição, venda e baixa rápida.
+            </span>
+          )}
         </div>
       </div>
 
@@ -316,11 +427,11 @@ export default function PreviewMobilePage() {
         <div
           className={`w-full bg-slate-950 flex flex-col relative transition-all shadow-2xl ${
             frameMode
-              ? 'h-[780px] rounded-[44px] border-[8px] border-slate-800/90 overflow-hidden ring-1 ring-white/10'
-              : 'min-h-[80vh] rounded-3xl border border-slate-800 overflow-hidden'
+              ? 'h-[800px] rounded-[44px] border-[8px] border-slate-800/90 overflow-hidden ring-1 ring-white/10'
+              : 'min-h-[85vh] rounded-3xl border border-slate-800 overflow-hidden'
           }`}
         >
-          {/* Entalhe da Câmera / Dynamic Island (Apenas no modo Moldura) */}
+          {/* Entalhe / Dynamic Island */}
           {frameMode && (
             <div className="w-full flex justify-center pt-2 pb-1 bg-slate-950 shrink-0 z-40">
               <div className="w-24 h-4 bg-slate-900 rounded-full border border-slate-800 flex items-center justify-end px-2">
@@ -329,7 +440,7 @@ export default function PreviewMobilePage() {
             </div>
           )}
 
-          {/* ITEM 2: HEADER INTELIGENTE COM AUTO-HIDE NO SCROLL */}
+          {/* HEADER INTELIGENTE COM AUTO-HIDE */}
           <MobileHeader
             nomeLoja="Phone Center"
             categoriaAtiva={categoriaAtiva}
@@ -337,73 +448,193 @@ export default function PreviewMobilePage() {
             isVisible={isHeaderVisible}
           />
 
-          {/* CONTEÚDO ROLÁVEL (LISTA DE APARELHOS) */}
+          {/* CONTEÚDO ROLÁVEL PRINCIPAL */}
           <div
             ref={scrollContainerRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto px-3.5 pt-3 pb-24 overscroll-contain space-y-2.5"
+            className="flex-1 overflow-y-auto px-3.5 pt-3 pb-24 overscroll-contain space-y-3"
           >
-            {/* Barra de Pesquisa Rápida Integrada */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-              <Input
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                placeholder="Buscar modelo, cor ou IMEI..."
-                className="h-10 pl-9 pr-8 bg-slate-900/80 border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-500 focus:border-blue-500"
-              />
-              {busca && (
-                <button
-                  onClick={() => setBusca('')}
-                  className="absolute right-2.5 top-2.5 p-0.5 rounded text-slate-400 hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+            {/* ======================================= */}
+            {/* SE ESTIVER NA ABA DE VENDAS             */}
+            {/* ======================================= */}
+            {activeTab === 'vendas' && (
+              <>
+                {/* 1. Resumo Financeiro Compacto (Estilo Fintech) */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-3 bg-gradient-to-br from-emerald-950/40 to-slate-900 border border-emerald-500/30 rounded-2xl">
+                    <div className="flex items-center justify-between text-slate-400 text-[10.5px]">
+                      <span>Faturamento</span>
+                      <span className="text-emerald-400 font-bold">{vendasFiltradas.length} vendas</span>
+                    </div>
+                    <div className="text-lg font-black text-emerald-400 mt-1">
+                      R$ {totalFaturamento.toLocaleString('pt-BR')}
+                    </div>
+                  </div>
 
-            {/* Cabeçalho da Lista: Contagem de Estoque e Indicador de Densidade */}
-            <div className="flex items-center justify-between text-xs px-1 text-slate-400">
-              <span>
-                Mostrando <strong className="text-white">{aparelhosFiltrados.length}</strong> de {aparelhos.length} aparelhos
-              </span>
-              <span className="text-[11px] text-blue-400 font-medium">
-                {density === 'compact' ? 'Visualização Rápida (52px)' : 'Visualização Detalhada'}
-              </span>
-            </div>
-
-            {/* ITEM 3: LISTA DE APARELHOS (LINHA COMPACTA 52PX OU CARD DETALHADO) */}
-            <div className="space-y-1.5">
-              {aparelhosFiltrados.map((item) => (
-                <MobileDeviceRow
-                  key={item.id}
-                  aparelho={item}
-                  density={density}
-                  onClick={() => setSelectedDevice(item)}
-                />
-              ))}
-
-              {aparelhosFiltrados.length === 0 && (
-                <div className="py-12 text-center text-slate-500 text-xs">
-                  Nenhum aparelho encontrado com os filtros selecionados.
+                  <div className="p-3 bg-gradient-to-br from-cyan-950/40 to-slate-900 border border-cyan-500/30 rounded-2xl">
+                    <div className="flex items-center justify-between text-slate-400 text-[10.5px]">
+                      <span>Lucro Estimado</span>
+                      <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+                    </div>
+                    <div className="text-lg font-black text-cyan-300 mt-1">
+                      R$ {totalLucro.toLocaleString('pt-BR')}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
+
+                {/* 2. Filtros Rápidos de Venda (Todas / Varejo / Atacado) */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {(['Todas', 'Varejo', 'Atacado'] as const).map((tipo) => (
+                    <button
+                      key={tipo}
+                      onClick={() => setFiltroTipoVenda(tipo)}
+                      className={`text-xs px-3 py-1 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        filtroTipoVenda === tipo
+                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                          : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {tipo}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 3. Campo de Busca de Vendas */}
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <Input
+                    value={busca}
+                    onChange={(e) => setBusca(e.target.value)}
+                    placeholder="Buscar por cliente, aparelho ou telefone..."
+                    className="h-10 pl-9 pr-8 bg-slate-900/80 border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-500 focus:border-emerald-500"
+                  />
+                  {busca && (
+                    <button
+                      onClick={() => setBusca('')}
+                      className="absolute right-2.5 top-2.5 p-0.5 rounded text-slate-400 hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* 4. Lista de Vendas */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs px-1 text-slate-400">
+                    <span>
+                      Mostrando <strong className="text-white">{vendasFiltradas.length}</strong> vendas
+                    </span>
+                    <span className="text-[11px] text-emerald-400 font-medium">
+                      {density === 'compact' ? 'Linhas 54px' : 'Cards 180px'}
+                    </span>
+                  </div>
+
+                  {vendasFiltradas.map((venda) => (
+                    <MobileSaleRow
+                      key={venda.id}
+                      venda={venda}
+                      density={density}
+                      onClick={() => setSelectedVenda(venda)}
+                    />
+                  ))}
+
+                  {vendasFiltradas.length === 0 && (
+                    <div className="py-12 text-center text-slate-500 text-xs">
+                      Nenhuma venda encontrada com estes filtros.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ======================================= */}
+            {/* SE ESTIVER NA ABA DE ESTOQUE            */}
+            {/* ======================================= */}
+            {activeTab === 'estoque' && (
+              <>
+                {/* Campo de Busca de Estoque */}
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                  <Input
+                    value={busca}
+                    onChange={(e) => setBusca(e.target.value)}
+                    placeholder="Buscar modelo, cor ou IMEI..."
+                    className="h-10 pl-9 pr-8 bg-slate-900/80 border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-500 focus:border-blue-500"
+                  />
+                  {busca && (
+                    <button
+                      onClick={() => setBusca('')}
+                      className="absolute right-2.5 top-2.5 p-0.5 rounded text-slate-400 hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Contadores de Estoque */}
+                <div className="flex items-center justify-between text-xs px-1 text-slate-400">
+                  <span>
+                    Mostrando <strong className="text-white">{aparelhosFiltrados.length}</strong> de {aparelhos.length} aparelhos
+                  </span>
+                  <span className="text-[11px] text-blue-400 font-medium">
+                    {density === 'compact' ? 'Linhas 52px' : 'Cards 180px'}
+                  </span>
+                </div>
+
+                {/* Lista de Aparelhos */}
+                <div className="space-y-1.5">
+                  {aparelhosFiltrados.map((item) => (
+                    <MobileDeviceRow
+                      key={item.id}
+                      aparelho={item}
+                      density={density}
+                      onClick={() => setSelectedDevice(item)}
+                    />
+                  ))}
+
+                  {aparelhosFiltrados.length === 0 && (
+                    <div className="py-12 text-center text-slate-500 text-xs">
+                      Nenhum aparelho encontrado com estes filtros.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
-          {/* ITEM 1: BARRA INFERIOR FLUTUANTE */}
+          {/* BARRA INFERIOR FLUTUANTE ADAPTADA */}
           <MobileBottomBar
             onSearchClick={() => {
-              // Foca no topo e rola para cima
               if (scrollContainerRef.current) {
                 scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
               }
               setIsHeaderVisible(true);
             }}
             onFilterClick={() => setIsFilterSheetOpen(true)}
-            onNewDeviceClick={() => setIsNewDeviceOpen(true)}
-            onConferirClick={() => showToast('Abrindo modo conferência de estoque rápida!')}
-            filtrosAtivosCount={totalAtivos}
+            onNewDeviceClick={() => {
+              if (activeTab === 'vendas') {
+                setIsNewSaleOpen(true);
+              } else {
+                setIsNewDeviceOpen(true);
+              }
+            }}
+            onConferirClick={() => {
+              if (activeTab === 'vendas') {
+                showToast('Relatório de fechamento de caixa do dia gerado!');
+              } else {
+                showToast('Abrindo modo conferência de estoque!');
+              }
+            }}
+            filtrosAtivosCount={
+              activeTab === 'vendas'
+                ? filtroTipoVenda !== 'Todas' ? 1 : 0
+                : [
+                    filtros.categoria !== 'Todas',
+                    filtros.capacidade !== 'Todas',
+                    filtros.bateriaMin !== 'Todas',
+                    filtros.status !== 'Todos',
+                  ].filter(Boolean).length
+            }
           />
         </div>
       </div>
@@ -416,7 +647,40 @@ export default function PreviewMobilePage() {
         </div>
       )}
 
-      {/* ITEM 5: BOTTOM SHEET DE FILTROS */}
+      {/* BOTTOM SHEETS DE VENDAS */}
+      <MobileSaleDetailsSheet
+        venda={selectedVenda}
+        isOpen={!!selectedVenda}
+        onClose={() => setSelectedVenda(null)}
+        onGerarPdf={(v) => {
+          showToast(`Gerando comprovante PDF de ${v.cliente_nome}...`);
+        }}
+        onEnviarWhatsapp={(v) => {
+          showToast(`Abrindo WhatsApp para enviar notinha para ${v.cliente_telefone}!`);
+        }}
+        onEnviarEmail={(v) => {
+          showToast(`Recibo enviado por e-mail com sucesso!`);
+        }}
+        onEditar={(v) => {
+          showToast(`Abrindo edição da venda #${v.id}`);
+          setSelectedVenda(null);
+        }}
+        onCancelar={(v) => {
+          showToast(`Venda #${v.id} estornada e aparelho retornado ao estoque!`);
+          setSelectedVenda(null);
+        }}
+      />
+
+      <MobileNewSaleSheet
+        isOpen={isNewSaleOpen}
+        onClose={() => setIsNewSaleOpen(false)}
+        onSalvar={(nova) => {
+          setVendas((prev) => [nova, ...prev]);
+          showToast(`Venda de R$ ${nova.valor_total} cadastrada com sucesso!`);
+        }}
+      />
+
+      {/* BOTTOM SHEETS DE ESTOQUE */}
       <MobileFiltersSheet
         isOpen={isFilterSheetOpen}
         onClose={() => setIsFilterSheetOpen(false)}
@@ -425,14 +689,15 @@ export default function PreviewMobilePage() {
         totalEncontrados={aparelhosFiltrados.length}
       />
 
-      {/* ITEM 4: BOTTOM SHEET DE DETALHES E AÇÕES DO APARELHO */}
       <MobileDeviceDetailsSheet
         aparelho={selectedDevice}
         isOpen={!!selectedDevice}
         onClose={() => setSelectedDevice(null)}
         onVender={(ap) => {
-          showToast(`Iniciando venda para: ${ap.modelo} (${ap.capacidade})`);
+          showToast(`Iniciando venda para: ${ap.modelo}`);
           setSelectedDevice(null);
+          setActiveTab('vendas');
+          setIsNewSaleOpen(true);
         }}
         onEditar={(ap) => {
           showToast(`Abrindo edição rápida de ${ap.modelo}`);
@@ -444,7 +709,6 @@ export default function PreviewMobilePage() {
         }}
       />
 
-      {/* ITEM 4: BOTTOM SHEET DE CADASTRO DE NOVO APARELHO */}
       <MobileNewDeviceSheet
         isOpen={isNewDeviceOpen}
         onClose={() => setIsNewDeviceOpen(false)}
