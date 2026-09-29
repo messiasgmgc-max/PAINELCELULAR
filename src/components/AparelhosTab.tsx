@@ -1627,6 +1627,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             </div>
 
             {/* Abas / Filtros de Categoria de Estoque */}
+            {/* Abas / Filtros de Categoria de Estoque (Padronizado Azul) */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 no-scrollbar touch-pan-x overscroll-contain">
               <button
                 type="button"
@@ -1634,11 +1635,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
                   categoriaFiltro === 'todos' 
-                    ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-950/40" 
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
                     : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
                 )}
               >
-                <Sparkles className="w-3.5 h-3.5" /> Todos ({contagens.todos})
+                <Sparkles className="w-3.5 h-3.5 text-blue-300" /> Todos ({contagens.todos})
               </button>
 
               <button
@@ -1647,11 +1648,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
                   categoriaFiltro === 'aparelho' 
-                    ? "bg-blue-500 text-white shadow-md shadow-blue-950/40" 
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
                     : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
                 )}
               >
-                <Smartphone className="w-3.5 h-3.5" /> 📱 Celulares ({contagens.aparelhos})
+                <Smartphone className="w-3.5 h-3.5 text-blue-300" /> 📱 Celulares ({contagens.aparelhos})
               </button>
 
               <button
@@ -1660,7 +1661,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
                   categoriaFiltro === 'perfume' 
-                    ? "bg-rose-500 text-white shadow-md shadow-rose-950/40" 
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
                     : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
                 )}
               >
@@ -1673,11 +1674,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
                   categoriaFiltro === 'acessorio' 
-                    ? "bg-purple-500 text-white shadow-md shadow-purple-950/40" 
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
                     : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
                 )}
               >
-                <Headphones className="w-3.5 h-3.5" /> 🎧 Acessórios ({contagens.acessorios})
+                <Headphones className="w-3.5 h-3.5 text-blue-300" /> 🎧 Acessórios ({contagens.acessorios})
               </button>
 
               <button
@@ -1686,11 +1687,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
                   categoriaFiltro === 'outro' 
-                    ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-950/40" 
+                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
                     : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
                 )}
               >
-                <Package className="w-3.5 h-3.5" /> 📦 Outros ({contagens.outros})
+                <Package className="w-3.5 h-3.5 text-blue-300" /> 📦 Outros ({contagens.outros})
               </button>
 
               {/* Divisor Visual */}
@@ -1703,63 +1704,67 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className={cn(
                   "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer border",
                   filtroStatus === 'manutencao' 
-                    ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-950/40" 
+                    ? "bg-blue-600 text-white border-blue-400 shadow-md shadow-blue-950/40" 
                     : contagens.emManutencao > 0
-                      ? "bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25 animate-pulse"
+                      ? "bg-blue-950/40 text-blue-300 border-blue-500/40 hover:bg-blue-900/50"
                       : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800"
                 )}
                 title="Filtrar aparelhos que estão fora da loja com o técnico para manutenção"
               >
-                <Wrench className="w-3.5 h-3.5" /> 🛠️ Com Técnico ({contagens.emManutencao})
+                <Wrench className="w-3.5 h-3.5 text-blue-300" /> 🛠️ Com Técnico ({contagens.emManutencao})
               </button>
             </div>
-            <div className="scroll-row no-scrollbar w-full pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
 
-              {/* Botão Visível: Conferir Estoque */}
-              <Button 
-                onClick={() => setShowConferenciaModal(true)} 
-                className="bg-slate-800/90 hover:bg-slate-700/90 text-emerald-400 hover:text-emerald-300 font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md flex items-center gap-2 border border-emerald-500/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 cursor-pointer"
-              >
-                <ShieldCheck className="h-4 w-4" />
-                Conferir Estoque
-              </Button>
-
-              {/* 1. Novo Aparelho */}
+            {/* Ações Principais: Grade responsiva para nunca cortar botões no mobile */}
+            <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:items-center">
+              {/* 1. Novo Aparelho (Azul Primário do Sistema) */}
               <Button 
                 onClick={() => setShowForm(!showForm)} 
-                className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 cursor-pointer"
+                className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-blue-950/40 flex items-center justify-center gap-2 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
                 Novo Aparelho
               </Button>
 
-              {/* 2. Botão Direto: Valores de Atacado */}
+              {/* 2. Conferir Estoque (Azul Accent do Sistema) */}
+              <Button 
+                onClick={() => setShowConferenciaModal(true)} 
+                className="bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 hover:text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 border border-blue-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
+              >
+                <ShieldCheck className="h-4 w-4 text-blue-400" />
+                Conferir Estoque
+              </Button>
+            </div>
+
+            {/* Ações Secundárias Padronizadas (Azul Sistema) */}
+            <div className="scroll-row no-scrollbar w-full pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
+              {/* Valores Atacado */}
               <Button
                 onClick={() => setShowAtacadoModal(true)}
-                className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-amber-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-300 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
                 title="Editar valores de atacado em lote para lojistas"
               >
-                <Tag className="h-4 w-4 text-amber-400" />
+                <Tag className="h-4 w-4 text-blue-400" />
                 Valores Atacado
               </Button>
 
-              {/* Edição em massa por modelo: cor, capacidade e observação */}
+              {/* Edição em massa */}
               <Button
                 onClick={() => setShowEdicaoMassa(true)}
-                className="bg-violet-500/15 hover:bg-violet-500/25 text-violet-200 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-violet-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-300 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
                 title="Mudar cor, capacidade e observação de vários aparelhos de uma vez"
               >
-                <Edit2 className="h-4 w-4 text-violet-300" />
+                <Edit2 className="h-4 w-4 text-blue-400" />
                 Editar em massa
               </Button>
 
-              {/* 2. Menu Importar */}
+              {/* Menu Importar */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                    className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
                   >
-                    <Download className="h-4 w-4 text-emerald-400" />
+                    <Download className="h-4 w-4 text-blue-400" />
                     Importar
                     <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                   </Button>
@@ -1769,7 +1774,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => setShowMercadoPhoneModal(true)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <RefreshCw className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <RefreshCw className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Lista Simples (Remontar / Importar)</div>
                       <div className="text-[10px] text-slate-400">Importar lista simples de produtos e atualizar</div>
@@ -1791,12 +1796,12 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {/* 3. Menu Exportar */}
+              {/* Menu Exportar */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     disabled={aparelhosAtivos.length === 0}
-                    className="bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 hover:text-white font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                    className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
                   >
                     <ArrowUpRight className="h-4 w-4 text-blue-400" />
                     Exportar
@@ -1808,7 +1813,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={handleExportCSV}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <FileSpreadsheet className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <FileSpreadsheet className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Exportar CSV</div>
                       <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
@@ -1821,7 +1826,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => handleExportWhatsApp(false)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <MessageCircle className="h-4 w-4 text-green-400 shrink-0" />
+                    <MessageCircle className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Lista WhatsApp (Varejo)</div>
                       <div className="text-[10px] text-slate-400">Lista sem preços / estoque geral</div>
@@ -1832,7 +1837,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => handleExportWhatsApp(true)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <Package className="h-4 w-4 text-amber-400 shrink-0" />
+                    <Package className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Lista WhatsApp (Atacado)</div>
                       <div className="text-[10px] text-slate-400">Lista com valores de atacado para lojistas</div>
@@ -1845,9 +1850,9 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    className="bg-slate-800/90 hover:bg-slate-700/90 text-cyan-400 hover:text-cyan-300 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-slate-700/80 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+                    className="bg-blue-950/30 hover:bg-blue-900/40 text-blue-300 hover:text-blue-200 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
                   >
-                    <Settings className="h-4 w-4 text-cyan-400" />
+                    <Settings className="h-4 w-4 text-blue-400" />
                     Gerenciar
                     <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                   </Button>
@@ -1859,7 +1864,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => setShowSaidas(true)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <History className="h-4 w-4 text-amber-400 shrink-0" />
+                    <History className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Saídas / Histórico</div>
                       <div className="text-[10px] text-slate-400">Aparelhos vendidos ou em manutenção</div>
@@ -1872,7 +1877,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => setShowAtacadoModal(true)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <Package className="h-4 w-4 text-amber-400 shrink-0" />
+                    <Package className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Editar Valores de Atacado</div>
                       <div className="text-[10px] text-slate-400">Ajuste de preços de revenda em lote</div>
@@ -1883,7 +1888,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => setShowBackupModal(true)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <RotateCcw className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <RotateCcw className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Restaurar Ponto de Backup</div>
                       <div className="text-[10px] text-slate-400">Prévia e comparação de restauração</div>
@@ -1894,7 +1899,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={handleRestaurarEstoqueDesativado}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <PackageCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <PackageCheck className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Reativar Desativados</div>
                       <div className="text-[10px] text-slate-400">Mostra a contagem antes de aplicar</div>
@@ -1905,7 +1910,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     onClick={() => setShowDesfazerLote(true)}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
-                    <Undo2 className="h-4 w-4 text-amber-400 shrink-0" />
+                    <Undo2 className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
                       <div className="font-bold text-xs text-white">Desfazer Operação em Massa</div>
                       <div className="text-[10px] text-slate-400">Últimas 24 h: remontagem, baixa total, conferência...</div>

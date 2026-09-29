@@ -3383,10 +3383,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             <Button
               variant="outline"
               onClick={() => setShowVincularVendidoModal(true)}
-              className="h-9 text-xs sm:text-sm whitespace-nowrap border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 font-bold gap-1.5 cursor-pointer"
+              className="h-9 text-xs sm:text-sm whitespace-nowrap border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 font-bold gap-1.5 cursor-pointer"
               title="Vincular aparelho já baixado do estoque a um cliente para gerar notinha"
             >
-              <Repeat className="h-4 w-4 text-amber-400" />
+              <Repeat className="h-4 w-4 text-blue-400" />
               Vincular Já Vendido
             </Button>
 

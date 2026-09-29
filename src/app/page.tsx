@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { guardarPreselecaoEtiquetas } from '@/lib/etiquetas/pendentes';
 import { usePathname, useRouter } from 'next/navigation';
-import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
+import { cn, checkIsSuperAdmin, checkIsVendedor, formatarNomeLojaAbreviado } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { supabase } from '@/lib/supabaseClient';
@@ -54,6 +54,7 @@ export default function Home() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const headerNomeLoja = config.nomeLoja || 'Phone Center';
+  const nomesLoja = useMemo(() => formatarNomeLojaAbreviado(headerNomeLoja), [headerNomeLoja]);
   const subtitulo = config.subtituloLoja || 'Sistema de Gestão';
   const headerLogoLoja = config.logoLoja;
   const [showMeuPlanoModal, setShowMeuPlanoModal] = useState(false);
@@ -248,12 +249,12 @@ export default function Home() {
         isSidebarCollapsed ? "md:ml-20" : "md:ml-64"
       )}>
         <div className="app-content-shell">
-          <div className="w-full h-14 glass nav-surface rounded-2xl border border-white/20 flex items-center justify-between gap-3 px-3 sm:px-4 shadow-lg">
-            <div className="flex min-w-0 items-center gap-3">
+          <div className="w-full h-14 glass nav-surface rounded-2xl border border-white/20 flex items-center justify-between gap-2 sm:gap-3 px-2.5 sm:px-4 shadow-lg overflow-hidden">
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 overflow-hidden">
               {headerLogoLoja ? (
                 <img
                   src={headerLogoLoja}
-                  alt={headerNomeLoja || 'Logo da loja'}
+                  alt={nomesLoja.full}
                   className="h-8 w-8 sm:h-10 sm:w-10 rounded-lg object-cover flex-shrink-0"
                 />
               ) : (
@@ -263,14 +264,21 @@ export default function Home() {
                   className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl object-contain flex-shrink-0 bg-slate-900/50 p-1 border border-white/10"
                 />
               )}
-              <div className="flex min-w-0 flex-col items-start">
-                <h1 className="text-base sm:text-xl font-bold truncate leading-none max-w-[30vw] sm:max-w-[28rem]">{headerNomeLoja || 'Phone Center'}</h1>
+              <div className="flex min-w-0 flex-col items-start overflow-hidden">
+                <h1 
+                  className="text-sm sm:text-base md:text-xl font-bold truncate leading-none" 
+                  title={nomesLoja.full}
+                >
+                  <span className="hidden md:inline">{nomesLoja.full}</span>
+                  <span className="hidden sm:inline md:hidden">{nomesLoja.medio}</span>
+                  <span className="inline sm:hidden">{nomesLoja.compact}</span>
+                </h1>
                 <p className="text-[10px] sm:text-xs text-muted-foreground truncate leading-none mt-0.5 hidden sm:block">{subtitulo}</p>
               </div>
             </div>
 
             {/* User Info, Busca Railway, Meu Plano e Dropdown */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               {/* Barra de Pesquisa Estilo Railway / Cmd+K */}
               <button
                 onClick={() => setShowCommandPalette(true)}

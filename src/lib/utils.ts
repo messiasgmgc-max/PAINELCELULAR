@@ -436,3 +436,45 @@ export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = 
   };
 }
 
+/**
+ * Abrevia o nome da loja responsivamente para caber no header sem colidir com ícones:
+ * - Telas grandes (>= 768px): Nome completo (ex: "Lucas Imports 031", "Phone Center")
+ * - Telas médias (400px - 767px): Nome semi-abreviado (ex: "Lucas Imp.", "Phone C.")
+ * - Telas compactas (< 400px): Iniciais (ex: "L.I.", "P.C.")
+ */
+export function formatarNomeLojaAbreviado(nome?: string) {
+  if (!nome || !nome.trim()) return { full: 'Phone Center', medio: 'Phone C.', compact: 'P.C.' };
+  const limpo = nome.trim();
+  const partes = limpo.split(/\s+/).filter(Boolean);
+
+  if (partes.length === 1) {
+    const palavra = partes[0];
+    return {
+      full: palavra,
+      medio: palavra.length > 9 ? `${palavra.slice(0, 8)}.` : palavra,
+      compact: palavra.length > 4 ? `${palavra.slice(0, 3)}.` : palavra,
+    };
+  }
+
+  const p1 = partes[0];
+  const p2 = partes[1];
+  
+  // Médio: Primeira palavra + primeiras 3-4 letras da segunda (ex: "Lucas Imp." ou "Phone C.")
+  let medio = '';
+  if (p2.length <= 4) {
+    medio = `${p1} ${p2}`;
+  } else {
+    medio = `${p1} ${p2.slice(0, 3)}.`;
+  }
+
+  // Compacto: Iniciais das palavras alfabéticas (ex: "L.I." ou "P.C.")
+  const letras = partes.filter(p => /[a-zA-Z]/i.test(p));
+  const compact = (letras.length > 0 ? letras.slice(0, 2).map(p => p[0].toUpperCase()).join('.') : p1.slice(0, 2).toUpperCase()) + '.';
+
+  return {
+    full: limpo,
+    medio,
+    compact,
+  };
+}
+
