@@ -5,7 +5,8 @@ import {
   BarChart3, Users, Smartphone, Package, ListTodo, Wrench, Calendar,
   Shield, X, DollarSign, Settings, ChevronRight, Lock, Percent,
   ChevronLeft, Menu, Tag, FileText, Boxes, Layers, Repeat,
-  Sparkles, SlidersHorizontal, Home, Search, Plus, CheckSquare, QrCode
+  Sparkles, SlidersHorizontal, Home, Search, Plus, CheckSquare, QrCode,
+  Download, MessageCircle, RotateCcw, Eye
 } from 'lucide-react';
 import { cn, checkIsSuperAdmin, checkIsVendedor } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
@@ -354,8 +355,65 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
                   <span className="truncate">Buscar</span>
                 </button>
               </div>
+            ) : currentTab === 'taxas-maquininha' ? (
+              /* 3. SE ESTIVER NA ABA DE TAXAS DE MAQUININHA */
+              <div className="grid grid-cols-5 gap-1 w-full overflow-hidden items-center">
+                {/* 1. Menu Geral */}
+                <button
+                  type="button"
+                  onClick={openDrawer}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer select-none"
+                >
+                  <Menu className="w-4 h-4" />
+                  <span className="truncate">Menu</span>
+                </button>
+
+                {/* 2. Alternar Modo Cliente / Lojista */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('toggle-modo')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold text-amber-300 hover:text-amber-200 bg-amber-950/40 border border-amber-500/30 transition-all active:scale-95 cursor-pointer select-none"
+                  title="Alternar Modo Cliente / Lojista"
+                >
+                  <Eye className="w-4 h-4 text-amber-400" />
+                  <span className="truncate">Margens</span>
+                </button>
+
+                {/* 3. Copiar WhatsApp (Central FAB) */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('copiar-whatsapp')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer select-none"
+                  title="Copiar Simulação Formatada para WhatsApp"
+                >
+                  <MessageCircle className="w-5 h-5 stroke-[2.2]" />
+                  <span className="truncate">WhatsApp</span>
+                </button>
+
+                {/* 4. Baixar Imagem PNG */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('baixar-png')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-bold text-cyan-300 hover:text-cyan-200 bg-cyan-950/40 border border-cyan-500/30 transition-all active:scale-95 cursor-pointer select-none"
+                  title="Baixar Tabela de Parcelamento em Imagem PNG"
+                >
+                  <Download className="w-4 h-4 text-cyan-400" />
+                  <span className="truncate">Baixar PNG</span>
+                </button>
+
+                {/* 5. Zerar Valor */}
+                <button
+                  type="button"
+                  onClick={() => triggerPhoneCenterAction('zerar-valor')}
+                  className="h-12 min-h-[44px] flex flex-col items-center justify-center gap-0.5 rounded-xl py-1 text-[10px] font-semibold text-slate-400 hover:text-rose-400 hover:bg-white/10 transition-colors cursor-pointer select-none"
+                  title="Limpar Campo de Valor"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span className="truncate">Zerar</span>
+                </button>
+              </div>
             ) : (
-              /* 3. DEMAIS ABAS: DOCK PADRÃO */
+              /* 4. DEMAIS ABAS: DOCK PADRÃO */
               <div className="grid grid-cols-5 gap-1 w-full overflow-hidden">
                 <button
                   type="button"

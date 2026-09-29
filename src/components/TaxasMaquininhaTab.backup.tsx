@@ -89,7 +89,7 @@ export function TaxasMaquininhaTab() {
         if (parsed.calcBandeira) setCalcBandeira(parsed.calcBandeira);
         if (parsed.calcParcelaSelecionada) setCalcParcelaSelecionada(parsed.calcParcelaSelecionada);
         if (parsed.tipoBusca) setTipoBusca(parsed.tipoBusca);
-        // Modo Cliente sempre como padrão de abertura conforme solicitado
+        if (typeof parsed.modoAvancado === 'boolean') setModoAvancado(parsed.modoAvancado);
       }
     } catch (e) {}
   }, [storageKey]);
@@ -101,10 +101,11 @@ export function TaxasMaquininhaTab() {
         calcBandeira,
         calcParcelaSelecionada,
         tipoBusca,
+        modoAvancado,
       };
       localStorage.setItem(storageKey, JSON.stringify(prefs));
     } catch (e) {}
-  }, [calcPerfil, calcBandeira, calcParcelaSelecionada, tipoBusca, storageKey]);
+  }, [calcPerfil, calcBandeira, calcParcelaSelecionada, tipoBusca, modoAvancado, storageKey]);
 
   // Cálculo automático em tempo real com debounce
   useEffect(() => {
@@ -121,10 +122,7 @@ export function TaxasMaquininhaTab() {
   const [copiedWhatsApp, setCopiedWhatsApp] = useState(false);
 
   const handleCopyWhatsApp = () => {
-    if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) {
-      toast.error('Digite um valor do produto para copiar a simulação!');
-      return;
-    }
+    if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) return;
 
     const nomeLoja = config?.nomeLoja || 'Phone Center';
     const valorProdStr = parseFloat(calcValorBase || '0').toFixed(2).replace('.', ',');
@@ -154,10 +152,7 @@ export function TaxasMaquininhaTab() {
   };
 
   const handleExportPNG = () => {
-    if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) {
-      toast.error('Digite um valor do produto para gerar a imagem PNG!');
-      return;
-    }
+    if (!tabelaTodasParcelas || tabelaTodasParcelas.length === 0) return;
 
     const canvas = document.createElement('canvas');
     const width = 840;
@@ -648,31 +643,6 @@ export function TaxasMaquininhaTab() {
     });
   }, [perfisAgrupados, calcPerfil, calcValorBase, calcBandeira]);
 
-  // Ouvinte para ações disparadas pela Barra Flutuante Mobile (MobileNav)
-  useEffect(() => {
-    const handleAction = (e: any) => {
-      const act = e.detail?.action;
-      if (act === 'copiar-whatsapp') {
-        handleCopyWhatsApp();
-      } else if (act === 'baixar-png') {
-        handleExportPNG();
-      } else if (act === 'toggle-modo') {
-        setModoAvancado((prev) => {
-          const next = !prev;
-          toast.success(next ? 'Modo Lojista ativado (mostra lucros)' : 'Modo Cliente ativado (oculta lucros)');
-          return next;
-        });
-      } else if (act === 'zerar-valor') {
-        setDisplayValorBase('');
-        setCalcValorBase('');
-        toast.success('Valor zerado.');
-      }
-    };
-
-    window.addEventListener('phonecenter:action' as any, handleAction);
-    return () => window.removeEventListener('phonecenter:action' as any, handleAction);
-  }, [tabelaTodasParcelas, modoAvancado, calcValorBase, calcPerfil, calcBandeira, config]);
-
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 px-2 pb-16 font-sans">
       {offlineAt && (
@@ -755,34 +725,6 @@ export function TaxasMaquininhaTab() {
             <div className="w-full">
               <label className="mb-2 block text-[13px] font-semibold text-slate-300">Valor Produto (R$)</label>
               <input type="text" inputMode="decimal" autoFocus className="w-full rounded-xl border border-white/10 bg-slate-900/80 px-3.5 py-2.5 text-sm font-bold text-white outline-none placeholder:text-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all" placeholder="R$ 0,00" value={displayValorBase ? 'R$ ' + (parseFloat(displayValorBase) / 100).toLocaleString('pt-BR', {minimumFractionDigits: 2}) : ''} onChange={handleValorChange} />
-              {/* Atalhos rápidos de valor no mobile */}
-              <div className="flex md:hidden items-center gap-1.5 mt-2">
-                {[100, 500, 1000].map((inc) => (
-                  <button
-                    key={inc}
-                    type="button"
-                    onClick={() => {
-                      const curr = parseFloat(calcValorBase || '0');
-                      const next = curr + inc;
-                      setCalcValorBase(next.toString());
-                      setDisplayValorBase((next * 100).toString());
-                    }}
-                    className="flex-1 py-1.5 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 text-xs font-bold rounded-lg border border-slate-700 transition-all cursor-pointer active:scale-95"
-                  >
-                    +{inc}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCalcValorBase('');
-                    setDisplayValorBase('');
-                  }}
-                  className="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700/80 text-rose-300 text-xs font-bold rounded-lg border border-slate-700 transition-all cursor-pointer active:scale-95"
-                >
-                  Limpar
-                </button>
-              </div>
             </div>
             
             <div className="w-full">
@@ -964,69 +906,59 @@ export function TaxasMaquininhaTab() {
               </div>
 
               {/* MOBILE LIST */}
-              <div className="block md:hidden space-y-1.5 mt-3 max-h-[65vh] overflow-y-auto pr-1 scrollbar-soft">
+              <div className="block md:hidden space-y-2.5 mt-4 max-h-[60vh] overflow-y-auto pr-1 scrollbar-soft">
                 {tabelaTodasParcelas.map((row) => {
                   const isSelected = calcResultado && (
                     (row.isDebito && calcResultado.isDebito) ||
                     (!row.isDebito && !calcResultado.isDebito && row.numParcelas === calcResultado.numParcelas)
                   );
+                  const isHighlighted = row.numParcelas === 1 || row.numParcelas === 10 || row.numParcelas === 12;
                   
                   return (
                     <div 
                       key={row.id} 
-                      onClick={() => {
-                        const txt = row.isDebito
-                          ? `Débito: R$ ${row.valorTotalCobrado.toFixed(2).replace('.', ',')}`
-                          : `${row.labelExibicao}: ${row.numParcelas}x de R$ ${row.valorDaParcela.toFixed(2).replace('.', ',')} (Total: R$ ${row.valorTotalCobrado.toFixed(2).replace('.', ',')})`;
-                        navigator.clipboard.writeText(txt);
-                        toast.success(`Copiado: ${txt}`);
-                      }}
-                      className={`w-full h-[52px] px-3 py-1.5 rounded-xl border flex items-center justify-between gap-2.5 transition-all cursor-pointer select-none group ${
+                      className={`flex flex-col p-3 rounded-xl border transition-all ${
                         isSelected 
                           ? 'border-cyan-400 bg-cyan-950/40 shadow-lg shadow-cyan-900/20' 
-                          : 'border-white/10 bg-slate-900/80 hover:bg-slate-800/80 active:bg-blue-950/40'
+                          : isHighlighted
+                            ? 'border-white/20 bg-white/10'
+                            : 'border-white/5 bg-white/5'
                       }`}
                     >
-                      {/* Parcela badge */}
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-extrabold text-xs transition-transform group-hover:scale-105 ${
-                        row.isDebito
-                          ? 'bg-purple-950/60 border border-purple-500/40 text-purple-300'
-                          : 'bg-blue-950/50 border border-blue-500/30 text-cyan-300'
-                      }`}>
-                        {row.isDebito ? 'DÉB' : row.labelExibicao}
-                      </div>
-
-                      {/* Valor Parcela + Total */}
-                      <div className="flex-1 min-w-0 pr-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-extrabold text-sm text-white">
-                            {row.isDebito
-                              ? `R$ ${row.valorTotalCobrado.toFixed(2).replace('.', ',')}`
-                              : `${row.numParcelas}x R$ ${row.valorDaParcela.toFixed(2).replace('.', ',')}`}
-                          </span>
-                        </div>
-                        <div className="text-[10.5px] text-slate-400 truncate flex items-center gap-1.5">
-                          <span>Total: R$ {row.valorTotalCobrado.toFixed(2).replace('.', ',')}</span>
-                          <span className="text-slate-600">•</span>
-                          <span className="text-cyan-400 font-semibold">{row.taxaCliente.toFixed(2)}%</span>
-                        </div>
-                      </div>
-
-                      {/* Lucro Loja (Se Modo Lojista ativado) ou Atalho Copiar */}
-                      <div className="shrink-0 text-right">
-                        {modoAvancado && row.lucroTaxa > 0 ? (
-                          <div className="flex flex-col items-end">
-                            <span className="text-[9.5px] text-emerald-400 bg-emerald-950/50 border border-emerald-500/30 px-1.5 py-0.2 rounded font-bold">
-                              +R$ {row.lucroTaxa.toFixed(2).replace('.', ',')}
-                            </span>
-                            <span className="text-[9px] text-slate-500 mt-0.5">lucro</span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            {row.isDebito ? (
+                              <span className="bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                                💵 DÉBITO
+                              </span>
+                            ) : (
+                              <span className="text-white font-extrabold text-sm">{row.labelExibicao}</span>
+                            )}
+                            <span className="text-[10px] font-bold text-cyan-400">{row.taxaCliente.toFixed(2)}% cli</span>
                           </div>
-                        ) : (
-                          <span className="text-[10px] text-slate-500 group-hover:text-cyan-400 font-medium">
-                            Copiar
-                          </span>
-                        )}
+                          
+                          <div className="text-[11px] font-medium text-slate-400">
+                            Total máq: R$ {row.valorTotalCobrado.toFixed(2).replace('.', ',')}
+                          </div>
+                        </div>
+                        
+                        <div className="text-right flex flex-col items-end">
+                          <div className={`font-black tracking-tight ${isSelected ? 'text-cyan-300 text-lg' : 'text-white text-base'}`}>
+                            R$ {row.valorDaParcela.toFixed(2).replace('.', ',')}
+                          </div>
+                          {!row.isDebito && <div className="text-[10px] text-slate-500 font-medium">/mês</div>}
+                        </div>
                       </div>
+                      
+                      {modoAvancado && (
+                        <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between">
+                          <div className="text-[10px] text-slate-400 font-medium">Custo: {row.taxaBase.toFixed(2)}%</div>
+                          <div className={`text-[11px] font-bold ${row.lucroTaxa > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            Lucro: {row.lucroTaxa > 0 ? '+ ' : ''}R$ {row.lucroTaxa.toFixed(2).replace('.', ',')}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
