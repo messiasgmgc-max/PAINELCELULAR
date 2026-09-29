@@ -55,27 +55,30 @@ export async function POST(request: Request) {
 
     // 1. Se configurado Resend (preferencial)
     if (process.env.RESEND_API_KEY) {
-      const resend = new Resend(process.env.RESEND_API_KEY);
-      const fromEmail = process.env.RESEND_FROM_EMAIL || 'Phone Center <contato@phonecenter.tech>';
+      try {
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const fromEmail = process.env.RESEND_FROM_EMAIL || 'Phone Center <contato@phonecenter.tech>';
 
-      const { data, error } = await resend.emails.send({
-        from: fromEmail,
-        to: para,
-        subject: assunto,
-        html: htmlContent,
-        attachments: anexos.map((a) => ({
-          filename: a.filename,
-          content: a.content,
-          path: a.path,
-        })),
-      });
+        const { data, error } = await resend.emails.send({
+          from: fromEmail,
+          to: para,
+          subject: assunto,
+          html: htmlContent,
+          attachments: anexos.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+            path: a.path,
+          })),
+        });
 
-      if (error) {
-        console.error('Erro Resend API:', error);
-        throw new Error(error.message);
+        if (error) {
+          console.warn('⚠️ Erro na API do Resend, acionando fallback SMTP:', error);
+        } else {
+          return NextResponse.json({ message: 'Email enviado com sucesso via Resend!', id: data?.id, provider: 'resend' }, { status: 200 });
+        }
+      } catch (resendErr: any) {
+        console.warn('⚠️ Exceção ao chamar Resend, acionando fallback SMTP:', resendErr?.message);
       }
-
-      return NextResponse.json({ message: 'Email enviado com sucesso via Resend!', id: data?.id }, { status: 200 });
     }
 
     // 2. Fallback para Nodemailer / SMTP
