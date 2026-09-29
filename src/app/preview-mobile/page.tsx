@@ -31,6 +31,7 @@ import { MobileNewDeviceSheet } from '@/components/mobile-preview/MobileNewDevic
 import { MobileSaleRow, MockVenda } from '@/components/mobile-preview/MobileSaleRow';
 import { MobileSaleDetailsSheet } from '@/components/mobile-preview/MobileSaleDetailsSheet';
 import { MobileNewSaleSheet } from '@/components/mobile-preview/MobileNewSaleSheet';
+import { MobileImportSaleSheet } from '@/components/mobile-preview/MobileImportSaleSheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -254,6 +255,7 @@ export default function PreviewMobilePage() {
   const [vendas, setVendas] = useState<MockVenda[]>(MOCK_VENDAS_INICIAL);
   const [selectedVenda, setSelectedVenda] = useState<MockVenda | null>(null);
   const [isNewSaleOpen, setIsNewSaleOpen] = useState(false);
+  const [isImportSaleOpen, setIsImportSaleOpen] = useState(false);
   const [filtroTipoVenda, setFiltroTipoVenda] = useState<'Todas' | 'Varejo' | 'Atacado'>('Todas');
 
   // Configurações da Página de Teste
@@ -604,6 +606,7 @@ export default function PreviewMobilePage() {
 
           {/* BARRA INFERIOR FLUTUANTE ADAPTADA */}
           <MobileBottomBar
+            activeTab={activeTab}
             onSearchClick={() => {
               if (scrollContainerRef.current) {
                 scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
@@ -625,6 +628,8 @@ export default function PreviewMobilePage() {
                 showToast('Abrindo modo conferência de estoque!');
               }
             }}
+            onImportarPedidoClick={() => setIsImportSaleOpen(true)}
+            onVincularVendidoClick={() => showToast('Abrindo vinculação de aparelho já baixado do estoque!')}
             filtrosAtivosCount={
               activeTab === 'vendas'
                 ? filtroTipoVenda !== 'Todas' ? 1 : 0
@@ -648,6 +653,15 @@ export default function PreviewMobilePage() {
       )}
 
       {/* BOTTOM SHEETS DE VENDAS */}
+      <MobileImportSaleSheet
+        isOpen={isImportSaleOpen}
+        onClose={() => setIsImportSaleOpen(false)}
+        onVendaCriada={(nova) => {
+          setVendas((prev) => [nova, ...prev]);
+          showToast(`Venda importada com IA: ${nova.aparelho_modelo} (${nova.cliente_nome})!`);
+        }}
+      />
+
       <MobileSaleDetailsSheet
         venda={selectedVenda}
         isOpen={!!selectedVenda}
