@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { Search, ChevronDown, ChevronRight, CheckSquare, Square, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { formatarSaudeBateria, getAparelhoCodigo, cn, sortModelosCronologico, parseCapacidadeGB } from '@/lib/utils';
+import { formatarSaudeBateria, getAparelhoCodigo, cn, sortModelosCronologico, parseCapacidadeGB, normalizarNomeModelo } from '@/lib/utils';
 
 interface ConferenciaManualViewProps {
   aparelhosEstoque: any[];
@@ -69,7 +69,7 @@ export function ConferenciaManualView({
   const grupos = useMemo(() => {
     const map: Record<string, any[]> = {};
     aparelhosFiltrados.forEach((item) => {
-      const nome = item.modelo || 'Outros';
+      const nome = normalizarNomeModelo(item.modelo);
       if (!map[nome]) map[nome] = [];
       map[nome].push(item);
     });

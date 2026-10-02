@@ -1,5 +1,5 @@
 import { ItemEscaneado, RascunhoConferencia } from './types';
-import { sortModelosCronologico } from '@/lib/utils';
+import { sortModelosCronologico, normalizarNomeModelo } from '@/lib/utils';
 
 export function getRascunhoKey(lojaId: string | null | undefined, usuarioId: string | null | undefined): string {
   const lId = lojaId || 'default_loja';
@@ -132,7 +132,7 @@ export function gerarTextoWhatsAppFaltantes(
   // Agrupa faltantes por modelo
   const map: Record<string, any[]> = {};
   faltantes.forEach((f) => {
-    const mod = f.modelo || 'Outros';
+    const mod = normalizarNomeModelo(f.modelo);
     if (!map[mod]) map[mod] = [];
     map[mod].push(f);
   });

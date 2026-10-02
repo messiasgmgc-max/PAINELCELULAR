@@ -13,15 +13,17 @@ import {
   ShieldCheck, 
   CheckSquare, 
   FileSpreadsheet,
-  MessageCircle
+  MessageCircle,
+  Copy
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmarAcaoEstoqueModal } from '@/components/ConfirmarAcaoEstoqueModal';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { cn, sortModelosCronologico, getAparelhoCodigo, parseCapacidadeGB } from '@/lib/utils';
+import { cn, sortModelosCronologico, getAparelhoCodigo, parseCapacidadeGB, normalizarNomeModelo } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { estaNoEstoque, patchSaida } from '@/lib/estoque/ciclo';
 import type { PatchCiclo, TipoMovimentacao } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
@@ -77,6 +79,7 @@ export function ConferenciaEstoqueModal({
   onEstoqueAtualizado,
 }: ConferenciaEstoqueModalProps) {
   const { usuario } = useAuth();
+  const { config } = useStoreConfig();
   const [etapa, setEtapa] = useState<'escaneamento' | 'relatorio'>('escaneamento');
   const [modoConferencia, setModoConferencia] = useState<'scanner' | 'manual'>('scanner');
   const [escaneados, setEscaneados] = useState<ItemEscaneado[]>([]);
@@ -321,6 +324,10 @@ export function ConferenciaEstoqueModal({
       .sort((a, b) => {
         const cron = sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos);
         if (cron !== 0) return cron;
+        const modA = normalizarNomeModelo(a.modelo);
+        const modB = normalizarNomeModelo(b.modelo);
+        const modComp = modA.localeCompare(modB, 'pt-BR');
+        if (modComp !== 0) return modComp;
         const capA = parseCapacidadeGB(a.capacidade);
         const capB = parseCapacidadeGB(b.capacidade);
         if (capA !== capB) return capA - capB;
@@ -336,6 +343,10 @@ export function ConferenciaEstoqueModal({
       .sort((a, b) => {
         const cron = sortModelosCronologico(a.modelo || '', b.modelo || '', ordemModelos);
         if (cron !== 0) return cron;
+        const modA = normalizarNomeModelo(a.modelo);
+        const modB = normalizarNomeModelo(b.modelo);
+        const modComp = modA.localeCompare(modB, 'pt-BR');
+        if (modComp !== 0) return modComp;
         const capA = parseCapacidadeGB(a.capacidade);
         const capB = parseCapacidadeGB(b.capacidade);
         if (capA !== capB) return capA - capB;
@@ -427,7 +438,7 @@ export function ConferenciaEstoqueModal({
   };
 
   const gerarTextoSaidasGrupo = () => {
-    const nomeLoja = 'LOJA';
+    const nomeLoja = config?.nomeLoja || 'Phone Center';
     return gerarTextoWhatsAppFaltantes(nomeLoja, aparelhosAlvo.length, aparelhosConfirmados.length, aparelhosFaltantes);
   };
 
@@ -826,6 +837,20 @@ export function ConferenciaEstoqueModal({
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={async () => {
+                      const txt = gerarTextoSaidasGrupo();
+                      const ok = await copiarParaAreaTransferencia(txt);
+                      if (ok) {
+                        toast.success('📋 Texto de saídas copiado para o WhatsApp!');
+                      }
+                    }}
+                    className="text-[10px] h-7 gap-1 font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-emerald-400" /> Copiar Saídas
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => aplicarLoteAcoes('remover')}
                     className="text-[10px] h-7 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30 font-bold"
                   >
@@ -864,7 +889,7 @@ export function ConferenciaEstoqueModal({
                     >
                       <div className="min-w-0">
                         <div className="font-bold text-white truncate flex items-center gap-2">
-                          <span>{aparelho.modelo}</span>
+                          <span>{normalizarNomeModelo(aparelho.modelo)}</span>
                           {aparelho.capacidade && <span className="text-[10px] text-slate-400">{aparelho.capacidade}</span>}
                           {aparelho.cor && <span className="text-[10px] text-cyan-400">{aparelho.cor}</span>}
                         </div>
@@ -941,7 +966,7 @@ export function ConferenciaEstoqueModal({
                   }}
                   className="text-xs font-bold gap-1.5 border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 h-9 px-3 rounded-xl cursor-pointer"
                 >
-                  <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> WhatsApp
+                  <Copy className="w-3.5 h-3.5 text-emerald-400" /> Copiar Saídas (WhatsApp)
                 </Button>
 
                 <Button

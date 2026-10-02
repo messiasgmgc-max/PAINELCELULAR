@@ -231,17 +231,62 @@ export function parseCapacidadeGB(capStr?: string): number {
 }
 
 /**
+ * Normaliza o nome do modelo para garantir agrupamento exato e padronizado:
+ * - Remove espaços extras no início/fim, múltiplos espaços e caracteres invisíveis (\u00A0)
+ * - Padroniza nomes numéricos (ex: '15', '15 Pro Max' -> 'iPhone 15', 'iPhone 15 Pro Max')
+ * - Remove prefixo 'Apple ' desnecessário
+ * - Padroniza grafia e caixa (iPhone, iPad, Apple Watch, Pro Max, Plus, Mini, SE)
+ */
+export function normalizarNomeModelo(nome?: string | null): string {
+  if (!nome || !nome.trim()) return 'Outros';
+
+  let limpo = nome
+    .replace(/[\u00A0\s]+/g, ' ')
+    .replace(/^apple\s+/i, '')
+    .trim();
+
+  // Caso seja apenas número ou comece com número de geração do iPhone (ex: '15', '15 Pro Max')
+  if (/^\d{1,2}(\b|$)/.test(limpo)) {
+    limpo = `iPhone ${limpo}`;
+  } else if (/^iphone\b/i.test(limpo)) {
+    const resto = limpo.replace(/^iphone\s*/i, '').trim();
+    limpo = resto ? `iPhone ${resto}` : 'iPhone';
+  } else if (/^ipad\b/i.test(limpo)) {
+    const resto = limpo.replace(/^ipad\s*/i, '').trim();
+    limpo = resto ? `iPad ${resto}` : 'iPad';
+  } else if (/^watch\b/i.test(limpo) || /^apple watch\b/i.test(limpo)) {
+    const resto = limpo.replace(/^(apple\s*)?watch\s*/i, '').trim();
+    limpo = resto ? `Apple Watch ${resto}` : 'Apple Watch';
+  }
+
+  // Padronização precisa dos sufixos de modelos
+  limpo = limpo
+    .replace(/\bpro\s*max\b/gi, 'Pro Max')
+    .replace(/\bpromax\b/gi, 'Pro Max')
+    .replace(/\bpro\b/gi, 'Pro')
+    .replace(/\bplus\b/gi, 'Plus')
+    .replace(/\bmini\b/gi, 'Mini')
+    .replace(/\bse\s*([1-3])\b/gi, 'SE $1')
+    .replace(/\bse\b/gi, 'SE');
+
+  return limpo;
+}
+
+/**
  * Ordena dois modelos alfabeticamente e cronologicamente do MAIS ANTIGO para o MAIS NOVO (Crescente).
  */
 export function sortModelosCronologico(modeloA: string, modeloB: string, ordem: 'antigo_para_novo' | 'novo_para_antigo' = 'antigo_para_novo'): number {
-  const scoreA = getModeloOrdemCronologica(modeloA);
-  const scoreB = getModeloOrdemCronologica(modeloB);
+  const normA = normalizarNomeModelo(modeloA);
+  const normB = normalizarNomeModelo(modeloB);
+
+  const scoreA = getModeloOrdemCronologica(normA);
+  const scoreB = getModeloOrdemCronologica(normB);
 
   if (scoreA !== scoreB) {
     return ordem === 'antigo_para_novo' ? scoreA - scoreB : scoreB - scoreA;
   }
 
-  return modeloA.localeCompare(modeloB, 'pt-BR');
+  return normA.localeCompare(normB, 'pt-BR');
 }
 
 /**
