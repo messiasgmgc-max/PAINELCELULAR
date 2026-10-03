@@ -537,6 +537,15 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     bateria: '',
     preco: '',
     custo: '',
+    isUpgrade: false,
+    tradeInMarca: 'Apple',
+    tradeInModelo: '',
+    tradeInCapacidade: '128GB',
+    tradeInCor: '',
+    tradeInImei: '',
+    tradeInBateria: '',
+    tradeInValor: '',
+    valorVolta: '',
     vendedor: '',
     formaPagamento: 'pix',
     dataVenda: new Date().toISOString().slice(0, 10),
@@ -1199,6 +1208,38 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         ? (parsedData.formaPagamento as Venda['metodo'])
         : 'dinheiro';
 
+      // Tratamento Inteligente de Upgrade / Trade-In
+      const isUpgrade = Boolean(parsedData.isUpgrade || (parsedData.tradeIn && parsedData.tradeIn.modelo));
+      const tradeInBruto = isUpgrade ? parsedData.tradeIn : null;
+      const valorEntradaTroca = tradeInBruto ? Number(tradeInBruto.valor || parsedData.valorEntradaTroca || 0) : 0;
+      const valorVolta = isUpgrade && valorEntradaTroca > 0
+        ? (parsedData.valorVolta ? Number(parsedData.valorVolta) : Math.max(0, valorVenda - valorEntradaTroca))
+        : valorVenda;
+
+      const tradeInPayload = isUpgrade && valorEntradaTroca > 0 && tradeInBruto?.modelo
+        ? {
+            marca: tradeInBruto.marca || (/iphone|ipad|apple/i.test(tradeInBruto.modelo) ? 'Apple' : null),
+            modelo: tradeInBruto.modelo,
+            capacidade: tradeInBruto.capacidade || null,
+            cor: tradeInBruto.cor || null,
+            imei: tradeInBruto.imei || null,
+            saude_bateria: tradeInBruto.bateria ? `${tradeInBruto.bateria}%` : (tradeInBruto.saude_bateria || null),
+            condicao: 'seminovo',
+            custo: valorEntradaTroca,
+            preco: Math.round(valorEntradaTroca * 1.3),
+            precoAtacado: Math.round(valorEntradaTroca * 1.15),
+            preco_atacado: Math.round(valorEntradaTroca * 1.15),
+            observacoes: `Recebido como troca (trade-in) no PDV de ${clienteNomeFinal || 'cliente'}`,
+          }
+        : null;
+
+      const pagamentosVenda = isUpgrade && valorEntradaTroca > 0
+        ? [
+            { id: Date.now().toString(), metodo: 'trade_in' as const, valor: valorEntradaTroca, parcelas: 1 },
+            { id: (Date.now() + 1).toString(), metodo: metodoPgto, valor: valorVolta, parcelas: 1 }
+          ]
+        : [{ id: Date.now().toString(), metodo: metodoPgto, valor: valorVenda, parcelas: 1 }];
+
       const condicaoTexto = (parsedData.aparelho?.condicao || aparelhoFinal?.condicao) === 'novo' ? 'Lacrado' : 'Seminovo';
       const cartItem: VendaItem = {
         id: Date.now().toString(),
@@ -1219,6 +1260,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const percentualLucro = valorVenda > 0 ? (lucroVenda / valorVenda) * 100 : 0;
 
       // 3. Inserir e FINALIZAR A VENDA DIRETO no banco de dados!
+      const descricaoVenda = isUpgrade && tradeInPayload
+        ? `Upgrade: Venda ${cartItem.descricao} (Entrada ${tradeInPayload.modelo} ${tradeInPayload.capacidade || ''} R$ ${valorEntradaTroca.toFixed(2)} + Volta R$ ${valorVolta.toFixed(2)})`
+        : `Venda Gerada por IA - ${cartItem.descricao}`;
+
       const vendaPayload = {
         clienteId: clienteIdFinal || null,
         clienteNome: clienteNomeFinal,
@@ -1232,27 +1277,35 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         dataPagamento: dataPagamentoIso,
         status: 'pago',
         metodo: metodoPgto,
-        descricao: `Venda Gerada por IA - ${cartItem.descricao}`,
+        descricao: descricaoVenda,
         garantia: `${config?.garantiaDias || 90} dias`,
         descontoTotal: 0,
-        pagamentos: [{ id: Date.now().toString(), metodo: metodoPgto, valor: valorVenda, parcelas: 1 }],
+        pagamentos: pagamentosVenda,
+        tradeIn: tradeInPayload,
+        trade_in: tradeInPayload,
+        valorEntradaTroca: valorEntradaTroca > 0 ? valorEntradaTroca : null,
+        valorVolta: isUpgrade ? valorVolta : null,
         loja_id: usuario?.lojaId || null
       };
 
-      // 4. Venda e baixa do aparelho numa transação só.
+      // 4. Venda, baixa do aparelho vendido e cadastro do aparelho da troca numa transação só.
       const aparelhoJaForaDoEstoque =
         aparelhoFinal?.id && !estaNoEstoque(aparelhoFinal as unknown as EstadoCicloAparelho) ? [aparelhoFinal.id] : [];
       const resultadoVendaIA = await registrarVendaAtomica(supabase, {
         venda: vendaPayload,
         aparelhoIds: aparelhoFinal?.id ? [aparelhoFinal.id] : [],
         permitirForaDoEstoque: aparelhoJaForaDoEstoque,
+        tradeIn: tradeInPayload,
         origem: 'venda',
         usuarioId: usuario?.id || null,
         usuarioNome: usuario?.nome || null,
-        observacao: 'Venda gerada por IA',
+        observacao: isUpgrade ? `Venda com Upgrade (Troca de ${tradeInPayload?.modelo})` : 'Venda gerada por IA',
       });
       const vendaCriada: any = resultadoVendaIA.venda;
-      if (aparelhoFinal?.id) await fetchAparelhos();
+      if (aparelhoFinal?.id || resultadoVendaIA.tradeInId) await fetchAparelhos();
+      if (resultadoVendaIA.tradeInId && tradeInPayload) {
+        toast.success(`Aparelho da troca (${tradeInPayload.modelo}) entrou no estoque.`);
+      }
 
       await carregarVendas();
       setShowSaleCelebration(true);
@@ -1366,6 +1419,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       if (faltantes.length > 0 || leituraFotos) {
         setAiParsedData(parsed);
         const apPreSel = matchedStockId ? disponiveis.find(a => a.id === matchedStockId) : null;
+        const isUp = Boolean(parsed.isUpgrade || (parsed.tradeIn && parsed.tradeIn.modelo));
+        const vTot = apPreSel ? Number(apPreSel.preco) : parsed.aparelho?.preco ? Number(parsed.aparelho.preco) : parsed.valorTotal ? Number(parsed.valorTotal) : 0;
+        const vEntrada = parsed.tradeIn?.valor ? Number(parsed.tradeIn.valor) : parsed.valorEntradaTroca ? Number(parsed.valorEntradaTroca) : 0;
+        const vVoltaCalc = parsed.valorVolta ? Number(parsed.valorVolta) : (vTot > 0 && vEntrada > 0 ? Math.max(0, vTot - vEntrada) : vTot);
+
         setDadosFaltantesForm({
           clienteNome: parsed.cliente?.nome || '',
           clienteTelefone: parsed.cliente?.telefone || '',
@@ -1379,8 +1437,17 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           bateria: apPreSel
             ? String(apPreSel.saudeBateria || apPreSel.saude_bateria || '')
             : parsed.aparelho?.saudeBateria ? String(parsed.aparelho.saudeBateria) : '',
-          preco: apPreSel ? String(apPreSel.preco) : parsed.aparelho?.preco ? String(parsed.aparelho.preco) : parsed.valorTotal ? String(parsed.valorTotal) : '',
+          preco: vTot > 0 ? String(vTot) : '',
           custo: apPreSel ? String((apPreSel as any).custo || 0) : parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
+          isUpgrade: isUp,
+          tradeInMarca: parsed.tradeIn?.marca || (/iphone|apple/i.test(parsed.tradeIn?.modelo || '') ? 'Apple' : 'Apple'),
+          tradeInModelo: parsed.tradeIn?.modelo || '',
+          tradeInCapacidade: parsed.tradeIn?.capacidade || '128GB',
+          tradeInCor: parsed.tradeIn?.cor || '',
+          tradeInImei: parsed.tradeIn?.imei || '',
+          tradeInBateria: parsed.tradeIn?.bateria ? String(parsed.tradeIn.bateria) : '',
+          tradeInValor: vEntrada > 0 ? String(vEntrada) : '',
+          valorVolta: vVoltaCalc > 0 ? String(vVoltaCalc) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
           formaPagamento: parsed.formaPagamento || 'pix',
           dataVenda: (() => {
@@ -2193,6 +2260,35 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       const valorTotalNovo = parsed.valorTotal ? Number(parsed.valorTotal) : vendaParaCompletarFormulario.valor;
       const metodoPgtoNovo = parsed.formaPagamento || vendaParaCompletarFormulario.metodo || 'pix';
 
+      const isUp = Boolean(parsed.isUpgrade || (parsed.tradeIn && parsed.tradeIn.modelo));
+      const tradeInBruto = isUp ? parsed.tradeIn : null;
+      const valorEntradaTroca = tradeInBruto ? Number(tradeInBruto.valor || parsed.valorEntradaTroca || 0) : 0;
+      const valorVolta = isUp && valorEntradaTroca > 0
+        ? (parsed.valorVolta ? Number(parsed.valorVolta) : Math.max(0, valorTotalNovo - valorEntradaTroca))
+        : valorTotalNovo;
+
+      const pagamentosAtualizados = isUp && valorEntradaTroca > 0
+        ? [
+            { id: Date.now().toString(), metodo: 'trade_in' as const, valor: valorEntradaTroca, parcelas: 1 },
+            { id: (Date.now() + 1).toString(), metodo: metodoPgtoNovo, valor: valorVolta, parcelas: 1 }
+          ]
+        : (vendaParaCompletarFormulario.pagamentos || [{ id: Date.now().toString(), metodo: metodoPgtoNovo, valor: valorTotalNovo, parcelas: 1 }]);
+
+      const tradeInPayload = isUp && valorEntradaTroca > 0 && tradeInBruto?.modelo
+        ? {
+            marca: tradeInBruto.marca || (/iphone|apple/i.test(tradeInBruto.modelo) ? 'Apple' : null),
+            modelo: tradeInBruto.modelo,
+            capacidade: tradeInBruto.capacidade || null,
+            cor: tradeInBruto.cor || null,
+            imei: tradeInBruto.imei || null,
+            condicao: 'seminovo',
+            custo: valorEntradaTroca,
+            preco: Math.round(valorEntradaTroca * 1.3),
+            precoAtacado: Math.round(valorEntradaTroca * 1.15),
+            observacoes: `Recebido como troca no pedido de ${clienteNomeNovo || 'cliente'}`
+          }
+        : null;
+
       const vendaId = vendaParaCompletarFormulario.id;
 
       // 3. Atualizar dados na tabela 'vendas'
@@ -2202,7 +2298,9 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           clienteNome: clienteNomeNovo || undefined,
           valor: valorTotalNovo,
           metodo: metodoPgtoNovo,
+          pagamentos: pagamentosAtualizados,
           dados_cliente_pendente: false,
+          ...(tradeInPayload ? { tradeIn: tradeInPayload, trade_in: tradeInPayload } : {}),
           ...(parsed.observacoes ? { descricao: parsed.observacoes } : {}),
         })
         .eq('id', vendaId);
@@ -2234,6 +2332,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         clienteNome: clienteNomeNovo || vendaParaCompletarFormulario.clienteNome,
         valor: valorTotalNovo,
         metodo: metodoPgtoNovo,
+        pagamentos: pagamentosAtualizados,
+        tradeIn: tradeInPayload || (vendaParaCompletarFormulario as any).tradeIn,
       };
 
       void handleReenviarRecibo(vendaAtualizada, 'todos');
@@ -3151,10 +3251,29 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           cartao_credito: 'CARTÃO DE CRÉDITO',
           cartao_debito: 'CARTÃO DE DÉBITO',
           parcelado: 'PARCELADO',
+          trade_in: '🔁 APARELHO NA TROCA',
           outros: 'OUTROS',
         };
         return map[String(m || '').toLowerCase()] || String(m || 'PIX').toUpperCase();
       };
+
+      // Identifica se há Trade-In / Aparelho na Troca
+      const tradeInPagamentoCupom = (venda as any).pagamentos && Array.isArray((venda as any).pagamentos)
+        ? (venda as any).pagamentos.find((p: any) => p.metodo === 'trade_in' || String(p.metodo || '').toLowerCase().includes('troca'))
+        : null;
+
+      const tradeInInfoCupom = (venda as any).tradeIn || (venda as any).trade_in || (venda as any).aparelhoTroca || (tradeInPagamentoCupom ? {
+        modelo: tradeInPagamentoCupom.descricao || tradeInPagamentoCupom.observacao || 'Aparelho na Troca',
+        valor: Number(tradeInPagamentoCupom.valor || 0),
+        imei: tradeInPagamentoCupom.imei || null,
+      } : null);
+
+      const valorEntradaCupom = Number(tradeInInfoCupom?.valor || tradeInPagamentoCupom?.valor || (venda as any).valorEntradaTroca || 0);
+      const isUpgradeCupom = Boolean(valorEntradaCupom > 0 || (tradeInInfoCupom && tradeInInfoCupom.modelo));
+      const valorTotalCupom = Number(venda.valorTotal || venda.valor || 0);
+      const valorVoltaCupom = isUpgradeCupom && valorEntradaCupom > 0
+        ? ((venda as any).valorVolta ? Number((venda as any).valorVolta) : Math.max(0, valorTotalCupom - valorEntradaCupom))
+        : valorTotalCupom;
 
       const pagamentosCupomTexto = (venda as any).pagamentos && Array.isArray((venda as any).pagamentos) && (venda as any).pagamentos.length > 0
         ? (venda as any).pagamentos.map((p: any) => {
@@ -3164,6 +3283,19 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             return `${label}${parcStr}${valorStr}`;
           }).join(' + ')
         : formatarMetodoCupom(venda.metodo || (venda as any).formaPagamento || 'PIX');
+
+      const tradeInCupomHtml = isUpgradeCupom && valorEntradaCupom > 0
+        ? `
+          <div style="margin-bottom: 8px; padding: 6px; border: 1px dashed #166534; background: #f0fdf4; border-radius: 4px;">
+            <div style="font-weight: 700; font-size: 10px; color: #166534;">🔁 ENTRADA: APARELHO RECEBIDO NA TROCA</div>
+            <div style="display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 11px;">
+              <span>${[tradeInInfoCupom?.marca, tradeInInfoCupom?.modelo || 'Aparelho na Troca', tradeInInfoCupom?.capacidade, tradeInInfoCupom?.cor].filter(Boolean).join(' ')}</span>
+              <span style="color: #166534;">- R$ ${valorEntradaCupom.toFixed(2).replace('.', ',')}</span>
+            </div>
+            ${tradeInInfoCupom?.imei ? `<div style="font-size: 9px; color: #444;">IMEI: ${tradeInInfoCupom.imei}</div>` : ''}
+          </div>
+        `
+        : '';
 
       const publicReceiptUrl = `${window.location.origin}/recibo/${venda.id}`;
       const qrData = encodeURIComponent(publicReceiptUrl);
@@ -3206,11 +3338,27 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           <div class="small">Forma(s) de Pagto: <b>${pagamentosCupomTexto}</b></div>
           <div class="divider"></div>
           ${itensHtml}
+          ${tradeInCupomHtml}
           <div class="divider"></div>
-          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700;">
-            <span>TOTAL</span>
-            <span>R$ ${(venda.valor || 0).toFixed(2).replace('.', ',')}</span>
-          </div>
+          ${isUpgradeCupom && valorEntradaCupom > 0 ? `
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #444;">
+              <span>Subtotal:</span>
+              <span>R$ ${valorTotalCupom.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #166534;">
+              <span>(-) Entrada Troca:</span>
+              <span>- R$ ${valorEntradaCupom.toFixed(2).replace('.', ',')}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-top: 4px;">
+              <span>(=) VOLTA PAGA:</span>
+              <span>R$ ${valorVoltaCupom.toFixed(2).replace('.', ',')}</span>
+            </div>
+          ` : `
+            <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700;">
+              <span>TOTAL:</span>
+              <span>R$ ${valorTotalCupom.toFixed(2).replace('.', ',')}</span>
+            </div>
+          `}
           ${(venda.descontoTotal && venda.descontoTotal > 0) ? `<div class="small" style="text-align: right;">Desconto: R$ ${venda.descontoTotal.toFixed(2).replace('.', ',')}</div>` : ''}
           <div class="divider"></div>
           <div class="center" style="margin: 10px 0;">
@@ -5545,6 +5693,144 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
               </div>
 
+              {/* SEÇÃO DE UPGRADE / APARELHO NA TROCA (TRADE-IN) */}
+              <div className="pt-2 border-t border-white/10 space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-950/40 border border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                      <Repeat className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white">Venda com Upgrade / Aparelho na Troca</h4>
+                      <p className="text-[11px] text-slate-400">Cliente entrega celular usado como entrada para abater o valor</p>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={dadosFaltantesForm.isUpgrade}
+                      onChange={(e) => {
+                        const ativo = e.target.checked;
+                        setDadosFaltantesForm({
+                          ...dadosFaltantesForm,
+                          isUpgrade: ativo,
+                          tradeInValor: ativo ? dadosFaltantesForm.tradeInValor : '',
+                        });
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+                </div>
+
+                {dadosFaltantesForm.isUpgrade && (
+                  <div className="p-4 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 animate-in fade-in-50">
+                    <div className="flex items-center justify-between pb-2 border-b border-emerald-500/20">
+                      <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Repeat className="w-3.5 h-3.5 text-emerald-400" /> Dados do Aparelho que Entrou na Troca
+                      </span>
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        Entrará no Estoque
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300">Modelo que Entrou <span className="text-red-400">*</span></label>
+                        <input
+                          type="text"
+                          required={dadosFaltantesForm.isUpgrade}
+                          className="input-glass mt-1 text-xs"
+                          placeholder="Ex: iPhone 11, iPhone 12 Pro"
+                          value={dadosFaltantesForm.tradeInModelo}
+                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInModelo: e.target.value})}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300">Capacidade GB</label>
+                        <select
+                          className="input-glass mt-1 text-xs"
+                          value={dadosFaltantesForm.tradeInCapacidade}
+                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInCapacidade: e.target.value})}
+                        >
+                          <option value="64GB">64GB</option>
+                          <option value="128GB">128GB</option>
+                          <option value="256GB">256GB</option>
+                          <option value="512GB">512GB</option>
+                          <option value="1TB">1TB</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300">Valor de Avaliação / Entrada (R$) <span className="text-red-400">*</span></label>
+                        <input
+                          type="number"
+                          required={dadosFaltantesForm.isUpgrade}
+                          className="input-glass mt-1 font-bold text-emerald-400 text-xs"
+                          placeholder="Ex: 1500"
+                          value={dadosFaltantesForm.tradeInValor}
+                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInValor: e.target.value})}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300">Cor</label>
+                        <input
+                          type="text"
+                          className="input-glass mt-1 text-xs"
+                          placeholder="Ex: Preto, Branco, Azul..."
+                          value={dadosFaltantesForm.tradeInCor}
+                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInCor: e.target.value})}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300">IMEI da Troca (Opcional)</label>
+                        <input
+                          type="text"
+                          className="input-glass mt-1 font-mono text-xs"
+                          placeholder="Ex: 358921098492041"
+                          value={dadosFaltantesForm.tradeInImei}
+                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInImei: e.target.value})}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300">Saúde Bateria % (Opcional)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          className="input-glass mt-1 text-xs"
+                          placeholder="Ex: 85"
+                          value={dadosFaltantesForm.tradeInBateria}
+                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInBateria: e.target.value})}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Resumo Financeiro da Troca */}
+                    <div className="p-3 rounded-xl bg-slate-950/60 border border-emerald-500/20 text-xs flex flex-wrap items-center justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="text-slate-400">
+                          Aparelho Adquirido: <strong className="text-slate-200">R$ {Number(dadosFaltantesForm.preco || 0).toFixed(2)}</strong>
+                        </div>
+                        <div className="text-emerald-400">
+                          (-) Entrada da Troca: <strong className="text-emerald-300">- R$ {Number(dadosFaltantesForm.tradeInValor || 0).toFixed(2)}</strong>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[11px] text-slate-400">(=) Volta Restante a Pagar ({dadosFaltantesForm.formaPagamento.toUpperCase()})</div>
+                        <div className="text-base font-black text-emerald-400 font-mono">
+                          R$ {Math.max(0, (Number(dadosFaltantesForm.preco) || 0) - (Number(dadosFaltantesForm.tradeInValor) || 0)).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-2 pt-3 border-t border-white/10">
                 <Button type="button" variant="outline" className="flex-1" onClick={() => setShowDadosFaltantesModal(false)}>
                   Cancelar
@@ -5557,6 +5843,18 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       toast.error('Preencha a Data da Venda, modelo e valor do aparelho!');
                       return;
                     }
+
+                    if (dadosFaltantesForm.isUpgrade) {
+                      if (!dadosFaltantesForm.tradeInModelo || !dadosFaltantesForm.tradeInValor || Number(dadosFaltantesForm.tradeInValor) <= 0) {
+                        toast.error('Informe o modelo e o valor de avaliação do aparelho que entrou na troca!');
+                        return;
+                      }
+                    }
+
+                    const precoTotalNum = Number(dadosFaltantesForm.preco);
+                    const valorEntradaTrocaNum = dadosFaltantesForm.isUpgrade ? Number(dadosFaltantesForm.tradeInValor) : 0;
+                    const valorVoltaNum = dadosFaltantesForm.isUpgrade ? Math.max(0, precoTotalNum - valorEntradaTrocaNum) : precoTotalNum;
+
                     setShowDadosFaltantesModal(false);
                     await aplicarVendaAI({
                       cliente: {
@@ -5574,12 +5872,26 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         condicao: dadosFaltantesForm.condicao,
                         imei: dadosFaltantesForm.imei,
                         saudeBateria: Number(dadosFaltantesForm.bateria) > 0 ? Number(dadosFaltantesForm.bateria) : null,
-                        preco: Number(dadosFaltantesForm.preco),
+                        preco: precoTotalNum,
                         custo: Number(dadosFaltantesForm.custo),
                       },
+                      isUpgrade: dadosFaltantesForm.isUpgrade,
+                      tradeIn: dadosFaltantesForm.isUpgrade ? {
+                        marca: dadosFaltantesForm.tradeInMarca,
+                        modelo: dadosFaltantesForm.tradeInModelo,
+                        capacidade: dadosFaltantesForm.tradeInCapacidade,
+                        cor: dadosFaltantesForm.tradeInCor,
+                        imei: dadosFaltantesForm.tradeInImei || null,
+                        bateria: Number(dadosFaltantesForm.tradeInBateria) > 0 ? Number(dadosFaltantesForm.tradeInBateria) : null,
+                        valor: valorEntradaTrocaNum,
+                        condicao: 'seminovo',
+                        observacoes: 'Recebido como troca (trade-in) no pedido'
+                      } : null,
+                      valorEntradaTroca: valorEntradaTrocaNum > 0 ? valorEntradaTrocaNum : null,
+                      valorVolta: valorVoltaNum,
                       vendedor: dadosFaltantesForm.vendedor,
                       formaPagamento: dadosFaltantesForm.formaPagamento,
-                      valorTotal: Number(dadosFaltantesForm.preco),
+                      valorTotal: precoTotalNum,
                       dataVenda: dadosFaltantesForm.dataVenda,
                       observacoes: dadosFaltantesForm.observacoes,
                     });

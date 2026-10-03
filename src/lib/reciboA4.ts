@@ -23,10 +23,25 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
       cartao_credito: 'CARTÃO DE CRÉDITO',
       cartao_debito: 'CARTÃO DE DÉBITO',
       parcelado: 'PARCELADO / CREDIÁRIO',
+      trade_in: '🔁 APARELHO NA TROCA (UPGRADE)',
       outros: 'OUTROS',
     };
     return map[String(m || '').toLowerCase()] || String(m || 'PIX').toUpperCase();
   };
+
+  // Identifica se há Trade-In / Aparelho na Troca
+  const tradeInPagamento = Array.isArray(venda.pagamentos)
+    ? venda.pagamentos.find((p: any) => p.metodo === 'trade_in' || String(p.metodo || '').toLowerCase().includes('troca'))
+    : null;
+
+  const tradeInInfo = venda.tradeIn || venda.trade_in || venda.aparelhoTroca || (tradeInPagamento ? {
+    modelo: tradeInPagamento.descricao || tradeInPagamento.observacao || 'Aparelho na Troca',
+    valor: Number(tradeInPagamento.valor || 0),
+    imei: tradeInPagamento.imei || null,
+  } : null);
+
+  const valorEntradaTroca = Number(tradeInInfo?.valor || tradeInPagamento?.valor || venda.valorEntradaTroca || 0);
+  const isUpgrade = Boolean(valorEntradaTroca > 0 || (tradeInInfo && tradeInInfo.modelo));
 
   const pagamentosTexto = venda.pagamentos && Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0
     ? venda.pagamentos.map((p: any) => {
@@ -101,7 +116,31 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
        </tr>`;
       })();
 
+  // Linha especial de Trade-In (Aparelho que Entrou na Troca)
+  const tradeInLinhaHtml = isUpgrade && valorEntradaTroca > 0
+    ? `
+    <tr style="background-color: #f0fdf4;">
+      <td style="text-align: center; border: 1px solid #000; padding: 6px; font-weight: bold; color: #166534;">🔁</td>
+      <td style="border: 1px solid #000; padding: 6px;">
+        <b style="font-size: 11px; color: #166534; text-transform: uppercase;">ENTRADA: APARELHO RECEBIDO NA TROCA (UPGRADE)</b><br>
+        <span style="font-size: 11px; font-weight: bold; color: #000;">${[tradeInInfo?.marca, tradeInInfo?.modelo || 'Aparelho na Troca', tradeInInfo?.capacidade, tradeInInfo?.cor].filter(Boolean).join(' ')}</span>
+        ${tradeInInfo?.imei ? `<br><span style="color: #1e293b; font-weight: bold; font-size: 10px;">📱 IMEI: ${tradeInInfo.imei}</span>` : ''}
+        ${tradeInInfo?.saude_bateria || tradeInInfo?.bateria ? `<span style="color: #475569; font-weight: 500; font-size: 10px; margin-left: 8px;">Bateria: ${tradeInInfo.saude_bateria || `${tradeInInfo.bateria}%`}</span>` : ''}
+        ${tradeInInfo?.observacoes ? `<br><span style="color: #64748b; font-size: 10px;">${tradeInInfo.observacoes}</span>` : ''}
+      </td>
+      <td style="text-align: center; border: 1px solid #000; padding: 6px; font-weight: bold;">1</td>
+      <td style="text-align: right; border: 1px solid #000; padding: 6px; color: #166534; font-weight: bold;">- R$ ${valorEntradaTroca.toFixed(2).replace('.', ',')}</td>
+      <td style="text-align: right; border: 1px solid #000; padding: 6px;">-</td>
+      <td style="text-align: right; font-weight: bold; border: 1px solid #000; padding: 6px; color: #166534;">- R$ ${valorEntradaTroca.toFixed(2).replace('.', ',')}</td>
+    </tr>
+  `
+    : '';
+
   const valorTotalVenda = (venda.valorTotal || venda.valor || 0);
+  const valorVoltaLiquida = isUpgrade && valorEntradaTroca > 0
+    ? (venda.valorVolta ? Number(venda.valorVolta) : Math.max(0, valorTotalVenda - valorEntradaTroca))
+    : valorTotalVenda;
+
   const nomeClienteFinal = cliente?.nome || venda.clienteNome || 'Não informado';
   const nomeLoja = loja?.nome || loja?.nomeLoja || 'Phone Center';
   const enderecoLoja = loja?.endereco || loja?.enderecoLoja || 'Endereço não configurado';
@@ -185,10 +224,26 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
             <td style="width: 15%;">Valor Total</td>
           </tr>
           ${itensHtmlA4}
+          ${tradeInLinhaHtml}
+          ${isUpgrade && valorEntradaTroca > 0 ? `
+          <tr>
+            <td colspan="5" style="text-align: right; font-weight: bold; font-size: 11px; color: #475569;">SUBTOTAL (APARELHO ADQUIRIDO)</td>
+            <td style="text-align: right; font-weight: bold; font-size: 11px; color: #475569;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
+          </tr>
+          <tr>
+            <td colspan="5" style="text-align: right; font-weight: bold; font-size: 11px; color: #166534;">(-) ENTRADA BASE DE TROCA (UPGRADE)</td>
+            <td style="text-align: right; font-weight: bold; font-size: 11px; color: #166534;">- R$ ${valorEntradaTroca.toFixed(2).replace('.', ',')}</td>
+          </tr>
+          <tr style="background-color: #fafafa;">
+            <td colspan="5" style="text-align: right; font-weight: bold; font-size: 12px; color: #000;">(=) TOTAL LÍQUIDO PAGO / VOLTA</td>
+            <td style="text-align: right; font-weight: bold; font-size: 12px; color: #000;">R$ ${valorVoltaLiquida.toFixed(2).replace('.', ',')}</td>
+          </tr>
+          ` : `
           <tr>
             <td colspan="5" style="text-align: right; font-weight: bold; font-size: 12px;">TOTAL DA VENDA</td>
             <td style="text-align: right; font-weight: bold; font-size: 12px;">R$ ${valorTotalVenda.toFixed(2).replace('.', ',')}</td>
           </tr>
+          `}
         </table>
 
         <!-- Formas de Pagamento -->

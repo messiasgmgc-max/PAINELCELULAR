@@ -76,21 +76,53 @@ Estrutura JSON obrigatória:
   "aparelho": {
     "codigo": string ou null (opcional: Código/ID do aparelho se informado ex: COD: 8665041, COD 8665041, ID: 8665041 ou #8665041),
     "marca": string ou null (ex: Apple, Samsung, Xiaomi, Motorola),
-    "modelo": string ou null (ex: iPhone 13 Pro, Galaxy S23, Redmi Note 12),
+    "modelo": string ou null (ex: iPhone 13 Pro, Galaxy S23, Redmi Note 12 - APARELHO QUE O CLIENTE ESTÁ COMPRANDO/LEVANDO),
     "capacidade": string ou null (ex: 128GB, 256GB, 512GB, 64GB),
     "cor": string ou null (ex: Grafite, Preto, Azul, Dourado, Branco),
     "condicao": string ou null (deve ser "novo" se for lacrado/novo ou "seminovo" se usado/seminovo),
-    "imei": string ou null (opcional: IMEI/Nº de Série se informado),
-    "preco": number ou null (valor unitário do aparelho em R$),
+    "imei": string ou null (opcional: IMEI/Nº de Série do aparelho VENDIDO se informado),
+    "preco": number ou null (valor unitário do aparelho vendido em R$),
     "custo": number ou null (valor de custo em R$ se informado)
   },
+  "isUpgrade": boolean (true SE o cliente deu um aparelho usado/antigo como base de troca/entrada para abater o valor, senão false),
+  "tradeIn": {
+    "marca": string ou null (ex: Apple, Samsung),
+    "modelo": string ou null (ex: iPhone 11, iPhone 12 Pro - APARELHO QUE O CLIENTE ENTREGOU NA TROCA),
+    "capacidade": string ou null (ex: 64GB, 128GB),
+    "cor": string ou null (ex: Preto, Branco),
+    "imei": string ou null (IMEI do aparelho entregue na troca se informado),
+    "bateria": number ou null (saúde da bateria em % se informada, ex: 85),
+    "valor": number (valor de avaliação/entrada que o aparelho do cliente abateu em R$, ex: 1500),
+    "condicao": "seminovo",
+    "observacoes": string ou null
+  } ou null,
   "vendedor": string ou null (nome do funcionário/vendedor),
-  "formaPagamento": string ou null (deve ser um de: "pix", "dinheiro", "cartao_credito", "cartao_debito", "parcelado"),
-  "valorTotal": number ou null (valor total final da venda em R$),
+  "formaPagamento": string ou null (forma de pagamento da VOLTA/RESTANTE pago pelo cliente: "pix", "dinheiro", "cartao_credito", "cartao_debito", "parcelado"),
+  "valorTotal": number ou null (valor total do aparelho que está sendo vendido em R$, antes do abatimento da troca),
+  "valorEntradaTroca": number ou null (valor abatido pelo aparelho entregue na troca em R$, ou null se não houver troca),
+  "valorVolta": number ou null (valor líquido da volta/restante pago pelo cliente em R$, calculado como valorTotal - valorEntradaTroca),
   "dataVenda": string ou null (formato YYYY-MM-DD da data em que a VENDA foi efetuada),
   "observacoes": string ou null,
   "camposFaltantes": string[] (array contendo as chaves dos campos essenciais que NÃO foram informados no texto ou estão em branco)
 }
+
+REGRAS CRÍTICAS DE CONTEXTO PARA UPGRADE / TROCA (TRADE-IN):
+1. DIFERENCIAÇÃO ENTRE APARELHO VENDIDO E APARELHO DE ENTRADA:
+   - "aparelho": É o aparelho que a loja está VENDENDO para o cliente (ex: "Comprou iPhone 14 Pro", "Levou iPhone 15 128GB", "Venda: iPhone 13").
+   - "tradeIn": É o aparelho USADO que o cliente DEU DE ENTRADA / TROCA para abater o preço (ex: "Pegou iPhone 11 na troca por 1500", "Deu iPhone XR de entrada", "Troca: iPhone 12 64GB por R$ 1800").
+2. MATEMÁTICA DA VOLTA / RESTANTE:
+   - Se o aparelho vendido custa R$ 4.500 e o cliente deu um aparelho de entrada avaliado em R$ 1.500:
+     - "valorTotal": 4500
+     - "valorEntradaTroca": 1500
+     - "valorVolta": 3000 (a volta/diferença a ser paga)
+     - "isUpgrade": true
+   - Se o texto disser apenas a volta e o valor da troca (ex: "Troca entrou iPhone 11 por 1200 e volta de 2000 no pix pelo iPhone 13"):
+     - "valorTotal": 3200 (1200 + 2000)
+     - "valorEntradaTroca": 1200
+     - "valorVolta": 2000
+     - "isUpgrade": true
+3. PROIBIÇÃO ABSOLUTA DE INVENTAR UPGRADE:
+   - Se o texto for uma venda normal simples sem troca de aparelho (ex: "Venda iPhone 13 128GB por 3000 no pix"), DEIXE "isUpgrade": false, "tradeIn": null, "valorEntradaTroca": null, "valorVolta": 3000. NUNCA invente aparelho de troca quando não foi informado.
 
 REGRAS CRÍTICAS DE DIFERENCIAÇÃO ENTRE DATA DE NASCIMENTO E DATA DA VENDA:
 1. "cliente.dataNascimento": Data em que o cliente nasceu (ex: "Data de nascimento: 04/04/1982", "Nasc: 15/05/1990", "aniversário", ou qualquer data com ano anterior a 2020).
@@ -175,9 +207,13 @@ Regras para os camposFaltantes:
       parsedJson = {
         cliente: {},
         aparelho: {},
+        isUpgrade: false,
+        tradeIn: null,
         vendedor: null,
         formaPagamento: null,
         valorTotal: null,
+        valorEntradaTroca: null,
+        valorVolta: null,
         dataVenda: null,
         observacoes: null,
         camposFaltantes: []
@@ -234,7 +270,57 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 6. Forma de Pagamento Regex
+    // 6. Detecção de Upgrade / Troca (Trade-In) via Regex
+    const ehTextoUpgrade = /trade[- ]?in|upgrade|base de troca|na troca|deu na troca|pegou na troca|aparelho de entrada|entrada de um/i.test(trimmedText);
+    if (ehTextoUpgrade && (!parsedJson.tradeIn || !parsedJson.isUpgrade)) {
+      const trocaMatch = trimmedText.match(/(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada):\s*([^\n\r]+)/i);
+      let modeloTroca = '';
+      let valorTroca = 0;
+      let capTroca = '';
+
+      if (trocaMatch) {
+        const linhaTroca = trocaMatch[1];
+        const valMatch = linhaTroca.match(/R?\$?\s*([0-9.,]+)/i);
+        if (valMatch) {
+          valorTroca = parseFloat(valMatch[1].replace(/\./g, '').replace(',', '.'));
+        }
+        const modTrocaMatch = linhaTroca.match(/(?:iPhone|Galaxy|Redmi|Poco|Xiaomi|Motorola)\s+[A-Za-z0-9\s]+/i);
+        if (modTrocaMatch) {
+          modeloTroca = modTrocaMatch[0].trim();
+        }
+        const capTrocaMatch = linhaTroca.match(/\b(\d+GB|\d+TB)\b/i);
+        if (capTrocaMatch) {
+          capTroca = capTrocaMatch[1].toUpperCase();
+        }
+      }
+
+      if (modeloTroca || valorTroca > 0) {
+        parsedJson.isUpgrade = true;
+        parsedJson.tradeIn = {
+          marca: /iphone|apple/i.test(modeloTroca) ? 'Apple' : 'Outro',
+          modelo: modeloTroca || 'Aparelho na Troca',
+          capacidade: capTroca || '128GB',
+          cor: '',
+          imei: null,
+          bateria: null,
+          valor: valorTroca || 0,
+          condicao: 'seminovo',
+          observacoes: 'Recebido como troca (upgrade) no pedido'
+        };
+        parsedJson.valorEntradaTroca = valorTroca || 0;
+      }
+    }
+
+    // Detecção de Volta / Restante via Regex
+    const voltaMatch = trimmedText.match(/(?:Volta|Restante|Diferen[cç]a|Saldo a pagar):\s*R?\$?\s*([0-9.,]+)/i);
+    if (voltaMatch) {
+      const valVolta = parseFloat(voltaMatch[1].replace(/\./g, '').replace(',', '.'));
+      if (!isNaN(valVolta) && valVolta > 0) {
+        parsedJson.valorVolta = valVolta;
+      }
+    }
+
+    // 7. Forma de Pagamento Regex
     if (!parsedJson.formaPagamento) {
       if (/\(X\s*\)\s*Pix|Pix/i.test(trimmedText)) parsedJson.formaPagamento = 'pix';
       else if (/\(X\s*\)\s*Cartão de crédito|Cartão de crédito|Cartao de credito/i.test(trimmedText)) parsedJson.formaPagamento = 'cartao_credito';
@@ -242,7 +328,7 @@ Regras para os camposFaltantes:
       else if (/\(X\s*\)\s*Dinheiro|Dinheiro/i.test(trimmedText)) parsedJson.formaPagamento = 'dinheiro';
     }
 
-    // 7. Valor Total Regex
+    // 8. Valor Total Regex
     if (!parsedJson.valorTotal || parsedJson.valorTotal <= 0) {
       const valorMatch = trimmedText.match(/(?:Valor total|Total|Valor):\s*R\$\s*([0-9.,]+)/i) ||
                          trimmedText.match(/R\$\s*([0-9.,]+)/i);
@@ -255,7 +341,22 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 8. Condição Regex (novo vs seminovo)
+    // Harmonização da Matemática de Upgrade:
+    if (parsedJson.isUpgrade && parsedJson.tradeIn?.valor > 0) {
+      const vTotal = Number(parsedJson.valorTotal || 0);
+      const vEntrada = Number(parsedJson.tradeIn.valor || parsedJson.valorEntradaTroca || 0);
+      if (vTotal > 0 && vEntrada > 0) {
+        if (!parsedJson.valorVolta || parsedJson.valorVolta <= 0) {
+          parsedJson.valorVolta = Math.max(0, vTotal - vEntrada);
+        }
+      } else if (parsedJson.valorVolta && parsedJson.valorVolta > 0 && vEntrada > 0 && (!vTotal || vTotal <= 0)) {
+        parsedJson.valorTotal = vEntrada + parsedJson.valorVolta;
+      }
+    } else if (!parsedJson.isUpgrade) {
+      parsedJson.valorVolta = parsedJson.valorTotal;
+    }
+
+    // 9. Condição Regex (novo vs seminovo)
     if (!parsedJson.aparelho.condicao) {
       if (/lacrado|novo|caixa fechada/i.test(trimmedText)) {
         parsedJson.aparelho.condicao = 'novo';
@@ -264,7 +365,7 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 9. Código / ID do Aparelho Regex
+    // 10. Código / ID do Aparelho Regex
     if (!parsedJson.aparelho.codigo) {
       const codMatch = trimmedText.match(/(?:COD|CÓD|CODIGO|CÓDIGO|ID|ID APARELHO):\s*#?([0-9A-Za-z]{6,12})/i) ||
                        trimmedText.match(/(?:COD|CÓD)\s+([0-9A-Za-z]{6,12})/i) ||
@@ -274,7 +375,7 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 10. Modelo & Capacidade Regex Fallback se a IA não tiver lido
+    // 11. Modelo & Capacidade Regex Fallback se a IA não tiver lido
     if (!parsedJson.aparelho.modelo) {
       const modMatch = trimmedText.match(/(?:iPhone|Galaxy|Redmi|Poco|Xiaomi|Motorola|MacBook|PS5|PS4|Xbox|Switch)\s+[A-Za-z0-9\s]+/i) ||
                        trimmedText.match(/(?:Modelo|Aparelho):\s*([^\n\r]+)/i);

@@ -112,6 +112,23 @@ export default function ReciboPublicoPage() {
   const totalVenda = venda.valorTotal || venda.valor || 0;
   const clienteNome = cliente?.nome || venda.clienteNome || "Cliente";
 
+  // Identifica se a venda teve Trade-In / Upgrade
+  const tradeInPagamento = Array.isArray(venda?.pagamentos)
+    ? venda.pagamentos.find((p: any) => p.metodo === 'trade_in' || String(p.metodo || '').toLowerCase().includes('troca'))
+    : null;
+
+  const tradeInInfo = venda?.tradeIn || venda?.trade_in || venda?.aparelhoTroca || (tradeInPagamento ? {
+    modelo: tradeInPagamento.descricao || tradeInPagamento.observacao || 'Aparelho na Troca',
+    valor: Number(tradeInPagamento.valor || 0),
+    imei: tradeInPagamento.imei || null,
+  } : null);
+
+  const valorEntradaTroca = Number(tradeInInfo?.valor || tradeInPagamento?.valor || venda?.valorEntradaTroca || 0);
+  const isUpgrade = Boolean(valorEntradaTroca > 0 || (tradeInInfo && tradeInInfo.modelo));
+  const valorVoltaLiquida = isUpgrade && valorEntradaTroca > 0
+    ? (venda?.valorVolta ? Number(venda.valorVolta) : Math.max(0, totalVenda - valorEntradaTroca))
+    : totalVenda;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 sm:p-8 flex flex-col items-center justify-center print:bg-white print:text-black print:p-0">
       {/* Container Principal */}
@@ -229,26 +246,73 @@ export default function ReciboPublicoPage() {
                       <td className="p-3 text-right font-mono font-bold">R$ {totalVenda.toFixed(2).replace(".", ",")}</td>
                     </tr>
                   )}
+
+                  {/* Linha de Aparelho Recebido na Troca / Upgrade */}
+                  {isUpgrade && valorEntradaTroca > 0 && (
+                    <tr className="bg-emerald-950/30 print:bg-emerald-50 border-t border-emerald-500/30">
+                      <td className="p-3">
+                        <p className="font-bold text-emerald-400 print:text-emerald-800 text-xs flex items-center gap-1.5">
+                          🔁 ENTRADA: APARELHO RECEBIDO NA TROCA (UPGRADE)
+                        </p>
+                        <p className="text-white print:text-black font-semibold mt-0.5">
+                          {[tradeInInfo?.marca, tradeInInfo?.modelo || 'Aparelho na Troca', tradeInInfo?.capacidade, tradeInInfo?.cor].filter(Boolean).join(' ')}
+                        </p>
+                        {tradeInInfo?.imei && (
+                          <p className="text-[11px] text-slate-300 print:text-slate-700 font-mono mt-0.5">IMEI: {tradeInInfo.imei}</p>
+                        )}
+                        {tradeInInfo?.observacoes && (
+                          <p className="text-[10px] text-slate-400 print:text-slate-600 mt-0.5">{tradeInInfo.observacoes}</p>
+                        )}
+                      </td>
+                      <td className="p-3 text-center font-bold text-emerald-400 print:text-emerald-800">1</td>
+                      <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-emerald-800">- R$ {valorEntradaTroca.toFixed(2).replace(".", ",")}</td>
+                      <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-emerald-800">- R$ {valorEntradaTroca.toFixed(2).replace(".", ",")}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
 
           {/* Resumo de Valores e Forma de Pagamento */}
-          <div className="bg-emerald-950/20 print:bg-emerald-50/50 p-4 rounded-2xl border border-emerald-500/20 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <p className="text-xs text-slate-400 print:text-slate-700 flex items-center gap-1 font-medium">
-                <CreditCard className="w-3.5 h-3.5 text-emerald-400" /> Forma(s) de Pagamento:
-              </p>
-              <p className="text-sm font-bold text-emerald-400 print:text-emerald-800 uppercase mt-0.5">
-                {formatarPagamentos(venda)}
-              </p>
-            </div>
-            <div className="text-left sm:text-right w-full sm:w-auto">
-              <p className="text-xs text-slate-400 print:text-slate-700 font-medium">Valor Total Pago</p>
-              <p className="text-2xl font-black text-emerald-400 print:text-emerald-700 font-mono">
-                R$ {totalVenda.toFixed(2).replace(".", ",")}
-              </p>
+          <div className="bg-emerald-950/20 print:bg-emerald-50/50 p-4 rounded-2xl border border-emerald-500/20 space-y-3">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <p className="text-xs text-slate-400 print:text-slate-700 flex items-center gap-1 font-medium">
+                  <CreditCard className="w-3.5 h-3.5 text-emerald-400" /> Forma(s) de Pagamento:
+                </p>
+                <p className="text-sm font-bold text-emerald-400 print:text-emerald-800 uppercase mt-0.5">
+                  {formatarPagamentos(venda)}
+                </p>
+              </div>
+
+              <div className="text-left sm:text-right w-full sm:w-auto space-y-1">
+                {isUpgrade && valorEntradaTroca > 0 ? (
+                  <>
+                    <div className="flex sm:justify-end gap-3 text-xs text-slate-400 print:text-slate-600">
+                      <span>Valor do Aparelho:</span>
+                      <span className="font-mono font-bold text-slate-200 print:text-black">R$ {totalVenda.toFixed(2).replace(".", ",")}</span>
+                    </div>
+                    <div className="flex sm:justify-end gap-3 text-xs text-emerald-400 print:text-emerald-700">
+                      <span>(-) Entrada da Troca:</span>
+                      <span className="font-mono font-bold">- R$ {valorEntradaTroca.toFixed(2).replace(".", ",")}</span>
+                    </div>
+                    <div className="border-t border-emerald-500/30 pt-1">
+                      <p className="text-xs text-slate-400 print:text-slate-700 font-medium">(=) Volta Líquida Paga</p>
+                      <p className="text-2xl font-black text-emerald-400 print:text-emerald-700 font-mono">
+                        R$ {valorVoltaLiquida.toFixed(2).replace(".", ",")}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-400 print:text-slate-700 font-medium">Valor Total Pago</p>
+                    <p className="text-2xl font-black text-emerald-400 print:text-emerald-700 font-mono">
+                      R$ {totalVenda.toFixed(2).replace(".", ",")}
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
