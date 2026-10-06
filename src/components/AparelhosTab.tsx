@@ -508,6 +508,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
     if (!nonAppleBrandRegex.test(cleanStr)) {
       // Modelos especiais não numéricos do iPhone
       const specialIphones = [
+        { regex: /\b(?:iphone\s*)?air\b/i, name: 'iPhone Air' },
         { regex: /\b(?:iphone\s*)?se\s*4\b/i, name: 'iPhone SE 4' },
         { regex: /\b(?:iphone\s*)?se\s*3\b/i, name: 'iPhone SE 3' },
         { regex: /\b(?:iphone\s*)?se\s*2\b/i, name: 'iPhone SE 2' },
@@ -536,8 +537,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         }
       }
 
-      // iPhones numéricos dinâmicos (ex: 7..99 com Pro Max, Pro, Plus, Mini, e, etc.)
-      const matchNumIphone = cleanStr.match(/\b(?:iphone\s*)?(\d{1,2})\s*(pm|promax|pro\s*max|pro|plus|mini|e)?\b/i);
+      // iPhones numéricos dinâmicos (ex: 7..99 com Pro Max, Pro, Plus, Mini, Air, e, etc.)
+      const matchNumIphone = cleanStr.match(/\b(?:iphone\s*)?(\d{1,2})\s*(pm|promax|pro\s*max|pro|plus|mini|air|e)?\b/i);
       if (matchNumIphone) {
         const num = matchNumIphone[1];
         const rawVariant = (matchNumIphone[2] || '').toLowerCase().replace(/\s+/g, '');
@@ -550,6 +551,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           variant = ' Plus';
         } else if (rawVariant === 'mini') {
           variant = ' Mini';
+        } else if (rawVariant === 'air') {
+          variant = ' Air';
         } else if (rawVariant === 'e') {
           variant = 'e';
         }
@@ -670,9 +673,10 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       const { marca: marcaExtraida, modelo, cor: corExtraida } = extractAparelhoBrandModelAndColor(mainPart);
 
       // Dispositivos que NÃO possuem IMEI (MacBooks, Consoles, Pencil, AirPods, Tablets Wi-Fi, etc.)
-      const isNonCellular = /\b(macbook|mac\s*book|ps5|ps4|playstation|xbox|nintendo|switch|pencil|airpods|airpod|ipad|tablet)\b/i.test(mainPart) ||
+      const isNonCellular = ((/\b(macbook|mac\s*book|ps5|ps4|playstation|xbox|nintendo|switch|pencil|airpods|airpod|ipad|tablet)\b/i.test(mainPart) ||
                             /\b(macbook|mac\s*book|ps5|ps4|playstation|xbox|nintendo|switch|pencil|airpods|airpod|ipad|tablet)\b/i.test(modelo) ||
-                            ['Sony', 'Microsoft', 'Nintendo'].includes(marcaExtraida);
+                            ['Sony', 'Microsoft', 'Nintendo'].includes(marcaExtraida)) &&
+                            !/\biphone\b/i.test(modelo));
 
       let imeiLimpo = '';
       if (sufixoSerial && !isNonCellular) {

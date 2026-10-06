@@ -63,6 +63,12 @@ export const TABELA_BASE_UPGRADE_PADRAO: Record<string, Record<string, number>> 
   'iPhone 16 Plus': { '128GB': 5200, '256GB': 5800, '512GB': 6450 },
   'iPhone 16 Pro': { '128GB': 5900, '256GB': 6600, '512GB': 7350, '1TB': 8100 },
   'iPhone 16 Pro Max': { '256GB': 6950, '512GB': 7750, '1TB': 8600 },
+  'iPhone 16e': { '128GB': 4200, '256GB': 4800, '512GB': 5400 },
+  'iPhone 17': { '256GB': 5200, '512GB': 5900 },
+  'iPhone Air': { '256GB': 5700, '512GB': 6400, '1TB': 7200 },
+  'iPhone 17 Air': { '256GB': 5700, '512GB': 6400, '1TB': 7200 },
+  'iPhone 17 Pro': { '256GB': 6500, '512GB': 7300, '1TB': 8200 },
+  'iPhone 17 Pro Max': { '256GB': 7600, '512GB': 8500, '1TB': 9400, '2TB': 10500 },
 };
 
 // Modelos suportados ordenados cronologicamente do mais ANTIGO ao mais NOVO

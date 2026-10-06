@@ -117,6 +117,7 @@ const CAPACIDADES_LANCAMENTOS_RECENTES: Record<string, string[]> = {
   'iPhone 16e': ['128GB', '256GB', '512GB'],
   'iPhone 17': ['256GB', '512GB'],
   'iPhone Air': ['256GB', '512GB', '1TB'],
+  'iPhone 17 Air': ['256GB', '512GB', '1TB'],
   'iPhone 17 Pro': ['256GB', '512GB', '1TB'],
   'iPhone 17 Pro Max': ['256GB', '512GB', '1TB', '2TB'],
   'iPhone 18': ['256GB', '512GB', '1TB'],

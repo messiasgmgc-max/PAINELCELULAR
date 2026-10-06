@@ -121,4 +121,27 @@ describe("Exportação para Mercado Phone (MP)", () => {
     const testeDesert = converterAparelhoParaLinhaMP({ modelo: "16 Pro", cor: "🏜️ Desert", preco: 6000 });
     assert.equal(testeDesert[9], "DESERT");
   });
+
+  it("deve reconhecer iPhone Air como aparelho celular na exportação", () => {
+    const apAir = converterAparelhoParaLinhaMP({
+      modelo: "Air",
+      cor: "Preto",
+      capacidade: "256GB",
+      preco: 5800,
+    });
+
+    assert.equal(apAir[1], "Celular");
+    assert.equal(apAir[2], "iPhone Air");
+    assert.equal(apAir[9], "PRETO");
+
+    const ap17Air = converterAparelhoParaLinhaMP({
+      modelo: "17 Air",
+      cor: "Branco",
+      capacidade: "512GB",
+      preco: 6400,
+    });
+
+    assert.equal(ap17Air[1], "Celular");
+    assert.equal(ap17Air[2], "iPhone 17 Air");
+  });
 });

@@ -159,7 +159,10 @@ export function getModeloOrdemCronologica(modeloStr: string): number {
   if (mod.includes('se 2') || mod.includes('se (2') || mod.includes('se 2020') || mod.includes('se 2ª')) return 11.8;
   if (/\bse\b/i.test(mod)) return 6.5;
 
-  // Detecta geração numérica: 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17 (+ sufixos s, c, g)
+  // Detecta iPhone Air (Geração 17)
+  if (/\b(?:iphone\s*)?air\b/i.test(mod) && !mod.includes('ipad') && !mod.includes('mac')) return 17.2;
+
+  // Detecta geração numérica: 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19 (+ sufixos s, c, g)
   const matchNum = mod.match(/\b(1[1-9]|[4-9])([scg])?(?:\s|$|\b)/i);
   let gen = 0;
   let isS = false;
@@ -193,6 +196,8 @@ export function getModeloOrdemCronologica(modeloStr: string): number {
         sub = 0.2; // 5c
       } else if (mod.includes('plus')) {
         sub = 0.2; // 6 Plus, 7 Plus, 8 Plus, 14 Plus, 15 Plus, 16 Plus
+      } else if (mod.includes('air')) {
+        sub = 0.25; // 17 Air
       } else if (mod.includes('pro max') || mod.includes('promax')) {
         sub = 0.6; // 11 Pro Max ... 16 Pro Max
       } else if (mod.includes('pro')) {
@@ -234,8 +239,9 @@ export function parseCapacidadeGB(capStr?: string): number {
  * Normaliza o nome do modelo para garantir agrupamento exato e padronizado:
  * - Remove espaços extras no início/fim, múltiplos espaços e caracteres invisíveis (\u00A0)
  * - Padroniza nomes numéricos (ex: '15', '15 Pro Max' -> 'iPhone 15', 'iPhone 15 Pro Max')
+ * - Padroniza iPhone Air (ex: 'Air', '17 Air' -> 'iPhone Air', 'iPhone 17 Air')
  * - Remove prefixo 'Apple ' desnecessário
- * - Padroniza grafia e caixa (iPhone, iPad, Apple Watch, Pro Max, Plus, Mini, SE)
+ * - Padroniza grafia e caixa (iPhone, iPad, Apple Watch, Pro Max, Plus, Mini, Air, SE)
  */
 export function normalizarNomeModelo(nome?: string | null): string {
   if (!nome || !nome.trim()) return 'Outros';
@@ -245,12 +251,15 @@ export function normalizarNomeModelo(nome?: string | null): string {
     .replace(/^apple\s+/i, '')
     .trim();
 
-  // Caso seja apenas número ou comece com número de geração do iPhone (ex: '15', '15 Pro Max')
+  // Caso seja apenas número ou comece com número de geração do iPhone (ex: '15', '15 Pro Max', '17 Air')
   if (/^\d{1,2}(\b|$)/.test(limpo)) {
     limpo = `iPhone ${limpo}`;
   } else if (/^iphone\b/i.test(limpo)) {
     const resto = limpo.replace(/^iphone\s*/i, '').trim();
     limpo = resto ? `iPhone ${resto}` : 'iPhone';
+  } else if (/^air\b/i.test(limpo) && !/ipad|macbook|mac/i.test(limpo)) {
+    const resto = limpo.replace(/^air\s*/i, '').trim();
+    limpo = resto ? `iPhone Air ${resto}` : 'iPhone Air';
   } else if (/^ipad\b/i.test(limpo)) {
     const resto = limpo.replace(/^ipad\s*/i, '').trim();
     limpo = resto ? `iPad ${resto}` : 'iPad';
@@ -266,6 +275,7 @@ export function normalizarNomeModelo(nome?: string | null): string {
     .replace(/\bpro\b/gi, 'Pro')
     .replace(/\bplus\b/gi, 'Plus')
     .replace(/\bmini\b/gi, 'Mini')
+    .replace(/\bair\b/gi, 'Air')
     .replace(/\bse\s*([1-3])\b/gi, 'SE $1')
     .replace(/\bse\b/gi, 'SE');
 
