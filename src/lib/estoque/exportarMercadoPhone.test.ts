@@ -5,6 +5,7 @@ import {
   converterAparelhoParaLinhaMP,
   montarMatrizEstoqueMercadoPhone,
   criarWorkbookMercadoPhone,
+  formatarDataMercadoPhone,
   AparelhoExportacaoMP,
 } from "./exportarMercadoPhone";
 
@@ -30,9 +31,21 @@ describe("Exportação para Mercado Phone (MP)", () => {
     assert.equal(colunas[16], "Valor Custo");
     assert.equal(colunas[17], "Valor Venda");
     assert.equal(colunas[18], "Valor Venda 2");
+    assert.equal(colunas[22], "Data Entrada");
   });
 
-  it("deve converter aparelho em linha compatível com o Mercado Phone", () => {
+  it("deve formatar data no padrão nacional brasileiro DD/MM/AAAA aceito pelo MP", () => {
+    assert.equal(formatarDataMercadoPhone("2026-10-06"), "06/10/2026");
+    assert.equal(formatarDataMercadoPhone("2026-10-06T15:30:00.000Z"), "06/10/2026");
+    assert.equal(formatarDataMercadoPhone("2026-05-18"), "18/05/2026");
+    assert.equal(formatarDataMercadoPhone("06/10/2026"), "06/10/2026");
+    assert.equal(formatarDataMercadoPhone("7/9/2026"), "07/09/2026");
+    // Se data for inválida ou vazia, retorna data de hoje no formato DD/MM/AAAA
+    const hoje = formatarDataMercadoPhone(undefined);
+    assert.match(hoje, /^\d{2}\/\d{2}\/\d{4}$/);
+  });
+
+  it("deve converter aparelho em linha compatível com o Mercado Phone com data em DD/MM/AAAA", () => {
     const aparelho: AparelhoExportacaoMP = {
       modelo: "  iPhone 15 Pro Max ",
       imei: "354892019482019",
@@ -47,6 +60,7 @@ describe("Exportação para Mercado Phone (MP)", () => {
       observacoes: "Impecável com caixa",
       codigo: "AP-0012",
       quantidade: 1,
+      dataCadastro: "2026-10-06",
     };
 
     const linha = converterAparelhoParaLinhaMP(aparelho);
@@ -64,30 +78,40 @@ describe("Exportação para Mercado Phone (MP)", () => {
     assert.equal(linha[17], "5690,00"); // Venda com vírgula
     assert.equal(linha[18], "5400,00"); // Atacado
     assert.equal(linha[21], "AP-0012"); // Código de barras
+    assert.equal(linha[22], "06/10/2026"); // Data de Entrada no formato DD/MM/AAAA
   });
 
-  it("deve montar matriz completa com produtos e bloco final", () => {
+  it("deve montar matriz de estoque limpa sem linhas 'final' ou letras 'f' que quebrem o validador do MP", () => {
     const aparelhos: AparelhoExportacaoMP[] = [
       {
         modelo: "iPhone 13",
         preco: 2900,
         condicao: "seminovo",
         cor: "Meia-noite",
+        dataCadastro: "2026-10-06",
       },
     ];
 
     const matriz = montarMatrizEstoqueMercadoPhone(aparelhos);
-    // 18 linhas de template + 1 linha de aparelho + 15 linhas finais
-    assert.equal(matriz.length, 18 + 1 + 15);
+    // 18 linhas de template + 1 linha de aparelho real (SEM linhas espúrias com 'f')
+    assert.equal(matriz.length, 18 + 1);
 
     const linhaProduto = matriz[18];
     assert.equal(linhaProduto[2], "iPhone 13");
     assert.equal(linhaProduto[14], "Disponível para venda");
     assert.equal(linhaProduto[17], "2900,00");
+    assert.equal(linhaProduto[22], "06/10/2026");
 
-    // Verifica que gera o workbook
+    // Garante que nenhuma linha contém o valor 'f' que causava 'Formato de data inválido: f'
+    for (const row of matriz) {
+      assert.ok(!row.includes("f"), "A matriz de produtos não deve conter células com 'f'");
+      assert.notEqual(row[1], "final", "A matriz de produtos não deve conter linha sentinela 'final'");
+    }
+
+    // Verifica que gera o workbook com as abas Produtos e Dados
     const wb = criarWorkbookMercadoPhone(matriz);
-    assert.ok(wb.SheetNames.includes("Planilha1"));
+    assert.ok(wb.SheetNames.includes("Produtos"));
+    assert.ok(wb.SheetNames.includes("Dados"));
   });
 
   it("deve remover 100% dos emojis de cores, modelos e observações para compatibilidade estrita com o MP", () => {
@@ -143,5 +167,42 @@ describe("Exportação para Mercado Phone (MP)", () => {
 
     assert.equal(ap17Air[1], "Celular");
     assert.equal(ap17Air[2], "iPhone 17 Air");
+  });
+
+  it("deve preencher template XLSX mantendo cabeçalho e sem adicionar linhas com 'f'", async () => {
+    const { preencherArquivoTemplateMP } = await import("./exportarMercadoPhone");
+    const XLSX = await import("xlsx");
+
+    // Cria um buffer de template falso simulando o Mercado Phone
+    const templateBase = gerarTemplateBaseMercadoPhone();
+    const wbSimulado = XLSX.utils.book_new();
+    const wsSimulada = XLSX.utils.aoa_to_sheet(templateBase);
+    XLSX.utils.book_append_sheet(wbSimulado, wsSimulada, "Produtos");
+    const buffer = XLSX.write(wbSimulado, { type: "array", bookType: "xlsx" });
+
+    const aparelhos: AparelhoExportacaoMP[] = [
+      {
+        modelo: "iPhone 15 Pro",
+        cor: "Natural",
+        preco: 5000,
+        dataCadastro: "2026-10-06",
+      },
+    ];
+
+    const wbPreenchido = await preencherArquivoTemplateMP(buffer, aparelhos);
+    assert.ok(wbPreenchido.SheetNames.includes("Produtos"));
+
+    const sheet = wbPreenchido.Sheets["Produtos"];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: true }) as (string | number)[][];
+    
+    // 18 linhas de template + 1 linha de aparelho
+    assert.equal(rows.length, 19);
+    assert.equal(rows[18][2], "iPhone 15 Pro");
+    assert.equal(rows[18][22], "06/10/2026");
+
+    // Garante que não há linha com 'f'
+    for (const r of rows) {
+      assert.ok(!r.includes("f"));
+    }
   });
 });

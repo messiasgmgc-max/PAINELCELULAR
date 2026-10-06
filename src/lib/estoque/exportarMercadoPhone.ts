@@ -165,6 +165,56 @@ export function limparCorMercadoPhone(corRaw?: string | null): string {
 }
 
 /**
+ * Formata data no padrão brasileiro DD/MM/AAAA (ex: 06/10/2026) exigido pelo Mercado Phone.
+ * Se nenhuma data for fornecida ou for inválida, utiliza a data atual em DD/MM/AAAA.
+ */
+export function formatarDataMercadoPhone(dataRaw?: string | Date | null): string {
+  if (!dataRaw) {
+    const hoje = new Date();
+    const dia = String(hoje.getDate()).padStart(2, "0");
+    const mes = String(hoje.getMonth() + 1).padStart(2, "0");
+    const ano = hoje.getFullYear();
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  try {
+    if (typeof dataRaw === "string") {
+      const trimmed = dataRaw.trim();
+      // Se já estiver no formato brasileiro DD/MM/AAAA
+      const matchBr = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (matchBr) {
+        const dia = matchBr[1].padStart(2, "0");
+        const mes = matchBr[2].padStart(2, "0");
+        const ano = matchBr[3];
+        return `${dia}/${mes}/${ano}`;
+      }
+      // Se estiver no formato ISO YYYY-MM-DD
+      const matchIso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (matchIso) {
+        const [, ano, mes, dia] = matchIso;
+        return `${dia.padStart(2, "0")}/${mes.padStart(2, "0")}/${ano}`;
+      }
+    }
+
+    const d = typeof dataRaw === "string" ? new Date(dataRaw) : dataRaw;
+    if (d instanceof Date && !isNaN(d.getTime())) {
+      const dia = String(d.getDate()).padStart(2, "0");
+      const mes = String(d.getMonth() + 1).padStart(2, "0");
+      const ano = d.getFullYear();
+      return `${dia}/${mes}/${ano}`;
+    }
+  } catch {
+    // fallback
+  }
+
+  const hoje = new Date();
+  const dia = String(hoje.getDate()).padStart(2, "0");
+  const mes = String(hoje.getMonth() + 1).padStart(2, "0");
+  const ano = hoje.getFullYear();
+  return `${dia}/${mes}/${ano}`;
+}
+
+/**
  * Converte um único aparelho do estoque em uma linha de 49 colunas compatível com o Mercado Phone.
  */
 export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (string | number)[] {
@@ -255,14 +305,8 @@ export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (s
   // 21. Código de Barras
   const codigoBarras = aparelho.codigo ? String(aparelho.codigo).trim() : "";
 
-  // 22. Data Entrada (YYYY-MM-DD)
-  let dataEntrada = "";
-  try {
-    const d = aparelho.dataCadastro ? new Date(aparelho.dataCadastro) : new Date();
-    dataEntrada = isNaN(d.getTime()) ? new Date().toISOString().split("T")[0] : d.toISOString().split("T")[0];
-  } catch {
-    dataEntrada = new Date().toISOString().split("T")[0];
-  }
+  // 22. Data Entrada (formato DD/MM/AAAA obrigatório pelo Mercado Phone)
+  const dataEntrada = formatarDataMercadoPhone(aparelho.dataCadastro);
 
   // 23. SKU
   const sku = aparelho.codigo || aparelho.id || "";
@@ -314,59 +358,37 @@ export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (s
 }
 
 /**
- * Retorna as linhas de apoio e validação de dados que o Mercado Phone inclui ao final da planilha.
+ * Retorna as linhas da aba auxiliar 'Dados' com as tabelas de apoio de RAM, cores, etc.
+ * Mantida separada da aba 'Produtos' para não gerar falsos positivos no validador do MP.
  */
-export function gerarLinhasFinaisMercadoPhone(): (string | number)[][] {
-  const linhaFinal: (string | number)[] = new Array(49).fill("f");
-  linhaFinal[0] = "";
-  linhaFinal[1] = "final";
-  linhaFinal[11] = "";
-  linhaFinal[12] = "";
-  linhaFinal[14] = "Disponível para venda";
-  linhaFinal[15] = 1;
-  linhaFinal[17] = "";
-  linhaFinal[18] = "";
-  linhaFinal[23] = "";
-  linhaFinal[24] = "";
-  linhaFinal[25] = "";
-  linhaFinal[26] = "";
-  linhaFinal[27] = "";
-  linhaFinal[28] = "";
-  linhaFinal[30] = "";
-  linhaFinal[37] = "";
-  linhaFinal[44] = "";
-
-  const tabelasApoio: (string | number)[][] = [
-    linhaFinal,
-    new Array(49).fill(""),
+export function gerarAbaDadosMercadoPhone(): (string | number)[][] {
+  return [
+    [],
     ["", "Aparelho", "", "", "", "", "NF"],
     ["", "Ram", "Cor", "Estado", "Disponibilidade", "", "CST", "Origem"],
     ["", "", "", "", "Disponível para venda"],
-    ["", "2", "PRETO", "NOVO", "Laboratório", "", "101", "0"],
-    ["", "3", "BRANCO", "SEMINOVO", "", "", "102", "1"],
-    ["", "4", "CINZA", "", "", "", "103", "2"],
-    ["", "6", "AZUL", "", "", "", "201", "3"],
-    ["", "8", "VERDE", "", "", "", "202", "4"],
-    ["", "12", "ROXO", "", "", "", "203", "5"],
-    ["", "16", "DOURADO", "", "", "", "300", "6"],
-    ["", "", "SPACE GRAY", "", "", "", "400", "7"],
-    ["", "", "VERMELHO", "", "", "", "500", "8"],
-    ["", "", "", "", "", "", "900"],
+    ["", 2, "PRETO", "NOVO", "Laboratório", "", 101, 0],
+    ["", 3, "BRANCO", "SEMINOVO", "", "", 102, 1],
+    ["", 4, "CINZA", "", "", "", 103, 2],
+    ["", 6, "AZUL", "", "", "", 201, 3],
+    ["", 8, "VERDE", "", "", "", 202, 4],
+    ["", 12, "ROXO", "", "", "", 203, 5],
+    ["", 16, "DOURADO", "", "", "", 300, 6],
+    ["", "", "SPACE GRAY", "", "", "", 400, 7],
+    ["", "", "VERMELHO", "", "", "", 500, 8],
+    ["", "", "", "", "", "", 900],
   ];
-
-  return tabelasApoio;
 }
 
 /**
- * Cria a matriz completa contendo:
- * - Linhas 0 a 17: Cabeçalho idêntico do Mercado Phone
- * - Linhas 18 em diante: Aparelhos em estoque convertidos
- * - Linhas finais: Sentinela 'final' e tabela de apoio
+ * Cria a matriz da aba de produtos contendo:
+ * - Linhas 0 a 17: Cabeçalho oficial do Mercado Phone
+ * - Linhas 18 em diante: Apenas os aparelhos em estoque cadastrados (SEM linhas com 'f' no fim)
  */
 export function montarMatrizEstoqueMercadoPhone(aparelhos: AparelhoExportacaoMP[]): (string | number)[][] {
   const base = gerarTemplateBaseMercadoPhone();
 
-  // Se não houver aparelhos, inclui pelo menos uma linha de exemplo ou vazia com disponibilidade
+  // Se não houver aparelhos, inclui pelo menos uma linha com disponibilidade
   if (aparelhos.length === 0) {
     const linhaVazia = new Array(49).fill("");
     linhaVazia[14] = "Disponível para venda";
@@ -378,60 +400,69 @@ export function montarMatrizEstoqueMercadoPhone(aparelhos: AparelhoExportacaoMP[
     }
   }
 
-  // Adiciona a estrutura final do MP
-  const linhasFinais = gerarLinhasFinaisMercadoPhone();
-  for (const lf of linhasFinais) {
-    base.push(lf);
-  }
-
+  // ATENÇÃO: NÃO adiciona linhas com 'f' na aba de produtos.
+  // O importador do Mercado Phone lê as linhas sequencialmente e rejeita textos espúrios.
   return base;
 }
 
 /**
- * Cria o Workbook XLSX e ajusta as células de IMEI e texto para garantir tipo string.
+ * Cria o Workbook XLSX formatado para o Mercado Phone, com a aba principal 'Produtos'
+ * e a aba de apoio 'Dados'.
  */
 export function criarWorkbookMercadoPhone(matriz: (string | number)[][]): XLSX.WorkBook {
-  const worksheet = XLSX.utils.aoa_to_sheet(matriz);
+  const wsProdutos = XLSX.utils.aoa_to_sheet(matriz);
 
   // Força células de IMEI (colunas E e F) e Serial (D) e Código (V) como texto explícito ('s')
   // para evitar notação científica ou perda de precisão no Excel
-  Object.keys(worksheet).forEach((cellKey) => {
+  Object.keys(wsProdutos).forEach((cellKey) => {
     if (cellKey.startsWith("!")) return;
-    const cell = worksheet[cellKey];
+    const cell = wsProdutos[cellKey];
     if (cell && typeof cell.v === "string") {
       cell.t = "s";
     }
   });
 
+  const wsDados = XLSX.utils.aoa_to_sheet(gerarAbaDadosMercadoPhone());
+
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "Planilha1");
+  // No Mercado Phone a primeira aba chama-se 'Produtos' e a segunda 'Dados'
+  XLSX.utils.book_append_sheet(workbook, wsProdutos, "Produtos");
+  XLSX.utils.book_append_sheet(workbook, wsDados, "Dados");
   return workbook;
 }
 
 /**
- * Injeta o estoque em um arquivo XLSX do Mercado Phone fornecido como template pelo usuário.
+ * Injeta o estoque em um arquivo XLSX do Mercado Phone fornecido como template pelo usuário,
+ * preservando todas as abas originais e substituindo apenas a lista de produtos.
  */
 export async function preencherArquivoTemplateMP(
   templateBuffer: ArrayBuffer,
   aparelhos: AparelhoExportacaoMP[]
 ): Promise<XLSX.WorkBook> {
-  const wbOriginal = XLSX.read(templateBuffer, { type: "array", cellDates: true });
-  const sheetName = wbOriginal.SheetNames[0] || "Planilha1";
+  const wbOriginal = XLSX.read(templateBuffer, { type: "array", cellDates: false });
+  const sheetName = wbOriginal.SheetNames.find((s) => s.toLowerCase() === "produtos") || wbOriginal.SheetNames[0] || "Produtos";
   const sheetOriginal = wbOriginal.Sheets[sheetName];
 
-  // Converte a planilha original para matriz
+  if (!sheetOriginal) {
+    const matrizNova = montarMatrizEstoqueMercadoPhone(aparelhos);
+    return criarWorkbookMercadoPhone(matrizNova);
+  }
+
+  // Converte a planilha original para matriz preservando linhas em branco do cabeçalho
   const matrizOriginal = XLSX.utils.sheet_to_json(sheetOriginal, {
     header: 1,
     defval: "",
+    blankrows: true,
     raw: false,
   }) as (string | number)[][];
 
-  // Localiza a linha do cabeçalho que contém 'Tipo' e 'Modelo Aparelho'
+  // Localiza a linha do cabeçalho oficial que contém 'Tipo' na coluna B (índice 1) e 'Modelo Aparelho' na coluna C (índice 2)
   let headerIndex = -1;
   for (let r = 0; r < Math.min(matrizOriginal.length, 30); r++) {
     const row = matrizOriginal[r] || [];
-    const rowText = row.map((c) => String(c || "").trim().toLowerCase()).join(" ");
-    if (rowText.includes("tipo") && rowText.includes("modelo aparelho")) {
+    const col1 = String(row[1] || "").trim().toLowerCase();
+    const col2 = String(row[2] || "").trim().toLowerCase();
+    if (col1 === "tipo" && col2.includes("modelo")) {
       headerIndex = r;
       break;
     }
@@ -443,29 +474,28 @@ export async function preencherArquivoTemplateMP(
     return criarWorkbookMercadoPhone(matrizNova);
   }
 
-  // Encontra onde termina a área de produtos (linha que tem 'final' na col 1 ou início da tabela de apoio)
-  let footerIndex = -1;
-  for (let r = headerIndex + 1; r < matrizOriginal.length; r++) {
-    const col1 = String(matrizOriginal[r]?.[1] || "").trim().toLowerCase();
-    if (col1 === "final" || col1 === "aparelho" || col1 === "ram") {
-      footerIndex = r;
-      break;
-    }
-  }
-
   const cabecalhoMatriz = matrizOriginal.slice(0, headerIndex + 1);
-  const footerMatriz = footerIndex !== -1 ? matrizOriginal.slice(footerIndex) : gerarLinhasFinaisMercadoPhone();
 
-  // Monta as linhas dos aparelhos
+  // Monta as linhas dos aparelhos ativos (sem lixo ou 'f' no fim)
   const linhasProdutos: (string | number)[][] = aparelhos.map((ap) => converterAparelhoParaLinhaMP(ap));
 
   const matrizFinal: (string | number)[][] = [
     ...cabecalhoMatriz,
     ...linhasProdutos,
-    ...footerMatriz,
   ];
 
-  return criarWorkbookMercadoPhone(matrizFinal);
+  // Atualiza a aba no workbook original, preservando demais abas (ex: 'Dados')
+  const newSheet = XLSX.utils.aoa_to_sheet(matrizFinal);
+  Object.keys(newSheet).forEach((cellKey) => {
+    if (cellKey.startsWith("!")) return;
+    const cell = newSheet[cellKey];
+    if (cell && typeof cell.v === "string") {
+      cell.t = "s";
+    }
+  });
+
+  wbOriginal.Sheets[sheetName] = newSheet;
+  return wbOriginal;
 }
 
 /**
