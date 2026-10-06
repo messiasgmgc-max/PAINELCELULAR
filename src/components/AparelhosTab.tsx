@@ -20,6 +20,7 @@ import { AparelhoFiltros } from "@/components/aparelhos/AparelhoFiltros";
 import { BarcodeScannerModal } from "@/components/BarcodeScannerModal";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
+import { ExportarMercadoPhoneModal } from "@/components/ExportarMercadoPhoneModal";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
 import { MarcarVendidoModal } from "@/components/MarcarVendidoModal";
 import { EditarVendaRegistroModal, VendaEditavelData } from "@/components/EditarVendaRegistroModal";
@@ -90,6 +91,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [showSaidas, setShowSaidas] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showMercadoPhoneModal, setShowMercadoPhoneModal] = useState(false);
+  const [showExportarMPModal, setShowExportarMPModal] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [mercadoPhoneText, setMercadoPhoneText] = useState("");
   const [mercadoPhoneMargem, setMercadoPhoneMargem] = useState("300");
@@ -1838,14 +1840,30 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
+                <DropdownMenuContent align="start" className="w-60 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
+                  <DropdownMenuItem
+                    onClick={() => setShowExportarMPModal(true)}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                        Exportar p/ Mercado Phone
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">.xlsx</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">Planilha oficial para importar no MP</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
                   <DropdownMenuItem
                     onClick={handleExportCSV}
                     className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
                   >
                     <FileSpreadsheet className="h-4 w-4 text-blue-400 shrink-0" />
                     <div>
-                      <div className="font-bold text-xs text-white">Exportar CSV</div>
+                      <div className="font-bold text-xs text-white">Exportar CSV Geral</div>
                       <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
                     </div>
                   </DropdownMenuItem>
@@ -3528,6 +3546,13 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         onClose={() => setAparelhoParaRetorno(null)}
         aparelho={aparelhoParaRetorno}
         onSuccess={fetchAparelhos}
+      />
+
+      {/* MODAL DE EXPORTAÇÃO PARA MERCADO PHONE (.XLSX) */}
+      <ExportarMercadoPhoneModal
+        isOpen={showExportarMPModal}
+        onClose={() => setShowExportarMPModal(false)}
+        aparelhos={aparelhosAtivos}
       />
     </div>
   );
