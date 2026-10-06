@@ -89,4 +89,36 @@ describe("Exportação para Mercado Phone (MP)", () => {
     const wb = criarWorkbookMercadoPhone(matriz);
     assert.ok(wb.SheetNames.includes("Planilha1"));
   });
+
+  it("deve remover 100% dos emojis de cores, modelos e observações para compatibilidade estrita com o MP", () => {
+    const aparelhoComEmojis: AparelhoExportacaoMP = {
+      modelo: "🔵 iPhone 15 Pro Max 🌸",
+      cor: "🔵 Azul Titânio",
+      observacoes: "Aparelho impecável ✨ sem marcas 🔥",
+      fornecedor: "📦 Fornecedor SP",
+      condicao: "seminovo",
+      capacidade: "256 GB",
+      preco: 4500,
+    };
+
+    const linha = converterAparelhoParaLinhaMP(aparelhoComEmojis);
+    // Modelo deve estar sem emojis
+    assert.equal(linha[2], "iPhone 15 Pro Max");
+    // Cor deve estar sem o emoji 🔵 e em caixa alta
+    assert.equal(linha[9], "AZUL TITÂNIO");
+    // Observações devem estar sem ✨ e 🔥
+    assert.equal(linha[13], "Aparelho impecável sem marcas");
+    // Fornecedor deve estar sem 📦
+    assert.equal(linha[20], "Fornecedor SP");
+
+    // Testa também cores comuns com outros emojis
+    const testePreto = converterAparelhoParaLinhaMP({ modelo: "13", cor: "⚫ Preto", preco: 2000 });
+    assert.equal(testePreto[9], "PRETO");
+
+    const testeRosa = converterAparelhoParaLinhaMP({ modelo: "15", cor: "🌸 Rosa", preco: 3000 });
+    assert.equal(testeRosa[9], "ROSA");
+
+    const testeDesert = converterAparelhoParaLinhaMP({ modelo: "16 Pro", cor: "🏜️ Desert", preco: 6000 });
+    assert.equal(testeDesert[9], "DESERT");
+  });
 });

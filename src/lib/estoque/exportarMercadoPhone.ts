@@ -132,19 +132,54 @@ export function gerarTemplateBaseMercadoPhone(): (string | number)[][] {
 }
 
 /**
+ * Remove qualquer emoji, pictograma, símbolo de marcador ou variação unicode de um texto,
+ * garantindo compatibilidade estrita com importadores como o Mercado Phone que rejeitam emojis.
+ * Preserva 100% de letras, números (ex: iPhone 15 Pro Max) e pontuações válidas.
+ */
+export function limparTextoMercadoPhone(texto?: string | null): string {
+  if (!texto) return "";
+  return String(texto)
+    // Remove sequências de keycap com emoji (ex: 1️⃣, 2️⃣)
+    .replace(/\d\uFE0F?\u20E3/gu, "")
+    // Remove emojis e pictogramas unicode (sem Emoji_Component para não apagar dígitos ASCII!)
+    .replace(/\p{Extended_Pictographic}|\p{Emoji_Presentation}/gu, "")
+    // Remove marcadores geométricos específicos e símbolos de status frequentemente usados em celulares
+    .replace(/[▫◽▪◾◼◻⬛⬜⚪⚫🔴🔵🟣🟡🟢🟠🔶🔷🔸🔹⭐✨🔥🎉🌸🏜🔘❤️🤍🤎🖤💜💙💚💛🧡🆕♻️⚠️]/gu, "")
+    // Remove seletores de variação unicode (Variation Selectors) e Zero Width Joiners
+    .replace(/[\uFE00-\uFE0F\u200D]/g, "")
+    // Remove caracteres de controle
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+    // Normaliza múltiplos espaços
+    .replace(/\s+/g, " ")
+    // Remove pontuações / traços soltos que sobram nas pontas após a remoção do emoji (ex: "- AZUL" ou "AZUL -")
+    .replace(/^[\s\-_–—:;|•/]+|[\s\-_–—:;|•/]+$/g, "")
+    .trim();
+}
+
+/**
+ * Normaliza e limpa a cor do aparelho para o Mercado Phone (sem emojis e em maiúsculas).
+ */
+export function limparCorMercadoPhone(corRaw?: string | null): string {
+  if (!corRaw) return "";
+  return limparTextoMercadoPhone(corRaw).toUpperCase();
+}
+
+/**
  * Converte um único aparelho do estoque em uma linha de 49 colunas compatível com o Mercado Phone.
  */
 export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (string | number)[] {
-  // 1. Tipo
+  // 1. Tipo (sem emojis)
   let tipo = "Celular";
   if (aparelho.categoria === "acessorio") tipo = "Acessório";
   else if (aparelho.categoria === "perfume") tipo = "Perfume";
+  tipo = limparTextoMercadoPhone(tipo);
 
-  // 2. Modelo Aparelho (normalizado)
-  const modelo = normalizarNomeModelo(aparelho.modelo);
+  // 2. Modelo Aparelho (normalizado e sem emojis)
+  const modeloLimpo = limparTextoMercadoPhone(aparelho.modelo);
+  const modelo = normalizarNomeModelo(modeloLimpo);
 
   // 3. Serial Number
-  const serial = aparelho.numeroSerie ? String(aparelho.numeroSerie).trim() : "";
+  const serial = aparelho.numeroSerie ? limparTextoMercadoPhone(String(aparelho.numeroSerie)) : "";
 
   // 4. IMEI
   const imei = aparelho.imei ? String(aparelho.imei).trim() : "";
@@ -155,11 +190,11 @@ export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (s
   // 6. Capacidade / GB (formato padronizado ex: '128gb', '64gb')
   let gb = "";
   if (aparelho.capacidade) {
-    gb = String(aparelho.capacidade).toLowerCase().replace(/\s+/g, "");
+    gb = limparTextoMercadoPhone(String(aparelho.capacidade)).toLowerCase().replace(/\s+/g, "");
   }
 
   // 7. Memória RAM
-  const ram = aparelho.memoria_ram || aparelho.ram ? String(aparelho.memoria_ram || aparelho.ram).trim() : "";
+  const ram = aparelho.memoria_ram || aparelho.ram ? limparTextoMercadoPhone(String(aparelho.memoria_ram || aparelho.ram)) : "";
 
   // 8. Saúde da Bateria (apenas o número inteiro)
   let bateria = "";
@@ -171,21 +206,21 @@ export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (s
     }
   }
 
-  // 9. Cor (em caixa alta)
-  const cor = aparelho.cor ? String(aparelho.cor).trim().toUpperCase() : "";
+  // 9. Cor (em caixa alta e 100% livre de emojis)
+  const cor = limparCorMercadoPhone(aparelho.cor);
 
-  // 10. Estado do Aparelho (NOVO ou SEMINOVO)
-  const cond = (aparelho.condicao || "").toLowerCase().trim();
+  // 10. Estado do Aparelho (NOVO ou SEMINOVO, sem emojis)
+  const cond = limparTextoMercadoPhone(aparelho.condicao || "").toLowerCase();
   const estado = cond === "novo" ? "NOVO" : "SEMINOVO";
 
   // 11. Marca
-  const marca = aparelho.marca ? String(aparelho.marca).trim() : "Apple";
+  const marca = aparelho.marca ? limparTextoMercadoPhone(String(aparelho.marca)) : "Apple";
 
   // 12. Subcategoria
   const subcategoria = "";
 
-  // 13. Observação
-  const observacao = aparelho.observacoes || aparelho.descricao || "";
+  // 13. Observação (sem emojis para não travar o validador do MP)
+  const observacao = limparTextoMercadoPhone(aparelho.observacoes || aparelho.descricao || "");
 
   // 14. Disponibilidade (obrigatório pelo MP)
   const disponibilidade = "Disponível para venda";
@@ -214,8 +249,8 @@ export function converterAparelhoParaLinhaMP(aparelho: AparelhoExportacaoMP): (s
   // 19. Valor Venda 3
   const valorVenda3 = "";
 
-  // 20. Fornecedor
-  const fornecedor = aparelho.fornecedor ? String(aparelho.fornecedor).trim() : "";
+  // 20. Fornecedor (sem emojis)
+  const fornecedor = aparelho.fornecedor ? limparTextoMercadoPhone(String(aparelho.fornecedor)) : "";
 
   // 21. Código de Barras
   const codigoBarras = aparelho.codigo ? String(aparelho.codigo).trim() : "";
