@@ -239,11 +239,15 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         const motivoLower = (matchBaixa?.[2] || '').toLowerCase();
         const obsLower = obs.toLowerCase();
         let tipoSaida: 'varejo' | 'atacado' | 'outro' = 'outro';
-        if (motivoLower.includes('varejo') || obsLower.includes('venda varejo')) {
-          tipoSaida = 'varejo';
-        } else if (motivoLower.includes('atacado') || obsLower.includes('venda atacado') || obsLower.includes('atacado')) {
+        if (motivoLower.includes('atacado') || obsLower.includes('venda atacado') || obsLower.includes('atacado')) {
           tipoSaida = 'atacado';
-        } else if (aparelho.condicao === 'vendido') {
+        } else if (
+          motivoLower.includes('varejo') ||
+          obsLower.includes('venda varejo') ||
+          aparelho.condicao === 'vendido' ||
+          aparelho.status === 'vendido' ||
+          aparelho.motivo_saida === 'venda'
+        ) {
           tipoSaida = 'varejo';
         }
 
@@ -251,7 +255,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           ...aparelho,
           dataSaida,
           dataEntrada: aparelho.dataCadastro || null,
-          motivoSaida: matchBaixa?.[2] || (aparelho.condicao === 'vendido' ? 'Venda de Aparelho' : 'Baixa de estoque'),
+          motivoSaida: matchBaixa?.[2] || (aparelho.condicao === 'vendido' || aparelho.status === 'vendido' ? 'Venda de Aparelho' : 'Baixa de estoque'),
           tipoSaida,
         };
       })
@@ -278,7 +282,23 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         const imei = (item.imei || '').toLowerCase();
         const cli = (item.cliente || '').toLowerCase();
         const mot = (item.motivoSaida || '').toLowerCase();
-        return mod.includes(b) || mar.includes(b) || imei.includes(b) || cli.includes(b) || mot.includes(b);
+        const cor = (item.cor || '').toLowerCase();
+        const cod = (item.codigo || '').toLowerCase();
+        const num = (item.numeroSerie || '').toLowerCase();
+        const cap = (item.capacidade || '').toLowerCase();
+        const obs = (item.observacoes || '').toLowerCase();
+        return (
+          mod.includes(b) ||
+          mar.includes(b) ||
+          imei.includes(b) ||
+          cli.includes(b) ||
+          mot.includes(b) ||
+          cor.includes(b) ||
+          cod.includes(b) ||
+          num.includes(b) ||
+          cap.includes(b) ||
+          obs.includes(b)
+        );
       }
       return true;
     });

@@ -444,7 +444,7 @@ export function ConferenciaEstoqueModal({
 
   const contagemAjustes = useMemo(() => {
     const porAcao: Record<AcaoFaltante, number> = { manter: 0, vendido: 0, atacado: 0, manutencao: 0, remover: 0 };
-    for (const a of aparelhosFaltantes) porAcao[acoesFaltantes[a.id] || 'remover'] += 1;
+    for (const a of aparelhosFaltantes) porAcao[acoesFaltantes[a.id] || 'manter'] += 1;
     const total = porAcao.vendido + porAcao.atacado + porAcao.manutencao + porAcao.remover;
     return { ...porAcao, total };
   }, [aparelhosFaltantes, acoesFaltantes]);
@@ -463,7 +463,7 @@ export function ConferenciaEstoqueModal({
       };
 
       for (const aparelho of aparelhosFaltantes) {
-        const acao = acoesFaltantes[aparelho.id] || 'remover';
+        const acao = acoesFaltantes[aparelho.id] || 'manter';
         if (acao !== 'manter') porAcao[acao].push(aparelho);
       }
 
@@ -899,15 +899,15 @@ export function ConferenciaEstoqueModal({
                       </div>
 
                       <select
-                        value={acoesFaltantes[aparelho.id] || 'remover'}
+                        value={acoesFaltantes[aparelho.id] || 'manter'}
                         onChange={(e) => setAcoesFaltantes({ ...acoesFaltantes, [aparelho.id]: e.target.value as AcaoFaltante })}
                         className="bg-slate-900 text-xs font-semibold text-white border border-slate-700 rounded-lg px-2.5 py-1.5 outline-none focus:border-cyan-500 shrink-0"
                       >
+                        <option value="manter">🔄 Manter no Estoque</option>
                         <option value="remover">❌ Dar Baixa (Extravio / Perda)</option>
                         <option value="vendido">🛒 Dar Saída - Vendido</option>
                         <option value="manutencao">🛠️ Encaminhar Manutenção</option>
                         <option value="atacado">📦 Dar Saída - Atacado</option>
-                        <option value="manter">🔄 Manter no Estoque</option>
                       </select>
                     </div>
                   ))
