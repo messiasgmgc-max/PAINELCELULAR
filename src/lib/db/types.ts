@@ -248,6 +248,11 @@ export interface Venda {
   garantia?: string;
   descontoTotal?: number;
   pagamentos?: VendaPagamento[];
+  tradeIn?: any;
+  trade_in?: any;
+  valorTotal?: number;
+  valorEntradaTroca?: number | null;
+  valorVolta?: number | null;
   lojaId: string;
 }
 

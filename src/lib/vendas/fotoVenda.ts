@@ -241,7 +241,9 @@ export function camposFaltantesDaVenda(venda: VendaLida): string[] {
     modelo: textoOuNull(aparelho.modelo) !== null,
     capacidade: textoOuNull(aparelho.capacidade) !== null,
     valorTotal: Number(venda.valorTotal) > 0,
-    formaPagamento: textoOuNull(venda.formaPagamento) !== null,
+    formaPagamento:
+      textoOuNull(venda.formaPagamento) !== null ||
+      (Array.isArray((venda as any).pagamentos) && (venda as any).pagamentos.length > 0),
     dataVenda: textoOuNull(venda.dataVenda) !== null,
   };
   const daIA = Array.isArray(venda.camposFaltantes) ? venda.camposFaltantes.map(String) : [];

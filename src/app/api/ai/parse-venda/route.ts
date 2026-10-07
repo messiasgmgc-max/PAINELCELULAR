@@ -97,7 +97,8 @@ Estrutura JSON obrigatória:
     "observacoes": string ou null
   } ou null,
   "vendedor": string ou null (nome do funcionário/vendedor),
-  "formaPagamento": string ou null (forma de pagamento da VOLTA/RESTANTE pago pelo cliente: "pix", "dinheiro", "cartao_credito", "cartao_debito", "parcelado"),
+  "formaPagamento": string ou null (forma de pagamento principal da volta/restante: "pix", "dinheiro", "cartao_credito", "cartao_debito", "parcelado"),
+  "pagamentos": Array<{ "metodo": string, "valor": number, "parcelas"?: number }> ou null (SE o texto informar pagamentos divididos em 2 ou mais formas, ex: 3000 no pix e 4500 no cartão em 10x),
   "valorTotal": number ou null (valor total do aparelho que está sendo vendido em R$, antes do abatimento da troca),
   "valorEntradaTroca": number ou null (valor abatido pelo aparelho entregue na troca em R$, ou null se não houver troca),
   "valorVolta": number ou null (valor líquido da volta/restante pago pelo cliente em R$, calculado como valorTotal - valorEntradaTroca),

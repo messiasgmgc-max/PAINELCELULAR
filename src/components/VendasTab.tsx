@@ -545,9 +545,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     tradeInImei: '',
     tradeInBateria: '',
     tradeInValor: '',
+    tradeInEntrarNoEstoque: true,
     valorVolta: '',
     vendedor: '',
     formaPagamento: 'pix',
+    pagamentos: [{ id: '1', metodo: 'pix', valor: '', parcelas: 1 }] as Array<{ id: string; metodo: string; valor: string; parcelas?: number }>,
     dataVenda: new Date().toISOString().slice(0, 10),
     observacoes: '',
   });
@@ -1211,6 +1213,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       // Tratamento Inteligente de Upgrade / Trade-In
       const isUpgrade = Boolean(parsedData.isUpgrade || (parsedData.tradeIn && parsedData.tradeIn.modelo));
       const tradeInBruto = isUpgrade ? parsedData.tradeIn : null;
+      const tradeInEntrarNoEstoque = parsedData.tradeInEntrarNoEstoque !== false && parsedData.tradeIn?.entrarNoEstoque !== false;
       const valorEntradaTroca = tradeInBruto ? Number(tradeInBruto.valor || parsedData.valorEntradaTroca || 0) : 0;
       const valorVolta = isUpgrade && valorEntradaTroca > 0
         ? (parsedData.valorVolta ? Number(parsedData.valorVolta) : Math.max(0, valorVenda - valorEntradaTroca))
@@ -1229,16 +1232,47 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
             preco: Math.round(valorEntradaTroca * 1.3),
             precoAtacado: Math.round(valorEntradaTroca * 1.15),
             preco_atacado: Math.round(valorEntradaTroca * 1.15),
-            observacoes: `Recebido como troca (trade-in) no PDV de ${clienteNomeFinal || 'cliente'}`,
+            observacoes: `Recebido como troca (trade-in) no PDV de ${clienteNomeFinal || 'cliente'}${tradeInEntrarNoEstoque ? '' : ' (não entrou no estoque)'}`,
+            entrarNoEstoque: tradeInEntrarNoEstoque,
           }
         : null;
 
-      const pagamentosVenda = isUpgrade && valorEntradaTroca > 0
-        ? [
-            { id: Date.now().toString(), metodo: 'trade_in' as const, valor: valorEntradaTroca, parcelas: 1 },
-            { id: (Date.now() + 1).toString(), metodo: metodoPgto, valor: valorVolta, parcelas: 1 }
-          ]
-        : [{ id: Date.now().toString(), metodo: metodoPgto, valor: valorVenda, parcelas: 1 }];
+      // Montagem flexível dos pagamentos da venda (suporta múltiplas formas: Pix + Cartão, Dinheiro, etc.)
+      let pagamentosVenda: Array<{ id: string; metodo: any; valor: number; parcelas?: number }> = [];
+
+      if (Array.isArray(parsedData.pagamentos) && parsedData.pagamentos.length > 0) {
+        const pagsUsuario = parsedData.pagamentos
+          .map((p: any, idx: number) => ({
+            id: p.id || (Date.now() + idx).toString(),
+            metodo: p.metodo || 'pix',
+            valor: Number(p.valor || 0),
+            parcelas: Number(p.parcelas) || 1
+          }))
+          .filter((p: any) => p.valor > 0);
+
+        if (isUpgrade && valorEntradaTroca > 0) {
+          pagamentosVenda = [
+            { id: Date.now().toString(), metodo: 'trade_in', valor: valorEntradaTroca, parcelas: 1 },
+            ...pagsUsuario
+          ];
+        } else {
+          pagamentosVenda = pagsUsuario;
+        }
+      }
+
+      if (pagamentosVenda.length === 0) {
+        pagamentosVenda = isUpgrade && valorEntradaTroca > 0
+          ? [
+              { id: Date.now().toString(), metodo: 'trade_in' as const, valor: valorEntradaTroca, parcelas: 1 },
+              { id: (Date.now() + 1).toString(), metodo: metodoPgto, valor: valorVolta, parcelas: 1 }
+            ]
+          : [{ id: Date.now().toString(), metodo: metodoPgto, valor: valorVenda, parcelas: 1 }];
+      }
+
+      const formasCliente = pagamentosVenda.filter(p => p.metodo !== 'trade_in');
+      const metodoPrincipal: Venda['metodo'] = formasCliente.length > 0 && METODOS_VENDA.includes(formasCliente[0].metodo)
+        ? (formasCliente[0].metodo as Venda['metodo'])
+        : metodoPgto;
 
       const condicaoTexto = (parsedData.aparelho?.condicao || aparelhoFinal?.condicao) === 'novo' ? 'Lacrado' : 'Seminovo';
       const cartItem: VendaItem = {
@@ -1276,7 +1310,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         percentualLucro,
         dataPagamento: dataPagamentoIso,
         status: 'pago',
-        metodo: metodoPgto,
+        metodo: metodoPrincipal,
         descricao: descricaoVenda,
         garantia: `${config?.garantiaDias || 90} dias`,
         descontoTotal: 0,
@@ -1295,16 +1329,20 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         venda: vendaPayload,
         aparelhoIds: aparelhoFinal?.id ? [aparelhoFinal.id] : [],
         permitirForaDoEstoque: aparelhoJaForaDoEstoque,
-        tradeIn: tradeInPayload,
+        tradeIn: (isUpgrade && tradeInEntrarNoEstoque) ? tradeInPayload : null,
         origem: 'venda',
         usuarioId: usuario?.id || null,
         usuarioNome: usuario?.nome || null,
-        observacao: isUpgrade ? `Venda com Upgrade (Troca de ${tradeInPayload?.modelo})` : 'Venda gerada por IA',
+        observacao: isUpgrade
+          ? `Venda com Upgrade (Troca de ${tradeInPayload?.modelo}${tradeInEntrarNoEstoque ? '' : ' - não adicionado ao estoque'})`
+          : 'Venda gerada por IA',
       });
       const vendaCriada: any = resultadoVendaIA.venda;
       if (aparelhoFinal?.id || resultadoVendaIA.tradeInId) await fetchAparelhos();
       if (resultadoVendaIA.tradeInId && tradeInPayload) {
         toast.success(`Aparelho da troca (${tradeInPayload.modelo}) entrou no estoque.`);
+      } else if (isUpgrade && !tradeInEntrarNoEstoque && tradeInPayload) {
+        toast.info(`Abatimento da troca (${tradeInPayload.modelo}) aplicado (aparelho não cadastrado no estoque).`);
       }
 
       await carregarVendas();
@@ -1424,6 +1462,23 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         const vEntrada = parsed.tradeIn?.valor ? Number(parsed.tradeIn.valor) : parsed.valorEntradaTroca ? Number(parsed.valorEntradaTroca) : 0;
         const vVoltaCalc = parsed.valorVolta ? Number(parsed.valorVolta) : (vTot > 0 && vEntrada > 0 ? Math.max(0, vTot - vEntrada) : vTot);
 
+        const pagamentosIniciais: Array<{ id: string; metodo: string; valor: string; parcelas?: number }> =
+          Array.isArray(parsed.pagamentos) && parsed.pagamentos.length > 0
+            ? parsed.pagamentos.map((p: any, idx: number) => ({
+                id: String(idx + 1),
+                metodo: p.metodo || p.forma || 'pix',
+                valor: p.valor !== undefined && p.valor !== null ? String(p.valor) : '',
+                parcelas: Number(p.parcelas) || 1,
+              }))
+            : [
+                {
+                  id: '1',
+                  metodo: parsed.formaPagamento || 'pix',
+                  valor: vVoltaCalc > 0 ? String(vVoltaCalc) : (vTot > 0 ? String(vTot) : ''),
+                  parcelas: 1,
+                },
+              ];
+
         setDadosFaltantesForm({
           clienteNome: parsed.cliente?.nome || '',
           clienteTelefone: parsed.cliente?.telefone || '',
@@ -1447,9 +1502,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           tradeInImei: parsed.tradeIn?.imei || '',
           tradeInBateria: parsed.tradeIn?.bateria ? String(parsed.tradeIn.bateria) : '',
           tradeInValor: vEntrada > 0 ? String(vEntrada) : '',
+          tradeInEntrarNoEstoque: true,
           valorVolta: vVoltaCalc > 0 ? String(vVoltaCalc) : '',
           vendedor: parsed.vendedor || posDados.vendedor || '',
-          formaPagamento: parsed.formaPagamento || 'pix',
+          formaPagamento: pagamentosIniciais[0]?.metodo || parsed.formaPagamento || 'pix',
+          pagamentos: pagamentosIniciais,
           dataVenda: (() => {
             const nascNorm = (parsed.cliente?.dataNascimento || (parsed.cliente as any)?.data_nascimento || '').replace(/\D/g, '');
             const rawVenda = parsed.dataVenda ? String(parsed.dataVenda).slice(0, 10) : '';
@@ -5636,32 +5693,26 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   </label>
                   <input
                     type="number"
+                    step="0.01"
                     required
                     className="input-glass mt-1 font-bold text-emerald-400"
                     placeholder="Ex: 3500"
                     value={dadosFaltantesForm.preco}
-                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, preco: e.target.value})}
+                    onChange={(e) => {
+                      const novoPreco = e.target.value;
+                      const precoNum = Number(novoPreco || 0);
+                      const trocaNum = dadosFaltantesForm.isUpgrade ? Number(dadosFaltantesForm.tradeInValor || 0) : 0;
+                      const volta = Math.max(0, precoNum - trocaNum);
+                      setDadosFaltantesForm((prev) => ({
+                        ...prev,
+                        preco: novoPreco,
+                        pagamentos:
+                          prev.pagamentos.length === 1
+                            ? [{ ...prev.pagamentos[0], valor: volta > 0 ? String(volta) : '' }]
+                            : prev.pagamentos,
+                      }));
+                    }}
                   />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                    <span>Forma de Pagamento <span className="text-red-400">*</span></span>
-                    {aiParsedData?.camposFaltantes?.includes('formaPagamento') && (
-                      <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
-                    )}
-                  </label>
-                  <select
-                    className="input-glass mt-1"
-                    value={dadosFaltantesForm.formaPagamento}
-                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, formaPagamento: e.target.value})}
-                  >
-                    <option value="pix">Pix</option>
-                    <option value="dinheiro">Dinheiro</option>
-                    <option value="cartao_credito">Cartão de Crédito</option>
-                    <option value="cartao_debito">Cartão de Débito</option>
-                    <option value="parcelado">Parcelado</option>
-                  </select>
                 </div>
 
                 <div>
@@ -5680,7 +5731,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   />
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                   <label className="text-xs font-bold text-slate-300">Vendedor</label>
                   <select
                     className="input-glass mt-1"
@@ -5690,6 +5741,236 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     <option value="">Vendedor</option>
                     {tecnicos.map(t => <option key={t.id} value={t.nome}>{t.nome}</option>)}
                   </select>
+                </div>
+
+                {/* SEÇÃO DINÂMICA DE FORMAS DE PAGAMENTO (1, 2 ou 3+ formas: Pix, Cartão, Dinheiro...) */}
+                <div className="sm:col-span-2 space-y-2 p-3.5 rounded-2xl bg-slate-950/50 border border-slate-800">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-slate-200">
+                        Formas de Pagamento <span className="text-red-400">*</span>
+                      </span>
+                      {aiParsedData?.camposFaltantes?.includes('formaPagamento') && (
+                        <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 cursor-pointer"
+                      onClick={() => {
+                        setDadosFaltantesForm((prev) => {
+                          const totalNecessario =
+                            prev.isUpgrade && Number(prev.tradeInValor) > 0
+                              ? Math.max(0, (Number(prev.preco) || 0) - (Number(prev.tradeInValor) || 0))
+                              : (Number(prev.preco) || 0);
+                          const totalJaDistribuido = prev.pagamentos.reduce(
+                            (acc, p) => acc + (Number(p.valor) || 0),
+                            0
+                          );
+                          const saldo = Math.max(0, totalNecessario - totalJaDistribuido);
+                          const ultimoMetodo = prev.pagamentos[prev.pagamentos.length - 1]?.metodo || 'pix';
+                          const novoMetodo =
+                            ultimoMetodo === 'pix'
+                              ? 'cartao_credito'
+                              : ultimoMetodo === 'cartao_credito'
+                              ? 'dinheiro'
+                              : 'pix';
+
+                          return {
+                            ...prev,
+                            pagamentos: [
+                              ...prev.pagamentos,
+                              {
+                                id: Date.now().toString(),
+                                metodo: novoMetodo,
+                                valor: saldo > 0 ? String(saldo) : '',
+                                parcelas: 1,
+                              },
+                            ],
+                          };
+                        });
+                      }}
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Adicionar outra forma (Pix + Cartão...)
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    {dadosFaltantesForm.pagamentos.map((pag, index) => {
+                      const isCartaoOuParcelado = pag.metodo === 'cartao_credito' || pag.metodo === 'parcelado';
+                      return (
+                        <div
+                          key={pag.id}
+                          className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-700/60 flex flex-wrap sm:flex-nowrap items-center gap-2"
+                        >
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-bold shrink-0 min-w-[65px]">
+                            <span>Forma {index + 1}:</span>
+                          </div>
+
+                          <div className="flex-1 min-w-[130px]">
+                            <select
+                              className="input-glass text-xs py-1.5"
+                              value={pag.metodo}
+                              onChange={(e) => {
+                                const novoMetodo = e.target.value;
+                                setDadosFaltantesForm((prev) => ({
+                                  ...prev,
+                                  pagamentos: prev.pagamentos.map((p, i) =>
+                                    i === index ? { ...p, metodo: novoMetodo } : p
+                                  ),
+                                }));
+                              }}
+                            >
+                              <option value="pix">Pix</option>
+                              <option value="cartao_credito">Cartão de Crédito</option>
+                              <option value="cartao_debito">Cartão de Débito</option>
+                              <option value="dinheiro">Dinheiro</option>
+                              <option value="parcelado">Parcelado</option>
+                              <option value="boleto">Boleto</option>
+                              <option value="fiado">Fiado / A Prazo</option>
+                            </select>
+                          </div>
+
+                          {isCartaoOuParcelado && (
+                            <div className="w-24 shrink-0">
+                              <select
+                                className="input-glass text-xs py-1.5"
+                                value={pag.parcelas || 1}
+                                onChange={(e) => {
+                                  const parc = Number(e.target.value) || 1;
+                                  setDadosFaltantesForm((prev) => ({
+                                    ...prev,
+                                    pagamentos: prev.pagamentos.map((p, i) =>
+                                      i === index ? { ...p, parcelas: parc } : p
+                                    ),
+                                  }));
+                                }}
+                              >
+                                {Array.from({ length: 18 }, (_, k) => k + 1).map((n) => (
+                                  <option key={n} value={n}>
+                                    {n}x
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          <div className="w-32 shrink-0">
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                                R$
+                              </span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="0,00"
+                                className="input-glass text-xs py-1.5 pl-8 font-bold text-emerald-400"
+                                value={pag.valor}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDadosFaltantesForm((prev) => ({
+                                    ...prev,
+                                    pagamentos: prev.pagamentos.map((p, i) =>
+                                      i === index ? { ...p, valor: val } : p
+                                    ),
+                                  }));
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {dadosFaltantesForm.pagamentos.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10 shrink-0 cursor-pointer"
+                              onClick={() => {
+                                setDadosFaltantesForm((prev) => ({
+                                  ...prev,
+                                  pagamentos: prev.pagamentos.filter((_, i) => i !== index),
+                                }));
+                              }}
+                              title="Remover esta forma de pagamento"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Resumo da conferência de valores dos pagamentos */}
+                  {(() => {
+                    const totalPagar =
+                      dadosFaltantesForm.isUpgrade && Number(dadosFaltantesForm.tradeInValor) > 0
+                        ? Math.max(0, (Number(dadosFaltantesForm.preco) || 0) - (Number(dadosFaltantesForm.tradeInValor) || 0))
+                        : (Number(dadosFaltantesForm.preco) || 0);
+                    const totalDistribuido = dadosFaltantesForm.pagamentos.reduce(
+                      (acc, p) => acc + (Number(p.valor) || 0),
+                      0
+                    );
+                    const dif = totalPagar - totalDistribuido;
+                    const bateu = Math.abs(dif) < 0.01;
+
+                    return (
+                      <div className="pt-2 flex flex-wrap items-center justify-between text-xs gap-2 border-t border-white/5">
+                        <div className="text-slate-400 flex items-center gap-2">
+                          <span>
+                            Total a Pagar: <strong className="text-white">R$ {totalPagar.toFixed(2)}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Soma das Formas:{' '}
+                            <strong className={bateu ? 'text-emerald-400' : 'text-amber-400'}>
+                              R$ {totalDistribuido.toFixed(2)}
+                            </strong>
+                          </span>
+                        </div>
+
+                        {bateu ? (
+                          <span className="text-emerald-400 font-bold flex items-center gap-1 text-[11px]">
+                            <Check className="w-3.5 h-3.5" /> Total conferido
+                          </span>
+                        ) : dif > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-400 text-[11px] font-semibold">
+                              Faltam R$ {dif.toFixed(2)}
+                            </span>
+                            <button
+                              type="button"
+                              className="text-[11px] text-emerald-400 hover:underline font-bold cursor-pointer"
+                              onClick={() => {
+                                setDadosFaltantesForm((prev) => {
+                                  if (prev.pagamentos.length === 0) return prev;
+                                  const ultimoIdx = prev.pagamentos.length - 1;
+                                  const valorAtual = Number(prev.pagamentos[ultimoIdx].valor) || 0;
+                                  const novoValor = (valorAtual + dif).toFixed(2);
+                                  return {
+                                    ...prev,
+                                    pagamentos: prev.pagamentos.map((p, i) =>
+                                      i === ultimoIdx ? { ...p, valor: novoValor } : p
+                                    ),
+                                  };
+                                });
+                              }}
+                            >
+                              Completar no último
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-red-400 text-[11px] font-semibold">
+                            Passou R$ {Math.abs(dif).toFixed(2)} do total!
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -5711,10 +5992,17 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       checked={dadosFaltantesForm.isUpgrade}
                       onChange={(e) => {
                         const ativo = e.target.checked;
+                        const precoNum = Number(dadosFaltantesForm.preco || 0);
+                        const trocaNum = ativo ? Number(dadosFaltantesForm.tradeInValor || 0) : 0;
+                        const volta = Math.max(0, precoNum - trocaNum);
                         setDadosFaltantesForm({
                           ...dadosFaltantesForm,
                           isUpgrade: ativo,
                           tradeInValor: ativo ? dadosFaltantesForm.tradeInValor : '',
+                          pagamentos:
+                            dadosFaltantesForm.pagamentos.length === 1
+                              ? [{ ...dadosFaltantesForm.pagamentos[0], valor: volta > 0 ? String(volta) : '' }]
+                              : dadosFaltantesForm.pagamentos,
                         });
                       }}
                       className="sr-only peer"
@@ -5725,14 +6013,45 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
                 {dadosFaltantesForm.isUpgrade && (
                   <div className="p-4 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 animate-in fade-in-50">
-                    <div className="flex items-center justify-between pb-2 border-b border-emerald-500/20">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-500/20">
                       <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
                         <Repeat className="w-3.5 h-3.5 text-emerald-400" /> Dados do Aparelho que Entrou na Troca
                       </span>
-                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                        Entrará no Estoque
-                      </span>
+
+                      {/* Opção de Não Adicionar ao Estoque */}
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs select-none">
+                          <input
+                            type="checkbox"
+                            checked={!dadosFaltantesForm.tradeInEntrarNoEstoque}
+                            onChange={(e) => {
+                              setDadosFaltantesForm({
+                                ...dadosFaltantesForm,
+                                tradeInEntrarNoEstoque: !e.target.checked,
+                              });
+                            }}
+                            className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                          />
+                          <span className={dadosFaltantesForm.tradeInEntrarNoEstoque ? "text-slate-300 hover:text-white" : "text-amber-300 font-semibold"}>
+                            Não adicionar ao estoque
+                          </span>
+                        </label>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          dadosFaltantesForm.tradeInEntrarNoEstoque
+                            ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                            : "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                        }`}>
+                          {dadosFaltantesForm.tradeInEntrarNoEstoque ? "Entrará no Estoque" : "Não entrará no Estoque"}
+                        </span>
+                      </div>
                     </div>
+
+                    {!dadosFaltantesForm.tradeInEntrarNoEstoque && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>O abatimento financeiro de entrada será aplicado na venda, mas o aparelho usado <strong>não será cadastrado no estoque</strong> da loja.</span>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       <div>
@@ -5766,11 +6085,25 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         <label className="text-[11px] font-bold text-slate-300">Valor de Avaliação / Entrada (R$) <span className="text-red-400">*</span></label>
                         <input
                           type="number"
+                          step="0.01"
                           required={dadosFaltantesForm.isUpgrade}
                           className="input-glass mt-1 font-bold text-emerald-400 text-xs"
                           placeholder="Ex: 1500"
                           value={dadosFaltantesForm.tradeInValor}
-                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInValor: e.target.value})}
+                          onChange={(e) => {
+                            const novoValorTroca = e.target.value;
+                            const precoNum = Number(dadosFaltantesForm.preco || 0);
+                            const trocaNum = Number(novoValorTroca || 0);
+                            const volta = Math.max(0, precoNum - trocaNum);
+                            setDadosFaltantesForm((prev) => ({
+                              ...prev,
+                              tradeInValor: novoValorTroca,
+                              pagamentos:
+                                prev.pagamentos.length === 1
+                                  ? [{ ...prev.pagamentos[0], valor: volta > 0 ? String(volta) : '' }]
+                                  : prev.pagamentos,
+                            }));
+                          }}
                         />
                       </div>
 
@@ -5821,7 +6154,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[11px] text-slate-400">(=) Volta Restante a Pagar ({dadosFaltantesForm.formaPagamento.toUpperCase()})</div>
+                        <div className="text-[11px] text-slate-400">(=) Volta Restante a Pagar</div>
                         <div className="text-base font-black text-emerald-400 font-mono">
                           R$ {Math.max(0, (Number(dadosFaltantesForm.preco) || 0) - (Number(dadosFaltantesForm.tradeInValor) || 0)).toFixed(2)}
                         </div>
@@ -5832,12 +6165,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               </div>
 
               <div className="flex gap-2 pt-3 border-t border-white/10">
-                <Button type="button" variant="outline" className="flex-1" onClick={() => setShowDadosFaltantesModal(false)}>
+                <Button type="button" variant="outline" className="flex-1 cursor-pointer" onClick={() => setShowDadosFaltantesModal(false)}>
                   Cancelar
                 </Button>
                 <Button
                   type="button"
-                  className="flex-1 bg-green-600 hover:bg-green-700 font-bold shadow-lg shadow-green-500/20"
+                  className="flex-1 bg-green-600 hover:bg-green-700 font-bold shadow-lg shadow-green-500/20 cursor-pointer"
                   onClick={async () => {
                     if (!dadosFaltantesForm.modelo || !dadosFaltantesForm.preco || !dadosFaltantesForm.dataVenda) {
                       toast.error('Preencha a Data da Venda, modelo e valor do aparelho!');
@@ -5854,6 +6187,31 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     const precoTotalNum = Number(dadosFaltantesForm.preco);
                     const valorEntradaTrocaNum = dadosFaltantesForm.isUpgrade ? Number(dadosFaltantesForm.tradeInValor) : 0;
                     const valorVoltaNum = dadosFaltantesForm.isUpgrade ? Math.max(0, precoTotalNum - valorEntradaTrocaNum) : precoTotalNum;
+
+                    // Validação de pagamentos informados
+                    const pagamentosValidos = dadosFaltantesForm.pagamentos
+                      .map((p) => ({
+                        id: p.id,
+                        metodo: p.metodo,
+                        valor: Number(p.valor) || 0,
+                        parcelas: p.parcelas || 1,
+                      }))
+                      .filter((p) => p.valor > 0);
+
+                    if (pagamentosValidos.length === 0) {
+                      toast.error('Informe pelo menos uma forma de pagamento com valor!');
+                      return;
+                    }
+
+                    const somaPags = pagamentosValidos.reduce((acc, p) => acc + p.valor, 0);
+                    if (Math.abs(somaPags - valorVoltaNum) > 0.05) {
+                      toast.error(
+                        `A soma das formas de pagamento (R$ ${somaPags.toFixed(2)}) não confere com o total a pagar (R$ ${valorVoltaNum.toFixed(2)})!`
+                      );
+                      return;
+                    }
+
+                    const tradeInEntrarNoEstoque = dadosFaltantesForm.tradeInEntrarNoEstoque !== false;
 
                     setShowDadosFaltantesModal(false);
                     await aplicarVendaAI({
@@ -5876,6 +6234,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         custo: Number(dadosFaltantesForm.custo),
                       },
                       isUpgrade: dadosFaltantesForm.isUpgrade,
+                      tradeInEntrarNoEstoque,
                       tradeIn: dadosFaltantesForm.isUpgrade ? {
                         marca: dadosFaltantesForm.tradeInMarca,
                         modelo: dadosFaltantesForm.tradeInModelo,
@@ -5885,12 +6244,14 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         bateria: Number(dadosFaltantesForm.tradeInBateria) > 0 ? Number(dadosFaltantesForm.tradeInBateria) : null,
                         valor: valorEntradaTrocaNum,
                         condicao: 'seminovo',
-                        observacoes: 'Recebido como troca (trade-in) no pedido'
+                        observacoes: 'Recebido como troca (trade-in) no pedido',
+                        entrarNoEstoque: tradeInEntrarNoEstoque,
                       } : null,
                       valorEntradaTroca: valorEntradaTrocaNum > 0 ? valorEntradaTrocaNum : null,
                       valorVolta: valorVoltaNum,
                       vendedor: dadosFaltantesForm.vendedor,
-                      formaPagamento: dadosFaltantesForm.formaPagamento,
+                      formaPagamento: pagamentosValidos[0]?.metodo || 'pix',
+                      pagamentos: pagamentosValidos,
                       valorTotal: precoTotalNum,
                       dataVenda: dadosFaltantesForm.dataVenda,
                       observacoes: dadosFaltantesForm.observacoes,
