@@ -202,19 +202,40 @@ describe('Correspondência entre lista e estoque', () => {
 
   it('final de IMEI que aponta para dois aparelhos não casa com nenhum', () => {
     const aparelhos = [
-      aparelho(1, { codigo: '', imei: '350000000002605' }),
-      aparelho(2, { codigo: '', imei: '359999999992605' }),
+      aparelho(1, { modelo: 'iPhone 14 Pro', codigo: '', imei: '350000000002605' }),
+      aparelho(2, { modelo: 'iPhone 14 Pro', codigo: '', imei: '359999999992605' }),
     ];
-    const item = itemPara(0, { idEtiquetaInformado: false, sufixoSerial: '2605' });
+    const item = itemPara(0, { modelo: 'iPhone 14 Pro', idEtiquetaInformado: false, sufixoSerial: '2605' });
 
     assert.equal(encontrarEquivalente(item, aparelhos, obterCodigo), undefined);
   });
 
-  it('final de IMEI único casa', () => {
-    const aparelhos = [aparelho(1, { codigo: '', imei: '350000000002605' }), aparelho(2, { codigo: '', imei: '359999999997777' })];
-    const item = itemPara(0, { idEtiquetaInformado: false, sufixoSerial: '2605' });
+  it('final de IMEI único casa se o modelo for compatível', () => {
+    const aparelhos = [
+      aparelho(1, { modelo: 'iPhone 14 Pro', codigo: '', imei: '350000000002605' }),
+      aparelho(2, { modelo: 'iPhone 14 Pro', codigo: '', imei: '359999999997777' }),
+    ];
+    const item = itemPara(0, { modelo: 'iPhone 14 Pro', idEtiquetaInformado: false, sufixoSerial: '2605' });
 
     assert.equal(encontrarEquivalente(item, aparelhos, obterCodigo)?.id, 'ap-1');
+  });
+
+  it('final de IMEI de modelo diferente NUNCA casa (ex: iPhone 14 Pro vs iPhone 17 Pro)', () => {
+    const aparelhos = [
+      aparelho(1, { modelo: 'iPhone 14 Pro', codigo: '', imei: '350000000006581' }),
+    ];
+    const item = itemPara(0, { modelo: 'iPhone 17 Pro', idEtiquetaInformado: false, sufixoSerial: '6581' });
+
+    assert.equal(encontrarEquivalente(item, aparelhos, obterCodigo), undefined);
+  });
+
+  it('ID de etiqueta não casa se os modelos forem incompatíveis (evita sobrescrever outro aparelho)', () => {
+    const aparelhos = [
+      aparelho(1, { modelo: 'iPhone 14 Pro', codigo: '58263550', numeroSerie: '58263550' }),
+    ];
+    const item = itemPara(0, { modelo: 'iPhone 17 Pro', idEtiqueta: '58263550', idEtiquetaInformado: true });
+
+    assert.equal(encontrarEquivalente(item, aparelhos, obterCodigo), undefined);
   });
 
   it('um aparelho não é casado com dois itens da lista', () => {

@@ -90,12 +90,73 @@ function somenteDigitos(valor: unknown): string {
 }
 
 /**
+ * Normaliza o nome do modelo para comparação segura.
+ * Remove acentos, capacidades soltas (128gb, etc) e múltiplos espaços.
+ */
+export function normalizarModelo(modelo?: string | null): string {
+  if (!modelo) return '';
+  return modelo
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/\b(16|32|64|128|256|512)\s*gb\b/gi, '') // remove capacidades
+    .replace(/\b(1|2)\s*tb\b/gi, '')
+    .replace(/[^\w\s]/g, ' ') // substitui pontuações por espaço
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Avalia se dois modelos podem se referir ao mesmo aparelho físico.
+ * Aparelhos de gerações diferentes (ex.: iPhone 14 Pro vs iPhone 17 Pro)
+ * ou variantes diferentes (ex.: Pro vs Pro Max, normal vs Plus, mini)
+ * NUNCA devem casar e sobrescrever um ao outro.
+ */
+export function modelosCompativeis(modeloA?: string | null, modeloB?: string | null): boolean {
+  const a = normalizarModelo(modeloA);
+  const b = normalizarModelo(modeloB);
+
+  // Se um dos dois não tiver modelo informado, não bloqueia por modelo.
+  if (!a || !b) return true;
+
+  if (a === b) return true;
+
+  // Extrai números (gerações) dos modelos (ex: "iphone 14 pro" -> ["14"], "iphone 17 pro" -> ["17"])
+  const numsA = a.match(/\b\d+\b/g) || [];
+  const numsB = b.match(/\b\d+\b/g) || [];
+  // Se ambos tiverem números de geração e forem diferentes, modelos são incompatíveis (ex: 14 vs 17, 11 vs 12)
+  if (numsA.length > 0 && numsB.length > 0) {
+    if (numsA.join(' ') !== numsB.join(' ')) {
+      return false;
+    }
+  }
+
+  // Verifica variantes de iPhone / smartphones
+  const variantes = ['pro max', 'pro', 'plus', 'mini', 'max', 'ultra', 'se', 'xr', 'xs max', 'xs'];
+  for (const v of variantes) {
+    const temA = new RegExp(`\\b${v}\\b`).test(a);
+    const temB = new RegExp(`\\b${v}\\b`).test(b);
+    if (temA !== temB) {
+      return false;
+    }
+  }
+
+  // Se um contém o outro por inteiro (ex: "apple iphone 14" e "iphone 14")
+  if (a.includes(b) || b.includes(a)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Procura o aparelho do banco que corresponde a um item da lista.
  *
  * Mais restritivo que a versão anterior:
  *  - ID de etiqueta gerado aleatoriamente pelo parser nunca é usado para casar;
  *  - a busca em observações exige a marca exata `ID: <id>`, não um trecho solto;
  *  - final de IMEI só casa se apontar para UM aparelho (4 dígitos repetem);
+ *  - modelos incompatíveis (ex: 14 Pro vs 17 Pro) NUNCA casam;
  *  - um aparelho já casado com outro item da lista não é reutilizado.
  */
 /**
@@ -131,24 +192,35 @@ export function encontrarEquivalente(
   if (idConfiavel) {
     const porCodigo = livres.find((a) => {
       const cod = somenteDigitos(obterCodigo(a));
-      return cod.length >= 6 && (cod === id || cod.endsWith(id) || id.endsWith(cod));
+      return (
+        cod.length >= 6 &&
+        (cod === id || cod.endsWith(id) || id.endsWith(cod)) &&
+        modelosCompativeis(item.modelo, a.modelo)
+      );
     });
     if (porCodigo) return porCodigo;
 
-    const porSerie = livres.find((a) => somenteDigitos(a.numeroSerie) === id);
+    const porSerie = livres.find(
+      (a) => somenteDigitos(a.numeroSerie) === id && modelosCompativeis(item.modelo, a.modelo)
+    );
     if (porSerie) return porSerie;
 
     const marca = new RegExp(`\\bID:\\s*${id}\\b`);
-    const porObservacao = livres.find((a) => marca.test(String(a.observacoes || '')));
+    const porObservacao = livres.find(
+      (a) => marca.test(String(a.observacoes || '')) && modelosCompativeis(item.modelo, a.modelo)
+    );
     if (porObservacao) return porObservacao;
   }
 
   const serial = String(item.sufixoSerial || '').trim();
   if (item.isCellular !== false && serial.length >= 3) {
-    const exato = livres.find((a) => String(a.imei || '') === serial);
+    // Modelos incompatíveis (ex: iPhone 14 Pro vs iPhone 17 Pro) NUNCA podem casar por IMEI
+    const compativeis = livres.filter((a) => modelosCompativeis(item.modelo, a.modelo));
+
+    const exato = compativeis.find((a) => String(a.imei || '') === serial);
     if (exato) return exato;
 
-    const porFinal = livres.filter((a) => a.imei && String(a.imei).endsWith(serial));
+    const porFinal = compativeis.filter((a) => a.imei && String(a.imei).endsWith(serial));
     if (porFinal.length === 1) return porFinal[0];
   }
 
