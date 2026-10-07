@@ -217,9 +217,11 @@ export async function devolverAparelhoAoEstoque(
     /** Quem pediu a devolução, para a auditoria. */
     usuarioId?: string | null;
     usuarioNome?: string | null;
+    /** Se deve cancelar/desfazer a venda histórica correspondente (padrão false para preservar histórico e upgrades). */
+    cancelarVendaOriginal?: boolean;
   }
 ): Promise<ResultadoDevolucao> {
-  const { aparelhoId, lojaId } = params;
+  const { aparelhoId, lojaId, cancelarVendaOriginal = false } = params;
 
   let leitura = supabase
     .from('aparelhos')
@@ -242,7 +244,7 @@ export async function devolverAparelhoAoEstoque(
   }
 
   const localizada = await localizarVendaDoAparelho(supabase, aparelhoId, lojaId);
-  if (localizada === 'varias') {
+  if (localizada === 'varias' && cancelarVendaOriginal) {
     return {
       ok: false,
       mensagem: `${nome} aparece em mais de uma venda. Ajuste pelo histórico de vendas para não apagar a venda errada.`,
@@ -250,27 +252,27 @@ export async function devolverAparelhoAoEstoque(
       auditoriaRegistrada: true,
     };
   }
-  const vendaAlvo = localizada;
+  const vendaAlvo = localizada === 'varias' ? null : localizada;
 
   const itemDaVenda = vendaAlvo
     ? (Array.isArray(vendaAlvo.itens) ? vendaAlvo.itens : []).find((i) => i?.aparelhoId === aparelhoId)
     : undefined;
 
-  const acao = planejarAjusteDaVenda(vendaAlvo, aparelhoId);
+  const acao = cancelarVendaOriginal ? planejarAjusteDaVenda(vendaAlvo, aparelhoId) : { tipo: 'nenhuma' as const };
 
-  // A venda é ajustada ANTES de reativar o aparelho: se algo falhar aqui, o
-  // aparelho continua baixado e a operação pode ser repetida. Na ordem inversa,
-  // uma falha deixaria o aparelho no estoque e a venda ainda cobrando por ele.
-  if (acao.tipo === 'cancelar') {
-    const { error } = await supabase
-      .from('vendas')
-      .update(montarCancelamento('Aparelho da venda devolvido ao estoque', params.usuarioNome))
-      .eq('id', acao.vendaId);
-    if (error) throw error;
-  } else if (acao.tipo === 'atualizar') {
-    const { tipo: _tipo, vendaId, ...campos } = acao;
-    const { error } = await supabase.from('vendas').update(campos).eq('id', vendaId);
-    if (error) throw error;
+  // Só altera a venda se foi explicitamente solicitado pelo usuário
+  if (cancelarVendaOriginal) {
+    if (acao.tipo === 'cancelar') {
+      const { error } = await supabase
+        .from('vendas')
+        .update(montarCancelamento('Aparelho da venda devolvido ao estoque', params.usuarioNome))
+        .eq('id', acao.vendaId);
+      if (error) throw error;
+    } else if (acao.tipo === 'atualizar') {
+      const { tipo: _tipo, vendaId, ...campos } = acao;
+      const { error } = await supabase.from('vendas').update(campos).eq('id', vendaId);
+      if (error) throw error;
+    }
   }
 
   // A condição física do aparelho é mantida. Só registros antigos, em que a
@@ -297,11 +299,11 @@ export async function devolverAparelhoAoEstoque(
     usuarioId: usuario.id,
     usuarioNome: usuario.nome,
     observacao:
-      acao.tipo === 'cancelar'
+      cancelarVendaOriginal && acao.tipo === 'cancelar'
         ? `Devolução ao estoque; venda ${acao.vendaId} cancelada.`
-        : acao.tipo === 'atualizar'
+        : cancelarVendaOriginal && acao.tipo === 'atualizar'
           ? `Devolução ao estoque; item retirado da venda ${acao.vendaId}.`
-          : 'Devolução ao estoque de aparelho sem venda vinculada.',
+          : 'Devolução / Reativação no estoque mantendo histórico de vendas.',
     // Cliente e observações são sobrescritos aqui: ficam no antes/depois.
     camposAuditados: ['cliente', 'clienteId', 'observacoes'],
     // Revalida no estado lido na escrita: quem voltou por outro caminho fica intocado.
@@ -309,11 +311,11 @@ export async function devolverAparelhoAoEstoque(
   });
 
   const complemento =
-    acao.tipo === 'cancelar'
+    cancelarVendaOriginal && acao.tipo === 'cancelar'
       ? ' A venda correspondente ficou como cancelada no histórico.'
-      : acao.tipo === 'atualizar'
+      : cancelarVendaOriginal && acao.tipo === 'atualizar'
         ? ' O item saiu da venda e os totais foram recalculados.'
-        : '';
+        : ' (Histórico de vendas preservado).';
 
   let aviso = '';
   if (!resultado.auditoriaRegistrada) {

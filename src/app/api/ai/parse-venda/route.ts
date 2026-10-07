@@ -10,6 +10,7 @@ import {
   type LeituraFotoVenda,
   type ResultadoFotosVenda,
 } from '@/lib/vendas/fotoVenda';
+import { inferirMarcaPorModelo } from '@/lib/marcaUtils';
 
 // Texto e até 3 fotos passam por IA; com fallback de modelos a resposta pode demorar.
 export const maxDuration = 60;
@@ -75,8 +76,8 @@ Estrutura JSON obrigatória:
   },
   "aparelho": {
     "codigo": string ou null (opcional: Código/ID do aparelho se informado ex: COD: 8665041, COD 8665041, ID: 8665041 ou #8665041),
-    "marca": string ou null (ex: Apple, Samsung, Xiaomi, Motorola),
-    "modelo": string ou null (ex: iPhone 13 Pro, Galaxy S23, Redmi Note 12 - APARELHO QUE O CLIENTE ESTÁ COMPRANDO/LEVANDO),
+    "marca": string ou null (identifique a marca real: Xiaomi para Poco/Redmi/Mi; Samsung para Galaxy; Motorola para Moto/Edge; Apple para iPhone/iPad),
+    "modelo": string ou null (ex: Poco X8 Pro, iPhone 13 Pro, Galaxy S23, Redmi Note 12 - APARELHO QUE O CLIENTE ESTÁ COMPRANDO/LEVANDO),
     "capacidade": string ou null (ex: 128GB, 256GB, 512GB, 64GB),
     "cor": string ou null (ex: Grafite, Preto, Azul, Dourado, Branco),
     "condicao": string ou null (deve ser "novo" se for lacrado/novo ou "seminovo" se usado/seminovo),
@@ -389,6 +390,29 @@ Regras para os camposFaltantes:
       const romMatch = trimmedText.match(/\b(\d+GB|\d+TB)\b/i);
       if (romMatch) {
         parsedJson.aparelho.capacidade = romMatch[1].toUpperCase();
+      }
+    }
+
+    // 12. IMEI do Aparelho Vendido (Regex Fallback)
+    if (!parsedJson.aparelho.imei) {
+      const imeiRotuloMatch = trimmedText.match(/(?:IMEI|IMEI\s*1|N[ºo°]\s*S[eé]rie|Serial):\s*([0-9A-Za-z]{8,18})/i) ||
+                             trimmedText.match(/IMEI\s+([0-9]{10,18})/i) ||
+                             trimmedText.match(/\b([0-9]{14,16})\b/);
+      if (imeiRotuloMatch) {
+        parsedJson.aparelho.imei = imeiRotuloMatch[1].trim();
+      }
+    }
+
+    // 13. Reconhecimento inteligente da marca do aparelho vendido e troca
+    parsedJson.aparelho.marca = inferirMarcaPorModelo(parsedJson.aparelho?.modelo, parsedJson.aparelho?.marca);
+
+    if (parsedJson.tradeIn && parsedJson.tradeIn.modelo) {
+      parsedJson.tradeIn.marca = inferirMarcaPorModelo(parsedJson.tradeIn.modelo, parsedJson.tradeIn.marca);
+      if (!parsedJson.tradeIn.imei) {
+        const imeiTrocaMatch = trimmedText.match(/(?:IMEI da troca|IMEI troca|IMEI entrada):\s*([0-9A-Za-z]{8,18})/i);
+        if (imeiTrocaMatch) {
+          parsedJson.tradeIn.imei = imeiTrocaMatch[1].trim();
+        }
       }
     }
 

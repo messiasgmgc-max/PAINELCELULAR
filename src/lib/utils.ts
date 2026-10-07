@@ -409,8 +409,24 @@ export function extrairAparelhoEImeiDaVenda(venda: any, listaAparelhos: any[] = 
     if (primeiro.aparelhoId && Array.isArray(listaAparelhos) && listaAparelhos.length > 0) {
       const ap = listaAparelhos.find((a: any) => a.id === primeiro.aparelhoId);
       if (ap) {
-        nomeAparelho = [ap.marca, ap.modelo, ap.capacidade, ap.cor].filter(Boolean).join(' ');
-        imei = ap.imei || '';
+        // Validação de coerência: se o item tiver descrição própria que conflita com o aparelho (ex: Poco vs iPhone),
+        // preserva a descrição do item vendido e não sobrescreve com aparelho conflitante.
+        const descItem = (primeiro.descricao || primeiro.modelo || '').toLowerCase();
+        const apMod = (ap.modelo || '').toLowerCase();
+        const incompativel = Boolean(
+          descItem &&
+            !descItem.includes('item avulso') &&
+            ((descItem.includes('poco') && !apMod.includes('poco')) ||
+              (descItem.includes('redmi') && !apMod.includes('redmi')) ||
+              (descItem.includes('galaxy') && !apMod.includes('galaxy')) ||
+              (descItem.includes('motorola') && !apMod.includes('motorola') && !apMod.includes('moto')) ||
+              (descItem.includes('iphone') && !apMod.includes('iphone')))
+        );
+
+        if (!incompativel) {
+          nomeAparelho = [ap.marca, ap.modelo, ap.capacidade, ap.cor].filter(Boolean).join(' ');
+          imei = ap.imei || '';
+        }
       }
     }
 

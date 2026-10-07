@@ -7,6 +7,7 @@ import { escoparHtmlRecibo, removerEstilosDoSistema } from '@/lib/recibo/reciboP
 import { escolherAparelhoParaVendaIA } from '@/lib/vendas/aparelhoParaVendaIA';
 import { MAX_FOTOS_VENDA, type CampoDaFoto } from '@/lib/vendas/fotoVenda';
 import { reduzirImagemParaEnvio } from '@/lib/imagens/reduzirImagem';
+import { inferirMarcaPorModelo } from '@/lib/marcaUtils';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -1132,7 +1133,25 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       let aparelhoFinal: Aparelho | null = null;
 
       if (selectedStockAparelhoId) {
-        aparelhoFinal = aparelhos.find(a => a.id === selectedStockAparelhoId) || null;
+        const apCandidato = aparelhos.find(a => a.id === selectedStockAparelhoId) || null;
+        if (apCandidato) {
+          const modVenda = (parsedData.aparelho?.modelo || '').toLowerCase();
+          const modEstoque = (apCandidato.modelo || '').toLowerCase();
+          const eIncompativel = Boolean(
+            modVenda &&
+              ((modVenda.includes('poco') && !modEstoque.includes('poco')) ||
+                (modVenda.includes('redmi') && !modEstoque.includes('redmi')) ||
+                (modVenda.includes('galaxy') && !modEstoque.includes('galaxy')) ||
+                (modVenda.includes('motorola') && !modEstoque.includes('motorola') && !modEstoque.includes('moto')) ||
+                (modVenda.includes('iphone') && !modEstoque.includes('iphone')))
+          );
+
+          if (!eIncompativel) {
+            aparelhoFinal = apCandidato;
+          } else {
+            console.warn(`[VendasTab] selectedStockAparelhoId ignorado: estoque=${apCandidato.modelo} vs form=${parsedData.aparelho?.modelo}`);
+          }
+        }
       }
 
       if (!aparelhoFinal && parsedData.aparelho?.modelo) {
@@ -1368,6 +1387,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
       console.error('Erro ao aplicar venda por IA:', err);
       toast.error(err.message || 'Erro ao finalizar venda por IA');
     } finally {
+      setSelectedStockAparelhoId('');
       setProcessingAiText(false);
     }
   };
@@ -1483,7 +1503,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           clienteNome: parsed.cliente?.nome || '',
           clienteTelefone: parsed.cliente?.telefone || '',
           clienteEmail: parsed.cliente?.email || '',
-          marca: apPreSel ? apPreSel.marca : parsed.aparelho?.marca || 'Apple',
+          marca: inferirMarcaPorModelo(apPreSel ? apPreSel.modelo : parsed.aparelho?.modelo, apPreSel ? apPreSel.marca : parsed.aparelho?.marca),
           modelo: apPreSel ? apPreSel.modelo : parsed.aparelho?.modelo || '',
           capacidade: apPreSel ? (apPreSel.capacidade || '128GB') : parsed.aparelho?.capacidade || '128GB',
           cor: apPreSel ? (apPreSel.cor || '') : parsed.aparelho?.cor || '',
@@ -1495,7 +1515,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           preco: vTot > 0 ? String(vTot) : '',
           custo: apPreSel ? String((apPreSel as any).custo || 0) : parsed.aparelho?.custo ? String(parsed.aparelho.custo) : '',
           isUpgrade: isUp,
-          tradeInMarca: parsed.tradeIn?.marca || (/iphone|apple/i.test(parsed.tradeIn?.modelo || '') ? 'Apple' : 'Apple'),
+          tradeInMarca: inferirMarcaPorModelo(parsed.tradeIn?.modelo, parsed.tradeIn?.marca),
           tradeInModelo: parsed.tradeIn?.modelo || '',
           tradeInCapacidade: parsed.tradeIn?.capacidade || '128GB',
           tradeInCor: parsed.tradeIn?.cor || '',
@@ -5512,7 +5532,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     : 'A IA leu a foto do aparelho. Confira principalmente o IMEI antes de confirmar.'}
                 </p>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowDadosFaltantesModal(false)}>
+              <Button variant="ghost" size="icon" onClick={() => { setShowDadosFaltantesModal(false); setSelectedStockAparelhoId(''); }}>
                 <X className="w-4 h-4" />
               </Button>
             </div>
@@ -5598,7 +5618,14 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
                 <div>
                   <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                    <span>Modelo do Celular <span className="text-red-400">*</span>{seloDaFoto('modelo')}</span>
+                    <span className="flex items-center gap-1.5">
+                      Modelo do Celular <span className="text-red-400">*</span>{seloDaFoto('modelo')}
+                      {dadosFaltantesForm.marca && (
+                        <span className="px-1.5 py-0.2 text-[10px] rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-sans font-semibold">
+                          {dadosFaltantesForm.marca}
+                        </span>
+                      )}
+                    </span>
                     {aiParsedData?.camposFaltantes?.includes('modelo') && (
                       <span className="text-amber-400 text-[10px] font-mono">⚠️ FALTANDO</span>
                     )}
@@ -5607,9 +5634,28 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     type="text"
                     required
                     className="input-glass mt-1"
-                    placeholder="Ex: iPhone 13 Pro"
+                    placeholder="Ex: Poco X8 Pro, iPhone 15, Galaxy S24..."
                     value={dadosFaltantesForm.modelo}
-                    onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, modelo: e.target.value})}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const novaMarca = inferirMarcaPorModelo(val, dadosFaltantesForm.marca);
+                      setDadosFaltantesForm((prev) => ({
+                        ...prev,
+                        modelo: val,
+                        marca: novaMarca,
+                      }));
+                      if (selectedStockAparelhoId) {
+                        const apSel = aparelhos.find((a) => a.id === selectedStockAparelhoId);
+                        if (
+                          apSel &&
+                          val.trim().length > 3 &&
+                          !apSel.modelo.toLowerCase().includes(val.toLowerCase()) &&
+                          !val.toLowerCase().includes(apSel.modelo.toLowerCase())
+                        ) {
+                          setSelectedStockAparelhoId('');
+                        }
+                      }
+                    }}
                   />
                 </div>
 
@@ -5659,15 +5705,104 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                   />
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                   <label className="text-xs font-bold text-slate-300">IMEI / Nº de Série (Opcional){seloDaFoto('imei')}</label>
                   <input
                     type="text"
                     className="input-glass mt-1 font-mono"
-                    placeholder="Ex: 358921098492041"
+                    placeholder="Ex: 358921098492041 ou 4 dígitos"
                     value={dadosFaltantesForm.imei}
                     onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, imei: e.target.value})}
                   />
+                  {/* Verificação Inteligente Dupla de IMEI (Estoque Ativo + Histórico de Saídas) */}
+                  {(() => {
+                    const imeiLimpo = (dadosFaltantesForm.imei || '').trim().toLowerCase();
+                    if (imeiLimpo.length < 3) return null;
+
+                    // 1. Procura no estoque ativo
+                    const apEstoque = aparelhos.find((a) => {
+                      if (!aparelhoNoEstoque(a)) return false;
+                      const aImei = (a.imei || a.numeroSerie || (a as any).codigo || '').toLowerCase();
+                      return aImei === imeiLimpo || (imeiLimpo.length >= 4 && aImei.endsWith(imeiLimpo));
+                    });
+
+                    // 2. Procura no histórico de saídas (aparelhos já vendidos/baixados)
+                    const apSaida = !apEstoque
+                      ? aparelhos.find((a) => {
+                          if (aparelhoNoEstoque(a)) return false;
+                          const aImei = (a.imei || a.numeroSerie || (a as any).codigo || '').toLowerCase();
+                          return aImei === imeiLimpo || (imeiLimpo.length >= 4 && aImei.endsWith(imeiLimpo));
+                        })
+                      : null;
+
+                    if (apEstoque) {
+                      const modForm = (dadosFaltantesForm.modelo || '').toLowerCase();
+                      const modEst = (apEstoque.modelo || '').toLowerCase();
+                      const mesmoModelo =
+                        modForm && (modEst.includes(modForm) || modForm.includes(modEst));
+
+                      return (
+                        <div
+                          className={`mt-2 p-2.5 rounded-xl text-xs flex items-center justify-between gap-2 border animate-in fade-in-50 ${
+                            mesmoModelo
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                              : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            {mesmoModelo ? (
+                              <PackageCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                            ) : (
+                              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                            )}
+                            <span>
+                              {mesmoModelo ? (
+                                <>
+                                  <strong>IMEI encontrado no estoque ativo:</strong> {apEstoque.marca} {apEstoque.modelo}{' '}
+                                  {apEstoque.capacidade || ''} (ID: {getAparelhoCodigo(apEstoque)})
+                                </>
+                              ) : (
+                                <>
+                                  <strong>Atenção de Modelo:</strong> Este IMEI pertence no estoque a{' '}
+                                  <strong>
+                                    {apEstoque.marca} {apEstoque.modelo}
+                                  </strong>
+                                  , mas você informou <strong>{dadosFaltantesForm.modelo}</strong>.
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          {selectedStockAparelhoId !== apEstoque.id && mesmoModelo && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 text-[11px] px-2 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20"
+                              onClick={() => setSelectedStockAparelhoId(apEstoque.id)}
+                            >
+                              Vincular a este
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (apSaida) {
+                      return (
+                        <div className="mt-2 p-2.5 rounded-xl text-xs flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 animate-in fade-in-50">
+                          <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                          <span>
+                            <strong>Aparelho já passou pelo sistema:</strong> {apSaida.marca} {apSaida.modelo}{' '}
+                            {apSaida.capacidade || ''} (Saída registrada anteriormente
+                            {apSaida.cliente ? ` para ${apSaida.cliente}` : ''}). Esta nova venda/entrada manterá o
+                            histórico anterior intacto!
+                          </span>
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
                 </div>
 
                 <div>
@@ -6055,14 +6190,29 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       <div>
-                        <label className="text-[11px] font-bold text-slate-300">Modelo que Entrou <span className="text-red-400">*</span></label>
+                        <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                          <span>Modelo que Entrou <span className="text-red-400">*</span></span>
+                          {dadosFaltantesForm.tradeInMarca && (
+                            <span className="px-1.5 py-0.2 text-[9px] rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-sans font-semibold">
+                              {dadosFaltantesForm.tradeInMarca}
+                            </span>
+                          )}
+                        </label>
                         <input
                           type="text"
                           required={dadosFaltantesForm.isUpgrade}
                           className="input-glass mt-1 text-xs"
-                          placeholder="Ex: iPhone 11, iPhone 12 Pro"
+                          placeholder="Ex: iPhone 11, Poco X5 Pro, Galaxy S21"
                           value={dadosFaltantesForm.tradeInModelo}
-                          onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInModelo: e.target.value})}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const marcaTroca = inferirMarcaPorModelo(val, dadosFaltantesForm.tradeInMarca);
+                            setDadosFaltantesForm((prev) => ({
+                              ...prev,
+                              tradeInModelo: val,
+                              tradeInMarca: marcaTroca,
+                            }));
+                          }}
                         />
                       </div>
 
@@ -6118,7 +6268,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                         />
                       </div>
 
-                      <div>
+                      <div className="sm:col-span-2">
                         <label className="text-[11px] font-bold text-slate-300">IMEI da Troca (Opcional)</label>
                         <input
                           type="text"
@@ -6127,6 +6277,23 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           value={dadosFaltantesForm.tradeInImei}
                           onChange={e => setDadosFaltantesForm({...dadosFaltantesForm, tradeInImei: e.target.value})}
                         />
+                        {(() => {
+                          const imeiTrocaLimpo = (dadosFaltantesForm.tradeInImei || '').trim().toLowerCase();
+                          if (imeiTrocaLimpo.length < 3) return null;
+                          const apExistente = aparelhos.find((a) => {
+                            const aImei = (a.imei || a.numeroSerie || (a as any).codigo || '').toLowerCase();
+                            return aImei === imeiTrocaLimpo || (imeiTrocaLimpo.length >= 4 && aImei.endsWith(imeiTrocaLimpo));
+                          });
+                          if (!apExistente) return null;
+                          return (
+                            <div className="mt-1.5 p-2 rounded-xl text-[11px] flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-300">
+                              <Sparkles className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <span>
+                                <strong>Aparelho já passou pelo sistema anteriormente:</strong> {apExistente.marca} {apExistente.modelo} {apExistente.capacidade || ''} (ID: {getAparelhoCodigo(apExistente)}). Entrará como novo ciclo de troca mantendo o histórico anterior!
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <div>
@@ -6165,7 +6332,7 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
               </div>
 
               <div className="flex gap-2 pt-3 border-t border-white/10">
-                <Button type="button" variant="outline" className="flex-1 cursor-pointer" onClick={() => setShowDadosFaltantesModal(false)}>
+                <Button type="button" variant="outline" className="flex-1 cursor-pointer" onClick={() => { setShowDadosFaltantesModal(false); setSelectedStockAparelhoId(''); }}>
                   Cancelar
                 </Button>
                 <Button

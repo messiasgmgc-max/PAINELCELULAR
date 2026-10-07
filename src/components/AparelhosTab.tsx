@@ -176,6 +176,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
   const [saidas, setSaidas] = useState<any[]>([]);
   const [saidaParaDevolver, setSaidaParaDevolver] = useState<any | null>(null);
+  const [cancelarVendaAoDevolver, setCancelarVendaAoDevolver] = useState(false);
   const [devolvendoSaida, setDevolvendoSaida] = useState(false);
   const [filtroSaidaTipo, setFiltroSaidaTipo] = useState<'todos' | 'varejo' | 'atacado' | 'outro'>('todos');
   const [buscaSaida, setBuscaSaida] = useState('');
@@ -197,6 +198,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         lojaId: usuario?.lojaId || (usuario as any)?.loja_id || null,
         usuarioId: usuario?.id || null,
         usuarioNome: usuario?.nome || null,
+        cancelarVendaOriginal: cancelarVendaAoDevolver,
       });
 
       if (!resultado.ok) {
@@ -3282,116 +3284,146 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <div className="divide-y divide-slate-800 min-w-[650px]">
-                  {saidasFiltradas.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 space-y-1">
-                      <p className="font-semibold text-sm text-slate-400">Nenhuma saída encontrada.</p>
-                      <p className="text-xs">Verifique o filtro selecionado ou a busca digitada.</p>
-                    </div>
-                  ) : (
-                    saidasFiltradas.map((item, idx) => (
-                      <div key={idx} className="p-4 flex justify-between items-start gap-6 hover:bg-slate-800/40 rounded-xl min-w-full transition-colors">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <p className="font-bold text-white text-sm">{item.marca} {item.modelo}</p>
-                            {item.capacidade && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-bold">
-                                {item.capacidade}
-                              </span>
+              <div className="overflow-x-auto space-y-2.5">
+                {saidasFiltradas.length === 0 ? (
+                  <div className="p-12 text-center text-slate-500 rounded-2xl bg-slate-950/40 border border-slate-800 space-y-2">
+                    <PackageCheck className="w-10 h-10 mx-auto text-slate-600 opacity-60" />
+                    <p className="font-semibold text-sm text-slate-300">Nenhuma saída encontrada.</p>
+                    <p className="text-xs text-slate-500">Verifique o filtro selecionado ou ajuste o termo digitado.</p>
+                  </div>
+                ) : (
+                  saidasFiltradas.map((item, idx) => {
+                    const diasEstoque = item.dataEntrada && item.dataSaida
+                      ? Math.max(0, Math.round((new Date(item.dataSaida).getTime() - new Date(item.dataEntrada).getTime()) / 86400000))
+                      : null;
+                    const bat = formatarSaudeBateria(item);
+                    const cod = getAparelhoCodigo(item);
+
+                    return (
+                      <div
+                        key={item.id || idx}
+                        className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 hover:border-slate-700/80 hover:bg-slate-900/60 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group"
+                      >
+                        <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                          {/* Ícone de Tipo de Saída */}
+                          <div
+                            className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border mt-0.5",
+                              item.tipoSaida === 'varejo'
+                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                : item.tipoSaida === 'atacado'
+                                ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                                : "bg-slate-800 border-slate-700 text-slate-400"
                             )}
-                            {item.cor && (
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                • {item.cor}
-                              </span>
-                            )}
-                            {item.tipoSaida === 'varejo' && (
-                              <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                🛒 Saída Varejo
-                              </span>
-                            )}
-                            {item.tipoSaida === 'atacado' && (
-                              <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                                📦 Saída Atacado
-                              </span>
-                            )}
-                            {item.tipoSaida === 'outro' && (
-                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-700/50 text-slate-300 border border-slate-600">
-                                🔧 Baixa Manual
-                              </span>
+                          >
+                            {item.tipoSaida === 'varejo' ? (
+                              <ShoppingCart className="w-5 h-5" />
+                            ) : item.tipoSaida === 'atacado' ? (
+                              <Truck className="w-5 h-5" />
+                            ) : (
+                              <PackageCheck className="w-5 h-5" />
                             )}
                           </div>
 
-                          <p className="text-xs text-slate-400">
-                            IMEI: <strong className="text-slate-300">{item.imei || 'N/A'}</strong>
-                            {formatarSaudeBateria(item) && (
-                              <span className="ml-3 font-bold text-cyan-400">🔋 {formatarSaudeBateria(item)}</span>
-                            )}
-                            {item.cliente && (
-                              <span className="ml-3 text-slate-300">
-                                Destino / Comprador: <strong className="text-white">{item.cliente}</strong>
-                              </span>
-                            )}
-                          </p>
-
-                          <p className="text-xs text-slate-300 font-medium mt-1 break-words">
-                            Detalhe: <span className="text-slate-400">{item.motivoSaida}</span>
-                          </p>
-
-                          {canViewFinancials(usuario) && item.custo !== undefined && (
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              Custo Cadastrado: <strong className="text-slate-200">R$ {(item.custo || 0).toFixed(2).replace('.', ',')}</strong>
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="text-right shrink-0 min-w-[180px] space-y-1.5">
-                          <div className="text-[11px] leading-snug">
-                            <p className="text-slate-500">
-                              Entrada:{' '}
-                              <span className="text-slate-300 font-medium">
-                                {item.dataEntrada ? new Date(item.dataEntrada).toLocaleDateString('pt-BR') : '—'}
-                              </span>
-                            </p>
-                            <p className="text-slate-500">
-                              Saída:{' '}
-                              <span className="text-slate-200 font-bold">
-                                {item.dataSaida
-                                  ? `${new Date(item.dataSaida).toLocaleDateString('pt-BR')} ${new Date(item.dataSaida).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-                                  : 'não registrada'}
-                              </span>
-                            </p>
-                            {item.dataEntrada && item.dataSaida && (
-                              <p className="text-slate-500">
-                                Ficou em estoque:{' '}
-                                <span className="text-slate-300 font-medium">
-                                  {Math.max(
-                                    0,
-                                    Math.round(
-                                      (new Date(item.dataSaida).getTime() - new Date(item.dataEntrada).getTime()) /
-                                        86400000
-                                    )
-                                  )}{' '}
-                                  dia(s)
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-white text-sm tracking-tight">
+                                {item.marca} {item.modelo}
+                              </h4>
+                              {item.capacidade && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-bold border border-slate-700">
+                                  {item.capacidade}
                                 </span>
+                              )}
+                              {item.cor && (
+                                <span className="text-[11px] text-slate-400 font-medium">
+                                  {item.cor}
+                                </span>
+                              )}
+                              <Badge variant="outline" className="text-[10px] capitalize py-0 border-slate-700 text-slate-400">
+                                {item.condicao}
+                              </Badge>
+
+                              {item.tipoSaida === 'varejo' && (
+                                <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                  🛒 Varejo
+                                </span>
+                              )}
+                              {item.tipoSaida === 'atacado' && (
+                                <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  📦 Atacado
+                                </span>
+                              )}
+                              {item.tipoSaida === 'outro' && (
+                                <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-800 text-slate-400 border border-slate-700">
+                                  🔧 Baixa Manual
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs text-slate-400">
+                              {cod && (
+                                <span className="font-mono text-slate-400">ID: #{cod}</span>
+                              )}
+                              {item.imei && (
+                                <span className="font-mono text-slate-300">
+                                  IMEI: <strong className="text-white">{item.imei}</strong>
+                                </span>
+                              )}
+                              {bat && (
+                                <span className="font-bold text-cyan-400 flex items-center gap-1">
+                                  🔋 {bat}
+                                </span>
+                              )}
+                              {item.cliente && (
+                                <span className="text-slate-300">
+                                  Destino: <strong className="text-emerald-400">{item.cliente}</strong>
+                                </span>
+                              )}
+                            </div>
+
+                            {item.motivoSaida && (
+                              <p className="text-[11px] text-slate-400 line-clamp-1 italic">
+                                {item.motivoSaida}
                               </p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 justify-end flex-wrap">
-                            <Badge variant="outline">{item.condicao}</Badge>
-                            {/* Devolver pode apagar a venda correspondente, então
-                                fica sob a mesma trava do "Editar Custo". */}
+                        </div>
+
+                        {/* Coluna da Direita: Datas, Valores e Ações */}
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto shrink-0 gap-2 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800">
+                          <div className="text-left sm:text-right text-[11px] space-y-0.5">
+                            <p className="text-slate-400">
+                              Saída:{' '}
+                              <strong className="text-slate-200">
+                                {item.dataSaida
+                                  ? `${new Date(item.dataSaida).toLocaleDateString('pt-BR')} ${new Date(item.dataSaida).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                                  : '—'}
+                              </strong>
+                            </p>
+                            {diasEstoque !== null && (
+                              <p className="text-slate-500">
+                                Ficou <span className="text-sky-400 font-semibold">{diasEstoque}d</span> em estoque
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
                             {canViewFinancials(usuario) && (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => setSaidaParaDevolver(item)}
+                                className="h-7 text-xs px-2.5 border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 cursor-pointer font-semibold gap-1 rounded-lg"
                                 title="Devolver este aparelho para o estoque"
-                                className="text-[11px] font-bold px-2 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer flex items-center gap-1"
                               >
                                 <Undo2 className="w-3 h-3" /> Devolver
-                              </button>
+                              </Button>
                             )}
                             {canViewFinancials(usuario) && (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => {
                                   const matchValObs = String(item.observacoes || '').match(/(?:Valor:\s*R\$|por\s*R\$)\s*([\d.,]+)/i);
                                   const valVendaFinal = matchValObs ? parseMonetaryValue(matchValObs[1]) : (item.preco || item.preco_atacado || 0);
@@ -3411,18 +3443,18 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                                     observacoes: item.observacoes || '',
                                   });
                                 }}
-                                className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-1 rounded-lg border border-blue-500/20 transition-colors cursor-pointer"
+                                className="h-7 text-xs px-2.5 border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 cursor-pointer font-semibold gap-1 rounded-lg"
                                 title="Editar custo ou dados da saída"
                               >
-                                <Edit2 className="w-3 h-3" /> Editar Custo
-                              </button>
+                                <Edit className="w-3 h-3" /> Editar Custo
+                              </Button>
                             )}
                           </div>
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
@@ -3457,16 +3489,41 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 )}
               </div>
 
-              <div className="text-xs text-slate-300 space-y-1.5">
+              <div className="text-xs text-slate-300 space-y-2">
                 <p className="flex items-start gap-1.5">
-                  <PackageCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                  <span>O aparelho volta a aparecer no estoque como disponível.</span>
+                  <PackageCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>O aparelho voltará a aparecer no estoque como <strong>disponível</strong>.</span>
                 </p>
+
                 {saidaParaDevolver.tipoSaida !== 'outro' && (
-                  <p className="text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
-                    Esta saída veio de uma venda. O aparelho sai dessa venda — se ele era o
-                    único item, a venda fica como cancelada no histórico e sai do faturamento.
-                  </p>
+                  <div className="space-y-2 pt-1 border-t border-white/10">
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-200">
+                      <p className="flex items-center gap-1.5 font-semibold text-blue-300">
+                        <Sparkles className="w-4 h-4 text-blue-400 shrink-0" /> Histórico de Vendas Preservado
+                      </p>
+                      <p className="text-[11px] text-slate-300 mt-1">
+                        A venda anterior permanecerá intacta no histórico para auditoria e controle de faturamento (ideal para quando o aparelho volta de upgrade, troca ou retorno físico).
+                      </p>
+                    </div>
+
+                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-amber-500/30 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={cancelarVendaAoDevolver}
+                        onChange={(e) => setCancelarVendaAoDevolver(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                      />
+                      <span className="text-xs text-slate-300">
+                        Cancelar venda original e estornar do faturamento (somente se a venda foi cancelada pelo cliente)
+                      </span>
+                    </label>
+
+                    {cancelarVendaAoDevolver && (
+                      <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2">
+                        ⚠️ Atenção: A venda correspondente será marcada como cancelada no histórico e o valor sairá do faturamento.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 
