@@ -1473,8 +1473,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
         }
       }
 
-      // Leitura de foto sempre passa pela revisão: o IMEI lido precisa ser conferido.
-      if (faltantes.length > 0 || leituraFotos) {
+      // Leitura de foto e vendas com Upgrade sempre passam pela revisão para conferência do lojista.
+      if (faltantes.length > 0 || leituraFotos || parsed.isUpgrade) {
         setAiParsedData(parsed);
         const apPreSel = matchedStockId ? disponiveis.find(a => a.id === matchedStockId) : null;
         const isUp = Boolean(parsed.isUpgrade || (parsed.tradeIn && parsed.tradeIn.modelo));

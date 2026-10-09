@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, ShoppingCart, Truck, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan } from "lucide-react";
 import { AparelhoCard } from "@/components/aparelhos/AparelhoCard";
 import { AparelhoFiltros } from "@/components/aparelhos/AparelhoFiltros";
 import { BarcodeScannerModal } from "@/components/BarcodeScannerModal";
@@ -3446,7 +3446,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                                 className="h-7 text-xs px-2.5 border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 cursor-pointer font-semibold gap-1 rounded-lg"
                                 title="Editar custo ou dados da saída"
                               >
-                                <Edit className="w-3 h-3" /> Editar Custo
+                                <Edit2 className="w-3 h-3" /> Editar Custo
                               </Button>
                             )}
                           </div>

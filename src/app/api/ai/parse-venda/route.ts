@@ -11,6 +11,7 @@ import {
   type ResultadoFotosVenda,
 } from '@/lib/vendas/fotoVenda';
 import { inferirMarcaPorModelo } from '@/lib/marcaUtils';
+import { sanitizarECompletarVendaParsed } from '@/lib/vendas/parseVendaTexto';
 
 // Texto e até 3 fotos passam por IA; com fallback de modelos a resposta pode demorar.
 export const maxDuration = 60;
@@ -77,7 +78,7 @@ Estrutura JSON obrigatória:
   "aparelho": {
     "codigo": string ou null (opcional: Código/ID do aparelho se informado ex: COD: 8665041, COD 8665041, ID: 8665041 ou #8665041),
     "marca": string ou null (identifique a marca real: Xiaomi para Poco/Redmi/Mi; Samsung para Galaxy; Motorola para Moto/Edge; Apple para iPhone/iPad),
-    "modelo": string ou null (ex: Poco X8 Pro, iPhone 13 Pro, Galaxy S23, Redmi Note 12 - APARELHO QUE O CLIENTE ESTÁ COMPRANDO/LEVANDO),
+    "modelo": string ou null (ex: iPhone 17 Pro Max, Poco X8 Pro, Galaxy S23 - APARELHO QUE O CLIENTE ESTÁ COMPRANDO/LEVANDO),
     "capacidade": string ou null (ex: 128GB, 256GB, 512GB, 64GB),
     "cor": string ou null (ex: Grafite, Preto, Azul, Dourado, Branco),
     "condicao": string ou null (deve ser "novo" se for lacrado/novo ou "seminovo" se usado/seminovo),
@@ -85,10 +86,10 @@ Estrutura JSON obrigatória:
     "preco": number ou null (valor unitário do aparelho vendido em R$),
     "custo": number ou null (valor de custo em R$ se informado)
   },
-  "isUpgrade": boolean (true SE o cliente deu um aparelho usado/antigo como base de troca/entrada para abater o valor, senão false),
+  "isUpgrade": boolean (true SE houver "(X) Upgrade" ou se o cliente deu um aparelho de entrada/troca para abater o valor, senão false),
   "tradeIn": {
     "marca": string ou null (ex: Apple, Samsung),
-    "modelo": string ou null (ex: iPhone 11, iPhone 12 Pro - APARELHO QUE O CLIENTE ENTREGOU NA TROCA),
+    "modelo": string ou null (ex: iPhone 16, iPhone 11 - APARELHO QUE O CLIENTE ENTREGOU NA TROCA),
     "capacidade": string ou null (ex: 64GB, 128GB),
     "cor": string ou null (ex: Preto, Branco),
     "imei": string ou null (IMEI do aparelho entregue na troca se informado),
@@ -110,26 +111,32 @@ Estrutura JSON obrigatória:
 
 REGRAS CRÍTICAS DE CONTEXTO PARA UPGRADE / TROCA (TRADE-IN):
 1. DIFERENCIAÇÃO ENTRE APARELHO VENDIDO E APARELHO DE ENTRADA:
-   - "aparelho": É o aparelho que a loja está VENDENDO para o cliente (ex: "Comprou iPhone 14 Pro", "Levou iPhone 15 128GB", "Venda: iPhone 13").
-   - "tradeIn": É o aparelho USADO que o cliente DEU DE ENTRADA / TROCA para abater o preço (ex: "Pegou iPhone 11 na troca por 1500", "Deu iPhone XR de entrada", "Troca: iPhone 12 64GB por R$ 1800").
-2. MATEMÁTICA DA VOLTA / RESTANTE:
+   - "aparelho": É o aparelho que a loja está VENDENDO para o cliente (ex: "Comprou iPhone 14 Pro", "Levou iPhone 15 128GB", "Modelo: 17 pro Max 256gb azul lacrado").
+   - "tradeIn": É o aparelho USADO que o cliente DEU DE ENTRADA / TROCA para abater o preço (ex: "(X) Upgrade - Modelo: iPhone 16", "Pegou iPhone 11 na troca", "Deu iPhone XR de entrada").
+2. FORMULÁRIOS COM CHECKBOXES (X) OU [X]:
+   - Se o texto contiver "(X) Upgrade - Modelo: [Nome]" ou "[X] Upgrade - Modelo: [Nome]", isso INDICA OBRIGATORIAMENTE que:
+     - "isUpgrade": true
+     - "tradeIn.modelo": "[Nome]" (ex: iPhone 16)
+     - "tradeIn.marca": "Apple" (ou a marca respectiva)
+     - A outra linha "Modelo: [Nome]" no formulário (ex: "Modelo: 17 pro Max 256gb azul lacrado imei 350015753668064") é o APARELHO VENDIDO!
+   - Se no formulário "(X) Cartão de crédito" estiver marcado e houver "Valor total: 4.776,77", esse valor é a VOLTA paga no cartão de crédito! Defina "formaPagamento": "cartao_credito", "valorVolta": 4776.77 e "valorTotal": 4776.77.
+3. MATEMÁTICA DA VOLTA / RESTANTE:
    - Se o aparelho vendido custa R$ 4.500 e o cliente deu um aparelho de entrada avaliado em R$ 1.500:
      - "valorTotal": 4500
      - "valorEntradaTroca": 1500
      - "valorVolta": 3000 (a volta/diferença a ser paga)
      - "isUpgrade": true
-   - Se o texto disser apenas a volta e o valor da troca (ex: "Troca entrou iPhone 11 por 1200 e volta de 2000 no pix pelo iPhone 13"):
-     - "valorTotal": 3200 (1200 + 2000)
-     - "valorEntradaTroca": 1200
-     - "valorVolta": 2000
+   - Se o texto disser apenas a volta e o valor da troca:
+     - "valorTotal": soma ou valor da volta informado
+     - "valorVolta": valor líquido restante
      - "isUpgrade": true
-3. PROIBIÇÃO ABSOLUTA DE INVENTAR UPGRADE:
-   - Se o texto for uma venda normal simples sem troca de aparelho (ex: "Venda iPhone 13 128GB por 3000 no pix"), DEIXE "isUpgrade": false, "tradeIn": null, "valorEntradaTroca": null, "valorVolta": 3000. NUNCA invente aparelho de troca quando não foi informado.
+4. PROIBIÇÃO ABSOLUTA DE INVENTAR UPGRADE:
+   - Se o texto for uma venda normal simples sem troca de aparelho (ex: "( ) Upgrade", ou sem qualquer menção a troca), DEIXE "isUpgrade": false, "tradeIn": null, "valorEntradaTroca": null.
 
 REGRAS CRÍTICAS DE DIFERENCIAÇÃO ENTRE DATA DE NASCIMENTO E DATA DA VENDA:
-1. "cliente.dataNascimento": Data em que o cliente nasceu (ex: "Data de nascimento: 04/04/1982", "Nasc: 15/05/1990", "aniversário", ou qualquer data com ano anterior a 2020).
-2. "dataVenda": Data em que a venda/negociação do aparelho ocorreu (transação na loja, geralmente ano corrente como 2024, 2025, 2026).
-3. PROIBIÇÃO ABSOLUTA: NUNCA coloque a data de nascimento do cliente em "dataVenda"! Se o cliente forneceu a data de nascimento e NÃO há outra data de venda explícita no texto, deixe "dataVenda": null. NUNCA misture essas duas informações.
+1. "cliente.dataNascimento": Data em que o cliente nasceu (ex: "Data de nascimento: 22011999" -> 22/01/1999, "Nasc: 15/05/1990", "aniversário").
+2. "dataVenda": Data em que a venda/negociação do aparelho ocorreu (transação na loja, ano atual como 2024, 2025, 2026).
+3. PROIBIÇÃO ABSOLUTA: NUNCA coloque a data de nascimento do cliente em "dataVenda"! Se o campo "Data da compra:" estiver vazio, deixe "dataVenda": null.
 
 Regras para os camposFaltantes:
 - Um celular exige obrigatoriamente: "modelo", "capacidade", "valorTotal", "formaPagamento" e "dataVenda" (O IMEI, CPF e Data de Nascimento são OPCIONAIS, NÃO coloque imei, cpf ou dataNascimento em camposFaltantes).
@@ -140,13 +147,10 @@ Regras para os camposFaltantes:
       const candidateModels = [
         'openai/gpt-oss-120b',
         'openai/gpt-oss-20b',
+        'qwen/qwen3.8-27b',
         'groq/compound',
-        'groq/compound-mini',
         'llama-3.3-70b-versatile',
         'llama-3.1-8b-instant',
-        'llama3-70b-8192',
-        'llama3-8b-8192',
-        'mixtral-8x7b-32768'
       ];
 
       for (const model of candidateModels) {
@@ -203,281 +207,13 @@ Regras para os camposFaltantes:
       }
     }
 
-    // 2. PARSER NATIVO LOCAL DE FALLBACK SE A IA FALHAR OU NÃO TIVER CHAVE
-    if (!parsedJson) {
-      if (trimmedText) console.log('Executando parser nativo local de fallback...');
-      parsedJson = {
-        cliente: {},
-        aparelho: {},
-        isUpgrade: false,
-        tradeIn: null,
-        vendedor: null,
-        formaPagamento: null,
-        valorTotal: null,
-        valorEntradaTroca: null,
-        valorVolta: null,
-        dataVenda: null,
-        observacoes: null,
-        camposFaltantes: []
-      };
-    }
+    // 2. PARSER NATIVO LOCAL DE FALLBACK SE A IA FALHAR OU NÃO TIVER CHAVE, E SANITIZAÇÃO COMPLETA
+    parsedJson = sanitizarECompletarVendaParsed(parsedJson, trimmedText);
 
-    if (!parsedJson.cliente) parsedJson.cliente = {};
-    if (!parsedJson.aparelho) parsedJson.aparelho = {};
-
-    // 3. FOTOS: completam o aparelho antes dos palpites de regex, que só olham o texto.
+    // 3. FOTOS: completam o aparelho antes da validação final
     let fotosResultado: ResultadoFotosVenda | null = null;
     if (fotos.length) {
       fotosResultado = mesclarFotosNaVenda(parsedJson, await leiturasFotos);
-    }
-
-    // --- FALLBACKS ROBUSTOS DE REGEX LOCAL ---
-    // 1. E-mail Regex
-    if (!parsedJson.cliente.email || parsedJson.cliente.email === 'sem@email.com') {
-      const emailMatch = trimmedText.match(/[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}/i);
-      if (emailMatch) {
-        parsedJson.cliente.email = emailMatch[0].trim();
-      }
-    }
-
-    // 2. Nome Cliente Regex
-    if (!parsedJson.cliente.nome) {
-      const nameMatch = trimmedText.match(/(?:Nome|Nome completo|Cliente):\s*([^\n\r•]+)/i);
-      if (nameMatch) {
-        parsedJson.cliente.nome = nameMatch[1].trim();
-      }
-    }
-
-    // 3. CPF Regex
-    if (!parsedJson.cliente.cpf) {
-      const cpfMatch = trimmedText.match(/(?:CPF):\s*([0-9.-]+)/i);
-      if (cpfMatch) {
-        parsedJson.cliente.cpf = cpfMatch[1].trim();
-      }
-    }
-
-    // 4. Data de Nascimento Regex
-    if (!parsedJson.cliente.dataNascimento && !parsedJson.cliente.data_nascimento) {
-      const nascMatch = trimmedText.match(/(?:Data de nascimento|Nascimento|Dt Nasc):\s*([0-9/.-]+)/i);
-      if (nascMatch) {
-        parsedJson.cliente.dataNascimento = nascMatch[1].trim();
-      }
-    }
-
-    // 5. Telefone Regex
-    if (!parsedJson.cliente.telefone) {
-      const telMatch = trimmedText.match(/(?:Telefone|WhatsApp|Tel|Celular):\s*([0-9\s()-]+)/i);
-      if (telMatch) {
-        parsedJson.cliente.telefone = telMatch[1].trim();
-      }
-    }
-
-    // 6. Detecção de Upgrade / Troca (Trade-In) via Regex
-    const ehTextoUpgrade = /trade[- ]?in|upgrade|base de troca|na troca|deu na troca|pegou na troca|aparelho de entrada|entrada de um/i.test(trimmedText);
-    if (ehTextoUpgrade && (!parsedJson.tradeIn || !parsedJson.isUpgrade)) {
-      const trocaMatch = trimmedText.match(/(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada):\s*([^\n\r]+)/i);
-      let modeloTroca = '';
-      let valorTroca = 0;
-      let capTroca = '';
-
-      if (trocaMatch) {
-        const linhaTroca = trocaMatch[1];
-        const valMatch = linhaTroca.match(/R?\$?\s*([0-9.,]+)/i);
-        if (valMatch) {
-          valorTroca = parseFloat(valMatch[1].replace(/\./g, '').replace(',', '.'));
-        }
-        const modTrocaMatch = linhaTroca.match(/(?:iPhone|Galaxy|Redmi|Poco|Xiaomi|Motorola)\s+[A-Za-z0-9\s]+/i);
-        if (modTrocaMatch) {
-          modeloTroca = modTrocaMatch[0].trim();
-        }
-        const capTrocaMatch = linhaTroca.match(/\b(\d+GB|\d+TB)\b/i);
-        if (capTrocaMatch) {
-          capTroca = capTrocaMatch[1].toUpperCase();
-        }
-      }
-
-      if (modeloTroca || valorTroca > 0) {
-        parsedJson.isUpgrade = true;
-        parsedJson.tradeIn = {
-          marca: /iphone|apple/i.test(modeloTroca) ? 'Apple' : 'Outro',
-          modelo: modeloTroca || 'Aparelho na Troca',
-          capacidade: capTroca || '128GB',
-          cor: '',
-          imei: null,
-          bateria: null,
-          valor: valorTroca || 0,
-          condicao: 'seminovo',
-          observacoes: 'Recebido como troca (upgrade) no pedido'
-        };
-        parsedJson.valorEntradaTroca = valorTroca || 0;
-      }
-    }
-
-    // Detecção de Volta / Restante via Regex
-    const voltaMatch = trimmedText.match(/(?:Volta|Restante|Diferen[cç]a|Saldo a pagar):\s*R?\$?\s*([0-9.,]+)/i);
-    if (voltaMatch) {
-      const valVolta = parseFloat(voltaMatch[1].replace(/\./g, '').replace(',', '.'));
-      if (!isNaN(valVolta) && valVolta > 0) {
-        parsedJson.valorVolta = valVolta;
-      }
-    }
-
-    // 7. Forma de Pagamento Regex
-    if (!parsedJson.formaPagamento) {
-      if (/\(X\s*\)\s*Pix|Pix/i.test(trimmedText)) parsedJson.formaPagamento = 'pix';
-      else if (/\(X\s*\)\s*Cartão de crédito|Cartão de crédito|Cartao de credito/i.test(trimmedText)) parsedJson.formaPagamento = 'cartao_credito';
-      else if (/\(X\s*\)\s*Cartão de débito|Cartão de débito|Cartao de debito/i.test(trimmedText)) parsedJson.formaPagamento = 'cartao_debito';
-      else if (/\(X\s*\)\s*Dinheiro|Dinheiro/i.test(trimmedText)) parsedJson.formaPagamento = 'dinheiro';
-    }
-
-    // 8. Valor Total Regex
-    if (!parsedJson.valorTotal || parsedJson.valorTotal <= 0) {
-      const valorMatch = trimmedText.match(/(?:Valor total|Total|Valor):\s*R\$\s*([0-9.,]+)/i) ||
-                         trimmedText.match(/R\$\s*([0-9.,]+)/i);
-      if (valorMatch) {
-        const clean = valorMatch[1].replace(/\./g, '').replace(',', '.');
-        const val = parseFloat(clean);
-        if (!isNaN(val) && val > 0) {
-          parsedJson.valorTotal = val;
-        }
-      }
-    }
-
-    // Harmonização da Matemática de Upgrade:
-    if (parsedJson.isUpgrade && parsedJson.tradeIn?.valor > 0) {
-      const vTotal = Number(parsedJson.valorTotal || 0);
-      const vEntrada = Number(parsedJson.tradeIn.valor || parsedJson.valorEntradaTroca || 0);
-      if (vTotal > 0 && vEntrada > 0) {
-        if (!parsedJson.valorVolta || parsedJson.valorVolta <= 0) {
-          parsedJson.valorVolta = Math.max(0, vTotal - vEntrada);
-        }
-      } else if (parsedJson.valorVolta && parsedJson.valorVolta > 0 && vEntrada > 0 && (!vTotal || vTotal <= 0)) {
-        parsedJson.valorTotal = vEntrada + parsedJson.valorVolta;
-      }
-    } else if (!parsedJson.isUpgrade) {
-      parsedJson.valorVolta = parsedJson.valorTotal;
-    }
-
-    // 9. Condição Regex (novo vs seminovo)
-    if (!parsedJson.aparelho.condicao) {
-      if (/lacrado|novo|caixa fechada/i.test(trimmedText)) {
-        parsedJson.aparelho.condicao = 'novo';
-      } else {
-        parsedJson.aparelho.condicao = 'seminovo';
-      }
-    }
-
-    // 10. Código / ID do Aparelho Regex
-    if (!parsedJson.aparelho.codigo) {
-      const codMatch = trimmedText.match(/(?:COD|CÓD|CODIGO|CÓDIGO|ID|ID APARELHO):\s*#?([0-9A-Za-z]{6,12})/i) ||
-                       trimmedText.match(/(?:COD|CÓD)\s+([0-9A-Za-z]{6,12})/i) ||
-                       trimmedText.match(/#([0-9]{6,10})/);
-      if (codMatch) {
-        parsedJson.aparelho.codigo = codMatch[1].trim();
-      }
-    }
-
-    // 11. Modelo & Capacidade Regex Fallback se a IA não tiver lido
-    if (!parsedJson.aparelho.modelo) {
-      const modMatch = trimmedText.match(/(?:iPhone|Galaxy|Redmi|Poco|Xiaomi|Motorola|MacBook|PS5|PS4|Xbox|Switch)\s+[A-Za-z0-9\s]+/i) ||
-                       trimmedText.match(/(?:Modelo|Aparelho):\s*([^\n\r]+)/i);
-      if (modMatch) {
-        parsedJson.aparelho.modelo = modMatch[0].trim();
-      }
-    }
-
-    if (!parsedJson.aparelho.capacidade) {
-      const romMatch = trimmedText.match(/\b(\d+GB|\d+TB)\b/i);
-      if (romMatch) {
-        parsedJson.aparelho.capacidade = romMatch[1].toUpperCase();
-      }
-    }
-
-    // 12. IMEI do Aparelho Vendido (Regex Fallback)
-    if (!parsedJson.aparelho.imei) {
-      const imeiRotuloMatch = trimmedText.match(/(?:IMEI|IMEI\s*1|N[ºo°]\s*S[eé]rie|Serial):\s*([0-9A-Za-z]{8,18})/i) ||
-                             trimmedText.match(/IMEI\s+([0-9]{10,18})/i) ||
-                             trimmedText.match(/\b([0-9]{14,16})\b/);
-      if (imeiRotuloMatch) {
-        parsedJson.aparelho.imei = imeiRotuloMatch[1].trim();
-      }
-    }
-
-    // 13. Reconhecimento inteligente da marca do aparelho vendido e troca
-    parsedJson.aparelho.marca = inferirMarcaPorModelo(parsedJson.aparelho?.modelo, parsedJson.aparelho?.marca);
-
-    if (parsedJson.tradeIn && parsedJson.tradeIn.modelo) {
-      parsedJson.tradeIn.marca = inferirMarcaPorModelo(parsedJson.tradeIn.modelo, parsedJson.tradeIn.marca);
-      if (!parsedJson.tradeIn.imei) {
-        const imeiTrocaMatch = trimmedText.match(/(?:IMEI da troca|IMEI troca|IMEI entrada):\s*([0-9A-Za-z]{8,18})/i);
-        if (imeiTrocaMatch) {
-          parsedJson.tradeIn.imei = imeiTrocaMatch[1].trim();
-        }
-      }
-    }
-
-    // Sanitização pós-IA: Garante que a IA não atribuiu a data de nascimento à data de venda
-    const nascNormalizada = (parsedJson.cliente?.dataNascimento || parsedJson.cliente?.data_nascimento || '').replace(/\D/g, '');
-    if (parsedJson.dataVenda) {
-      const dataVendaLimpa = String(parsedJson.dataVenda).replace(/\D/g, '');
-      let anoVenda = 0;
-      if (parsedJson.dataVenda.includes('-')) {
-        anoVenda = parseInt(parsedJson.dataVenda.split('-')[0], 10);
-      } else if (parsedJson.dataVenda.includes('/')) {
-        anoVenda = parseInt(parsedJson.dataVenda.split('/')[2], 10);
-      }
-      if ((nascNormalizada && dataVendaLimpa === nascNormalizada) || (anoVenda > 0 && anoVenda < 2020)) {
-        console.warn(`[Parse-Venda] IA atribuiu nascimento ou ano antigo (${parsedJson.dataVenda}) à data da venda. Corrigindo.`);
-        parsedJson.dataVenda = null;
-      }
-    }
-
-    // 11. Data Venda Regex (ex: YYYY-MM-DD ou DD/MM/YYYY)
-    if (!parsedJson.dataVenda) {
-      // 11.1 Busca rótulo explícito de data de venda (Data da venda, Em, Venda realizada em, etc.)
-      const rotuloVendaMatch = trimmedText.match(/(?:Data da Venda|Data Venda|Data do Pedido|Venda realizada em|Data:\s*)(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/i);
-      if (rotuloVendaMatch) {
-        const rawDate = rotuloVendaMatch[1];
-        if (rawDate.includes('/')) {
-          const [d, m, y] = rawDate.split('/');
-          parsedJson.dataVenda = `${y}-${m}-${d}`;
-        } else {
-          parsedJson.dataVenda = rawDate;
-        }
-      } else {
-        // 11.2 Varre as datas do texto, DESCONSIDERANDO explicitamente a data de nascimento do cliente
-        const todasDatas = [...trimmedText.matchAll(/\b(\d{2}\/\d{2}\/\d{4})\b|\b(\d{4}-\d{2}-\d{2})\b/g)];
-        let dataValidaVenda: string | null = null;
-        for (const match of todasDatas) {
-          const raw = match[1] || match[2];
-          const rawLimpa = raw.replace(/\D/g, '');
-          if (nascNormalizada && rawLimpa === nascNormalizada) {
-            continue; // É a data de nascimento do cliente!
-          }
-          let ano = 0;
-          if (raw.includes('/')) {
-            ano = parseInt(raw.split('/')[2], 10);
-          } else {
-            ano = parseInt(raw.split('-')[0], 10);
-          }
-          if (ano < 2020) {
-            continue; // Ano típico de data de nascimento de cliente
-          }
-          if (raw.includes('/')) {
-            const [d, m, y] = raw.split('/');
-            dataValidaVenda = `${y}-${m}-${d}`;
-          } else {
-            dataValidaVenda = raw;
-          }
-          break;
-        }
-
-        if (dataValidaVenda) {
-          parsedJson.dataVenda = dataValidaVenda;
-        } else {
-          parsedJson.dataVenda = new Date().toISOString().split('T')[0];
-        }
-      }
     }
 
     // Campos faltantes conferidos nos dados finais (texto + foto + regex). IMEI, CPF e nascimento são opcionais.
