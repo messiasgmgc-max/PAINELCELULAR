@@ -6099,9 +6099,31 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                             </button>
                           </div>
                         ) : (
-                          <span className="text-red-400 text-[11px] font-semibold">
-                            Passou R$ {Math.abs(dif).toFixed(2)} do total!
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-red-400 text-[11px] font-semibold">
+                              Passou R$ {Math.abs(dif).toFixed(2)} do total!
+                            </span>
+                            <button
+                              type="button"
+                              className="text-[11px] text-emerald-400 hover:underline font-bold cursor-pointer"
+                              onClick={() => {
+                                setDadosFaltantesForm((prev) => {
+                                  if (prev.pagamentos.length === 0) return prev;
+                                  const ultimoIdx = prev.pagamentos.length - 1;
+                                  const valorAtual = Number(prev.pagamentos[ultimoIdx].valor) || 0;
+                                  const novoValor = Math.max(0, valorAtual + dif).toFixed(2);
+                                  return {
+                                    ...prev,
+                                    pagamentos: prev.pagamentos.map((p, i) =>
+                                      i === ultimoIdx ? { ...p, valor: novoValor } : p
+                                    ),
+                                  };
+                                });
+                              }}
+                            >
+                              Ajustar no último
+                            </button>
+                          </div>
                         )}
                       </div>
                     );
@@ -6232,13 +6254,19 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       </div>
 
                       <div>
-                        <label className="text-[11px] font-bold text-slate-300">Valor de Avaliação / Entrada (R$) <span className="text-red-400">*</span></label>
+                        <label className="text-[11px] font-bold text-slate-300">
+                          Valor de Avaliação / Entrada (R$){' '}
+                          {!dadosFaltantesForm.tradeInEntrarNoEstoque ? (
+                            <span className="text-amber-400 font-normal text-[10px]">(Opcional)</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal text-[10px]">(R$ 0 se não abater)</span>
+                          )}
+                        </label>
                         <input
                           type="number"
                           step="0.01"
-                          required={dadosFaltantesForm.isUpgrade}
                           className="input-glass mt-1 font-bold text-emerald-400 text-xs"
-                          placeholder="Ex: 1500"
+                          placeholder="0.00"
                           value={dadosFaltantesForm.tradeInValor}
                           onChange={(e) => {
                             const novoValorTroca = e.target.value;
@@ -6345,8 +6373,8 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                     }
 
                     if (dadosFaltantesForm.isUpgrade) {
-                      if (!dadosFaltantesForm.tradeInModelo || !dadosFaltantesForm.tradeInValor || Number(dadosFaltantesForm.tradeInValor) <= 0) {
-                        toast.error('Informe o modelo e o valor de avaliação do aparelho que entrou na troca!');
+                      if (!dadosFaltantesForm.tradeInModelo || !dadosFaltantesForm.tradeInModelo.trim()) {
+                        toast.error('Informe o modelo do aparelho que entrou na troca!');
                         return;
                       }
                     }
