@@ -152,12 +152,16 @@ export async function POST(request: Request) {
     textoMsg += `Olá, *${nomeLimpo}*! Seu pedido de atacado foi registrado com sucesso. 🚀\n\n`;
 
     if (Array.isArray(itens) && itens.length > 0) {
-      textoMsg += `📦 *Itens do Pedido (${itens.length} un):*\n`;
+      const totalUnidades = itens.reduce((acc, it) => acc + (Number(it.quantidade) || 1), 0);
+      textoMsg += `📦 *Itens do Pedido (${totalUnidades} un):*\n`;
       itens.forEach((it, idx) => {
         const desc = `${it.modelo || 'Aparelho'} ${it.capacidade || ''} ${it.cor || ''}`.trim();
         const ident = it.codigo ? `ID: ${it.codigo}` : (it.imei ? `IMEI: ${it.imei}` : '');
         const precoItem = Number(it.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        textoMsg += ` ${idx + 1}. *${desc}* ${ident ? `(${ident})` : ''} - R$ ${precoItem}\n`;
+        const qtd = Number(it.quantidade) || 1;
+        const prefixQtd = qtd > 1 ? `${qtd}x ` : '';
+        const subtotalFmt = qtd > 1 ? ` (Total: R$ ${Number(it.total || (it.valor * qtd)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : '';
+        textoMsg += ` ${idx + 1}. *${prefixQtd}${desc}* ${ident ? `(${ident})` : ''} - R$ ${precoItem}${subtotalFmt}\n`;
       });
       textoMsg += `\n`;
     }

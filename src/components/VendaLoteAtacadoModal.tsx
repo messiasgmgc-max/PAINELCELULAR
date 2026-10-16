@@ -4,19 +4,19 @@ import {
   Boxes, 
   ShoppingBag, 
   Search, 
-  CheckSquare, 
-  Square, 
-  DollarSign, 
-  TrendingUp, 
+  Plus,
+  Minus,
+  Trash2,
+  Camera, 
+  CheckCircle2, 
+  AlertCircle, 
   User, 
   Calendar, 
-  CreditCard, 
-  CheckCircle2, 
-  Trash2,
-  AlertCircle,
-  Camera,
-  QrCode,
-  MessageCircle
+  DollarSign, 
+  TrendingUp, 
+  MessageCircle,
+  Package,
+  Layers
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,8 +30,6 @@ import { useCompradores } from '@/hooks/useCompradores';
 import { useAuth } from '@/hooks/useAuth';
 import { logVenda } from '@/lib/logger';
 import { registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
-import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
-import { aplicarMudancaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 
 interface VendaLoteAtacadoModalProps {
   isOpen: boolean;
@@ -40,6 +38,15 @@ interface VendaLoteAtacadoModalProps {
   lojaId: string | null;
   onSuccess: () => Promise<void>;
   abrirScannerInicial?: boolean;
+}
+
+export interface ItemLoteAtacado {
+  aparelhoId: string;
+  aparelho: Aparelho;
+  quantidade: number;
+  maxEstoque: number;
+  precoUnitario: number;
+  custoUnitario: number;
 }
 
 const FORMAS_PAGAMENTO = [
@@ -61,8 +68,7 @@ export function VendaLoteAtacadoModal({
 }: VendaLoteAtacadoModalProps) {
   const [busca, setBusca] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'aparelho' | 'perfume' | 'acessorio' | 'outro'>('todos');
-  const [selecionados, setSelecionados] = useState<string[]>([]);
-  const [precosCustomizados, setPrecosCustomizados] = useState<Record<string, number>>({});
+  const [itensPedido, setItensPedido] = useState<ItemLoteAtacado[]>([]);
   const [comprador, setComprador] = useState('');
   const [compradorTelefone, setCompradorTelefone] = useState('');
   const [metodoPgto, setMetodoPgto] = useState('pix');
@@ -75,18 +81,6 @@ export function VendaLoteAtacadoModal({
   const { usuario } = useAuth();
 
   const { compradores, buscarCompradores, upsertComprador } = useCompradores(lojaId);
-  
-  const handleCompradorChange = (novoNome: string) => {
-    setComprador(novoNome);
-    if (!novoNome.trim()) {
-      setCompradorTelefone('');
-      return;
-    }
-    const matchComp = compradores.find(c => c.nome.trim().toLowerCase() === novoNome.trim().toLowerCase());
-    if (matchComp?.telefone) {
-      setCompradorTelefone(matchComp.telefone);
-    }
-  };
 
   const keyBufferRef = useRef<string>('');
   const keyTimeoutRef = useRef<any>(null);
@@ -94,8 +88,9 @@ export function VendaLoteAtacadoModal({
   // Reseta ao abrir/fechar
   useEffect(() => {
     if (isOpen) {
-      setSelecionados([]);
-      setPrecosCustomizados({});
+      setItensPedido([]);
+      setBusca('');
+      setCategoriaFiltro('todos');
       setComprador('');
       setCompradorTelefone('');
       setObservacoes('');
@@ -108,6 +103,115 @@ export function VendaLoteAtacadoModal({
       }
     }
   }, [isOpen, abrirScannerInicial]);
+
+  const handleCompradorChange = (novoNome: string) => {
+    setComprador(novoNome);
+    if (!novoNome.trim()) {
+      setCompradorTelefone('');
+      return;
+    }
+    const matchComp = compradores.find(c => c.nome.trim().toLowerCase() === novoNome.trim().toLowerCase());
+    if (matchComp?.telefone) {
+      setCompradorTelefone(matchComp.telefone);
+    }
+  };
+
+  // Obter estoque máximo real de um produto
+  const getMaxEstoque = (aparelho: Aparelho): number => {
+    if (typeof aparelho.quantidade === 'number' && aparelho.quantidade > 0) {
+      return aparelho.quantidade;
+    }
+    return 1;
+  };
+
+  // Preço padrão de atacado
+  const getPrecoPadrao = (aparelho: Aparelho): number => {
+    const valAtacado = (aparelho as any).precoAtacado ?? (aparelho as any).preco_atacado ?? aparelho.preco ?? 0;
+    return Number(valAtacado) || 0;
+  };
+
+  // Adicionar produto ao pedido
+  const handleAdicionarProduto = (aparelho: Aparelho, qtdAdicionar = 1) => {
+    const maxEstoque = getMaxEstoque(aparelho);
+
+    setItensPedido((prev) => {
+      const index = prev.findIndex((item) => item.aparelhoId === aparelho.id);
+
+      if (index >= 0) {
+        // Já existe no pedido -> incrementa quantidade
+        const itemAtual = prev[index];
+        const novaQtd = itemAtual.quantidade + qtdAdicionar;
+
+        if (novaQtd > itemAtual.maxEstoque) {
+          toast.warning(`Limite de estoque atingido para ${aparelho.modelo} (Máx: ${itemAtual.maxEstoque} un).`);
+          return prev;
+        }
+
+        const atualizados = [...prev];
+        atualizados[index] = {
+          ...itemAtual,
+          quantidade: novaQtd,
+        };
+        toast.success(`+1 ${aparelho.modelo} adicionado (${novaQtd} no pedido)`);
+        return atualizados;
+      } else {
+        // Não existe -> adiciona novo item
+        const precoUnitario = getPrecoPadrao(aparelho);
+        const custoUnitario = Number(aparelho.custo) || 0;
+        const qtdInicial = Math.min(qtdAdicionar, maxEstoque);
+
+        toast.success(`📦 ${aparelho.modelo} adicionado ao pedido!`);
+        return [
+          ...prev,
+          {
+            aparelhoId: aparelho.id,
+            aparelho,
+            quantidade: qtdInicial,
+            maxEstoque,
+            precoUnitario,
+            custoUnitario,
+          },
+        ];
+      }
+    });
+  };
+
+  // Alterar quantidade de um item no pedido
+  const handleAlterarQuantidade = (aparelhoId: string, novaQtd: number) => {
+    setItensPedido((prev) => {
+      if (novaQtd <= 0) {
+        return prev.filter((it) => it.aparelhoId !== aparelhoId);
+      }
+
+      return prev.map((it) => {
+        if (it.aparelhoId === aparelhoId) {
+          if (novaQtd > it.maxEstoque) {
+            toast.warning(`Estoque máximo disponível: ${it.maxEstoque} un.`);
+            return { ...it, quantidade: it.maxEstoque };
+          }
+          return { ...it, quantidade: novaQtd };
+        }
+        return it;
+      });
+    });
+  };
+
+  // Alterar preço unitário de um item no pedido
+  const handleAlterarPrecoUnitario = (aparelhoId: string, novoPreco: number) => {
+    setItensPedido((prev) =>
+      prev.map((it) => (it.aparelhoId === aparelhoId ? { ...it, precoUnitario: Math.max(0, novoPreco) } : it))
+    );
+  };
+
+  // Remover item do pedido
+  const handleRemoverItem = (aparelhoId: string) => {
+    setItensPedido((prev) => prev.filter((it) => it.aparelhoId !== aparelhoId));
+  };
+
+  // Limpar todo o pedido
+  const handleLimparPedido = () => {
+    setItensPedido([]);
+  };
 
   // Processamento de código de barras lido por Câmera ou Leitor USB
   const handleBarcodeScanned = (barcode: string) => {
@@ -132,19 +236,7 @@ export function VendaLoteAtacadoModal({
     });
 
     if (found) {
-      setSelecionados((prev) => {
-        if (!prev.includes(found.id)) {
-          if (precosCustomizados[found.id] === undefined) {
-            const valAtacado = (found as any).precoAtacado || found.preco || 0;
-            setPrecosCustomizados((p) => ({ ...p, [found.id]: valAtacado }));
-          }
-          toast.success(`📦 ${found.marca} ${found.modelo} adicionado ao lote!`, { duration: 3000 });
-          return [...prev, found.id];
-        } else {
-          toast.info(`ℹ️ ${found.marca} ${found.modelo} já está no lote.`);
-          return prev;
-        }
-      });
+      handleAdicionarProduto(found, 1);
     } else {
       toast.error(`⚠️ Código "${barcode}" não encontrado no estoque ativo.`);
     }
@@ -204,68 +296,17 @@ export function VendaLoteAtacadoModal({
     });
   }, [aparelhosEstoque, busca, categoriaFiltro]);
 
-  // Lista dos objetos de aparelhos selecionados
-  const itensSelecionados = useMemo(() => {
-    return aparelhosEstoque.filter((a) => selecionados.includes(a.id));
-  }, [aparelhosEstoque, selecionados]);
-
-  // Alterna seleção de um aparelho
-  const toggleSelecionado = (id: string) => {
-    setSelecionados((prev) => {
-      if (prev.includes(id)) {
-        return prev.filter((item) => item !== id);
-      } else {
-        const item = aparelhosEstoque.find(a => a.id === id);
-        if (item && precosCustomizados[id] === undefined) {
-          const valAtacado = (item as any).precoAtacado || item.preco || 0;
-          setPrecosCustomizados(p => ({ ...p, [id]: valAtacado }));
-        }
-        return [...prev, id];
-      }
-    });
-  };
-
-  // Selecionar todos os filtrados
-  const handleSelecionarTodos = () => {
-    const ids = aparelhosFiltrados.map((a) => a.id);
-    const novosPrecos = { ...precosCustomizados };
-    aparelhosFiltrados.forEach((a) => {
-      if (novosPrecos[a.id] === undefined) {
-        novosPrecos[a.id] = (a as any).precoAtacado || a.preco || 0;
-      }
-    });
-    setPrecosCustomizados(novosPrecos);
-    setSelecionados((prev) => Array.from(new Set([...prev, ...ids])));
-  };
-
-  // Desmarcar todos
-  const handleDesmarcarTodos = () => {
-    setSelecionados([]);
-  };
-
-  // Preço de venda unitário de um item no lote
-  const getPrecoItem = (a: Aparelho): number => {
-    if (precosCustomizados[a.id] !== undefined) {
-      return precosCustomizados[a.id];
-    }
-    return (a as any).precoAtacado || a.preco || 0;
-  };
-
-  // Atualizar preço individual
-  const handlePrecoChange = (id: string, valStr: string) => {
-    const valLimpo = valStr.replace(/[^\d,.]/g, '').replace(',', '.');
-    const num = parseFloat(valLimpo) || 0;
-    setPrecosCustomizados((prev) => ({ ...prev, [id]: num }));
-  };
-
-  // Totais financeiros do lote
+  // Totais financeiros do pedido
   const totais = useMemo(() => {
     let valorTotal = 0;
     let custoTotal = 0;
+    let totalUnidades = 0;
 
-    itensSelecionados.forEach((a) => {
-      valorTotal += getPrecoItem(a);
-      custoTotal += (a.custo || 0);
+    itensPedido.forEach((it) => {
+      const qtd = it.quantidade;
+      valorTotal += qtd * it.precoUnitario;
+      custoTotal += qtd * it.custoUnitario;
+      totalUnidades += qtd;
     });
 
     const lucroTotal = valorTotal - custoTotal;
@@ -276,8 +317,19 @@ export function VendaLoteAtacadoModal({
       custoTotal,
       lucroTotal,
       margemMedia,
+      totalUnidades,
+      totalProdutos: itensPedido.length,
     };
-  }, [itensSelecionados, precosCustomizados]);
+  }, [itensPedido]);
+
+  // Mapa de quantidades no pedido por aparelhoId para badges rápidos
+  const mapaQtdNoPedido = useMemo(() => {
+    const map = new Map<string, number>();
+    itensPedido.forEach((it) => {
+      map.set(it.aparelhoId, it.quantidade);
+    });
+    return map;
+  }, [itensPedido]);
 
   if (!isOpen) return null;
 
@@ -285,18 +337,18 @@ export function VendaLoteAtacadoModal({
   const handleFinalizarVendaLote = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (itensSelecionados.length === 0) {
-      toast.error('Selecione pelo menos 1 aparelho para vender.');
+    if (itensPedido.length === 0) {
+      toast.error('Adicione pelo menos 1 produto ao pedido.');
       return;
     }
 
     if (!comprador.trim()) {
-      toast.error('Informe o nome do comprador/lojista (ex: "Junior").');
+      toast.error('Informe o nome do lojista / comprador (ex: "Junior").');
       return;
     }
 
     setSalvando(true);
-    const toastId = toast.loading(`Registrando venda de ${itensSelecionados.length} aparelho(s) para ${comprador.trim()}...`);
+    const toastId = toast.loading(`Registrando venda de ${totais.totalUnidades} unidade(s) para ${comprador.trim()}...`);
 
     try {
       const compradorFinal = comprador.trim();
@@ -314,13 +366,31 @@ export function VendaLoteAtacadoModal({
           valor: valorEntradaNum,
           metodo: 'pix',
           observacao: 'Entrada paga no momento da compra',
-          registradoPor: 'Sistema'
+          registradoPor: usuario?.nome || 'Sistema'
         }
       ] : [];
 
+      const itensPayload = itensPedido.map((it) => {
+        const subtotal = Number((it.quantidade * it.precoUnitario).toFixed(2));
+        const item = it.aparelho;
+        return {
+          id: `${Date.now()}_${it.aparelhoId}`,
+          aparelhoId: it.aparelhoId,
+          condicaoOriginal: item.condicao,
+          descricao: `${item.marca} ${item.modelo} ${item.capacidade || ''} ${item.cor || ''}`.trim(),
+          quantidade: it.quantidade,
+          valorInterno: it.custoUnitario,
+          valorExibir: it.precoUnitario,
+          desconto: 0,
+          tipoDesconto: 'R$',
+          total: subtotal,
+          observacao: observacoes || 'Venda em Lote Atacado',
+        };
+      });
+
       const payloadVenda: any = {
         clienteNome: compradorFinal,
-        vendedor: 'Sistema',
+        vendedor: usuario?.nome || 'Sistema',
         tipoEntrega: 'Atacado / Lojista',
         valor: totais.valorTotal,
         custo: totais.custoTotal,
@@ -333,28 +403,11 @@ export function VendaLoteAtacadoModal({
         valorPago: valorPagoFinal,
         saldoDevedor: saldoDevedorFinal,
         historicoAbatimentos,
-        descricao: `Venda ATACADO (Lote ${itensSelecionados.length} itens) para ${compradorFinal}`,
-        garantia: 'Garantia de Atacado (Teste)',
+        descricao: `Venda ATACADO (${totais.totalUnidades} un em ${itensPedido.length} itens) para ${compradorFinal}`,
+        garantia: observacoes || 'Garantia de Atacado (Teste)',
         descontoTotal: 0,
         taxa_cartao: 0,
-        itens: itensSelecionados.map((item) => {
-          const p = getPrecoItem(item);
-          const c = item.custo || 0;
-          return {
-            id: `${Date.now()}_${item.id}`,
-            aparelhoId: item.id,
-            // Estado físico antes da venda, para um estorno devolver o aparelho como estava.
-            condicaoOriginal: item.condicao,
-            descricao: `${item.marca} ${item.modelo} - ${item.capacidade || ''} ${item.cor || ''} (ID: ${getAparelhoCodigo(item)})`,
-            quantidade: 1,
-            valorInterno: c,
-            valorExibir: p,
-            desconto: 0,
-            tipoDesconto: 'R$',
-            total: p,
-            observacao: observacoes || 'Venda em Lote Atacado',
-          };
-        }),
+        itens: itensPayload,
         pagamentos: [
           {
             id: Date.now().toString(),
@@ -363,37 +416,81 @@ export function VendaLoteAtacadoModal({
             parcelas: 1,
           },
         ],
-        loja_id: lojaId || null,
+        loja_id: lojaId || usuario?.lojaId || null,
       };
 
-      // Observação de baixa de cada aparelho, gravada junto com a venda.
-      const camposAparelho = Object.fromEntries(
-        itensSelecionados.map((item) => {
-          const precoItem = getPrecoItem(item);
-          const custoItem = item.custo || 0;
-          const lucroItem = precoItem - custoItem;
-          const obsBaixa = [
-            `BAIXA_ESTOQUE:${dataIso}:Venda ATACADO (Lote com ${itensSelecionados.length} itens) para ${compradorFinal} por R$ ${precoItem.toFixed(2)} | Custo: R$ ${custoItem.toFixed(2)} | Lucro: R$ ${lucroItem.toFixed(2)} | Pgto: ${metodoPgto}`,
-            observacoes ? `Obs: ${observacoes.trim()}` : '',
-            `ID: ${getAparelhoCodigo(item)}`,
-            item.imei ? `IMEI: ${item.imei}` : ''
-          ].filter(Boolean).join(' | ');
-          return [item.id, { cliente: compradorFinal, observacoes: obsBaixa }];
-        })
-      );
+      // Separar quais itens dão baixa total via registrarVendaAtomica
+      // e quais apenas decrementam quantidade no estoque de acessórios/perfumes
+      const idsBaixaTotal: string[] = [];
+      const itensParaDecrementar: { id: string; novaQtd: number; qtdVendida: number }[] = [];
+      const camposAparelho: Record<string, { cliente: string; observacoes: string }> = {};
 
-      // Venda, baixa de todos os aparelhos e movimentações numa transação só: se um aparelho
-      // do lote já saiu do estoque, nada é gravado e a mensagem diz qual foi.
+      for (const it of itensPedido) {
+        const item = it.aparelho;
+        const precoItem = it.precoUnitario;
+        const custoItem = it.custoUnitario;
+        const lucroItem = (precoItem - custoItem) * it.quantidade;
+
+        const obsBaixa = [
+          `BAIXA_ESTOQUE:${dataIso}:Venda ATACADO (${it.quantidade} un) para ${compradorFinal} por R$ ${precoItem.toFixed(2)}/un | Custo: R$ ${custoItem.toFixed(2)} | Lucro: R$ ${lucroItem.toFixed(2)} | Pgto: ${metodoPgto}`,
+          observacoes ? `Obs: ${observacoes.trim()}` : '',
+          `ID: ${getAparelhoCodigo(item)}`,
+          item.imei ? `IMEI: ${item.imei}` : ''
+        ].filter(Boolean).join(' | ');
+
+        if (it.quantidade >= it.maxEstoque) {
+          // Todo o estoque desta linha foi vendido -> Baixa total!
+          idsBaixaTotal.push(it.aparelhoId);
+          camposAparelho[it.aparelhoId] = {
+            cliente: compradorFinal,
+            observacoes: obsBaixa,
+          };
+        } else {
+          // Apenas parte do estoque foi vendida (ex: 20 de 5000 películas) -> Decrementa
+          const novaQtd = it.maxEstoque - it.quantidade;
+          itensParaDecrementar.push({
+            id: it.aparelhoId,
+            novaQtd,
+            qtdVendida: it.quantidade,
+          });
+        }
+      }
+
+      // 1. Grava a venda atomicamente com os itens que dão baixa total
       await registrarVendaAtomica(supabase, {
         venda: { ...payloadVenda, loja_id: lojaId || usuario?.lojaId || null },
-        aparelhoIds: itensSelecionados.map((item) => item.id),
+        aparelhoIds: idsBaixaTotal,
         camposAparelho,
         origem: 'atacado',
         usuarioId: usuario?.id || null,
         usuarioNome: usuario?.nome || null,
-        observacao: `Venda ATACADO em lote (${itensSelecionados.length} itens) para ${compradorFinal}`,
+        observacao: `Venda ATACADO (${totais.totalUnidades} un) para ${compradorFinal}`,
       });
 
+      // 2. Para itens com baixa parcial de quantidade, decrementa o estoque e audita
+      if (itensParaDecrementar.length > 0) {
+        for (const dec of itensParaDecrementar) {
+          // estoque-guard: sem-ciclo
+          await supabase
+            .from('aparelhos')
+            .update({ quantidade: dec.novaQtd })
+            .eq('id', dec.id);
+
+          await supabase
+            .from('movimentacoes_estoque')
+            .insert({
+              loja_id: lojaId || usuario?.lojaId || null,
+              aparelho_id: dec.id,
+              tipo: 'saida',
+              origem: 'atacado',
+              usuario_id: usuario?.id || null,
+              usuario_nome: usuario?.nome || null,
+              observacao: `Saída de ${dec.qtdVendida} un por venda atacado para ${compradorFinal}`,
+            });
+        }
+      }
+
+      // 3. Salva/atualiza dados do lojista
       await upsertComprador(compradorFinal, 'lojista', compradorTelefone || undefined);
 
       logVenda({
@@ -401,12 +498,12 @@ export function VendaLoteAtacadoModal({
         valorTotal: totais.valorTotal,
         tipoVenda: 'atacado',
         formaPagamento: metodoPgto,
-        itensCount: itensSelecionados.length,
+        itensCount: totais.totalUnidades,
       }, usuario, lojaId);
 
-      toast.success(`🎉 Lote de ${itensSelecionados.length} aparelhos vendido com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
+      toast.success(`🎉 Venda de ${totais.totalUnidades} unidade(s) finalizada com sucesso para ${compradorFinal}!`, { id: toastId, duration: 5000 });
 
-      // Notifica o lojista automaticamente no WhatsApp com itens e saldo devedor
+      // 4. Notifica o lojista automaticamente no WhatsApp com itens e saldo devedor
       try {
         fetch('/api/atacado/notificar-venda', {
           method: 'POST',
@@ -415,13 +512,15 @@ export function VendaLoteAtacadoModal({
             lojaId: lojaId || null,
             compradorNome: compradorFinal,
             compradorTelefone: compradorTelefone || undefined,
-            itens: itensSelecionados.map((item) => ({
-              modelo: item.modelo,
-              capacidade: item.capacidade,
-              cor: item.cor,
-              imei: item.imei,
-              codigo: getAparelhoCodigo(item),
-              valor: getPrecoItem(item),
+            itens: itensPedido.map((it) => ({
+              modelo: it.aparelho.modelo,
+              capacidade: it.aparelho.capacidade,
+              cor: it.aparelho.cor,
+              imei: it.aparelho.imei,
+              codigo: getAparelhoCodigo(it.aparelho),
+              quantidade: it.quantidade,
+              valor: it.precoUnitario,
+              total: Number((it.quantidade * it.precoUnitario).toFixed(2)),
             })),
             valorTotal: totais.valorTotal,
             formaPagamento: metodoPgto,
@@ -431,7 +530,7 @@ export function VendaLoteAtacadoModal({
           .then(async (r) => {
             const j = await r.json();
             if (j.enviado) {
-              toast.success(`📲 Comprovante e saldo devedor enviados no WhatsApp de ${compradorFinal}!`, { duration: 6000 });
+              toast.success(`📲 Comprovante enviado no WhatsApp de ${compradorFinal}!`, { duration: 6000 });
             }
           })
           .catch((eW) => console.warn('Aviso notificação WhatsApp atacado lote:', eW));
@@ -450,54 +549,162 @@ export function VendaLoteAtacadoModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto flex flex-col my-auto relative">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-6xl w-full p-4 sm:p-5 shadow-2xl space-y-3.5 text-white max-h-[95dvh] overflow-hidden flex flex-col my-auto relative">
         
-        {/* CABEÇALHO */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
+        {/* CABEÇALHO MODAL */}
+        <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
               <Boxes className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-base sm:text-lg text-white">Nova Venda de Atacado (Lote / Múltiplos)</h3>
-                <Button
-                  type="button"
-                  onClick={() => setShowScannerModal(true)}
-                  className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold rounded-xl h-6 px-2 flex items-center gap-1 shadow-sm cursor-pointer shrink-0"
-                >
-                  <Camera className="w-3 h-3 text-amber-400" />
-                  Bipar Câmera/USB
-                </Button>
+                <h3 className="font-bold text-base text-white">Venda de Atacado / Lojista</h3>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-semibold">
+                  Rápido & Objetivo
+                </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Selecione ou bipe aparelhos para fechar o pedido de atacado para um lojista
+              <p className="text-[11px] text-slate-400">
+                Selecione produtos, defina as quantidades exatas e finalize com 1 clique
               </p>
             </div>
           </div>
 
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              onClick={() => setShowScannerModal(true)}
+              className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold rounded-xl h-8 px-3 flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5 text-amber-400" />
+              <span>Bipar Câmera/USB</span>
+            </Button>
+            <button 
+              onClick={onClose} 
+              className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleFinalizarVendaLote} className="space-y-4 flex flex-col flex-1">
+        <form onSubmit={handleFinalizarVendaLote} className="space-y-3 flex flex-col flex-1 overflow-hidden min-h-0">
           
-          {/* GRID COM 2 COLUNAS: ESQUERDA (SELEÇÃO DE ESTOQUE) | DIREITA (DADOS DO COMPRADOR & RESUMO) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* BARRA SUPERIOR COMPACTA: DADOS PRINCIPAIS DA VENDA */}
+          <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3 shrink-0 space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
+              
+              {/* Lojista / Comprador (5 cols) */}
+              <div className="lg:col-span-4 space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-amber-400" />
+                  Lojista / Comprador *
+                </label>
+                <CompradorAutocomplete
+                  value={comprador}
+                  onChange={handleCompradorChange}
+                  compradores={compradores}
+                  onBuscar={(termo) => buscarCompradores(termo, 'lojista')}
+                  tipo="lojista"
+                  placeholder="Buscar ou digitar lojista..."
+                  required
+                />
+              </div>
+
+              {/* WhatsApp do Lojista (3 cols) */}
+              <div className="lg:col-span-3 space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  WhatsApp
+                  <span className="text-[10px] text-slate-500 font-normal">(Comprovante)</span>
+                </label>
+                <input
+                  type="text"
+                  value={compradorTelefone}
+                  onChange={(e) => setCompradorTelefone(e.target.value)}
+                  placeholder="Ex: 31999999999"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                />
+              </div>
+
+              {/* Forma de Pagamento (3 cols) */}
+              <div className="lg:col-span-3 space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                  Pagamento
+                </label>
+                <select
+                  value={metodoPgto}
+                  onChange={(e) => setMetodoPgto(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  {FORMAS_PAGAMENTO.map((f) => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Data da Venda (2 cols) */}
+              <div className="lg:col-span-2 space-y-1">
+                <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  Data
+                </label>
+                <input
+                  type="date"
+                  value={dataVenda}
+                  onChange={(e) => setDataVenda(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5 text-xs text-white outline-none focus:border-amber-500"
+                />
+              </div>
+
+            </div>
+
+            {/* SE FIADO: FAIXA DE CONFIGURAÇÃO DE PRAZO */}
+            {metodoPgto === 'fiado' && (
+              <div className="pt-2 border-t border-rose-500/20 grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-center">
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-rose-300 font-semibold">Entrada Paga Agora (R$)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 500,00"
+                    value={valorEntrada}
+                    onChange={(e) => setValorEntrada(e.target.value)}
+                    className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-rose-400 font-mono"
+                  />
+                </div>
+                <div className="space-y-0.5">
+                  <label className="text-[10px] text-rose-300 font-semibold">Vencimento (Opcional)</label>
+                  <input
+                    type="date"
+                    value={dataVencimento}
+                    onChange={(e) => setDataVencimento(e.target.value)}
+                    className="w-full bg-slate-900 border border-rose-500/40 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-rose-400"
+                  />
+                </div>
+                <div className="text-xs text-rose-300 font-medium sm:text-right pt-2 sm:pt-0">
+                  Saldo devedor restante: <strong className="font-mono text-sm text-rose-400">R$ {Math.max(0, totais.valorTotal - (parseFloat(valorEntrada.replace(/[^\d,.]/g, '').replace(',', '.')) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* PAINEL CENTRAL (GRID 2 COLUNAS: ESQUERDA CATÁLOGO / DIREITA CARRINHO) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0 overflow-hidden">
             
-            {/* COLUNA ESQUERDA: LISTA DE APARELHOS DO ESTOQUE (7 cols) */}
-            <div className="lg:col-span-7 flex flex-col space-y-2.5 min-h-0">
+            {/* COLUNA ESQUERDA: CATÁLOGO DO ESTOQUE (6 cols) */}
+            <div className="lg:col-span-6 flex flex-col space-y-2 min-h-0 border border-slate-800 rounded-2xl p-2.5 bg-slate-950/40">
               
               {/* FILTROS DE CATEGORIA */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar touch-pan-x">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar shrink-0">
                 <button
                   type="button"
                   onClick={() => setCategoriaFiltro('todos')}
                   className={cn(
-                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                    categoriaFiltro === 'todos' ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                    categoriaFiltro === 'todos' ? "bg-amber-500 text-slate-950 shadow-sm" : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
                   )}
                 >
                   ✨ Todos ({aparelhosEstoque.length})
@@ -506,8 +713,8 @@ export function VendaLoteAtacadoModal({
                   type="button"
                   onClick={() => setCategoriaFiltro('aparelho')}
                   className={cn(
-                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                    categoriaFiltro === 'aparelho' ? "bg-blue-500 text-white shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                    categoriaFiltro === 'aparelho' ? "bg-blue-500 text-white shadow-sm" : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
                   )}
                 >
                   📱 Celulares
@@ -516,8 +723,8 @@ export function VendaLoteAtacadoModal({
                   type="button"
                   onClick={() => setCategoriaFiltro('perfume')}
                   className={cn(
-                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                    categoriaFiltro === 'perfume' ? "bg-rose-500 text-white shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                    categoriaFiltro === 'perfume' ? "bg-rose-500 text-white shadow-sm" : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
                   )}
                 >
                   🧴 Perfumes
@@ -526,122 +733,114 @@ export function VendaLoteAtacadoModal({
                   type="button"
                   onClick={() => setCategoriaFiltro('acessorio')}
                   className={cn(
-                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                    categoriaFiltro === 'acessorio' ? "bg-purple-500 text-white shadow-sm" : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                    "px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                    categoriaFiltro === 'acessorio' ? "bg-purple-500 text-white shadow-sm" : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
                   )}
                 >
                   🎧 Acessórios
                 </button>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Filtrar por modelo, marca, cor, IMEI ou ID..."
-                    value={busca}
-                    onChange={(e) => setBusca(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-amber-500 outline-none"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    type="button"
-                    onClick={() => setShowScannerModal(true)}
-                    className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold rounded-xl h-8 px-2.5 flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0"
-                    title="Bipar código de barras ou IMEI com a câmera ou leitor USB"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Bipar</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleSelecionarTodos}
-                    className="text-[11px] h-8 px-2 text-amber-400 hover:text-amber-300"
-                  >
-                    Marcar Todos
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDesmarcarTodos}
-                    className="text-[11px] h-8 px-2 text-slate-400 hover:text-white"
-                  >
-                    Limpar
-                  </Button>
-                </div>
+              {/* BUSCA RÁPIDA */}
+              <div className="relative shrink-0">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Pesquisar produto, modelo, cor, IMEI ou ID..."
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:border-amber-500 outline-none"
+                />
               </div>
 
-              {/* LISTA ROLÁVEL COM CHECKBOXES */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[340px] border border-slate-800/80 rounded-2xl p-2 bg-slate-950/60">
+              {/* LISTA DE PRODUTOS DISPONÍVEIS */}
+              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 min-h-0">
                 {aparelhosFiltrados.length === 0 ? (
-                  <p className="p-8 text-center text-slate-500 text-xs">Nenhum produto disponível encontrado.</p>
+                  <div className="p-8 text-center text-slate-500 text-xs">
+                    Nenhum produto encontrado no estoque.
+                  </div>
                 ) : (
                   aparelhosFiltrados.map((item) => {
-                    const isChecked = selecionados.includes(item.id);
-                    const precoItem = getPrecoItem(item);
+                    const precoSug = getPrecoPadrao(item);
                     const isPerfume = item.categoria === 'perfume';
                     const isAcessorio = item.categoria === 'acessorio';
+                    const maxEstoque = getMaxEstoque(item);
+                    const qtdNoPedido = mapaQtdNoPedido.get(item.id) || 0;
+                    const esgotadoNoPedido = qtdNoPedido >= maxEstoque;
 
                     return (
                       <div
                         key={item.id}
-                        onClick={() => toggleSelecionado(item.id)}
+                        onClick={() => {
+                          if (!esgotadoNoPedido) {
+                            handleAdicionarProduto(item, 1);
+                          }
+                        }}
                         className={cn(
-                          "p-2.5 rounded-xl border flex items-center justify-between gap-3 text-xs transition-all cursor-pointer select-none",
-                          isChecked
-                            ? "bg-amber-500/15 border-amber-500/50 text-white"
-                            : "bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700"
+                          "p-2 rounded-xl border flex items-center justify-between gap-2.5 text-xs transition-all cursor-pointer select-none",
+                          qtdNoPedido > 0
+                            ? "bg-amber-500/10 border-amber-500/40 text-white"
+                            : "bg-slate-900/90 border-slate-800/80 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
                         )}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                          <button
-                            type="button"
-                            className={cn("w-4 h-4 rounded flex items-center justify-center transition-colors shrink-0", isChecked ? "text-amber-400" : "text-slate-500")}
-                          >
-                            {isChecked ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
-                          </button>
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="text-base shrink-0">
+                            {isPerfume ? '🧴' : isAcessorio ? '🎧' : '📱'}
+                          </span>
 
                           <div className="min-w-0 flex-1">
-                            <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
-                              <span>{isPerfume ? '🧴' : isAcessorio ? '🎧' : '📱'}</span>
-                              <span className="truncate">{item.marca} {item.modelo}</span>
+                            <div className="font-semibold text-white truncate flex items-center gap-1.5">
+                              <span>{item.marca} {item.modelo}</span>
                               {item.capacidade && <span className="text-slate-400 text-[10px]">({item.capacidade})</span>}
                               {item.cor && <span className="text-slate-400 text-[10px]">· {item.cor}</span>}
                             </div>
-                            <div className="text-[10px] text-slate-500 font-mono">
-                              ID: {getAparelhoCodigo(item)} {item.imei ? `· IMEI: ${item.imei}` : ''} · Custo: R$ {(item.custo || 0).toFixed(0)}
+                            <div className="text-[10px] text-slate-400 font-mono truncate flex items-center gap-2">
+                              <span>ID: {getAparelhoCodigo(item)}</span>
+                              {item.imei && <span>· IMEI: {item.imei.slice(-6)}</span>}
+                              <span className={cn(
+                                "font-sans font-medium px-1.5 py-0.2 rounded",
+                                maxEstoque > 1 ? "bg-purple-950/60 text-purple-300 border border-purple-500/30" : "bg-slate-800 text-slate-400"
+                              )}>
+                                Estoque: {maxEstoque} un
+                              </span>
                             </div>
                           </div>
                         </div>
 
-                        {/* INPUT PARA EDITAR O VALOR DE VENDA DESTE ITEM */}
-                        <div 
-                          className="flex items-center gap-1.5 shrink-0"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span className="text-[10px] font-bold text-amber-400">R$</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={precosCustomizados[item.id] !== undefined ? precosCustomizados[item.id] : precoItem}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrecosCustomizados((prev) => ({ ...prev, [item.id]: val }));
-                              if (!selecionados.includes(item.id)) {
-                                setSelecionados((prev) => [...prev, item.id]);
-                              }
+                        {/* PREÇO SUGERIDO E BOTÃO ADICIONAR */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-400 block leading-tight">Atacado</span>
+                            <span className="font-mono font-bold text-amber-300 text-xs">
+                              R$ {precoSug.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={esgotadoNoPedido}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAdicionarProduto(item, 1);
                             }}
-                            placeholder="0"
-                            className="w-24 bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-lg px-2 py-1 text-xs font-bold font-mono text-amber-300 text-right outline-none ring-0 shadow-inner"
-                            title="Digite ou altere o valor deste item para a venda"
-                          />
+                            className={cn(
+                              "h-7 px-2.5 rounded-lg text-[11px] font-bold cursor-pointer transition-all",
+                              qtdNoPedido > 0
+                                ? "bg-amber-500 text-slate-950 hover:bg-amber-400"
+                                : "bg-slate-800 hover:bg-slate-700 text-white border border-slate-700"
+                            )}
+                          >
+                            {qtdNoPedido > 0 ? (
+                              esgotadoNoPedido ? (
+                                <span>Máx ({qtdNoPedido})</span>
+                              ) : (
+                                <span>+{qtdNoPedido}</span>
+                              )
+                            ) : (
+                              <span>+ Add</span>
+                            )}
+                          </Button>
                         </div>
                       </div>
                     );
@@ -650,230 +849,223 @@ export function VendaLoteAtacadoModal({
               </div>
             </div>
 
-            {/* COLUNA DIREITA: DADOS DO COMPRADOR & FECHAMENTO (5 cols) */}
-            <div className="lg:col-span-5 flex flex-col space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+            {/* COLUNA DIREITA: ITENS DO PEDIDO / CARRINHO DE ATACADO (6 cols) */}
+            <div className="lg:col-span-6 flex flex-col space-y-2 min-h-0 border border-slate-800 rounded-2xl p-2.5 bg-slate-950/60">
               
-              {/* COMPRADOR */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-amber-400" />
-                    Lojista / Comprador *
-                  </label>
-                  <span className="text-[10px] text-amber-400 font-medium">💡 Busca inteligente salva no banco</span>
-                </div>
-
-                <CompradorAutocomplete
-                  value={comprador}
-                  onChange={handleCompradorChange}
-                  compradores={compradores}
-                  onBuscar={(termo) => buscarCompradores(termo, 'lojista')}
-                  tipo="lojista"
-                  placeholder="Buscar lojista ou digitar novo (ex: Junior, Tech Cell...)"
-                  required
-                />
-                <div className="pt-1">
-                  <label className="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
-                      <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
-                      WhatsApp do Lojista (Notificação Automática)
-                    </span>
-                    <span className="text-[10px] text-slate-500">Opcional</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={compradorTelefone}
-                    onChange={(e) => setCompradorTelefone(e.target.value)}
-                    placeholder="Ex: 31999999999 ou +1 (305) 123-4567 para outro país"
-                    className="w-full mt-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              {/* LISTA DOS ITENS SELECIONADOS NO PEDIDO */}
-              {itensSelecionados.length > 0 && (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
-                    <span>Itens no Pedido ({itensSelecionados.length})</span>
-                    <span className="text-[10px] text-amber-400 font-normal">Valores unitários editáveis</span>
-                  </div>
-                  <div className="max-h-32 overflow-y-auto space-y-1 pr-1 border border-slate-800 rounded-xl p-1.5 bg-slate-900/50">
-                    {itensSelecionados.map((item) => {
-                      const preco = getPrecoItem(item);
-                      return (
-                        <div key={item.id} className="flex items-center justify-between gap-1.5 p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px]">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-white truncate">{item.marca} {item.modelo} {item.capacidade || ''}</p>
-                            <p className="text-[9px] text-slate-400 font-mono">ID: {getAparelhoCodigo(item)} · Custo: R$ {(item.custo || 0).toFixed(0)}</p>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className="text-[10px] font-bold text-amber-400">R$</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={precosCustomizados[item.id] !== undefined ? precosCustomizados[item.id] : preco}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrecosCustomizados((prev) => ({ ...prev, [item.id]: val }));
-                              }}
-                              className="w-20 bg-slate-900 border border-amber-500/40 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-amber-300 text-right outline-none focus:border-amber-400"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => toggleSelecionado(item.id)}
-                              className="text-slate-500 hover:text-rose-400 p-0.5 rounded cursor-pointer"
-                              title="Remover do lote"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* FORMA DE PAGAMENTO E DATA */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-400">Pagamento</label>
-                  <select
-                    value={metodoPgto}
-                    onChange={(e) => setMetodoPgto(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    {FORMAS_PAGAMENTO.map((f) => (
-                      <option key={f.id} value={f.id}>{f.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-400">Data da Venda</label>
-                  <input
-                    type="date"
-                    value={dataVenda}
-                    onChange={(e) => setDataVenda(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              {/* CAMPOS ADICIONAIS QUANDO FOR FIADO / A PRAZO */}
-              {metodoPgto === 'fiado' && (
-                <div className="p-3 bg-rose-950/30 border border-rose-500/30 rounded-xl space-y-2.5 animate-in fade-in duration-150">
-                  <div className="flex items-center gap-1.5 text-rose-400 font-bold text-xs">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    Configuração de Fiado / A Prazo
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-300">Entrada Paga Agora (R$)</label>
-                      <input
-                        type="text"
-                        placeholder="Ex: 500,00"
-                        value={valorEntrada}
-                        onChange={(e) => setValorEntrada(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500 font-mono"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-300">Vencimento (Opcional)</label>
-                      <input
-                        type="date"
-                        value={dataVencimento}
-                        onChange={(e) => setDataVencimento(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="text-[11px] text-rose-300 flex items-center justify-between pt-1 border-t border-rose-500/20">
-                    <span>Ficará devendo:</span>
-                    <strong className="font-mono text-xs">
-                      R$ {Math.max(0, totais.valorTotal - (parseFloat(valorEntrada.replace(/[^\d,.]/g, '').replace(',', '.')) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </strong>
-                  </div>
-                </div>
-              )}
-
-              {/* OBSERVAÇÃO */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-400">Observações / Garantia</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Garantia de teste 30 dias..."
-                  value={observacoes}
-                  onChange={(e) => setObservacoes(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500 outline-none focus:border-amber-500"
-                />
-              </div>
-
-              {/* RESUMO FINANCEIRO DO LOTE */}
-              <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-xs text-slate-400 pb-1.5 border-b border-white/5">
-                  <span>Itens Selecionados:</span>
-                  <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 font-mono text-xs font-bold">
-                    {itensSelecionados.length} item(ns)
+              {/* CABEÇALHO DO CARRINHO */}
+              <div className="flex items-center justify-between pb-1 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-amber-400" />
+                  <span className="font-bold text-xs text-white">Itens no Pedido</span>
+                  <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px] font-mono">
+                    {totais.totalUnidades} un · {totais.totalProdutos} itens
                   </Badge>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>Custo Total:</span>
-                  <span className="font-mono text-slate-300">R$ {totais.custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                </div>
+                {itensPedido.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleLimparPedido}
+                    className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Limpar
+                  </button>
+                )}
+              </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>Valor Total Atacado:</span>
-                  <span className="font-mono font-bold text-sm text-emerald-400">
-                    R$ {totais.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
+              {/* LISTA DOS ITENS ADICIONADOS */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
+                {itensPedido.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                    <Package className="w-10 h-10 text-slate-600 mb-2 opacity-60" />
+                    <p className="text-xs font-semibold text-slate-400">Nenhum produto adicionado ainda</p>
+                    <p className="text-[11px] text-slate-500 max-w-xs mt-1">
+                      Clique nos produtos à esquerda ou use o leitor de código de barras para adicionar ao pedido.
+                    </p>
+                  </div>
+                ) : (
+                  itensPedido.map((it) => {
+                    const subtotal = it.quantidade * it.precoUnitario;
+                    const item = it.aparelho;
 
-                <div className="flex items-center justify-between text-xs pt-1.5 border-t border-white/5">
-                  <span className="text-cyan-300 font-semibold flex items-center gap-1">
-                    <TrendingUp className="w-3.5 h-3.5" /> Lucro Líquido:
-                  </span>
-                  <span className="font-mono font-bold text-cyan-400">
-                    R$ {totais.lucroTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({totais.margemMedia}%)
-                  </span>
-                </div>
+                    return (
+                      <div
+                        key={it.aparelhoId}
+                        className="bg-slate-900 border border-slate-800/90 rounded-xl p-2 space-y-1.5 text-xs shadow-sm"
+                      >
+                        {/* LINHA 1: NOME DO PRODUTO E REMOVER */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold text-white text-xs truncate block">
+                              {item.marca} {item.modelo} {item.capacidade || ''} {item.cor ? `· ${item.cor}` : ''}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ID: {getAparelhoCodigo(item)} {item.imei ? `· IMEI: ${item.imei}` : ''}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoverItem(it.aparelhoId)}
+                            className="p-1 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            title="Remover produto do pedido"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* LINHA 2: CONTROLE DE QUANTIDADE, PREÇO UNITÁRIO E SUBTOTAL */}
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60 bg-slate-950/40 -mx-2 -mb-1 px-2 py-1.5 rounded-b-xl">
+                          
+                          {/* PREÇO UNITÁRIO EDITÁVEL */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-[10px] text-slate-400">Unit: R$</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={it.precoUnitario}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                handleAlterarPrecoUnitario(it.aparelhoId, val);
+                              }}
+                              className="w-18 bg-slate-900 border border-slate-700 focus:border-amber-400 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-amber-300 text-right outline-none"
+                              title="Preço Unitário de Atacado"
+                            />
+                          </div>
+
+                          {/* CONTROLE DE QUANTIDADE COM [-] [INPUT] [+] */}
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleAlterarQuantidade(it.aparelhoId, it.quantidade - 1)}
+                              className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-bold text-xs transition-colors cursor-pointer"
+                              title="Diminuir quantidade"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+
+                            <input
+                              type="number"
+                              min="1"
+                              max={it.maxEstoque}
+                              value={it.quantidade}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 1;
+                                handleAlterarQuantidade(it.aparelhoId, val);
+                              }}
+                              className="w-12 bg-slate-900 border border-amber-500/50 focus:border-amber-400 rounded px-1 py-0.5 text-xs font-mono font-bold text-white text-center outline-none"
+                              title={`Quantidade no pedido (Máx: ${it.maxEstoque})`}
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => handleAlterarQuantidade(it.aparelhoId, it.quantidade + 1)}
+                              disabled={it.quantidade >= it.maxEstoque}
+                              className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-bold text-xs transition-colors cursor-pointer disabled:opacity-40"
+                              title="Aumentar quantidade"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              /{it.maxEstoque}
+                            </span>
+                          </div>
+
+                          {/* SUBTOTAL DA LINHA */}
+                          <div className="text-right shrink-0">
+                            <span className="text-[9px] text-slate-400 block leading-tight">Subtotal</span>
+                            <span className="font-mono font-bold text-emerald-400 text-xs">
+                              R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* CAMPO DE OBSERVAÇÕES / GARANTIA */}
+              <div className="pt-1 shrink-0">
+                <input
+                  type="text"
+                  placeholder="Observação da venda / Garantia de teste (opcional)..."
+                  value={observacoes}
+                  onChange={(e) => setObservacoes(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
               </div>
 
             </div>
 
           </div>
 
-          {/* BOTÕES DE AÇÃO INFERIORES (STICKY FOOTER COM FUNDO SÓLIDO PARA NUNCA SOBREPOR) */}
-          <div className="sticky bottom-0 bg-slate-900/98 backdrop-blur-md pt-3.5 pb-1 border-t border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 -mx-4 -mb-4 px-4 sm:-mx-6 sm:-mb-6 sm:px-6 rounded-b-3xl z-20 shadow-2xl">
-            <span className="text-xs text-slate-400 font-medium text-center sm:text-left">
-              {itensSelecionados.length === 0 ? 'Nenhum aparelho selecionado' : `${itensSelecionados.length} aparelho(s) prontos para baixa`}
-            </span>
+          {/* RODAPÉ FIXO OBJETIVO E DE ALTA VELOCIDADE */}
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-lg">
+            
+            {/* RESUMO DE VALORES E VOLUMES */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div>
+                <span className="text-[10px] text-slate-400 block leading-tight">Total de Volumes</span>
+                <span className="text-xs font-bold text-white font-mono">
+                  {totais.totalUnidades} un <span className="text-slate-400 text-[10px]">({totais.totalProdutos} produtos)</span>
+                </span>
+              </div>
 
-            <div className="flex items-center justify-end gap-2.5">
+              <div className="hidden sm:block h-6 w-px bg-slate-800" />
+
+              <div>
+                <span className="text-[10px] text-slate-400 block leading-tight">Custo Estimado</span>
+                <span className="text-xs font-mono text-slate-300">
+                  R$ {totais.custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              <div className="hidden sm:block h-6 w-px bg-slate-800" />
+
+              <div>
+                <span className="text-[10px] text-cyan-300 block leading-tight">Lucro Líquido</span>
+                <span className="text-xs font-mono font-bold text-cyan-400">
+                  R$ {totais.lucroTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({totais.margemMedia}%)
+                </span>
+              </div>
+
+              <div className="hidden sm:block h-6 w-px bg-slate-800" />
+
+              <div>
+                <span className="text-[10px] text-emerald-400 font-bold block leading-tight">VALOR TOTAL DA VENDA</span>
+                <span className="text-base sm:text-lg font-mono font-extrabold text-emerald-400">
+                  R$ {totais.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
+            {/* BOTÕES DE AÇÃO */}
+            <div className="flex items-center justify-end gap-2 shrink-0">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={onClose}
-                className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                className="text-xs text-slate-400 hover:text-white cursor-pointer h-9 px-3"
               >
                 Cancelar
               </Button>
 
               <Button
                 type="submit"
-                disabled={salvando || itensSelecionados.length === 0}
-                className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold text-xs sm:text-sm gap-2 px-6 py-2.5 rounded-xl shadow-lg shadow-amber-950/40 cursor-pointer disabled:opacity-50"
+                disabled={salvando || itensPedido.length === 0}
+                className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-extrabold text-xs sm:text-sm gap-2 px-5 py-2 rounded-xl shadow-lg shadow-amber-950/40 cursor-pointer disabled:opacity-50 h-10"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                Finalizar Venda de {itensSelecionados.length} Aparelho(s)
+                <span>Finalizar Venda ({totais.totalUnidades} un · R$ {totais.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})</span>
               </Button>
             </div>
+
           </div>
 
         </form>
