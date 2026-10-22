@@ -137,27 +137,39 @@ export function EdicaoMassaModal({ aberto, aparelhos, atualizarAparelho, onFecha
     let atualizados = 0;
     const falhas: string[] = [];
 
-    for (const { aparelho, dados } of alteracoes) {
-      try {
-        const resultado = await atualizarAparelho(aparelho.id, dados);
-        if (resultado) atualizados += 1;
-        else falhas.push(descricaoCurta(aparelho));
-      } catch {
-        falhas.push(descricaoCurta(aparelho));
-      }
+    // Executa em lotes paralelos de 6 operações simultâneas para máxima velocidade
+    const CHUNK_SIZE = 6;
+    for (let i = 0; i < alteracoes.length; i += CHUNK_SIZE) {
+      const lote = alteracoes.slice(i, i + CHUNK_SIZE);
+      const resultados = await Promise.allSettled(
+        lote.map(async ({ aparelho, dados }) => {
+          const resultado = await atualizarAparelho(aparelho.id, dados);
+          if (!resultado) throw new Error('Falha');
+          return aparelho;
+        })
+      );
+
+      resultados.forEach((res, idx) => {
+        if (res.status === 'fulfilled') {
+          atualizados += 1;
+        } else {
+          falhas.push(descricaoCurta(lote[idx].aparelho));
+        }
+      });
     }
 
     setSalvando(false);
-    await onConcluido();
 
     if (falhas.length === 0) {
       toast.success(`${atualizados} aparelho(s) atualizado(s).`);
       onFechar();
+      void onConcluido();
     } else {
       toast.error(
         `${atualizados} atualizado(s) e ${falhas.length} com erro: ${falhas.slice(0, 3).join(', ')}${falhas.length > 3 ? '…' : ''}`,
         { duration: 10000 }
       );
+      void onConcluido();
     }
   };
 

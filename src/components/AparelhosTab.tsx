@@ -1064,7 +1064,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
     toast.success(editingId ? 'Aparelho atualizado.' : 'Aparelho cadastrado no estoque.');
     handleCancel();
-    await fetchAparelhos();
+    // O estado local já foi atualizado pelo hook (setAparelhos); a sincronização com o banco roda em segundo plano
+    void fetchAparelhos();
   };
 
   const handleDelete = async (id: string) => {
@@ -1073,7 +1074,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       if (sucesso) {
         toast.success("Aparelho baixado do estoque.");
       }
-      await fetchAparelhos();
+      void fetchAparelhos();
     }
   };
 

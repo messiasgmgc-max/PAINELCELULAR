@@ -129,47 +129,76 @@ export function EditarValoresAtacadoModal({
         return;
       }
 
-      let alteradosSucesso = 0;
-
+      // 1. Agrupar IDs que têm o mesmo valor de atacado para atualizar em massa (.in)
+      const gruposPorValor = new Map<number, string[]>();
       for (const id of idsParaAtualizar) {
-        const novoPrecoAtacado = valoresEditados[id];
-        
-        // Tenta atualizar com precoAtacado (camelCase)
-        let { error } = await supabase
-          .from('aparelhos') // estoque-guard: sem-ciclo
-          .update({
-            precoAtacado: novoPrecoAtacado,
-            preco_atacado: novoPrecoAtacado 
-          })
-          .eq('id', id);
-
-        // Se der erro de coluna não encontrada, tenta individualmente
-        if (error) {
-          const res1 = await supabase
-            .from('aparelhos') // estoque-guard: sem-ciclo
-            .update({ precoAtacado: novoPrecoAtacado })
-            .eq('id', id);
-
-          if (res1.error) {
-            const res2 = await supabase
-              .from('aparelhos') // estoque-guard: sem-ciclo
-              .update({ preco_atacado: novoPrecoAtacado })
-              .eq('id', id);
-            error = res2.error;
-          } else {
-            error = null;
-          }
-        }
-
-        if (!error) {
-          alteradosSucesso++;
+        const preco = valoresEditados[id];
+        if (typeof preco === 'number' && !isNaN(preco)) {
+          const lista = gruposPorValor.get(preco) || [];
+          lista.push(id);
+          gruposPorValor.set(preco, lista);
         }
       }
 
+      let alteradosSucesso = 0;
+      const CHUNK_IN_SIZE = 80; // limite seguro de IDs por requisição URL no PostgREST
+
+      // Monta tarefas de atualização
+      const tarefas: (() => Promise<void>)[] = [];
+
+      for (const [novoPrecoAtacado, idsDoGrupo] of gruposPorValor.entries()) {
+        // Fatiar em blocos de até 80 IDs
+        for (let i = 0; i < idsDoGrupo.length; i += CHUNK_IN_SIZE) {
+          const blocoIds = idsDoGrupo.slice(i, i + CHUNK_IN_SIZE);
+          tarefas.push(async () => {
+            // estoque-guard: sem-ciclo
+            let { error } = await supabase
+              .from('aparelhos')
+              .update({
+                precoAtacado: novoPrecoAtacado,
+                preco_atacado: novoPrecoAtacado,
+              })
+              .in('id', blocoIds);
+
+            // Fallback se uma coluna não existir
+            if (error) {
+              // estoque-guard: sem-ciclo
+              const res1 = await supabase
+                .from('aparelhos')
+                .update({ precoAtacado: novoPrecoAtacado })
+                .in('id', blocoIds);
+
+              if (res1.error) {
+                // estoque-guard: sem-ciclo
+                const res2 = await supabase
+                  .from('aparelhos')
+                  .update({ preco_atacado: novoPrecoAtacado })
+                  .in('id', blocoIds);
+                error = res2.error;
+              } else {
+                error = null;
+              }
+            }
+
+            if (!error) {
+              alteradosSucesso += blocoIds.length;
+            }
+          });
+        }
+      }
+
+      // 2. Executa as tarefas em lotes paralelos de 8 operações simultâneas
+      const CONCURRENCY_LIMIT = 8;
+      for (let i = 0; i < tarefas.length; i += CONCURRENCY_LIMIT) {
+        const batch = tarefas.slice(i, i + CONCURRENCY_LIMIT);
+        await Promise.all(batch.map((fn) => fn()));
+      }
+
       toast.success(`⚡ ${alteradosSucesso} preço(s) de atacado atualizado(s) com sucesso!`, { id: toastId, duration: 4000 });
-      await onEstoqueAtualizado();
       setValoresEditados({});
       onClose();
+      // Atualiza o estoque em segundo plano sem travar o fechamento do modal
+      void onEstoqueAtualizado();
     } catch (err: any) {
       console.error("Erro ao salvar preços de atacado:", err);
       toast.error(`Erro ao salvar: ${err.message || 'Falha na conexão'}`, { id: toastId });
