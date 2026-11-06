@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
-import { aplicarMudancaEstoque, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
+import { aplicarMudancaEstoque, registrarEntradaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
+import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
+import { parseTextoEntradaAparelhos, ItemEntradaDetectado } from '../entradaInteligente';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
   Capability,
@@ -209,6 +211,111 @@ export const capabilitiesEstoque: Capability[] = [
         `📱 ${descreverAparelho(registro)}\n` +
         `💰 ${moeda(preco)}\n` +
         (imei ? `🔢 IMEI: ${imei}\n` : '')
+      );
+    },
+  },
+
+  {
+    action: 'create_aparelhos_lote',
+    titulo: 'Entrada de aparelhos em lote',
+    descricao: 'Dar entrada inteligente em múltiplos aparelhos no estoque (texto livre ou lista de fornecedor)',
+    recurso: 'estoque',
+    papeis: ['owner', 'staff'],
+    escrita: true,
+    atalho: '!entradas',
+    parametros: [
+      { nome: 'texto', descricao: 'texto ou lista com os aparelhos', obrigatorio: true },
+      { nome: 'itens', descricao: 'lista estruturada de itens (opcional)' },
+    ],
+    exemplos: [
+      '"Entradas: 13 128gb azul 2200, 14 128gb preto 3100" -> {"texto":"13 128gb azul 2200, 14 128gb preto 3100"}',
+      '"dar entrada nos aparelhos: iPhone 15 128gb 4200" -> {"texto":"iPhone 15 128gb 4200"}',
+    ],
+    async executar(ctx, params) {
+      const textoBruto = texto(params, 'texto', 'lista', 'aparelhos', 'conteudo');
+      let itensParaCadastrar: ItemEntradaDetectado[] = [];
+
+      if (Array.isArray(params.itens) && params.itens.length > 0) {
+        itensParaCadastrar = params.itens as ItemEntradaDetectado[];
+      } else if (textoBruto) {
+        itensParaCadastrar = parseTextoEntradaAparelhos(textoBruto);
+      }
+
+      if (itensParaCadastrar.length === 0) {
+        return (
+          `⚠️ Não consegui identificar os aparelhos na mensagem.\n\n` +
+          `💡 *Exemplo de uso:* "Entradas: iPhone 13 128gb azul 2200, iPhone 14 128gb preto 3100" ou cole sua lista em linhas separadas!`
+        );
+      }
+
+      // Busca aparelhos atuais para gerar códigos únicos de etiqueta
+      const { data: aparelhosExistentes } = await ctx.supabase
+        .from('aparelhos')
+        .select('codigo')
+        .eq('loja_id', ctx.lojaId)
+        .limit(2000);
+
+      const listaCodigos = (aparelhosExistentes || []) as Array<{ codigo?: string | null }>;
+
+      const loteId = gerarLoteId();
+      const registrosParaInserir: any[] = [];
+
+      for (const item of itensParaCadastrar) {
+        const codigoEtiqueta = gerarCodigoEtiqueta(listaCodigos);
+        listaCodigos.push({ codigo: codigoEtiqueta });
+
+        registrosParaInserir.push({
+          loja_id: ctx.lojaId,
+          marca: item.marca || 'Apple',
+          modelo: item.modelo,
+          capacidade: item.capacidade || null,
+          cor: item.cor || null,
+          preco: item.preco || (item.custo ? item.custo + 300 : 0),
+          precoAtacado: item.precoAtacado || (item.custo ? item.custo + 150 : 0),
+          custo: item.custo || 0,
+          imei: item.imei || null,
+          condicao: item.condicao || 'seminovo',
+          status: 'disponivel',
+          ativo: true,
+          codigo: codigoEtiqueta,
+          dataCadastro: new Date().toISOString(),
+          observacoes: `Entrada em lote via WhatsApp por ${ctx.pushName}`,
+        });
+      }
+
+      // estoque-guard: auditado
+      const { data: criados, error } = await ctx.supabase
+        .from('aparelhos')
+        .insert(registrosParaInserir)
+        .select('id, loja_id, ativo, status, condicao, modelo, preco, codigo, imei, custo');
+
+      if (error) throw error;
+
+      const entrada = await registrarEntradaEstoque(ctx.supabase, {
+        aparelhos: criados || [],
+        origem: 'bot_whatsapp',
+        loteId,
+        lojaId: ctx.lojaId,
+        usuarioNome: ctx.pushName,
+        observacao: `Entrada em lote via WhatsApp (${registrosParaInserir.length} itens)`,
+      });
+
+      if (!entrada.auditoriaRegistrada) {
+        console.warn('[Estoque] Entrada em lote cadastrada sem auditoria completa:', entrada.erroAuditoria);
+      }
+
+      const linhasConfirmacao = registrosParaInserir.map((reg, idx) => {
+        const cod = reg.codigo ? ` (Cód: #${reg.codigo})` : '';
+        const custoStr = reg.custo > 0 ? ` | Custo: ${moeda(reg.custo)}` : '';
+        const imeiStr = reg.imei ? ` | IMEI: ${reg.imei}` : '';
+        return `${idx + 1}. *${reg.modelo}* ${reg.capacidade || ''} ${reg.cor || ''}${custoStr}${cod}${imeiStr}`;
+      }).join('\n');
+
+      return (
+        `📦 *Entrada no estoque realizada com sucesso!*\n\n` +
+        `Total: *${registrosParaInserir.length} aparelho(s)* cadastrado(s):\n\n` +
+        linhasConfirmacao +
+        `\n\n⚡ _Códigos de etiqueta gerados e estoque atualizado no sistema._`
       );
     },
   },

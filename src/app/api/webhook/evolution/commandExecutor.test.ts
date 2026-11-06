@@ -178,4 +178,21 @@ test('buildWhatsAppText never outputs raw JSON for list_estoque or list_lojas', 
   assert.ok(!textLojas.includes('{') && !textLojas.includes('}'));
 });
 
+test('parseGeminiPlan extracts create_aparelhos_lote command', () => {
+  const raw = `{
+    "type": "command",
+    "action": "create_aparelhos_lote",
+    "params": {
+      "texto": "iPhone 13 128gb azul 2200, iPhone 14 128gb preto 3100"
+    },
+    "confianca": "alta"
+  }`;
+
+  const plan = parseGeminiPlan(raw);
+  assert.ok(plan);
+  assert.equal(plan.action, 'create_aparelhos_lote');
+  assert.equal(plan.confianca, 'alta');
+  assert.ok(String(plan.params.texto).includes('iPhone 13'));
+});
+
 

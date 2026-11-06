@@ -31,6 +31,7 @@ import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo
 import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
+import { ehMensagemDeEntradaEstoque } from './entradaInteligente';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -461,11 +462,12 @@ function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
   );
 }
 
-// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Comandos / Normal / Off) ──
-const cacheModosChat = new Map<string, { modo: 'comandos' | 'normal' | 'off'; exp: number }>();
+// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Teste / Padrão / Off) ──
+export type ModoChat = 'teste' | 'padrao' | 'off';
+const cacheModosChat = new Map<string, { modo: ModoChat; exp: number }>();
 
-async function obterModoChat(remoteJid: string): Promise<'comandos' | 'normal' | 'off'> {
-  if (!remoteJid) return 'normal';
+async function obterModoChat(remoteJid: string): Promise<ModoChat> {
+  if (!remoteJid) return 'padrao';
   const agora = Date.now();
   const cached = cacheModosChat.get(remoteJid);
   if (cached && agora < cached.exp) {
@@ -482,19 +484,24 @@ async function obterModoChat(remoteJid: string): Promise<'comandos' | 'normal' |
     if (data?.chave) {
       const partes = data.chave.split(':');
       const modoSalvo = partes[partes.length - 1];
-      if (modoSalvo === 'comandos' || modoSalvo === 'off' || modoSalvo === 'normal') {
+      if (modoSalvo === 'teste' || modoSalvo === 'off' || modoSalvo === 'padrao') {
         cacheModosChat.set(remoteJid, { modo: modoSalvo, exp: agora + 300000 });
         return modoSalvo;
+      }
+      // Retrocompatibilidade com modos legados
+      if (modoSalvo === 'comandos' || modoSalvo === 'normal') {
+        cacheModosChat.set(remoteJid, { modo: 'padrao', exp: agora + 300000 });
+        return 'padrao';
       }
     }
   } catch (err) {
     console.warn('Erro ao obter modo do chat:', err);
   }
-  cacheModosChat.set(remoteJid, { modo: 'normal', exp: agora + 300000 });
-  return 'normal';
+  cacheModosChat.set(remoteJid, { modo: 'padrao', exp: agora + 300000 });
+  return 'padrao';
 }
 
-async function definirModoChat(remoteJid: string, modo: 'comandos' | 'normal' | 'off'): Promise<boolean> {
+async function definirModoChat(remoteJid: string, modo: ModoChat): Promise<boolean> {
   if (!remoteJid) return false;
   const agora = Date.now();
   cacheModosChat.set(remoteJid, { modo, exp: agora + 300000 });
@@ -504,14 +511,12 @@ async function definirModoChat(remoteJid: string, modo: 'comandos' | 'normal' | 
       .delete()
       .ilike('chave', `chat_mode:${remoteJid}:%`);
 
-    if (modo !== 'normal') {
-      await supabase
-        .from('whatsapp_antiflood_cache')
-        .upsert({
-          chave: `chat_mode:${remoteJid}:${modo}`,
-          timestamp: agora,
-        });
-    }
+    await supabase
+      .from('whatsapp_antiflood_cache')
+      .upsert({
+        chave: `chat_mode:${remoteJid}:${modo}`,
+        timestamp: agora,
+      });
     return true;
   } catch (err) {
     console.error('Erro ao salvar modo do chat:', err);
@@ -2101,12 +2106,12 @@ export async function POST(request: Request) {
 
     if (hasImage) {
       if (modoChat === 'off') {
-        return NextResponse.json({ status: 'ok', message: 'Chat desativado via !config off.' }, { status: 200 });
+        return NextResponse.json({ status: 'ok', message: 'Chat desativado via !modo off.' }, { status: 200 });
       }
-      if (modoChat === 'comandos') {
+      if (modoChat === 'padrao' && isGroup) {
         const caption = messageContent.imageMessage?.caption || '';
         if (!caption.trim().startsWith('!')) {
-          return NextResponse.json({ status: 'ok', message: 'Imagem ignorada devido ao modo exclusivo de comandos.' }, { status: 200 });
+          return NextResponse.json({ status: 'ok', message: 'Imagem ignorada em grupo no modo padrão.' }, { status: 200 });
         }
       }
       console.log(`📸 Imagem recebida de ${pushName} (${targetDestination}). Iniciando OCR Vision...`);
@@ -2228,16 +2233,49 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !config) ──
+    // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !modo OU !config) ──
+    const ehComandoModo = lowerText.startsWith('!modo') || lowerText.startsWith('!config');
     if (modoChat === 'off') {
-      // Se estiver desligado, só aceita comando !config para religar
-      if (!lowerText.startsWith('!config')) {
-        return NextResponse.json({ status: 'ok', message: 'Chat desativado via !config off.' }, { status: 200 });
+      // Se estiver desligado, só aceita comando de modo para religar
+      if (!ehComandoModo) {
+        return NextResponse.json({ status: 'ok', message: 'Chat desativado via !modo off.' }, { status: 200 });
       }
-    } else if (modoChat === 'comandos') {
-      // Se estiver no modo apenas comandos, ignora qualquer mensagem que não comece com !
-      if (!ehComandoExplicito) {
-        return NextResponse.json({ status: 'ok', message: 'Chat configurado apenas para comandos (!). Mensagem ignorada.' }, { status: 200 });
+    } else if (modoChat === 'padrao') {
+      // Se for grupo no modo padrão, o bot fica calado e só atende a comandos explícitos com !
+      if (isGroup && !ehComandoExplicito) {
+        return NextResponse.json({ status: 'ok', message: 'Chat configurado em modo padrão: mensagens sem comando ignoradas em grupo.' }, { status: 200 });
+      }
+    }
+
+    // ── ENTRADA INTELIGENTE DE APARELHOS NO ESTOQUE (TEXTO LIVRE OU LISTA) ──
+    if (ehMensagemDeEntradaEstoque(textContent)) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para cadastrar aparelhos no estoque. Contate o suporte.");
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+
+      const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!perm.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* O cadastro de aparelhos no estoque é restrito à equipe autorizada.');
+        return NextResponse.json({ status: 'unauthorized', message: 'Sem permissão para cadastrar estoque' }, { status: 200 });
+      }
+
+      const capabilityLote = obterCapability('create_aparelhos_lote');
+      if (capabilityLote) {
+        const resultadoLote = await capabilityLote.executar(
+          { texto: textContent },
+          {
+            supabase,
+            lojaId,
+            usuarioId: usuarioResolvido?.usuarioId,
+            papel: papelCapability,
+            planoLoja,
+            isGroup,
+            authorPhone,
+          }
+        );
+        await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoLote.texto);
+        return NextResponse.json({ status: 'ok', message: 'Entrada de aparelhos em lote processada com sucesso.' }, { status: 200 });
       }
     }
 
@@ -3241,13 +3279,8 @@ Envie o modelo que deseja consultar no estoque:
       return NextResponse.json({ status: 'ok', message: `Busca respondida (${aparelhosFiltrados.length} itens).` }, { status: 200 });
     }
 
-    // ── 10.2. COMANDO: !config [comandos | normal | off | status] ──
-    if (lowerText.startsWith('!config')) {
-      // O papel vindo de resolverLojaEUsuarioPorTelefone usa igualdade exata de
-      // telefone e cai para 'staff' no fallback por instância, então o próprio
-      // dono era barrado aqui enquanto !abater e !fiado funcionavam — estes
-      // usam verificarPermissaoWhatsApp, que compara de forma tolerante (DDI,
-      // DDD e nono dígito). Alinhamos as duas regras.
+    // ── 10.2. COMANDO: !modo [teste | padrao | off | status] (ou !config) ──
+    if (lowerText.startsWith('!modo') || lowerText.startsWith('!config')) {
       let isDonoOuMaster = ehModeradorMaster || papelUsuario === 'owner';
 
       if (!isDonoOuMaster && lojaId) {
@@ -3260,82 +3293,83 @@ Envie o modelo que deseja consultar no estoque:
         await enviarMensagemWhatsApp(
           instanceName,
           targetDestination,
-          `❌ *Acesso Restrito:* alterar a configuração deste chat é permitido apenas ao dono da loja.
-
-` +
-            `📱 Seu número chegou aqui como *${numeroVisivel}*.
-
-` +
+          `❌ *Acesso Restrito:* alterar o modo de operação do bot é permitido apenas ao dono da loja.\n\n` +
+            `📱 Seu número chegou aqui como *${numeroVisivel}*.\n\n` +
             `Se você é o dono, cadastre este número em *Configurações > Equipe* com o papel *Proprietário* e tente de novo.`
         );
-        return NextResponse.json({ status: 'ok', message: 'Sem permissão para !config.' }, { status: 200 });
+        return NextResponse.json({ status: 'ok', message: 'Sem permissão para alterar modo.' }, { status: 200 });
       }
 
       const partes = textContent.trim().split(/\s+/);
       const subComando = partes[1] ? partes[1].toLowerCase() : 'status';
 
-      if (subComando === 'comandos' || subComando === 'comando') {
-        await definirModoChat(remoteJid, 'comandos');
-        const msgConfig = `⚙️ *Configurações do Chat — Phone Center*
+      if (subComando === 'teste' || subComando === 'test' || subComando === 'dev') {
+        await definirModoChat(remoteJid, 'teste');
+        const msgModo = `⚙️ *Modo do Chat — Phone Center*
 
-✅ Modo atualizado com sucesso para: *APENAS COMANDOS*!
+🧪 Modo atualizado com sucesso para: *MODO TESTE*!
 
-🔇 O bot agora ignorará conversas paralelas, bate-papo e perguntas soltas neste chat.
-⚡ Ele responderá *exclusivamente* a comandos que comecem com *!* (ex: *!buscar*, *!estoque*, *!vender*, *!plano*, *!fiado*).
+🚀 *Neste modo, o assistente tem inteligência avançada e acesso total ao Phone Center:*
+• Consulta livre de estoque, datas de entrada e datas de saída de qualquer aparelho.
+• Responde qual IMEI saiu, que dia vendeu e quanto tempo ficou no estoque.
+• Identifica quando alguém precisa de ajuda operacional sem se intrometer em conversas paralelas.
+• Permite dar entrada inteligente em aparelhos falando: *"Entradas: [aparelho] [valor]..."* ou *!entradas*.
+• Proteção de segurança: nunca vaza custos ou lucros internos em grupos.
 
-💡 _Para retornar ao modo padrão com escuta inteligente envie:_ *!config normal*`;
-        await enviarMensagemWhatsApp(instanceName, targetDestination, msgConfig);
-        return NextResponse.json({ status: 'ok', message: 'Modo comandos ativado.' }, { status: 200 });
+💡 _Para retornar ao modo padrão silencioso envie:_ *!modo padrao*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
+        return NextResponse.json({ status: 'ok', message: 'Modo teste ativado.' }, { status: 200 });
       }
 
-      if (subComando === 'normal' || subComando === 'padrao' || subComando === 'padrão') {
-        await definirModoChat(remoteJid, 'normal');
-        const msgConfig = `⚙️ *Configurações do Chat — Phone Center*
+      if (subComando === 'padrao' || subComando === 'padrão' || subComando === 'normal' || subComando === 'comandos' || subComando === 'comando') {
+        await definirModoChat(remoteJid, 'padrao');
+        const msgModo = `⚙️ *Modo do Chat — Phone Center*
 
-✅ Modo atualizado com sucesso para: *PADRÃO (NORMAL)*!
+🤖 Modo atualizado com sucesso para: *MODO PADRÃO*!
 
-🤖 O bot atenderá a comandos operacionais e responderá consultas inteligentes e perguntas de clientes quando acionado.
+🔇 O assistente fica focado no básico e direto ao ponto.
+• Não puxa assunto e não se intromete em conversas de grupos.
+• Atende a comandos operacionais com *!* e perguntas pontuais diretas.
 
-💡 _Para restringir este chat apenas a comandos envie:_ *!config comandos*`;
-        await enviarMensagemWhatsApp(instanceName, targetDestination, msgConfig);
-        return NextResponse.json({ status: 'ok', message: 'Modo normal ativado.' }, { status: 200 });
+💡 _Para ativar o modo inteligente livre envie:_ *!modo teste*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
+        return NextResponse.json({ status: 'ok', message: 'Modo padrão ativado.' }, { status: 200 });
       }
 
-      if (subComando === 'off' || subComando === 'desativar' || subComando === 'pausar' || subComando === 'silencio') {
+      if (subComando === 'off' || subComando === 'desativar' || subComando === 'pausar' || subComando === 'silencio' || subComando === 'desligar') {
         await definirModoChat(remoteJid, 'off');
-        const msgConfig = `⚙️ *Configurações do Chat — Phone Center*
+        const msgModo = `⚙️ *Modo do Chat — Phone Center*
 
-🛑 O bot foi *DESATIVADO* neste chat.
+🛑 O bot foi *DESATIVADO* por completo neste chat.
 
-Ele não responderá a nenhuma mensagem nem comando até ser reativado.
+Ele não responderá a nenhuma mensagem nem comando até você reativar.
 
-💡 _Para religar o bot envie:_ *!config normal* ou *!config comandos*`;
-        await enviarMensagemWhatsApp(instanceName, targetDestination, msgConfig);
+💡 _Para religar o bot envie:_ *!modo padrao* ou *!modo teste*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
         return NextResponse.json({ status: 'ok', message: 'Bot desativado no chat.' }, { status: 200 });
       }
 
-      // Exibição de Status / Ajuda do !config
+      // Exibição de Status / Ajuda do !modo
       const modoAtual = await obterModoChat(remoteJid);
       const modoFormatado =
-        modoAtual === 'comandos'
-          ? '⚡ *APENAS COMANDOS* (ignora conversas paralelas, responde só comandos com !)'
+        modoAtual === 'teste'
+          ? '🧪 *MODO TESTE* (inteligente, livre, acesso total a entradas/saídas/IMEIs)'
           : modoAtual === 'off'
           ? '🛑 *DESATIVADO* (bot silenciado no chat)'
-          : '🤖 *PADRÃO (NORMAL)* (comandos + escuta inteligente)';
+          : '🤖 *MODO PADRÃO* (silencioso, comandos e direto ao ponto)';
 
-      const msgStatus = `⚙️ *Configurações do Chat — Phone Center*
+      const msgStatus = `⚙️ *Modo do Chat — Phone Center*
 
 📍 *Chat:* ${isGroup ? 'Grupo' : 'Privado'} (\`${remoteJid.slice(0, 18)}...\`)
 🎯 *Modo Atual:* ${modoFormatado}
 
-*Opções de configuração:*
-• *!config comandos* — O bot responde *somente* a comandos iniciados com ! (ideal para grupos movimentados)
-• *!config normal* — Modo padrão com comandos e escuta inteligente
-• *!config off* — Desativa o bot totalmente neste chat
-• *!config status* — Exibe esta tela de status`;
+*Como alternar entre os modos:*
+• *!modo teste* — Modo livre e inteligente com acesso total a dados de estoque, entradas, saídas e IMEIs
+• *!modo padrao* — Modo calado que atende comandos e foca no básico
+• *!modo off* — Desativa o bot por completo até ser religado`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgStatus);
-      return NextResponse.json({ status: 'ok', message: 'Status do !config enviado.' }, { status: 200 });
+      return NextResponse.json({ status: 'ok', message: 'Status do modo enviado.' }, { status: 200 });
     }
 
     // ── 11. COMANDO: !abater [lojista] [valor] (Gestão de Fiado/Atacado) ──
@@ -4075,16 +4109,21 @@ Digite: *!broadcast agora*`;
         // Deixamos prosseguir para a Seção 14 (Copiloto Operacional Inteligente) para responder de forma rica e neural!
       }
 
-      // Se confiança for baixa em grupo, ignora silenciosamente para não floodar conversas alheias
+      // Se confiança for baixa em grupo, se não estiver em modo teste ou se for ruído, ignora silenciosamente
       if (isGroup) {
-        return NextResponse.json({ status: 'ok', message: 'Mensagem em grupo com baixa relevância ignorada.' }, { status: 200 });
+        if (modoChat !== 'teste' || avaliarRuidoDeGrupo(textContent).ehRuido) {
+          return NextResponse.json({ status: 'ok', message: 'Mensagem em grupo ignorada (modo padrão ou ruído).' }, { status: 200 });
+        }
       }
     }
 
-    // ── 14. COPILOTO OPERACIONAL INTELIGENTE DO LOJISTA (PRIVADO) ──
-    if (!isGroup) {
+    // ── 14. COPILOTO OPERACIONAL INTELIGENTE DO LOJISTA ──
+    const deveResponderCopiloto = !isGroup || (modoChat === 'teste' && !avaliarRuidoDeGrupo(textContent).ehRuido);
+    if (deveResponderCopiloto) {
       let modelosEstoque: string[] = [];
       let detalhesEstoqueFormatado = '';
+      let detalhesSaidasFormatado = '';
+      let detalhesEntradasRecentes = '';
       let totalEstoque = 0;
       let totalFiadoEmAberto = 0;
       let detalhesDevedoresFormatado = '';
@@ -4095,10 +4134,10 @@ Digite: *!broadcast agora*`;
       let resumoGarantiasAtivas = '';
 
       if (lojaId) {
-        // 1. Busca aparelhos detalhados do estoque com imei, codigo, custo e precos
+        // 1. Busca aparelhos detalhados do estoque com imei, codigo, custo, precos e data de entrada
         const { data: apsBrutos } = await supabase
           .from('aparelhos')
-          .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saude_bateria, status, condicao')
+          .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saude_bateria, status, condicao, dataCadastro')
           .eq('loja_id', lojaId)
           .eq('ativo', true)
           .not('status', 'in', '(vendido,baixado)')
@@ -4117,8 +4156,44 @@ Digite: *!broadcast agora*`;
             const custo = a.custo ? ` [Custo: R$ ${Number(a.custo).toLocaleString('pt-BR')}]` : '';
             const imeiStr = a.imei ? ` | IMEI: ${a.imei}` : '';
             const codStr = a.codigo ? ` | Cód: ${a.codigo}` : '';
-            return `• ${a.modelo} ${a.capacidade || ''} ${a.cor || ''}${bat}${preco}${custo}${imeiStr}${codStr}`;
+            const dataCad = a.dataCadastro ? ` [Entrada: ${formatarDataSegura(a.dataCadastro)}]` : '';
+            return `• ${a.modelo} ${a.capacidade || ''} ${a.cor || ''}${bat}${dataCad}${preco}${custo}${imeiStr}${codStr}`;
           }).join('\n');
+
+          // Entradas recentes no estoque
+          const apsOrdenadosPorEntrada = [...aps]
+            .sort((a, b) => new Date(b.dataCadastro || 0).getTime() - new Date(a.dataCadastro || 0).getTime())
+            .slice(0, 20);
+          detalhesEntradasRecentes = apsOrdenadosPorEntrada.map((e) => {
+            const dataCad = e.dataCadastro ? formatarDataSegura(e.dataCadastro) : 'Recente';
+            const preco = e.preco || e.precoAtacado ? ` - R$ ${(e.preco || e.precoAtacado).toLocaleString('pt-BR')}` : '';
+            return `• ${e.modelo} ${e.capacidade || ''} [Entrada: ${dataCad}]${preco} | IMEI: ${e.imei || '-'} | Cód: ${e.codigo || '-'}`;
+          }).join('\n');
+        }
+
+        // 1.1. Busca histórico de aparelhos que saíram/foram vendidos recentemente
+        try {
+          const { data: apsSaidos } = await supabase
+            .from('aparelhos')
+            .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, cliente, data_saida, dataCadastro, motivo_saida, status')
+            .eq('loja_id', lojaId)
+            .or('status.in.(vendido,baixado),ativo.eq.false')
+            .order('data_saida', { ascending: false, nullsFirst: false })
+            .limit(30);
+
+          if (apsSaidos && apsSaidos.length > 0) {
+            detalhesSaidasFormatado = apsSaidos.map((s: any) => {
+              const dataSaidaStr = s.data_saida ? formatarDataSegura(s.data_saida) : 'Data n/d';
+              const dataEntradaStr = s.dataCadastro ? ` (Entrada: ${formatarDataSegura(s.dataCadastro)})` : '';
+              const quem = s.cliente ? ` | Para: ${s.cliente}` : (s.motivo_saida ? ` | Motivo: ${s.motivo_saida}` : '');
+              const imeiStr = s.imei ? ` | IMEI: ${s.imei}` : '';
+              const codStr = s.codigo ? ` | Cód: ${s.codigo}` : '';
+              const val = s.preco || s.precoAtacado ? ` | R$ ${(s.preco || s.precoAtacado).toLocaleString('pt-BR')}` : '';
+              return `• ${s.modelo} ${s.capacidade || ''} ${s.cor || ''} [Saída: ${dataSaidaStr}]${dataEntradaStr}${quem}${imeiStr}${codStr}${val}`;
+            }).join('\n');
+          }
+        } catch (saidaErr) {
+          console.warn('[Copiloto IA] Erro ao carregar aparelhos saídos:', saidaErr);
         }
 
         // 2. Busca total de fiado em aberto e detalhamento dos devedores (consolidando cadastrados + vendas pendentes)
@@ -4208,6 +4283,8 @@ Digite: *!broadcast agora*`;
         totalEstoque,
         modelosDisponiveis: modelosEstoque,
         detalhesEstoqueFormatado,
+        detalhesSaidasFormatado,
+        detalhesEntradasRecentes,
         totalFiadoEmAberto,
         detalhesDevedoresFormatado,
         totalVendasHoje,
@@ -4223,7 +4300,8 @@ Digite: *!broadcast agora*`;
         resumoAgendamentosHoje,
         resumoGarantiasAtivas,
         historicoChat,
-        isGroup: false,
+        isGroup,
+        modoChat,
       });
 
       if (respostaConversaIA.sucesso && respostaConversaIA.resposta) {
@@ -4235,6 +4313,11 @@ Digite: *!broadcast agora*`;
 
         await enviarMensagemWhatsApp(instanceName, targetDestination, respostaConversaIA.resposta);
         return NextResponse.json({ status: 'ok', message: `Resposta do copiloto enviada via IA (${respostaConversaIA.modeloUsado}).` }, { status: 200 });
+      }
+
+      // Se for grupo, silencia em caso de falha para não poluir
+      if (isGroup) {
+        return NextResponse.json({ status: 'ok', message: 'Falha na IA em grupo silenciada para evitar ruído.' }, { status: 200 });
       }
 
       // Mensagem de erro técnico solicitada caso o Gemini falhe em todos os modelos
