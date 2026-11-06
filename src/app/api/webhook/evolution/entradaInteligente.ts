@@ -26,6 +26,7 @@ const CORES_CONHECIDAS: Record<string, string> = {
   preto: 'Preto',
   preta: 'Preto',
   black: 'Preto',
+  dark: 'Preto',
   branco: 'Branco',
   branca: 'Branco',
   white: 'Branco',
@@ -38,15 +39,20 @@ const CORES_CONHECIDAS: Record<string, string> = {
   amarelo: 'Amarelo',
   yellow: 'Amarelo',
   dourado: 'Dourado',
+  dourada: 'Dourado',
   gold: 'Dourado',
   rosa: 'Rosa',
   pink: 'Rosa',
+  rose: 'Rosa',
   roxo: 'Roxo',
   purple: 'Roxo',
+  violeta: 'Roxo',
   vermelho: 'Vermelho',
+  vermelha: 'Vermelho',
   red: 'Vermelho',
   cinza: 'Cinza',
   gray: 'Cinza',
+  grey: 'Cinza',
   grafite: 'Grafite',
   graphite: 'Grafite',
   estelar: 'Estelar',
@@ -54,15 +60,39 @@ const CORES_CONHECIDAS: Record<string, string> = {
   meia_noite: 'Meia-noite',
   midnight: 'Meia-noite',
   natural: 'Titânio Natural',
-  desert: 'Titânio Deserto',
-  deserto: 'Titânio Deserto',
+  desert: 'Desert',
+  deserto: 'Desert',
+  titanium: 'Titânio Natural',
+  titânio: 'Titânio Natural',
+  titanio: 'Titânio Natural',
 };
 
 /**
+ * Retorna o emoji característico de uma cor de aparelho para exibição em listas.
+ */
+export function obterEmojiDaCor(cor?: string | null): string {
+  if (!cor) return '📱';
+  const c = String(cor).toLowerCase();
+  if (c.includes('desert') || c.includes('deserto')) return '🏜️';
+  if (c.includes('natural')) return '🩶';
+  if (c.includes('preto') || c.includes('black') || c.includes('grafite') || c.includes('midnight') || c.includes('noite') || c.includes('dark')) return '🖤';
+  if (c.includes('branco') || c.includes('white') || c.includes('prata') || c.includes('silver') || c.includes('estelar') || c.includes('starlight')) return '🤍';
+  if (c.includes('azul') || c.includes('blue') || c.includes('sierra') || c.includes('pacific')) return '💙';
+  if (c.includes('dourado') || c.includes('gold') || c.includes('amarelo') || c.includes('yellow')) return '💛';
+  if (c.includes('rosa') || c.includes('pink') || c.includes('rose')) return '🩷';
+  if (c.includes('verde') || c.includes('green') || c.includes('alpine') || c.includes('teal')) return '💚';
+  if (c.includes('roxo') || c.includes('purple') || c.includes('violeta') || c.includes('deep purple')) return '💜';
+  if (c.includes('vermelho') || c.includes('red')) return '❤️';
+  if (c.includes('cinza') || c.includes('gray') || c.includes('grey') || c.includes('titanium') || c.includes('titânio')) return '🩶';
+  return '📱';
+}
+
+/**
  * Normaliza nomes populares de modelos (ex: "13pm" -> "iPhone 13 Pro Max").
+ * Remove duplicações como "iPhone Apple iPhone 16 Pro" ou "Apple iPhone 16 Pro".
  */
 export function normalizarNomeModelo(termo: string): { marca: string; modelo: string } {
-  let t = termo.trim().replace(/\s+/g, ' ');
+  let t = termo.replace(/[\uFE0F\u200D]/g, '').trim().replace(/\s+/g, ' ');
 
   // Verifica marca
   let marca = 'Apple';
@@ -74,35 +104,47 @@ export function normalizarNomeModelo(termo: string): { marca: string; modelo: st
     marca = 'Motorola';
   }
 
-  // Remove "iPhone" repetido se houver no início
-  t = t.replace(/^iphone\s+/i, '');
+  if (marca === 'Apple') {
+    // Remove qualquer ocorrência solta de "Apple" e "iPhone" do miolo para evitar duplicações
+    t = t
+      .replace(/\bapple\b/gi, '')
+      .replace(/\biphone\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-  // Abreviações Apple comuns
-  t = t.replace(/\b16\s*pm\b/i, '16 Pro Max')
-    .replace(/\b16\s*pro\s*max\b/i, '16 Pro Max')
-    .replace(/\b16\s*p\b/i, '16 Pro')
-    .replace(/\b16\s*plus\b/i, '16 Plus')
-    .replace(/\b15\s*pm\b/i, '15 Pro Max')
-    .replace(/\b15\s*pro\s*max\b/i, '15 Pro Max')
-    .replace(/\b15\s*p\b/i, '15 Pro')
-    .replace(/\b15\s*plus\b/i, '15 Plus')
-    .replace(/\b14\s*pm\b/i, '14 Pro Max')
-    .replace(/\b14\s*pro\s*max\b/i, '14 Pro Max')
-    .replace(/\b14\s*p\b/i, '14 Pro')
-    .replace(/\b14\s*plus\b/i, '14 Plus')
-    .replace(/\b13\s*pm\b/i, '13 Pro Max')
-    .replace(/\b13\s*pro\s*max\b/i, '13 Pro Max')
-    .replace(/\b13\s*p\b/i, '13 Pro')
-    .replace(/\b13\s*mini\b/i, '13 Mini')
-    .replace(/\b12\s*pm\b/i, '12 Pro Max')
-    .replace(/\b12\s*pro\s*max\b/i, '12 Pro Max')
-    .replace(/\b12\s*p\b/i, '12 Pro')
-    .replace(/\b11\s*pm\b/i, '11 Pro Max')
-    .replace(/\b11\s*pro\s*max\b/i, '11 Pro Max')
-    .replace(/\b11\s*p\b/i, '11 Pro');
+    // Abreviações Apple comuns
+    t = t.replace(/\b16\s*pm\b/i, '16 Pro Max')
+      .replace(/\b16\s*pro\s*max\b/i, '16 Pro Max')
+      .replace(/\b16\s*p\b/i, '16 Pro')
+      .replace(/\b16\s*plus\b/i, '16 Plus')
+      .replace(/\b15\s*pm\b/i, '15 Pro Max')
+      .replace(/\b15\s*pro\s*max\b/i, '15 Pro Max')
+      .replace(/\b15\s*p\b/i, '15 Pro')
+      .replace(/\b15\s*plus\b/i, '15 Plus')
+      .replace(/\b14\s*pm\b/i, '14 Pro Max')
+      .replace(/\b14\s*pro\s*max\b/i, '14 Pro Max')
+      .replace(/\b14\s*p\b/i, '14 Pro')
+      .replace(/\b14\s*plus\b/i, '14 Plus')
+      .replace(/\b13\s*pm\b/i, '13 Pro Max')
+      .replace(/\b13\s*pro\s*max\b/i, '13 Pro Max')
+      .replace(/\b13\s*p\b/i, '13 Pro')
+      .replace(/\b13\s*mini\b/i, '13 Mini')
+      .replace(/\b12\s*pm\b/i, '12 Pro Max')
+      .replace(/\b12\s*pro\s*max\b/i, '12 Pro Max')
+      .replace(/\b12\s*p\b/i, '12 Pro')
+      .replace(/\b11\s*pm\b/i, '11 Pro Max')
+      .replace(/\b11\s*pro\s*max\b/i, '11 Pro Max')
+      .replace(/\b11\s*p\b/i, '11 Pro');
 
-  if (marca === 'Apple' && !/^ipad/i.test(t) && !/^mac/i.test(t) && !/^watch/i.test(t)) {
-    t = `iPhone ${t}`;
+    if (/^ipad/i.test(t)) {
+      t = t.replace(/\bipad\b/gi, 'iPad');
+    } else if (/^mac/i.test(t)) {
+      t = t.replace(/\bmacbook\b/gi, 'MacBook');
+    } else if (/^watch/i.test(t)) {
+      t = t.replace(/\bwatch\b/gi, 'Apple Watch');
+    } else {
+      t = `iPhone ${t}`;
+    }
   }
 
   // Capitalização limpa
@@ -173,29 +215,53 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
     }
   }
 
-  // 4. Cor
+  // 4. Cor (Detecta termos compostos, palavras simples e emojis de coração/fornecedor)
   let cor: string | undefined;
-  const tokens = l.toLowerCase().split(/[\s,;-]+/);
-  for (const t of tokens) {
-    if (CORES_CONHECIDAS[t]) {
-      cor = CORES_CONHECIDAS[t];
-      break;
+  const lLower = l.toLowerCase();
+
+  // 4.1. Cores compostas prioritárias
+  if (/\b(?:desert\s*titanium|tit[aâ]nio\s*deserto?|desert|deserto)\b/i.test(lLower)) {
+    cor = 'Desert';
+  } else if (/\b(?:natural\s*titanium|tit[aâ]nio\s*natural|natural)\b/i.test(lLower)) {
+    cor = 'Titânio Natural';
+  } else if (/\b(?:space\s*black|preto\s*espacial|tit[aâ]nio\s*preto|black\s*titanium)\b/i.test(lLower)) {
+    cor = 'Preto';
+  } else if (/\b(?:white\s*titanium|tit[aâ]nio\s*branco)\b/i.test(lLower)) {
+    cor = 'Branco';
+  } else if (/\b(?:blue\s*titanium|tit[aâ]nio\s*azul|sierra\s*blue|pacific\s*blue)\b/i.test(lLower)) {
+    cor = 'Azul';
+  } else if (/\b(?:meia\s*noite|meia-noite|midnight)\b/i.test(lLower)) {
+    cor = 'Meia-noite';
+  } else if (/\b(?:estelar|starlight)\b/i.test(lLower)) {
+    cor = 'Estelar';
+  } else if (/\b(?:space\s*gr[ae]y|cinza\s*espacial)\b/i.test(lLower)) {
+    cor = 'Cinza';
+  }
+
+  // 4.2. Busca por tokens de palavras simples
+  if (!cor) {
+    const tokens = lLower.split(/[\s,;-]+/);
+    for (const t of tokens) {
+      if (CORES_CONHECIDAS[t]) {
+        cor = CORES_CONHECIDAS[t];
+        break;
+      }
     }
   }
 
-  // Detecta cor por emojis de fornecedor
+  // 4.3. Detecta cor por emojis de fornecedor e corações do WhatsApp
   if (!cor) {
-    if (l.includes('⚫') || l.includes('⬛')) cor = 'Preto';
-    else if (l.includes('⚪') || l.includes('⬜')) cor = 'Branco/Prata';
-    else if (l.includes('🔵') || l.includes('🟦')) cor = 'Azul';
-    else if (l.includes('🟡') || l.includes('🟨')) cor = 'Dourado';
-    else if (l.includes('🔴') || l.includes('🟥')) cor = 'Vermelho';
-    else if (l.includes('🟣') || l.includes('🟪')) cor = 'Roxo';
-    else if (l.includes('🟢') || l.includes('🟩')) cor = 'Verde';
-    else if (l.includes('🩷')) cor = 'Rosa';
+    if (l.includes('🖤') || l.includes('⚫') || l.includes('⬛')) cor = 'Preto';
+    else if (l.includes('🤍') || l.includes('⚪') || l.includes('⬜')) cor = 'Branco';
+    else if (l.includes('💙') || l.includes('🔵') || l.includes('🟦')) cor = 'Azul';
+    else if (l.includes('💛') || l.includes('🟡') || l.includes('🟨')) cor = 'Dourado';
+    else if (l.includes('❤️') || l.includes('🔴') || l.includes('🟥')) cor = 'Vermelho';
+    else if (l.includes('💜') || l.includes('🟣') || l.includes('🟪')) cor = 'Roxo';
+    else if (l.includes('💚') || l.includes('🟢') || l.includes('🟩')) cor = 'Verde';
+    else if (l.includes('🩷') || l.includes('🌸')) cor = 'Rosa';
     else if (l.includes('🩶')) cor = 'Cinza';
     else if (l.includes('🔘')) cor = 'Titânio Natural';
-    else if (l.includes('🏜️') || l.includes('🐪')) cor = 'Titânio Deserto';
+    else if (l.includes('🏜️') || l.includes('🐪') || l.includes('🤎')) cor = 'Desert';
   }
 
   // 5. Modelo
@@ -203,12 +269,15 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
     .replace(REGEX_IMEI, '')
     .replace(REGEX_CAPACIDADE, '')
     .replace(/\b(?:r\$|custo|por|valor|pre[çc]o|lacrado|seminovo|novo|usado|imei)\b/gi, '')
-    .replace(/\p{Extended_Pictographic}/gu, ' ')
+    .replace(/\b(?:desert\s*titanium|tit[aâ]nio\s*deserto?|natural\s*titanium|tit[aâ]nio\s*natural|space\s*black|space\s*gr[ae]y|meia\s*noite|meia-noite|starlight|estelar)\b/gi, ' ')
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
     .replace(/[•\-\*]/g, ' ')
     .trim();
 
   if (cor) {
-    textoModelo = textoModelo.replace(new RegExp(`\\b${cor}\\b`, 'gi'), '');
+    textoModelo = textoModelo
+      .replace(new RegExp(`\\b${cor}\\b`, 'gi'), '')
+      .replace(/\b(?:desert|deserto|natural|titanium|tit[aâ]nio|preto?|black|branco?|white|prata|silver|azul|blue|dourado?|gold|amarelo?|yellow|rosa|pink|roxo|purple|cinza|gr[ae]y|grafite|graphite)\b/gi, ' ');
   }
 
   // Remove valores numéricos restantes maiores que 100

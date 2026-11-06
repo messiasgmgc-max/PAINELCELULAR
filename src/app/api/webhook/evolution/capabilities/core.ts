@@ -102,9 +102,32 @@ export function dataBr(iso?: string | null): string {
 
 /** Descreve um aparelho a partir de qualquer subconjunto de colunas presentes. */
 export function descreverAparelho(ap: Record<string, unknown>): string {
-  const partes = [ap.marca, ap.modelo, ap.capacidade, ap.cor]
-    .map((p) => (p ? String(p).trim() : ''))
-    .filter(Boolean);
+  const marca = ap.marca ? String(ap.marca).trim() : '';
+  const modelo = ap.modelo ? String(ap.modelo).trim() : '';
+  const capacidade = ap.capacidade ? String(ap.capacidade).trim() : '';
+  const cor = ap.cor ? String(ap.cor).trim() : '';
+
+  const partes: string[] = [];
+
+  // Se o modelo já começa com a marca ou já é Apple ("iPhone", "iPad", "MacBook", "Watch"),
+  // não prefixa a marca para não duplicar ("Apple iPhone 16 Pro" -> "iPhone 16 Pro")
+  if (marca && modelo) {
+    const modLower = modelo.toLowerCase();
+    const marLower = marca.toLowerCase();
+    const jaContemMarca =
+      modLower.startsWith(marLower) ||
+      (marLower === 'apple' && (modLower.startsWith('iphone') || modLower.startsWith('ipad') || modLower.startsWith('mac') || modLower.startsWith('watch') || modLower.startsWith('airpod')));
+    if (!jaContemMarca) {
+      partes.push(marca);
+    }
+  } else if (marca && !modelo) {
+    partes.push(marca);
+  }
+
+  if (modelo) partes.push(modelo);
+  if (capacidade) partes.push(capacidade);
+  if (cor) partes.push(cor);
+
   return partes.join(' ') || 'Aparelho';
 }
 

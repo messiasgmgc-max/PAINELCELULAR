@@ -72,4 +72,37 @@ describe('Entrada Inteligente de Aparelhos', () => {
     assert.equal(item.custo, 3000);
     assert.equal(item.imei, '350015753668064');
   });
+
+  it('evita duplicação de marca e modelo (Apple / iPhone)', () => {
+    assert.equal(normalizarNomeModelo('IPHONE APPLE IPHONE 16 PRO').modelo, 'iPhone 16 Pro');
+    assert.equal(normalizarNomeModelo('Apple iPhone 16 Pro').modelo, 'iPhone 16 Pro');
+    assert.equal(normalizarNomeModelo('iPhone 16 Pro').modelo, 'iPhone 16 Pro');
+    assert.equal(normalizarNomeModelo('16 Pro').modelo, 'iPhone 16 Pro');
+    assert.equal(normalizarNomeModelo('16p').modelo, 'iPhone 16 Pro');
+    assert.equal(normalizarNomeModelo('16pm').modelo, 'iPhone 16 Pro Max');
+  });
+
+  it('extrai cor Desert, Titânio Natural e emojis de coração corretamente', () => {
+    const itemDesert = parseLinhaEntrada('iPhone 16 Pro 128GB Desert 5000');
+    assert.ok(itemDesert);
+    assert.equal(itemDesert.modelo, 'iPhone 16 Pro');
+    assert.equal(itemDesert.cor, 'Desert');
+    assert.equal(itemDesert.capacidade, '128GB');
+    assert.equal(itemDesert.custo, 5000);
+
+    const itemEmojiDesert = parseLinhaEntrada('📱 16 Pro Max 256GB 🏜️ 6200');
+    assert.ok(itemEmojiDesert);
+    assert.equal(itemEmojiDesert.modelo, 'iPhone 16 Pro Max');
+    assert.equal(itemEmojiDesert.cor, 'Desert');
+
+    const itemCoracaoPreto = parseLinhaEntrada('iPhone 15 128GB 🖤 3200');
+    assert.ok(itemCoracaoPreto);
+    assert.equal(itemCoracaoPreto.modelo, 'iPhone 15');
+    assert.equal(itemCoracaoPreto.cor, 'Preto');
+
+    const itemNatural = parseLinhaEntrada('15 Pro 128gb Titânio Natural 4300');
+    assert.ok(itemNatural);
+    assert.equal(itemNatural.modelo, 'iPhone 15 Pro');
+    assert.equal(itemNatural.cor, 'Titânio Natural');
+  });
 });

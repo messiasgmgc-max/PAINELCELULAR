@@ -549,6 +549,48 @@ function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
   );
 }
 
+// ── AUXILIAR: Comparação Robusta de Telefones (DDI 55, DDD e 9º Dígito) ──
+function telefonesConferem(telA?: string | null, telB?: string | null): boolean {
+  if (!telA || !telB) return false;
+  const normA = normalizarTelefoneOuLid(telA);
+  const normB = normalizarTelefoneOuLid(telB);
+  const a = String(normA).replace(/@.*$/, '').replace(/\D/g, '');
+  const b = String(normB).replace(/@.*$/, '').replace(/\D/g, '');
+  if (!a || !b) return false;
+
+  // 1. Igualdade exata
+  if (a === b) return true;
+
+  // 2. Um termina com o outro (desde que ambos tenham ao menos 10 dígitos)
+  if (a.length >= 10 && b.length >= 10 && (a.endsWith(b) || b.endsWith(a))) {
+    return true;
+  }
+
+  // 3. Compara variantes de ambos
+  const varsA = obterVariantesTelefone(a);
+  const varsB = obterVariantesTelefone(b);
+  if (varsA.includes(b) || varsB.includes(a)) return true;
+  for (const va of varsA) {
+    if (varsB.includes(va)) return true;
+  }
+
+  // 4. Comparação pelos últimos 8 dígitos + DDD
+  if (a.length >= 8 && b.length >= 8) {
+    const last8A = a.slice(-8);
+    const last8B = b.slice(-8);
+    if (last8A === last8B) {
+      if (a.length >= 10 && b.length >= 10) {
+        const dddA = a.length >= 11 ? a.slice(-11, -9) : a.slice(-10, -8);
+        const dddB = b.length >= 11 ? b.slice(-11, -9) : b.slice(-10, -8);
+        return dddA === dddB;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Teste / Padrão / Off) ──
 export type ModoChat = 'teste' | 'padrao' | 'off';
 const cacheModosChat = new Map<string, { modo: ModoChat; exp: number }>();
@@ -617,14 +659,15 @@ async function resolverLojaEUsuarioPorTelefone(
   instanceName?: string,
   isGroup: boolean = false
 ): Promise<UsuarioResolvido | null> {
-  const variants = obterVariantesTelefone(authorPhone);
+  const normPhone = normalizarTelefoneOuLid(authorPhone);
+  const variants = obterVariantesTelefone(normPhone);
   if (variants.length === 0) return null;
 
   // Resolve loja vinculada à instância da Evolution API (ex: lucasimports)
   const lojaIdInstancia = instanceName ? await resolverLojaId(instanceName) : null;
 
-  // 0. Caso seja o Moderador Master / Dono do Bot (31993586377), concede acesso irrestrito
-  if (verificarSeModeradorOuDonoGeral(authorPhone)) {
+  // 0. Caso seja o Moderador Master / Dono do Bot (Lucas), concede acesso irrestrito
+  if (verificarSeModeradorOuDonoGeral(normPhone)) {
     let lojaAlvo: any = null;
     if (lojaIdInstancia) {
       const { data: l } = await supabase.from('lojas').select('id, nome, plano_status, data_vencimento').eq('id', lojaIdInstancia).maybeSingle();
@@ -651,47 +694,139 @@ async function resolverLojaEUsuarioPorTelefone(
     };
   }
 
-  // 1. Busca em whatsapp_permissoes (fonte prioritária de permissão no WhatsApp)
+  // 1. Busca prioritária na tabela 'tecnicos' (Vendedores, Gerentes e Equipe cadastrados no sistema)
+  try {
+    const { data: tecs, error: errTecs } = await supabase
+      .from('tecnicos')
+      .select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo');
+
+    if (!errTecs && tecs && tecs.length > 0) {
+      const matchingTecs = tecs.filter((t) => {
+        if (t.ativo === false) return false;
+        return telefonesConferem(t.whatsapp, normPhone) || telefonesConferem(t.telefone, normPhone);
+      });
+
+      // Prioriza a loja da instância se houver mais de um registro
+      const matchTec = (lojaIdInstancia ? matchingTecs.find((t) => t.loja_id === lojaIdInstancia) : null) || matchingTecs[0];
+
+      if (matchTec && matchTec.loja_id) {
+        const { data: loja } = await supabase
+          .from('lojas')
+          .select('id, nome, plano_status, data_vencimento')
+          .eq('id', matchTec.loja_id)
+          .maybeSingle();
+
+        if (loja) {
+          let diasRestantes = 0;
+          if (loja.data_vencimento) {
+            const vDate = new Date(loja.data_vencimento);
+            const agora = new Date();
+            diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+          }
+
+          const cargoStr = String(matchTec.cargo || matchTec.tipo || '').toLowerCase();
+          const papel: 'owner' | 'staff' | 'motoboy' =
+            ['owner', 'dono', 'admin', 'gerente', 'administrador', 'proprietario'].some((c) => cargoStr.includes(c))
+              ? 'owner'
+              : ['motoboy', 'entregador'].some((c) => cargoStr.includes(c))
+              ? 'motoboy'
+              : 'staff';
+
+          return {
+            lojaId: loja.id,
+            lojaNome: loja.nome || 'Phone Center',
+            usuarioNome: matchTec.nome || 'Vendedor',
+            usuarioId: matchTec.id,
+            papel,
+            planoTipo: 'pro',
+            planoStatus: loja.plano_status || 'ativo',
+            dataVencimento: loja.data_vencimento || undefined,
+            diasRestantes,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao consultar tecnicos:', err);
+  }
+
+  // 2. Busca na tabela whatsapp_permissoes
   try {
     const { data: perms } = await supabase
       .from('whatsapp_permissoes')
       .select('loja_id, telefone, nome, papel, ativo')
-      .in('telefone', variants)
       .eq('ativo', true);
 
     if (perms && perms.length > 0) {
-      const p = (lojaIdInstancia ? perms.find((x) => x.loja_id === lojaIdInstancia) : null) || perms[0];
-      const { data: loja } = await supabase
-        .from('lojas')
-        .select('id, nome, plano_status, data_vencimento')
-        .eq('id', p.loja_id)
-        .maybeSingle();
+      const matchingPerms = perms.filter((p) => telefonesConferem(p.telefone, normPhone));
+      const p = (lojaIdInstancia ? matchingPerms.find((x) => x.loja_id === lojaIdInstancia) : null) || matchingPerms[0];
 
-      if (loja) {
-        let diasRestantes = 0;
-        if (loja.data_vencimento) {
-          const vDate = new Date(loja.data_vencimento);
-          const agora = new Date();
-          diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+      if (p) {
+        const { data: loja } = await supabase
+          .from('lojas')
+          .select('id, nome, plano_status, data_vencimento')
+          .eq('id', p.loja_id)
+          .maybeSingle();
+
+        if (loja) {
+          let diasRestantes = 0;
+          if (loja.data_vencimento) {
+            const vDate = new Date(loja.data_vencimento);
+            const agora = new Date();
+            diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+          }
+
+          return {
+            lojaId: loja.id,
+            lojaNome: loja.nome || 'Phone Center',
+            usuarioNome: p.nome || 'Colaborador',
+            papel: (p.papel as any) || 'staff',
+            planoTipo: 'pro',
+            planoStatus: loja.plano_status || 'ativo',
+            dataVencimento: loja.data_vencimento || undefined,
+            diasRestantes,
+          };
         }
-
-        return {
-          lojaId: loja.id,
-          lojaNome: loja.nome || 'Phone Center',
-          usuarioNome: p.nome || 'Colaborador',
-          papel: (p.papel as any) || 'staff',
-          planoTipo: 'pro',
-          planoStatus: loja.plano_status || 'ativo',
-          dataVencimento: loja.data_vencimento || undefined,
-          diasRestantes,
-        };
       }
     }
   } catch (err) {
     console.warn('Erro ao consultar whatsapp_permissoes:', err);
   }
 
-  // 2. Busca na tabela lojas (dono da loja)
+  // 3. Busca na tabela perfis (usuários cadastrados no painel web)
+  try {
+    const { data: perfis } = await supabase
+      .from('perfis')
+      .select('id, nome, telefone, loja_id, role');
+
+    if (perfis && perfis.length > 0) {
+      const matchPerfil = perfis.find((p) => telefonesConferem(p.telefone, normPhone));
+      if (matchPerfil && matchPerfil.loja_id) {
+        const { data: loja } = await supabase
+          .from('lojas')
+          .select('id, nome, plano_status, data_vencimento')
+          .eq('id', matchPerfil.loja_id)
+          .maybeSingle();
+
+        if (loja) {
+          return {
+            lojaId: loja.id,
+            lojaNome: loja.nome || 'Phone Center',
+            usuarioNome: matchPerfil.nome || 'Equipe',
+            usuarioId: matchPerfil.id,
+            papel: matchPerfil.role === 'admin' || matchPerfil.role === 'super_admin' ? 'owner' : 'staff',
+            planoTipo: 'pro',
+            planoStatus: loja.plano_status || 'ativo',
+            dataVencimento: loja.data_vencimento || undefined,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao consultar perfis:', err);
+  }
+
+  // 4. Busca na tabela lojas (dono da loja)
   try {
     const { data: lojas } = await supabase
       .from('lojas')
@@ -700,12 +835,9 @@ async function resolverLojaEUsuarioPorTelefone(
 
     if (lojas && lojas.length > 0) {
       const lojasFiltradas = (lojaIdInstancia ? lojas.filter((l) => l.id === lojaIdInstancia) : lojas);
-      const matchLoja = (lojasFiltradas.length > 0 ? lojasFiltradas : lojas).find((l) => {
-        const tel1 = (l.telefone || '').replace(/\D/g, '');
-        const tel2 = (l.dono_whatsapp || '').replace(/\D/g, '');
-        return variants.some((v) => (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) ||
-                                  (tel2 && (tel2 === v || v.endsWith(tel2) || tel2.endsWith(v))));
-      });
+      const matchLoja = (lojasFiltradas.length > 0 ? lojasFiltradas : lojas).find((l) =>
+        telefonesConferem(l.telefone, normPhone) || telefonesConferem(l.dono_whatsapp, normPhone)
+      );
 
       if (matchLoja) {
         let diasRestantes = 0;
@@ -731,114 +863,7 @@ async function resolverLojaEUsuarioPorTelefone(
     console.warn('Erro ao consultar lojas:', err);
   }
 
-  // 3. Busca na tabela tecnicos (colaboradores cadastrados pelo lojista como vendedor, técnico ou gerente)
-  try {
-    const { data: tecs, error: errTecs } = await supabase
-      .from('tecnicos')
-      .select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo');
-
-    if (!errTecs && tecs && tecs.length > 0) {
-      const matchingTecs = tecs.filter((t) => {
-        if (t.ativo === false) return false;
-        const tel1 = (t.whatsapp || '').replace(/\D/g, '');
-        const tel2 = (t.telefone || '').replace(/\D/g, '');
-        return variants.some((v) => {
-          if (!v) return false;
-          if (tel1 && (tel1 === v || v.endsWith(tel1) || tel1.endsWith(v))) return true;
-          if (tel2 && (tel2 === v || v.endsWith(tel2) || tel2.endsWith(v))) return true;
-          // Compara os últimos 8 dígitos (elimina inconsistências de 9º dígito / DDD / 55)
-          if (v.length >= 8) {
-            const vLast8 = v.slice(-8);
-            if (tel1 && tel1.length >= 8 && tel1.slice(-8) === vLast8) return true;
-            if (tel2 && tel2.length >= 8 && tel2.slice(-8) === vLast8) return true;
-          }
-          return false;
-        });
-      });
-
-      // Prioriza a loja da instância ativa se houver múltiplos cadastros
-      const matchTec = (lojaIdInstancia ? matchingTecs.find((t) => t.loja_id === lojaIdInstancia) : null) || matchingTecs[0];
-
-      if (matchTec && matchTec.loja_id) {
-        const { data: loja } = await supabase
-          .from('lojas')
-          .select('id, nome, plano_status, data_vencimento')
-          .eq('id', matchTec.loja_id)
-          .maybeSingle();
-
-        if (loja) {
-          let diasRestantes = 0;
-          if (loja.data_vencimento) {
-            const vDate = new Date(loja.data_vencimento);
-            const agora = new Date();
-            diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
-          }
-
-          const cargoStr = String(matchTec.cargo || matchTec.tipo || '').toLowerCase();
-          const papel: 'owner' | 'staff' | 'motoboy' =
-            ['owner', 'dono', 'admin', 'gerente', 'administrador'].some((c) => cargoStr.includes(c))
-              ? 'owner'
-              : ['motoboy', 'entregador'].some((c) => cargoStr.includes(c))
-              ? 'motoboy'
-              : 'staff';
-
-          return {
-            lojaId: loja.id,
-            lojaNome: loja.nome || 'Phone Center',
-            usuarioNome: matchTec.nome || 'Colaborador',
-            papel,
-            planoTipo: 'pro',
-            planoStatus: loja.plano_status || 'ativo',
-            dataVencimento: loja.data_vencimento || undefined,
-            diasRestantes,
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Erro ao consultar tecnicos:', err);
-  }
-
-  // 3.5. Busca na tabela perfis (usuários do sistema cadastrados no painel web)
-  try {
-    const { data: perfis } = await supabase
-      .from('perfis')
-      .select('id, nome, telefone, loja_id, role');
-
-    if (perfis && perfis.length > 0) {
-      const matchPerfil = perfis.find((p) => {
-        const tel = (p.telefone || '').replace(/\D/g, '');
-        return variants.some((v) => tel && (tel === v || v.endsWith(tel) || tel.endsWith(v)));
-      });
-
-      if (matchPerfil && matchPerfil.loja_id) {
-        const { data: loja } = await supabase
-          .from('lojas')
-          .select('id, nome, plano_status, data_vencimento')
-          .eq('id', matchPerfil.loja_id)
-          .maybeSingle();
-
-        if (loja) {
-          return {
-            lojaId: loja.id,
-            lojaNome: loja.nome || 'Phone Center',
-            usuarioNome: matchPerfil.nome || 'Equipe',
-            papel: matchPerfil.role === 'admin' || matchPerfil.role === 'super_admin' ? 'owner' : 'staff',
-            planoTipo: 'pro',
-            planoStatus: loja.plano_status || 'ativo',
-            dataVencimento: loja.data_vencimento || undefined,
-          };
-        }
-      }
-    }
-  } catch (err) {
-    // segue se perfis não tiver telefone
-  }
-
-  // 4. Fallback por instância (EXCLUSIVO PARA GRUPOS @g.us)
-  // CRÍTICO: Em chat privado (!isGroup), NUNCA fazer fallback por instância.
-  // Fazer fallback em chat privado faria clientes finais que enviam mensagens para o WhatsApp da loja
-  // serem falsamente identificados como 'Lojista', fazendo o bot responder clientes.
+  // 5. Fallback por instância (EXCLUSIVO PARA GRUPOS @g.us)
   if (isGroup && instanceName) {
     const lojaIdFallback = await resolverLojaId(instanceName);
     if (lojaIdFallback) {
@@ -916,8 +941,10 @@ async function verificarPermissaoWhatsApp(
   telefone: string,
   papeisPermitidos: ('owner' | 'staff' | 'motoboy')[] = ['owner', 'staff']
 ): Promise<PermissaoWhatsAppResult> {
-  // Super Admin / Dono Geral (Lucas) tem acesso irrestrito em todas as lojas
-  if (verificarSeModeradorOuDonoGeral(telefone)) {
+  const normPhone = normalizarTelefoneOuLid(telefone);
+
+  // 1. Super Admin / Dono Geral (Lucas) tem acesso irrestrito em todas as lojas
+  if (verificarSeModeradorOuDonoGeral(normPhone)) {
     return { autorizado: true, papel: 'owner' };
   }
 
@@ -925,72 +952,100 @@ async function verificarPermissaoWhatsApp(
     return { autorizado: false, papel: 'nenhum', motivo: 'Loja não identificada' };
   }
 
-  const cleanPhone = (telefone || '').replace(/\D/g, '');
+  const cleanPhone = (normPhone || '').replace(/\D/g, '');
   if (!cleanPhone) {
     return { autorizado: false, papel: 'nenhum', motivo: 'Telefone inválido' };
   }
 
   try {
-    const { data: permissoes, error } = await supabase
+    // 2. Verifica se é o dono da loja na tabela 'lojas'
+    const { data: loja } = await supabase
+      .from('lojas')
+      .select('telefone, dono_whatsapp')
+      .eq('id', lojaId)
+      .maybeSingle();
+
+    if (loja && (telefonesConferem(loja.dono_whatsapp, cleanPhone) || telefonesConferem(loja.telefone, cleanPhone))) {
+      return { autorizado: true, papel: 'owner' };
+    }
+
+    // 3. Verifica na tabela 'tecnicos' (Vendedores, Gerentes e Equipe cadastrados no sistema para esta loja)
+    const { data: tecnicos } = await supabase
+      .from('tecnicos')
+      .select('id, nome, telefone, whatsapp, cargo, tipo, ativo')
+      .eq('loja_id', lojaId);
+
+    if (tecnicos && tecnicos.length > 0) {
+      const tecEncontrado = tecnicos.find((t) => {
+        if (t.ativo === false) return false;
+        return telefonesConferem(t.whatsapp, cleanPhone) || telefonesConferem(t.telefone, cleanPhone);
+      });
+
+      if (tecEncontrado) {
+        const cargoStr = String(tecEncontrado.cargo || tecEncontrado.tipo || '').toLowerCase();
+        const papel: 'owner' | 'staff' | 'motoboy' =
+          ['owner', 'dono', 'admin', 'gerente', 'administrador', 'proprietario'].some((c) => cargoStr.includes(c))
+            ? 'owner'
+            : ['motoboy', 'entregador'].some((c) => cargoStr.includes(c))
+            ? 'motoboy'
+            : 'staff';
+
+        if (papeisPermitidos.includes(papel)) {
+          return { autorizado: true, papel };
+        }
+        return { autorizado: false, papel, motivo: `Cargo/Papel '${papel}' não autorizado para esta ação` };
+      }
+    }
+
+    // 4. Verifica na tabela 'perfis' (Usuários cadastrados no painel web vinculados a esta loja)
+    const { data: perfis } = await supabase
+      .from('perfis')
+      .select('id, nome, telefone, role')
+      .eq('loja_id', lojaId);
+
+    if (perfis && perfis.length > 0) {
+      const perfilEncontrado = perfis.find((p) => telefonesConferem(p.telefone, cleanPhone));
+      if (perfilEncontrado) {
+        const roleStr = String(perfilEncontrado.role || '').toLowerCase();
+        const papel: 'owner' | 'staff' | 'motoboy' =
+          roleStr === 'admin' || roleStr === 'super_admin' ? 'owner' : 'staff';
+
+        if (papeisPermitidos.includes(papel)) {
+          return { autorizado: true, papel };
+        }
+        return { autorizado: false, papel, motivo: `Papel '${papel}' não autorizado para esta ação` };
+      }
+    }
+
+    // 5. Verifica na tabela 'whatsapp_permissoes' da loja
+    const { data: permissoes } = await supabase
       .from('whatsapp_permissoes')
       .select('*')
       .eq('loja_id', lojaId)
       .eq('ativo', true);
 
-    if (error) {
-      console.warn('⚠️ Erro ao consultar whatsapp_permissoes (tabela pode estar pendente no Supabase):', error.message);
-      return { autorizado: true, papel: 'nao_configurado' };
-    }
-
-    // Rollout seguro: se não há permissões cadastradas para esta loja,
-    // permite a execução e registra aviso em logs_sistema para não quebrar lojas em produção.
-    if (!permissoes || permissoes.length === 0) {
-      try {
-        await supabase.from('logs_sistema').insert({
-          loja_id: lojaId,
-          tipo_evento: 'permissao_nao_configurada',
-          ator_telefone: cleanPhone,
-          ator_papel: 'nao_configurado',
-          acao: 'Acesso sem permissões cadastradas',
-          detalhes: `Loja ${lojaId} não possui registros em whatsapp_permissoes. Acesso liberado por fallback de rollout.`,
-        });
-      } catch (logErr) {
-        // Silêncio para não quebrar fluxo
-      }
-      return { autorizado: true, papel: 'nao_configurado' };
-    }
-
-    // Compara telefone considerando DDI (55), DDD e 9º dígito
-    const permissaoEncontrada = permissoes.find((p: any) => {
-      const pClean = (p.telefone || '').replace(/\D/g, '');
-      if (!pClean) return false;
-      if (pClean === cleanPhone) return true;
-      if (cleanPhone.endsWith(pClean) || pClean.endsWith(cleanPhone)) return true;
-      if (cleanPhone.length >= 8 && pClean.length >= 8) {
-        const last8User = cleanPhone.slice(-8);
-        const last8Perm = pClean.slice(-8);
-        if (last8User === last8Perm) {
-          if (cleanPhone.length >= 10 && pClean.length >= 10) {
-            const dddUser = cleanPhone.length >= 11 ? cleanPhone.slice(-11, -9) : cleanPhone.slice(-10, -8);
-            const dddPerm = pClean.length >= 11 ? pClean.slice(-11, -9) : pClean.slice(-10, -8);
-            return dddUser === dddPerm;
-          }
-          return true;
+    if (permissoes && permissoes.length > 0) {
+      const permissaoEncontrada = permissoes.find((p) => telefonesConferem(p.telefone, cleanPhone));
+      if (permissaoEncontrada) {
+        const papel = (permissaoEncontrada.papel || 'staff') as 'owner' | 'staff' | 'motoboy';
+        if (papeisPermitidos.includes(papel)) {
+          return { autorizado: true, papel };
         }
+        return { autorizado: false, papel, motivo: `Papel '${papel}' não autorizado para esta ação` };
       }
-      return false;
-    });
-
-    if (!permissaoEncontrada) {
-      return { autorizado: false, papel: 'nenhum', motivo: 'Número não cadastrado nas permissões da loja' };
     }
 
-    const papel = (permissaoEncontrada.papel || 'staff') as 'owner' | 'staff' | 'motoboy' | 'nenhum';
-    if (papeisPermitidos.includes(papel as any)) {
-      return { autorizado: true, papel };
+    // 6. Rollout seguro: se não há equipe ou permissões configuradas na loja
+    const temEquipeCadastrada =
+      (tecnicos && tecnicos.some((t) => t.ativo !== false && (t.whatsapp || t.telefone))) ||
+      (perfis && perfis.some((p) => p.telefone)) ||
+      (permissoes && permissoes.length > 0);
+
+    if (!temEquipeCadastrada) {
+      return { autorizado: true, papel: 'nao_configurado' };
     }
 
-    return { autorizado: false, papel, motivo: `Papel '${papel}' não autorizado para esta ação` };
+    return { autorizado: false, papel: 'nenhum', motivo: 'Número não cadastrado na equipe desta loja' };
   } catch (err: any) {
     console.error('❌ Falha inesperada ao verificar permissão:', err);
     return { autorizado: true, papel: 'nao_configurado' };
@@ -2434,9 +2489,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ status: 'ok', message: 'Chat desativado via !modo off.' }, { status: 200 });
       }
     } else if (modoChat === 'padrao') {
-      // Se for grupo no modo padrão, o bot fica calado e só atende a comandos explícitos com !
-      if (isGroup && !ehComandoExplicito) {
-        return NextResponse.json({ status: 'ok', message: 'Chat configurado em modo padrão: mensagens sem comando ignoradas em grupo.' }, { status: 200 });
+      // Se for grupo no modo padrão, o bot fica calado e atende apenas a:
+      // 1. Comandos explícitos iniciados com !
+      // 2. Entradas inteligentes de estoque (ex: "Entrada iPhone 13...")
+      // 3. Pedidos / formulários de venda para geração de notinha automática
+      // 4. Correções de dados de notinha pendente
+      const ehOperacaoLoja =
+        ehComandoExplicito ||
+        ehMensagemDeEntradaEstoque(textContent) ||
+        Boolean(detectarFormularioOuPedidoVenda(textContent)) ||
+        Boolean(interpretarTextoCorrecaoVenda(textContent));
+
+      if (isGroup && !ehOperacaoLoja) {
+        return NextResponse.json({ status: 'ok', message: 'Chat configurado em modo padrão: mensagens sem comando ou operação de loja ignoradas em grupo.' }, { status: 200 });
       }
     }
 

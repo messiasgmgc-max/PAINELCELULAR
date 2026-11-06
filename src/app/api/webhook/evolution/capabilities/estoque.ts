@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, registrarEntradaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
-import { parseTextoEntradaAparelhos, ItemEntradaDetectado } from '../entradaInteligente';
+import { parseTextoEntradaAparelhos, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor } from '../entradaInteligente';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
   Capability,
@@ -154,11 +154,14 @@ export const capabilitiesEstoque: Capability[] = [
       '"cadastra um iphone 12 128gb preto por 1800" -> {"marca":"Apple","modelo":"iPhone 12","capacidade":"128gb","cor":"preto","preco":1800}',
     ],
     async executar(ctx, params) {
-      const modelo = texto(params, 'modelo', 'aparelho');
+      const modeloBruto = texto(params, 'modelo', 'aparelho');
       const preco = numero(params, 'preco', 'valor');
 
-      if (!modelo) return '⚠️ Qual é o modelo do aparelho a cadastrar?';
-      if (preco <= 0) return `⚠️ Qual é o preço de venda do *${modelo}*?`;
+      if (!modeloBruto) return '⚠️ Qual é o modelo do aparelho a cadastrar?';
+      if (preco <= 0) return `⚠️ Qual é o preço de venda do *${modeloBruto}*?`;
+
+      const norm = normalizarNomeModelo(modeloBruto);
+      const modelo = norm.modelo;
 
       const imei = texto(params, 'imei');
 
@@ -264,10 +267,11 @@ export const capabilitiesEstoque: Capability[] = [
         const codigoEtiqueta = gerarCodigoEtiqueta(listaCodigos);
         listaCodigos.push({ codigo: codigoEtiqueta });
 
+        const norm = normalizarNomeModelo(item.modelo);
         registrosParaInserir.push({
           loja_id: ctx.lojaId,
-          marca: item.marca || 'Apple',
-          modelo: item.modelo,
+          marca: norm.marca || item.marca || 'Apple',
+          modelo: norm.modelo,
           capacidade: item.capacidade || null,
           cor: item.cor || null,
           preco: item.preco || (item.custo ? item.custo + 300 : 0),
@@ -308,7 +312,9 @@ export const capabilitiesEstoque: Capability[] = [
         const cod = reg.codigo ? ` (Cód: #${reg.codigo})` : '';
         const custoStr = reg.custo > 0 ? ` | Custo: ${moeda(reg.custo)}` : '';
         const imeiStr = reg.imei ? ` | IMEI: ${reg.imei}` : '';
-        return `${idx + 1}. *${reg.modelo}* ${reg.capacidade || ''} ${reg.cor || ''}${custoStr}${cod}${imeiStr}`;
+        const emojiCor = obterEmojiDaCor(reg.cor);
+        const corTexto = reg.cor ? ` ${emojiCor} ${reg.cor}` : '';
+        return `${idx + 1}. 📱 *${reg.modelo}* ${reg.capacidade || ''}${corTexto}${custoStr}${cod}${imeiStr}`;
       }).join('\n');
 
       return (
