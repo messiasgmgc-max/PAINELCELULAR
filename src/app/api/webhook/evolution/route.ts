@@ -32,6 +32,16 @@ import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { ehMensagemDeEntradaEstoque } from './entradaInteligente';
+import {
+  detectarFormularioOuPedidoVenda,
+  cruzarAparelhoComEstoque,
+  formatarMensagemPreviaNotinha,
+  interpretarReacaoNotinha,
+  interpretarTextoCorrecaoVenda,
+  salvarPropostaNotinha,
+  emitirNotinhaVenda,
+  type PropostaNotinha,
+} from './notinhaAutomatica';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
 
@@ -135,16 +145,20 @@ export async function GET() {
   );
 }
 
-// ── AUXILIAR: Enviar Mensagem via Evolution API ──
-async function enviarMensagemWhatsApp(instanceName: string, destination: string, text: string) {
+// ── AUXILIAR: Enviar Mensagem via Evolution API com Retorno de MessageId ──
+async function enviarMensagemWhatsAppComRetorno(
+  instanceName: string,
+  destination: string,
+  text: string
+): Promise<{ ok: boolean; messageId?: string }> {
   if (!EVOLUTION_URL || !EVOLUTION_API_KEY) {
     console.warn('⚠️ EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados no .env.local');
-    return false;
+    return { ok: false };
   }
 
   const isGroup = destination.endsWith('@g.us');
   const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
-  if (!cleanDestination) return false;
+  if (!cleanDestination) return { ok: false };
 
   const cleanText = sanitizarTextoWhatsApp(text);
   const targetInstance = instanceName || DEFAULT_INSTANCE;
@@ -170,15 +184,75 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
     if (!response.ok) {
       const errText = await response.text();
       console.error(`❌ Erro ao enviar mensagem via Evolution API (${response.status}):`, errText);
-      return false;
+      return { ok: false };
     }
 
-    console.log(`✅ Mensagem enviada com sucesso para ${cleanDestination} via instância "${targetInstance}"`);
-    return true;
+    const resJson = await response.json().catch(() => ({}));
+    const messageId = resJson?.key?.id || resJson?.id || undefined;
+    console.log(`✅ Mensagem ${messageId || ''} enviada com sucesso para ${cleanDestination} via "${targetInstance}"`);
+    return { ok: true, messageId };
   } catch (err: any) {
     console.error('❌ Falha na requisição para Evolution API:', err?.message || err);
-    return false;
+    return { ok: false };
   }
+}
+
+// ── AUXILIAR: Enviar Mensagem via Evolution API (Retrocompatibilidade) ──
+async function enviarMensagemWhatsApp(instanceName: string, destination: string, text: string): Promise<boolean> {
+  const res = await enviarMensagemWhatsAppComRetorno(instanceName, destination, text);
+  return res.ok;
+}
+
+// ── AUXILIAR: Editar Mensagem Original ou Enviar como Resposta ──
+async function editarOuResponderMensagemWhatsApp(
+  instanceName: string,
+  destination: string,
+  messageId: string,
+  text: string
+): Promise<boolean> {
+  if (!EVOLUTION_URL || !EVOLUTION_API_KEY) return false;
+
+  const targetInstance = instanceName || DEFAULT_INSTANCE;
+  const cleanText = sanitizarTextoWhatsApp(text);
+  const isGroup = destination.endsWith('@g.us');
+  const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
+
+  if (messageId) {
+    const editEndpoints = [
+      `${EVOLUTION_URL}/chat/updateMessage/${targetInstance}`,
+      `${EVOLUTION_URL}/message/updateMessage/${targetInstance}`,
+    ];
+
+    for (const ep of editEndpoints) {
+      try {
+        const res = await fetch(ep, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: EVOLUTION_API_KEY,
+          },
+          body: JSON.stringify({
+            key: {
+              id: messageId,
+              remoteJid: cleanDestination,
+              fromMe: true,
+            },
+            text: cleanText,
+          }),
+        });
+
+        if (res.ok) {
+          console.log(`✅ Mensagem ${messageId} editada com sucesso no chat ${cleanDestination}`);
+          return true;
+        }
+      } catch {
+        // Tenta o próximo ou cai no fallback
+      }
+    }
+  }
+
+  // Fallback: se não for possível editar, envia mensagem no chat
+  return await enviarMensagemWhatsApp(instanceName, destination, cleanText);
 }
 
 // ── AUXILIAR: Enviar Imagem / QR Code via Evolution API ──
@@ -2096,6 +2170,89 @@ export async function POST(request: Request) {
 
     const messageContent = msgData.message || {};
 
+    // ── 3.0. TRATAMENTO DE REAÇÕES (EMISSÃO OU CANCELAMENTO DA NOTINHA COM ✅ / ❌) ──
+    const reactionMessage =
+      msgData.message?.reactionMessage ||
+      payload.data?.reaction ||
+      payload.reaction ||
+      (eventName.includes('reaction') ? (payload.data || payload) : null);
+
+    if (reactionMessage && reactionMessage.key?.id) {
+      const idMensagemReagida = String(reactionMessage.key.id);
+      const emojiReacao = String(reactionMessage.text || '').trim();
+      const acaoReacao = interpretarReacaoNotinha(emojiReacao);
+
+      if (acaoReacao) {
+        console.log(`👍 [Reação Notinha] Emoji "${emojiReacao}" -> Ação: ${acaoReacao} para mensagem ${idMensagemReagida} em ${remoteJid}`);
+
+        let propostaPendente: PropostaNotinha | null = null;
+        let chaveEncontrada = `notinha:${remoteJid}:${idMensagemReagida}`;
+
+        // 1. Busca proposta indexada pela mensagem enviada pelo bot
+        const { data: pendExata } = await supabase
+          .from('whatsapp_acoes_pendentes')
+          .select('*')
+          .eq('chave', chaveEncontrada)
+          .maybeSingle();
+
+        if (pendExata?.params) {
+          propostaPendente = pendExata.params as PropostaNotinha;
+        } else {
+          // 2. Fallback: busca pela última proposta pendente deste chat
+          const { data: pendUltima } = await supabase
+            .from('whatsapp_acoes_pendentes')
+            .select('*')
+            .eq('chave', `notinha:${remoteJid}:ultima`)
+            .maybeSingle();
+
+          if (pendUltima?.params) {
+            propostaPendente = pendUltima.params as PropostaNotinha;
+            chaveEncontrada = `notinha:${remoteJid}:ultima`;
+          }
+        }
+
+        if (propostaPendente) {
+          // Limpa as pendências imediatamente para evitar duplo processamento
+          await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
+            `notinha:${remoteJid}:${idMensagemReagida}`,
+            `notinha:${remoteJid}:ultima`,
+          ]);
+
+          if (acaoReacao === 'confirmar') {
+            const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
+            const resultadoEmissao = await emitirNotinhaVenda(
+              supabase,
+              lojaEfetivaId,
+              propostaPendente,
+              nomeUsuario || pushName || 'Equipe'
+            );
+
+            await editarOuResponderMensagemWhatsApp(
+              instanceName,
+              targetDestination,
+              idMensagemReagida,
+              resultadoEmissao.mensagem
+            );
+
+            return NextResponse.json({
+              status: resultadoEmissao.sucesso ? 'ok' : 'error',
+              message: resultadoEmissao.sucesso ? 'Notinha emitida com sucesso via reação.' : 'Falha na emissão da notinha.',
+            }, { status: 200 });
+          } else {
+            const msgCancelamento = `❌ *Emissão da notinha cancelada por ${pushName}.*\nPara tentar novamente, envie os dados corrigidos no grupo.`;
+            await editarOuResponderMensagemWhatsApp(
+              instanceName,
+              targetDestination,
+              idMensagemReagida,
+              msgCancelamento
+            );
+
+            return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via reação.' }, { status: 200 });
+          }
+        }
+      }
+    }
+
     // ── 3.1. RECONHECIMENTO DE IMAGEM / ETIQUETA COM IA VISION OCR ──
     const hasImage = Boolean(
       messageContent.imageMessage ||
@@ -2277,6 +2434,106 @@ export async function POST(request: Request) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoLote.texto);
         return NextResponse.json({ status: 'ok', message: 'Entrada de aparelhos em lote processada com sucesso.' }, { status: 200 });
       }
+    }
+
+    // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
+    const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
+    if (correcaoDetectada && lojaId) {
+      const { data: pendUltima } = await supabase
+        .from('whatsapp_acoes_pendentes')
+        .select('*')
+        .eq('chave', `notinha:${remoteJid}:ultima`)
+        .maybeSingle();
+
+      if (pendUltima?.params) {
+        const proposta = pendUltima.params as PropostaNotinha;
+        if (correcaoDetectada.campo === 'valor') {
+          proposta.valorTotal = correcaoDetectada.valor;
+        } else if (correcaoDetectada.campo === 'imei') {
+          proposta.imei = correcaoDetectada.valor;
+        } else if (correcaoDetectada.campo === 'cliente') {
+          proposta.clienteNome = correcaoDetectada.valor;
+        }
+
+        // Reavalia estoque se o IMEI mudou
+        if (correcaoDetectada.campo === 'imei') {
+          const { data: apsEstoque } = await supabase
+            .from('aparelhos')
+            .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+            .eq('loja_id', lojaId)
+            .limit(100);
+
+          const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+            modelo: proposta.modelo,
+            capacidade: proposta.capacidade,
+            cor: proposta.cor,
+            imei: proposta.imei,
+          });
+
+          proposta.statusEstoque = cruzamento.mensagem;
+          if (cruzamento.aparelhoEncontrado?.id) {
+            proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
+            proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
+          }
+        }
+
+        const msgPreviaAtualizada = formatarMensagemPreviaNotinha(proposta);
+        const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
+        if (envio.messageId) {
+          await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+        }
+
+        return NextResponse.json({ status: 'ok', message: 'Notinha corrigida e reenviada para confirmação.' }, { status: 200 });
+      }
+    }
+
+    // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA) ──
+    const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
+    if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal) && lojaId) {
+      // Busca estoque para conferir e bater aparelho de saída com venda
+      const { data: apsEstoque } = await supabase
+        .from('aparelhos')
+        .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+        .eq('loja_id', lojaId)
+        .limit(150);
+
+      const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+        modelo: vendaDetectada.aparelho?.modelo,
+        capacidade: vendaDetectada.aparelho?.capacidade,
+        cor: vendaDetectada.aparelho?.cor,
+        imei: vendaDetectada.aparelho?.imei,
+      });
+
+      const proposta: PropostaNotinha = {
+        id: `notinha-${Date.now()}`,
+        clienteNome: vendaDetectada.cliente?.nome || pushName || 'Cliente',
+        cpf: vendaDetectada.cliente?.cpf || undefined,
+        telefone: vendaDetectada.cliente?.telefone || undefined,
+        email: vendaDetectada.cliente?.email || undefined,
+        enderecoEntrega: vendaDetectada.observacoes || undefined,
+        modelo: vendaDetectada.aparelho?.modelo || 'Smartphone',
+        capacidade: vendaDetectada.aparelho?.capacidade || undefined,
+        cor: vendaDetectada.aparelho?.cor || undefined,
+        imei: vendaDetectada.aparelho?.imei || cruzamento.aparelhoEncontrado?.imei || undefined,
+        statusEstoque: cruzamento.mensagem,
+        aparelhoId: cruzamento.aparelhoEncontrado?.id,
+        valorTotal: vendaDetectada.valorTotal || cruzamento.aparelhoEncontrado?.preco || 0,
+        custo: cruzamento.aparelhoEncontrado?.custo || undefined,
+        formaPagamento: vendaDetectada.formaPagamento || 'Não informada',
+        isUpgrade: Boolean(vendaDetectada.isUpgrade),
+        modeloTroca: vendaDetectada.tradeIn?.modelo || undefined,
+        imeiTroca: vendaDetectada.tradeIn?.imei || undefined,
+        valorTroca: vendaDetectada.tradeIn?.valor || undefined,
+        vendedor: pushName,
+      };
+
+      const msgPrevia = formatarMensagemPreviaNotinha(proposta);
+      const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
+      if (envio.messageId) {
+        await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+      }
+
+      return NextResponse.json({ status: 'ok', message: 'Prévia de notinha gerada com sucesso a partir de pedido.' }, { status: 200 });
     }
 
     // ── 4.1. CONSULTA DE PLANOS DA PLATAFORMA PHONE CENTER ──
