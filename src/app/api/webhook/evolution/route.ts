@@ -521,6 +521,17 @@ interface UsuarioResolvido {
   isTrial?: boolean;
 }
 
+// ── MAPA DE LIDs DO WHATSAPP (Linked Device Identifiers) PARA NÚMEROS REAIS ──
+const MAPA_LID_PARA_TELEFONE: Record<string, string> = {
+  '105278892703905': '5531993586377',
+};
+
+function normalizarTelefoneOuLid(jidOuPhone?: string | null): string {
+  if (!jidOuPhone) return '';
+  const limpo = String(jidOuPhone).replace(/@.*$/, '').replace(/\D/g, '');
+  return MAPA_LID_PARA_TELEFONE[limpo] || limpo;
+}
+
 // ── AUXILIAR: Verificar se o Telefone Pertence ao Moderador Geral / Dono do Bot ──
 function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
   if (!telefone) return false;
@@ -531,6 +542,8 @@ function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
     clean === '553193586377' ||
     clean === '31993586377' ||
     clean === '3193586377' ||
+    clean === '105278892703905' ||
+    clean.includes('105278892703905') ||
     clean.endsWith('31993586377') ||
     clean.endsWith('3193586377')
   );
@@ -903,6 +916,11 @@ async function verificarPermissaoWhatsApp(
   telefone: string,
   papeisPermitidos: ('owner' | 'staff' | 'motoboy')[] = ['owner', 'staff']
 ): Promise<PermissaoWhatsAppResult> {
+  // Super Admin / Dono Geral (Lucas) tem acesso irrestrito em todas as lojas
+  if (verificarSeModeradorOuDonoGeral(telefone)) {
+    return { autorizado: true, papel: 'owner' };
+  }
+
   if (!lojaId) {
     return { autorizado: false, papel: 'nenhum', motivo: 'Loja não identificada' };
   }
@@ -2137,9 +2155,27 @@ export async function POST(request: Request) {
     }
 
     const isGroup = remoteJid.endsWith('@g.us');
-    const participantJid = String(key.participant || msgData.participant || key.remoteJid || '');
-    const participantPhone = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
-    const senderPhone = remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
+    const participantJid = String(
+      (key as any).participantPn ||
+      (msgData as any).participantPn ||
+      (payload.data as any)?.participantPn ||
+      key.participant ||
+      msgData.participant ||
+      key.remoteJid ||
+      ''
+    );
+    const participantPhoneRaw = participantJid.replace(/@.*$/, '').replace(/\D/g, '');
+    const participantPhone = normalizarTelefoneOuLid(participantPhoneRaw);
+
+    const senderJid = String(
+      (msgData as any).senderPn ||
+      (payload.data as any)?.senderPn ||
+      remoteJid ||
+      ''
+    );
+    const senderPhoneRaw = senderJid.replace(/@.*$/, '').replace(/\D/g, '');
+    const senderPhone = normalizarTelefoneOuLid(senderPhoneRaw);
+
     const authorPhone = isGroup ? (participantPhone || senderPhone) : senderPhone;
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : senderPhone;
