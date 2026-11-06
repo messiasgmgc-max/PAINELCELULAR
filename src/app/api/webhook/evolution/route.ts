@@ -157,7 +157,8 @@ async function enviarMensagemWhatsAppComRetorno(
   }
 
   const isGroup = destination.endsWith('@g.us');
-  const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
+  const normDest = normalizarTelefoneOuLid(destination);
+  const cleanDestination = isGroup ? destination : normDest.replace(/\D/g, '');
   if (!cleanDestination) return { ok: false };
 
   const cleanText = sanitizarTextoWhatsApp(text);
@@ -215,7 +216,8 @@ async function editarOuResponderMensagemWhatsApp(
   const targetInstance = instanceName || DEFAULT_INSTANCE;
   const cleanText = sanitizarTextoWhatsApp(text);
   const isGroup = destination.endsWith('@g.us');
-  const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
+  const normDest = normalizarTelefoneOuLid(destination);
+  const cleanDestination = isGroup ? destination : normDest.replace(/\D/g, '');
 
   if (messageId) {
     const editEndpoints = [
@@ -268,7 +270,8 @@ async function enviarImagemWhatsApp(
   }
 
   const isGroup = destination.endsWith('@g.us');
-  const cleanDestination = isGroup ? destination : destination.replace(/\D/g, '');
+  const normDest = normalizarTelefoneOuLid(destination);
+  const cleanDestination = isGroup ? destination : normDest.replace(/\D/g, '');
   if (!cleanDestination) return false;
 
   const targetInstance = instanceName || DEFAULT_INSTANCE;
@@ -2233,7 +2236,7 @@ export async function POST(request: Request) {
 
     const authorPhone = isGroup ? (participantPhone || senderPhone) : senderPhone;
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
-    const targetDestination = isGroup ? remoteJid : senderPhone;
+    const targetDestination = isGroup ? remoteJid : (normalizarTelefoneOuLid(senderPhone) || normalizarTelefoneOuLid(remoteJid));
 
     const ehModeradorMaster = verificarSeModeradorOuDonoGeral(authorPhone) || (isGroup && verificarSeModeradorOuDonoGeral(participantPhone));
     const modoChat = await obterModoChat(remoteJid);
@@ -2248,15 +2251,29 @@ export async function POST(request: Request) {
     const papelUsuario = ehModeradorMaster ? 'owner' : (usuarioResolvido?.papel || 'staff');
 
     // ── O BOT NÃO RESPONDE CLIENTES EM CHAT PRIVADO ──
-    // O bot é de uso exclusivo da equipe interna cadastrada ou em grupos autorizados.
-    // Clientes que enviarem mensagens privadas (ex: perguntando de notinha, dúvidas, etc.)
-    // são ignorados em silêncio para que a loja responda humanamente sem respostas automáticas indevidas.
-    if (!isGroup && !usuarioResolvido && !ehModeradorMaster) {
+    // Clientes que enviarem mensagens privadas sem formulário/operação são ignorados em silêncio.
+    // Mas pedidos/notinhas, entradas de estoque e comandos sempre são atendidos no privado para teste ou uso da equipe!
+    const rawPreviewText =
+      msgData.message?.conversation ||
+      msgData.message?.extendedTextMessage?.text ||
+      msgData.message?.imageMessage?.caption ||
+      '';
+    const ehOperacaoEquipePreview =
+      rawPreviewText.trim().startsWith('!') ||
+      ehMensagemDeEntradaEstoque(rawPreviewText) ||
+      Boolean(detectarFormularioOuPedidoVenda(rawPreviewText)) ||
+      Boolean(interpretarTextoCorrecaoVenda(rawPreviewText));
+
+    if (!isGroup && !usuarioResolvido && !ehModeradorMaster && !ehOperacaoEquipePreview) {
       console.log(`🔇 [Privado] Mensagem de cliente/número não cadastrado (${authorPhone}) ignorada. O bot não responde clientes.`);
       return NextResponse.json({
         status: 'ignored',
         message: 'Mensagem de cliente ignorada em chat privado. O bot responde apenas à equipe cadastrada ou em grupos.'
       }, { status: 200 });
+    }
+
+    if (!lojaId && (ehModeradorMaster || ehOperacaoEquipePreview)) {
+      lojaId = 'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
     }
 
     const messageContent = msgData.message || {};
@@ -2537,13 +2554,57 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
-    const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
-    if (correcaoDetectada && lojaId) {
+    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / CONFIRMAR / OK / CANCELAR) ──
+    const ehConfirmacaoTexto = /^(?:sim|confirmar|confirmo|emitir|gerar\s*nota|gerar\s*notinha|aprovar|ok|pode\s*emitir)$/i.test(textContent.trim());
+    const ehCancelamentoTexto = /^(?:n[aã]o|cancelar|cancela|cancelado|esquece|anular)$/i.test(textContent.trim());
+
+    if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
+      const chavesBusca = [
+        `notinha:${remoteJid}:ultima`,
+        `notinha:${targetDestination}:ultima`,
+      ];
       const { data: pendUltima } = await supabase
         .from('whatsapp_acoes_pendentes')
         .select('*')
-        .eq('chave', `notinha:${remoteJid}:ultima`)
+        .in('chave', chavesBusca)
+        .order('expira_em', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pendUltima?.params) {
+        const propostaPendente = pendUltima.params as PropostaNotinha;
+        await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
+
+        if (ehConfirmacaoTexto) {
+          const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
+          const resultadoEmissao = await emitirNotinhaVenda(
+            supabase,
+            lojaEfetivaId,
+            propostaPendente,
+            nomeUsuario || pushName || 'Equipe'
+          );
+          await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoEmissao.mensagem);
+          return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
+        } else {
+          await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ *Emissão da notinha cancelada por ${pushName}.*`);
+          return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via texto.' }, { status: 200 });
+        }
+      }
+    }
+
+    // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
+    const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
+    if (correcaoDetectada && lojaId) {
+      const chavesBusca = [
+        `notinha:${remoteJid}:ultima`,
+        `notinha:${targetDestination}:ultima`,
+      ];
+      const { data: pendUltima } = await supabase
+        .from('whatsapp_acoes_pendentes')
+        .select('*')
+        .in('chave', chavesBusca)
+        .order('expira_em', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (pendUltima?.params) {
@@ -2554,10 +2615,12 @@ export async function POST(request: Request) {
           proposta.imei = correcaoDetectada.valor;
         } else if (correcaoDetectada.campo === 'cliente') {
           proposta.clienteNome = correcaoDetectada.valor;
+        } else if (correcaoDetectada.campo === 'cor') {
+          proposta.cor = correcaoDetectada.valor;
         }
 
-        // Reavalia estoque se o IMEI mudou
-        if (correcaoDetectada.campo === 'imei') {
+        // Reavalia estoque se o IMEI ou modelo mudou
+        if (correcaoDetectada.campo === 'imei' || correcaoDetectada.campo === 'cor') {
           const { data: apsEstoque } = await supabase
             .from('aparelhos')
             .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
@@ -2575,6 +2638,9 @@ export async function POST(request: Request) {
           if (cruzamento.aparelhoEncontrado?.id) {
             proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
             proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
+            if (cruzamento.aparelhoEncontrado.imei) {
+              proposta.imei = cruzamento.aparelhoEncontrado.imei;
+            }
           }
         }
 
@@ -2582,6 +2648,9 @@ export async function POST(request: Request) {
         const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
         if (envio.messageId) {
           await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+          if (targetDestination !== remoteJid) {
+            await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
+          }
         }
 
         return NextResponse.json({ status: 'ok', message: 'Notinha corrigida e reenviada para confirmação.' }, { status: 200 });
@@ -2632,6 +2701,9 @@ export async function POST(request: Request) {
       const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
       if (envio.messageId) {
         await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+        if (targetDestination !== remoteJid) {
+          await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
+        }
       }
 
       return NextResponse.json({ status: 'ok', message: 'Prévia de notinha gerada com sucesso a partir de pedido.' }, { status: 200 });

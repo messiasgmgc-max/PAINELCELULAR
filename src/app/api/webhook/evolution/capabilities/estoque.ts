@@ -3,6 +3,7 @@ import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoq
 import { aplicarMudancaEstoque, registrarEntradaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
 import { parseTextoEntradaAparelhos, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor } from '../entradaInteligente';
+import { extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
   Capability,
@@ -160,7 +161,19 @@ export const capabilitiesEstoque: Capability[] = [
       if (!modeloBruto) return '⚠️ Qual é o modelo do aparelho a cadastrar?';
       if (preco <= 0) return `⚠️ Qual é o preço de venda do *${modeloBruto}*?`;
 
-      const norm = normalizarNomeModelo(modeloBruto);
+      const corInformada = texto(params, 'cor');
+      const corExtraida = extrairCorDeTexto(corInformada) || extrairCorDeTexto(modeloBruto);
+      const cor = corExtraida || corInformada || null;
+
+      let modLimpo = modeloBruto;
+      if (cor) {
+        modLimpo = modLimpo
+          .replace(new RegExp(`\\b${cor}\\b`, 'gi'), '')
+          .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      const norm = normalizarNomeModelo(modLimpo || modeloBruto);
       const modelo = norm.modelo;
 
       const imei = texto(params, 'imei');
@@ -183,7 +196,7 @@ export const capabilitiesEstoque: Capability[] = [
         marca: texto(params, 'marca') || 'Apple',
         modelo,
         capacidade: texto(params, 'capacidade') || null,
-        cor: texto(params, 'cor') || null,
+        cor: cor || null,
         preco,
         custo: numero(params, 'custo') || 0,
         imei: imei || null,

@@ -1,8 +1,9 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { sanitizarECompletarVendaParsed, normalizarNomeModelo, ParsedVenda } from '@/lib/vendas/parseVendaTexto';
+import { sanitizarECompletarVendaParsed, normalizarNomeModelo, ParsedVenda, extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
 import { registrarVendaAtomica, ErroVenda } from '@/lib/vendas/vendaAtomica';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
+import { obterEmojiDaCor } from './entradaInteligente';
 
 export interface AparelhoEstoqueConsulta {
   id: string;
@@ -87,7 +88,7 @@ export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | nu
   const t = texto.trim();
   if (t.length < 15) return null;
 
-  // Checa se tem indício de venda/pedido
+  // Checa se tem indício de venda/pedido (aceita atalhos, formulários ou frases naturais)
   const indicios = [
     /para finalizar seu pedido/i,
     /dados pessoais/i,
@@ -95,10 +96,17 @@ export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | nu
     /forma de pagamento/i,
     /\bvendido\b/i,
     /\bvendi\b/i,
+    /\bvenda\b/i,
     /\bnova venda\b/i,
     /\bpedido\b/i,
+    /\bpedidos\b/i,
+    /\bnotinha\b/i,
+    /\bnota\b/i,
+    /\bformul[aá]rio\b/i,
+    /\bcliente\b/i,
     /\bimei\b/i,
     /\bupgrade\b/i,
+    /^!(?:pedido|notinha|venda)\b/i,
   ];
 
   const temIndicio = indicios.some((regex) => regex.test(t));
@@ -154,23 +162,36 @@ export function cruzarAparelhoComEstoque(
 ): ResultadoCruzamentoEstoque {
   const imeiAlvo = digitos(dadosAparelho.imei);
 
-  // 1. Busca prioritária por IMEI quando informado
+  // 1. Busca prioritária por IMEI quando informado (aceita IMEI de 15 dígitos ou final de 4 a 6 dígitos)
   if (imeiAlvo.length >= 4) {
-    const comMesmoImei = estoque.filter((a) => {
+    let comMesmoImei = estoque.filter((a) => {
       const cad = digitos(a.imei);
       if (cad.length < 4) return false;
       if (imeiAlvo.length >= 15 && cad.length >= 15) return imeiAlvo === cad;
       return cad.endsWith(imeiAlvo) || imeiAlvo.endsWith(cad);
     });
 
+    // Se houver mais de um aparelho com o mesmo final de IMEI (4 dígitos), desempata por modelo e capacidade
+    if (comMesmoImei.length > 1 && dadosAparelho.modelo) {
+      const modAlvo = dadosAparelho.modelo.toLowerCase();
+      const porModelo = comMesmoImei.filter((a) => (a.modelo || '').toLowerCase().includes(modAlvo) || modAlvo.includes((a.modelo || '').toLowerCase()));
+      if (porModelo.length > 0) {
+        comMesmoImei = porModelo;
+      }
+    }
+
     if (comMesmoImei.length > 0) {
       const primeiro = comMesmoImei[0];
       const noEstoqueAtivo = estaNoEstoque(primeiro as any);
 
       if (noEstoqueAtivo) {
+        const msgConfirmado = imeiAlvo.length < 15 && primeiro.imei
+          ? `Aparelho confirmado no estoque pelo final ${imeiAlvo} (IMEI completo: ${primeiro.imei}) ✅`
+          : 'Aparelho confirmado no estoque ✅';
+
         return {
           status: 'confirmado',
-          mensagem: 'Aparelho confirmado no estoque ✅',
+          mensagem: msgConfirmado,
           aparelhoEncontrado: primeiro,
         };
       } else {
@@ -180,14 +201,14 @@ export function cruzarAparelhoComEstoque(
         const comprador = primeiro.cliente ? ` para ${primeiro.cliente}` : '';
         return {
           status: 'ja_vendido',
-          mensagem: `⚠️ Este IMEI já consta como vendido/baixado em ${dataSaidaFmt}${comprador}.`,
+          mensagem: `⚠️ Este IMEI (${primeiro.imei || imeiAlvo}) já consta como vendido/baixado em ${dataSaidaFmt}${comprador}.`,
           aparelhoEncontrado: primeiro,
         };
       }
     } else {
       return {
         status: 'nao_encontrado',
-        mensagem: 'IMEI não localizado no estoque (será associado à venda)',
+        mensagem: `IMEI final ${imeiAlvo} não localizado no estoque (será associado à venda)`,
       };
     }
   }
@@ -236,11 +257,14 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
     maximumFractionDigits: 2,
   });
 
+  const emojiCor = obterEmojiDaCor(proposta.cor);
+  const corFmt = proposta.cor ? ` ${emojiCor} ${proposta.cor}` : '';
+
   const linhas: string[] = [
     '🧾 *PRÉVIA DA NOTINHA — LUCAS IMPORTS*',
     '──────────────────────────',
     `👤 *Cliente:* ${proposta.clienteNome || 'Cliente Não Informado'}${proposta.cpf ? ` (CPF: ${proposta.cpf})` : ''}`,
-    `📱 *Aparelho:* ${proposta.modelo} ${proposta.capacidade || ''} ${proposta.cor || ''}`.replace(/\s+/g, ' ').trim(),
+    `📱 *Aparelho:* ${proposta.modelo} ${proposta.capacidade || ''}${corFmt}`.replace(/\s+/g, ' ').trim(),
   ];
 
   if (proposta.imei) {
@@ -267,8 +291,8 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
   }
 
   linhas.push('──────────────────────────');
-  linhas.push('👉 Reaja com ✅ nesta mensagem para EMITIR A NOTINHA e dar baixa no estoque.');
-  linhas.push('❌ Reaja com ❌ para cancelar ou responda corrigindo qualquer dado.');
+  linhas.push('👉 Reaja com ✅ nesta mensagem ou responda "SIM" / "CONFIRMAR" para emitir a notinha.');
+  linhas.push('❌ Reaja com ❌ ou responda "CANCELAR" para cancelar, ou informe o dado a corrigir.');
 
   return sanitizarTextoWhatsApp(linhas.join('\n'));
 }
@@ -294,7 +318,7 @@ export function interpretarReacaoNotinha(emoji: string): 'confirmar' | 'cancelar
  */
 export function interpretarTextoCorrecaoVenda(
   texto: string
-): { campo: 'valor' | 'imei' | 'cliente' | 'modelo'; valor: any } | null {
+): { campo: 'valor' | 'imei' | 'cliente' | 'modelo' | 'cor'; valor: any } | null {
   if (!texto || typeof texto !== 'string') return null;
   const t = texto.trim();
 
@@ -308,10 +332,19 @@ export function interpretarTextoCorrecaoVenda(
     }
   }
 
-  // Correção de IMEI
-  const matchImei = t.match(/\b(?:imei)\s*(?:é|e|correto|certo|novo|\s)*[:=-]?\s*(\d{14,16})\b/i);
+  // Correção de IMEI (aceita 14 a 16 dígitos ou final de 4 dígitos)
+  const matchImei = t.match(/\b(?:final\s*(?:do\s*)?imei|imei\s*final|imei)\s*(?:é|e|correto|certo|novo|\s)*[:=-]?\s*#?(\d{4,16})\b/i);
   if (matchImei) {
     return { campo: 'imei', valor: matchImei[1] };
+  }
+
+  // Correção de cor (por nome ou emoji)
+  const matchCor = t.match(/(?:cor|nova\s*cor)\s*(?:é|e|correto|certo|nova)?\s*[:=-]?\s*([^\n\r]+)/i);
+  if (matchCor) {
+    const corDet = extrairCorDeTexto(matchCor[1]);
+    if (corDet) {
+      return { campo: 'cor', valor: corDet };
+    }
   }
 
   // Correção de cliente

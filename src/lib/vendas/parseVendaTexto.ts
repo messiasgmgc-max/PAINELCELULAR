@@ -76,6 +76,53 @@ export function normalizarNomeModelo(modeloBruto: string): string {
 }
 
 /**
+ * Extrai o nome padronizado da cor a partir de texto ou emoji.
+ * Suporta emojis de coração, círculos, símbolos de fornecedor e termos populares (inclusive Desert e Titânio Natural).
+ */
+export function extrairCorDeTexto(texto?: string | null): string | undefined {
+  if (!texto) return undefined;
+  const t = String(texto);
+  const lower = t.toLowerCase();
+
+  // 1. Emojis de cor (com ou sem seletor de variação unicode)
+  if (/🖤|⚫|⬛|◾|◼️|◼|♠️|🕶️/.test(t)) return 'Preto';
+  if (/🤍|⚪|⬜|◽|◻️|◻|❄️|🕊️/.test(t)) return 'Branco';
+  if (/🏜️|🏜|🐪|🐫|🤎|🟤|🟫/.test(t)) return 'Desert';
+  if (/🔘|🩶|💿|🪙|🥈/.test(t)) return 'Titânio Natural';
+  if (/💙|🔵|🟦|🔷|🔹|🌊/.test(t)) return 'Azul';
+  if (/💛|🟡|🟨|🥇|👑|⭐|🌟|✨/.test(t)) return 'Dourado';
+  if (/🩷|🌸|🌺|🌷|🎀/.test(t)) return 'Rosa';
+  if (/💚|🟢|🟩|🍏|🍃|🌿/.test(t)) return 'Verde';
+  if (/💜|🟣|🟪|🍇/.test(t)) return 'Roxo';
+  if (/❤️|❤|🔴|🟥|🍎|🍒/.test(t)) return 'Vermelho';
+  if (/🧡|🟠|🟧|📙/.test(t)) return 'Laranja';
+
+  // 2. Termos compostos prioritários
+  if (/\b(?:desert\s*titanium|tit[aâ]nio\s*deserto?|desert|deserto)\b/i.test(lower)) return 'Desert';
+  if (/\b(?:natural\s*titanium|tit[aâ]nio\s*natural|natural)\b/i.test(lower)) return 'Titânio Natural';
+  if (/\b(?:space\s*black|preto\s*espacial|tit[aâ]nio\s*preto|black\s*titanium|meia\s*noite|meia-noite|midnight|grafite|graphite)\b/i.test(lower)) return 'Preto';
+  if (/\b(?:white\s*titanium|tit[aâ]nio\s*branco|estelar|starlight|prata|silver)\b/i.test(lower)) return 'Branco';
+  if (/\b(?:blue\s*titanium|tit[aâ]nio\s*azul|sierra\s*blue|pacific\s*blue|ultramarine|ultramarino)\b/i.test(lower)) return 'Azul';
+  if (/\b(?:space\s*gr[ae]y|cinza\s*espacial)\b/i.test(lower)) return 'Cinza';
+  if (/\b(?:deep\s*purple|violeta|lil[aá]s)\b/i.test(lower)) return 'Roxo';
+  if (/\b(?:product\s*red)\b/i.test(lower)) return 'Vermelho';
+
+  // 3. Cores simples
+  if (/\b(?:preto|preta|black|dark)\b/i.test(lower)) return 'Preto';
+  if (/\b(?:branco|branca|white)\b/i.test(lower)) return 'Branco';
+  if (/\b(?:azul|blue)\b/i.test(lower)) return 'Azul';
+  if (/\b(?:dourado|dourada|gold|amarelo|yellow|ouro)\b/i.test(lower)) return 'Dourado';
+  if (/\b(?:rosa|pink|rose)\b/i.test(lower)) return 'Rosa';
+  if (/\b(?:verde|green|alpine|teal)\b/i.test(lower)) return 'Verde';
+  if (/\b(?:roxo|purple)\b/i.test(lower)) return 'Roxo';
+  if (/\b(?:vermelho|vermelha|red)\b/i.test(lower)) return 'Vermelho';
+  if (/\b(?:cinza|gray|grey|titanium|tit[aâ]nio|titanio)\b/i.test(lower)) return 'Titânio Natural';
+  if (/\b(?:laranja|orange|coral)\b/i.test(lower)) return 'Laranja';
+
+  return undefined;
+}
+
+/**
  * Sanitiza e complementa os dados brutos ou retornados da IA utilizando
  * regras estritas de pós-processamento, regex e suporte a templates de mensagens/pedidos.
  */
@@ -303,9 +350,9 @@ export function sanitizarECompletarVendaParsed(
       result.aparelho.capacidade = romMatch[1].toUpperCase();
     }
 
-    // IMEI na linha de modelo
+    // IMEI na linha de modelo (aceita 4 a 18 dígitos: completo ou final de 4 dígitos)
     const imeiMatch =
-      linhaModelo.match(/(?:imei|serial|nº série):\s*([0-9A-Za-z]{8,18})/i) ||
+      linhaModelo.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei|serial|n[ºo°]\s*s[eé]rie):\s*#?([0-9A-Za-z]{4,18})/i) ||
       linhaModelo.match(/\b([0-9]{14,16})\b/);
     if (imeiMatch && !result.aparelho.imei) {
       result.aparelho.imei = imeiMatch[1].trim();
@@ -320,33 +367,51 @@ export function sanitizarECompletarVendaParsed(
       }
     }
 
-    // Cor na linha de modelo
+    // Cor na linha de modelo (suporta emojis e nomes)
     if (!result.aparelho.cor) {
-      const cores = [
-        'azul escuro', 'azul', 'preto', 'branco', 'grafite', 'dourado', 'prata',
-        'silver', 'gold', 'space gray', 'cinza espacial', 'rosa', 'verde', 'amarelo',
-        'roxo', 'laranja', 'titanium', 'titânio', 'natural'
-      ];
-      for (const c of cores) {
-        const regexCor = new RegExp(`\\b${c}\\b`, 'i');
-        if (regexCor.test(linhaModelo)) {
-          result.aparelho.cor = c.charAt(0).toUpperCase() + c.slice(1);
-          break;
-        }
+      const corEncontrada = extrairCorDeTexto(linhaModelo);
+      if (corEncontrada) {
+        result.aparelho.cor = corEncontrada;
       }
     }
 
     // Nome limpo do modelo
     let modNome = linhaModelo
-      .replace(/(?:imei|serial|nº série):\s*[0-9A-Za-z]+/gi, '')
+      .replace(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei|serial|n[ºo°]\s*s[eé]rie):\s*#?[0-9A-Za-z]+/gi, '')
       .replace(/\b[0-9]{14,16}\b/g, '')
       .replace(/\b(\d+GB|\d+TB)\b/gi, '')
       .replace(/\b(?:lacrado|novo|seminovo|usado)\b/gi, '')
-      .replace(new RegExp(`\\b(?:${result.aparelho.cor || ''})\\b`, 'gi'), '')
+      .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
+      .replace(new RegExp(`\\b(?:${result.aparelho.cor || ''}|desert|deserto|natural|titanium|tit[aâ]nio|preto|branco|azul|dourado|rosa|verde|roxo|cinza)\\b`, 'gi'), '')
       .trim();
 
     if (modNome) {
       result.aparelho.modelo = normalizarNomeModelo(modNome);
+    }
+  }
+
+  // Linha explícita de cor no formulário (ex: "Cor: 🖤", "Cor: Desert", "Cor: Preto")
+  if (!result.aparelho.cor) {
+    const linhaCorMatch = trimmedText.match(/(?:^|\n|\r)\s*(?:Cor|Cores):\s*([^\n\r]+)/i);
+    if (linhaCorMatch) {
+      const corExtraida = extrairCorDeTexto(linhaCorMatch[1]);
+      if (corExtraida) {
+        result.aparelho.cor = corExtraida;
+      }
+    }
+  }
+
+  // Fallback geral de cor no texto se não identificou acima
+  if (!result.aparelho.cor) {
+    const corFallback = extrairCorDeTexto(trimmedText);
+    if (corFallback) {
+      result.aparelho.cor = corFallback;
+    }
+  } else {
+    // Normaliza caso a IA tenha retornado um emoji puro no campo de cor
+    const norm = extrairCorDeTexto(result.aparelho.cor);
+    if (norm) {
+      result.aparelho.cor = norm;
     }
   }
 
@@ -363,10 +428,11 @@ export function sanitizarECompletarVendaParsed(
     }
   }
 
-  // IMEI geral fallback
+  // IMEI geral fallback (reconhece IMEI completo de 15 dígitos ou final de 4 dígitos)
   if (!result.aparelho.imei) {
     const imeiRotuloMatch =
-      trimmedText.match(/(?:IMEI|IMEI\s*1|N[ºo°]\s*S[eé]rie|Serial):\s*([0-9A-Za-z]{8,18})/i) ||
+      trimmedText.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei\s*\(?\s*(?:últimos\s*)?4\s*(?:d[íi]gitos)?\s*\)?|imei|imei\s*1|n[ºo°]\s*s[eé]rie|serial):\s*#?([0-9A-Za-z]{4,18})/i) ||
+      trimmedText.match(/(?:final):\s*#?([0-9]{4,6})\b/i) ||
       trimmedText.match(/\b([0-9]{14,16})\b/);
     if (imeiRotuloMatch) {
       result.aparelho.imei = imeiRotuloMatch[1].trim();

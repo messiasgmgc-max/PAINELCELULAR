@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { obterEmojiDaCor } from '../entradaInteligente';
 import {
   RecursoPlano,
   TipoPlano,
@@ -126,7 +127,10 @@ export function descreverAparelho(ap: Record<string, unknown>): string {
 
   if (modelo) partes.push(modelo);
   if (capacidade) partes.push(capacidade);
-  if (cor) partes.push(cor);
+  if (cor) {
+    const emoji = obterEmojiDaCor(cor);
+    partes.push(`${emoji} ${cor}`);
+  }
 
   return partes.join(' ') || 'Aparelho';
 }

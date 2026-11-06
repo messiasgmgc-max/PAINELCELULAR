@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizarECompletarVendaParsed, normalizarNomeModelo } from './parseVendaTexto';
+import { sanitizarECompletarVendaParsed, normalizarNomeModelo, extrairCorDeTexto } from './parseVendaTexto';
 
 describe('Parsing e Sanitização de Venda com IA e Regex', () => {
   it('normaliza nomes de modelos Apple sem prefixo', () => {
@@ -113,5 +113,45 @@ Modelo: 15 Pro 128gb titânio lacrado imei 350015753668099`;
     assert.equal(final.aparelho.capacidade, '128GB');
     assert.equal(final.aparelho.imei, '350015753668099');
     assert.equal(final.aparelho.condicao, 'novo');
+  });
+
+  it('reconhece cores a partir de emojis e termos especiais', () => {
+    assert.equal(extrairCorDeTexto('🖤'), 'Preto');
+    assert.equal(extrairCorDeTexto('🤍'), 'Branco');
+    assert.equal(extrairCorDeTexto('🏜️'), 'Desert');
+    assert.equal(extrairCorDeTexto('🏜'), 'Desert');
+    assert.equal(extrairCorDeTexto('🔘'), 'Titânio Natural');
+    assert.equal(extrairCorDeTexto('🩶'), 'Titânio Natural');
+    assert.equal(extrairCorDeTexto('💙'), 'Azul');
+    assert.equal(extrairCorDeTexto('💛'), 'Dourado');
+    assert.equal(extrairCorDeTexto('🩷'), 'Rosa');
+    assert.equal(extrairCorDeTexto('❤️'), 'Vermelho');
+    assert.equal(extrairCorDeTexto('❤'), 'Vermelho');
+    assert.equal(extrairCorDeTexto('titânio deserto'), 'Desert');
+    assert.equal(extrairCorDeTexto('desert titanium'), 'Desert');
+    assert.equal(extrairCorDeTexto('natural titanium'), 'Titânio Natural');
+  });
+
+  it('reconhece IMEI de 4 dígitos (final do IMEI) e cor por emoji no formulário de pedido', () => {
+    const textoPedido = `👤 DADOS PESSOAIS
+Nome: Guilherme Messias
+Telefone: 31993586377
+
+💳 FORMA DE PAGAMENTO
+Valor total: 5.200,00
+Pix
+
+Modelo: iPhone 16 Pro 256gb 🏜️
+Cor: 🏜️
+Final do IMEI: 4567`;
+
+    const final = sanitizarECompletarVendaParsed(null, textoPedido);
+
+    assert.ok(final.aparelho.modelo?.toLowerCase().includes('16 pro'));
+    assert.equal(final.aparelho.capacidade, '256GB');
+    assert.equal(final.aparelho.cor, 'Desert');
+    assert.equal(final.aparelho.imei, '4567');
+    assert.equal(final.valorTotal, 5200);
+    assert.equal(final.cliente.nome, 'Guilherme Messias');
   });
 });

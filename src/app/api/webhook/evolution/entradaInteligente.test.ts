@@ -105,4 +105,33 @@ describe('Entrada Inteligente de Aparelhos', () => {
     assert.equal(itemNatural.modelo, 'iPhone 15 Pro');
     assert.equal(itemNatural.cor, 'Titânio Natural');
   });
+
+  it('reconhece IMEI e NÃO confunde com custo quando não tem R$', () => {
+    // 1. Linha com IMEI puro de 15 dígitos sem valor (não deve achar que IMEI é custo!)
+    const linhaComImeiPuro = 'Entrada iPhone 16 Pro 128GB Desert 356829104829102';
+    const itemA = parseLinhaEntrada(linhaComImeiPuro);
+    assert.ok(itemA);
+    assert.equal(itemA.modelo, 'iPhone 16 Pro');
+    assert.equal(itemA.capacidade, '128GB');
+    assert.equal(itemA.cor, 'Desert');
+    assert.equal(itemA.imei, '356829104829102');
+    assert.equal(itemA.custo, 0); // Sem R$ e sem prefixo, IMEI NÃO é custo!
+
+    // 2. Linha com prefixo explícito de IMEI
+    const linhaComPrefixoImei = 'iPhone 16 Pro Desert imei: 356829104829102';
+    const itemB = parseLinhaEntrada(linhaComPrefixoImei);
+    assert.ok(itemB);
+    assert.equal(itemB.modelo, 'iPhone 16 Pro');
+    assert.equal(itemB.cor, 'Desert');
+    assert.equal(itemB.imei, '356829104829102');
+    assert.equal(itemB.custo, 0);
+
+    // 3. Linha com R$ e IMEI
+    const linhaComValorEImei = 'iPhone 16 Pro 128GB Desert R$ 5200 IMEI 356829104829102';
+    const itemC = parseLinhaEntrada(linhaComValorEImei);
+    assert.ok(itemC);
+    assert.equal(itemC.modelo, 'iPhone 16 Pro');
+    assert.equal(itemC.custo, 5200);
+    assert.equal(itemC.imei, '356829104829102');
+  });
 });

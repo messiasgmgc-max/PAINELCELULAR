@@ -1,3 +1,5 @@
+import { extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
+
 /**
  * Parser e processador inteligente de entradas de aparelhos no estoque via WhatsApp.
  * Suporta múltiplas sintaxes:
@@ -74,16 +76,17 @@ export function obterEmojiDaCor(cor?: string | null): string {
   if (!cor) return '📱';
   const c = String(cor).toLowerCase();
   if (c.includes('desert') || c.includes('deserto')) return '🏜️';
-  if (c.includes('natural')) return '🩶';
+  if (c.includes('natural') || c.includes('titanium') || c.includes('titânio') || c.includes('titanio')) return '🔘';
   if (c.includes('preto') || c.includes('black') || c.includes('grafite') || c.includes('midnight') || c.includes('noite') || c.includes('dark')) return '🖤';
   if (c.includes('branco') || c.includes('white') || c.includes('prata') || c.includes('silver') || c.includes('estelar') || c.includes('starlight')) return '🤍';
-  if (c.includes('azul') || c.includes('blue') || c.includes('sierra') || c.includes('pacific')) return '💙';
-  if (c.includes('dourado') || c.includes('gold') || c.includes('amarelo') || c.includes('yellow')) return '💛';
+  if (c.includes('azul') || c.includes('blue') || c.includes('sierra') || c.includes('pacific') || c.includes('ultramarine') || c.includes('ultramarino')) return '💙';
+  if (c.includes('dourado') || c.includes('gold') || c.includes('amarelo') || c.includes('yellow') || c.includes('ouro')) return '💛';
   if (c.includes('rosa') || c.includes('pink') || c.includes('rose')) return '🩷';
   if (c.includes('verde') || c.includes('green') || c.includes('alpine') || c.includes('teal')) return '💚';
-  if (c.includes('roxo') || c.includes('purple') || c.includes('violeta') || c.includes('deep purple')) return '💜';
+  if (c.includes('roxo') || c.includes('purple') || c.includes('violeta') || c.includes('deep purple') || c.includes('lilás') || c.includes('lilas')) return '💜';
   if (c.includes('vermelho') || c.includes('red')) return '❤️';
-  if (c.includes('cinza') || c.includes('gray') || c.includes('grey') || c.includes('titanium') || c.includes('titânio')) return '🩶';
+  if (c.includes('laranja') || c.includes('orange') || c.includes('coral')) return '🧡';
+  if (c.includes('cinza') || c.includes('gray') || c.includes('grey')) return '🩶';
   return '📱';
 }
 
@@ -186,89 +189,76 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
   else if (/usado/i.test(l)) condicao = 'usado';
   else if (/seminovo|semi\s*novo/i.test(l)) condicao = 'seminovo';
 
-  // 1. IMEI se houver
+  let linhaTrabalho = l
+    .replace(/^(?:!(?:entradas?|importar)\s*|(?:entradas?|dar entradas?|cadastrar entradas?|chegou hoje|chegaram os aparelhos)[:\s]*)/i, '')
+    .trim();
+
+  // 1. Extração prioritária de IMEI (com prefixo "imei/serial" ou sequência direta de 14 a 16 dígitos)
   let imei: string | undefined;
-  const imeiMatch = l.match(REGEX_IMEI);
-  if (imeiMatch) {
-    imei = imeiMatch[1];
+
+  // 1.1. Prefixo explícito: "imei: 356829104829102", "imei 35...", "serial: 35..."
+  const imeiPrefixoMatch = linhaTrabalho.match(/(?:imei|serial|sn)[:\s=]*([0-9\s-]{14,18})/i);
+  if (imeiPrefixoMatch) {
+    const limpo = imeiPrefixoMatch[1].replace(/\D/g, '');
+    if (limpo.length >= 14 && limpo.length <= 16) {
+      imei = limpo;
+      linhaTrabalho = linhaTrabalho.replace(imeiPrefixoMatch[0], ' ');
+    }
   }
 
-  // 2. Capacidade se houver
+  // 1.2. Sequência numérica direta de 14 a 16 dígitos isolados
+  if (!imei) {
+    const imeiDiretoMatch = linhaTrabalho.match(/\b(\d{14,16})\b/);
+    if (imeiDiretoMatch) {
+      imei = imeiDiretoMatch[1];
+      linhaTrabalho = linhaTrabalho.replace(imeiDiretoMatch[0], ' ');
+    }
+  }
+
+  // 2. Capacidade (32GB, 64GB, 128GB, 256GB, 512GB, 1TB, etc.)
   let capacidade: string | undefined;
-  const capMatch = l.match(REGEX_CAPACIDADE);
+  const capMatch = linhaTrabalho.match(REGEX_CAPACIDADE);
   if (capMatch) {
     capacidade = `${capMatch[1].toUpperCase()}${capMatch[2].toUpperCase()}`;
+    linhaTrabalho = linhaTrabalho.replace(capMatch[0], ' ');
   }
 
   // 3. Valor de custo / preço
+  // REGRA ESTRITA: O IMEI já foi removido acima, garantindo que nunca seja confundido com valor.
+  // Procura valor com R$/r$, com prefixo explícito ("custo", "valor", "preço", "por", "pago")
+  // ou número solto no final da linha (ex: listas de fornecedor "13 128gb 2200").
   let custo = 0;
-  const precoMatches = Array.from(l.matchAll(/(?:r\$|custo|por|valor|[:=])?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\b\d{3,6}\b)/gi));
-  if (precoMatches.length > 0) {
-    for (const m of precoMatches) {
-      const num = extrairNumeroValor(m[1]);
-      if (num >= 50 && num !== 32 && num !== 64 && num !== 128 && num !== 256 && num !== 512 && num !== 1024) {
-        if (!imei || !m[1].includes(imei)) {
-          custo = num;
-          break;
-        }
-      }
+  const matchComPrefixo = linhaTrabalho.match(/(?:r\$|custo|por|valor|pre[çc]o|pago)[:=\s]*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\b\d{3,6}\b)/i);
+  const matchComCentavos = linhaTrabalho.match(/\b(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\b/);
+  const matchNumeroSolto = linhaTrabalho.match(/(?:^|\s)(\d{3,5})(?:\s|$)/);
+
+  if (matchComPrefixo) {
+    const num = extrairNumeroValor(matchComPrefixo[1]);
+    if (num >= 50 && num !== 32 && num !== 64 && num !== 128 && num !== 256 && num !== 512 && num !== 1024) {
+      custo = num;
+      linhaTrabalho = linhaTrabalho.replace(matchComPrefixo[0], ' ');
+    }
+  } else if (matchComCentavos) {
+    const num = extrairNumeroValor(matchComCentavos[1]);
+    if (num >= 50) {
+      custo = num;
+      linhaTrabalho = linhaTrabalho.replace(matchComCentavos[0], ' ');
+    }
+  } else if (matchNumeroSolto) {
+    const num = extrairNumeroValor(matchNumeroSolto[1]);
+    if (num >= 50 && num !== 64 && num !== 128 && num !== 256 && num !== 512 && num !== 1024) {
+      custo = num;
+      linhaTrabalho = linhaTrabalho.replace(matchNumeroSolto[0], ' ');
     }
   }
 
   // 4. Cor (Detecta termos compostos, palavras simples e emojis de coração/fornecedor)
-  let cor: string | undefined;
-  const lLower = l.toLowerCase();
-
-  // 4.1. Cores compostas prioritárias
-  if (/\b(?:desert\s*titanium|tit[aâ]nio\s*deserto?|desert|deserto)\b/i.test(lLower)) {
-    cor = 'Desert';
-  } else if (/\b(?:natural\s*titanium|tit[aâ]nio\s*natural|natural)\b/i.test(lLower)) {
-    cor = 'Titânio Natural';
-  } else if (/\b(?:space\s*black|preto\s*espacial|tit[aâ]nio\s*preto|black\s*titanium)\b/i.test(lLower)) {
-    cor = 'Preto';
-  } else if (/\b(?:white\s*titanium|tit[aâ]nio\s*branco)\b/i.test(lLower)) {
-    cor = 'Branco';
-  } else if (/\b(?:blue\s*titanium|tit[aâ]nio\s*azul|sierra\s*blue|pacific\s*blue)\b/i.test(lLower)) {
-    cor = 'Azul';
-  } else if (/\b(?:meia\s*noite|meia-noite|midnight)\b/i.test(lLower)) {
-    cor = 'Meia-noite';
-  } else if (/\b(?:estelar|starlight)\b/i.test(lLower)) {
-    cor = 'Estelar';
-  } else if (/\b(?:space\s*gr[ae]y|cinza\s*espacial)\b/i.test(lLower)) {
-    cor = 'Cinza';
-  }
-
-  // 4.2. Busca por tokens de palavras simples
-  if (!cor) {
-    const tokens = lLower.split(/[\s,;-]+/);
-    for (const t of tokens) {
-      if (CORES_CONHECIDAS[t]) {
-        cor = CORES_CONHECIDAS[t];
-        break;
-      }
-    }
-  }
-
-  // 4.3. Detecta cor por emojis de fornecedor e corações do WhatsApp
-  if (!cor) {
-    if (l.includes('🖤') || l.includes('⚫') || l.includes('⬛')) cor = 'Preto';
-    else if (l.includes('🤍') || l.includes('⚪') || l.includes('⬜')) cor = 'Branco';
-    else if (l.includes('💙') || l.includes('🔵') || l.includes('🟦')) cor = 'Azul';
-    else if (l.includes('💛') || l.includes('🟡') || l.includes('🟨')) cor = 'Dourado';
-    else if (l.includes('❤️') || l.includes('🔴') || l.includes('🟥')) cor = 'Vermelho';
-    else if (l.includes('💜') || l.includes('🟣') || l.includes('🟪')) cor = 'Roxo';
-    else if (l.includes('💚') || l.includes('🟢') || l.includes('🟩')) cor = 'Verde';
-    else if (l.includes('🩷') || l.includes('🌸')) cor = 'Rosa';
-    else if (l.includes('🩶')) cor = 'Cinza';
-    else if (l.includes('🔘')) cor = 'Titânio Natural';
-    else if (l.includes('🏜️') || l.includes('🐪') || l.includes('🤎')) cor = 'Desert';
-  }
+  let cor = extrairCorDeTexto(linhaTrabalho) || extrairCorDeTexto(l);
 
   // 5. Modelo
-  let textoModelo = l
-    .replace(REGEX_IMEI, '')
-    .replace(REGEX_CAPACIDADE, '')
-    .replace(/\b(?:r\$|custo|por|valor|pre[çc]o|lacrado|seminovo|novo|usado|imei)\b/gi, '')
+  let textoModelo = linhaTrabalho
+    .replace(/(?:imei|serial|sn)[:\s=]*\d*/gi, ' ')
+    .replace(/\b(?:r\$|custo|por|valor|pre[çc]o|pago|lacrado|seminovo|novo|usado)\b/gi, ' ')
     .replace(/\b(?:desert\s*titanium|tit[aâ]nio\s*deserto?|natural\s*titanium|tit[aâ]nio\s*natural|space\s*black|space\s*gr[ae]y|meia\s*noite|meia-noite|starlight|estelar)\b/gi, ' ')
     .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
     .replace(/[•\-\*]/g, ' ')
@@ -276,12 +266,12 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
 
   if (cor) {
     textoModelo = textoModelo
-      .replace(new RegExp(`\\b${cor}\\b`, 'gi'), '')
+      .replace(new RegExp(`\\b${cor}\\b`, 'gi'), ' ')
       .replace(/\b(?:desert|deserto|natural|titanium|tit[aâ]nio|preto?|black|branco?|white|prata|silver|azul|blue|dourado?|gold|amarelo?|yellow|rosa|pink|roxo|purple|cinza|gr[ae]y|grafite|graphite)\b/gi, ' ');
   }
 
-  // Remove valores numéricos restantes maiores que 100
-  textoModelo = textoModelo.replace(/\b\d{3,6}\b/g, '').trim();
+  // Remove valores numéricos restantes
+  textoModelo = textoModelo.replace(/\b\d{3,}\b/g, '').trim();
 
   if (textoModelo.length < 2) return null;
 
@@ -311,10 +301,10 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
 export function ehMensagemDeEntradaEstoque(texto: string): boolean {
   const t = texto.trim().toLowerCase();
   if (t.startsWith('!entradas') || t.startsWith('!entrada') || t.startsWith('!importar')) return true;
-  if (/^entradas?:/i.test(t)) return true;
-  if (/^dar entradas?:/i.test(t)) return true;
-  if (/^cadastrar entradas?:/i.test(t)) return true;
-  if (/^entrada dos aparelhos:?/i.test(t)) return true;
+  if (/^entradas?\b/i.test(t)) return true;
+  if (/^dar entradas?\b/i.test(t)) return true;
+  if (/^cadastrar entradas?\b/i.test(t)) return true;
+  if (/^entrada dos aparelhos\b/i.test(t)) return true;
   if (/^chegou hoje:?/i.test(t)) return true;
   if (/^chegaram os aparelhos:?/i.test(t)) return true;
   return false;
@@ -330,7 +320,7 @@ export function parseTextoEntradaAparelhos(texto: string): ItemEntradaDetectado[
   // Remove o prefixo de gatilho
   let limpo = texto.trim()
     .replace(/^!(?:entradas?|importar)\s*/i, '')
-    .replace(/^(?:entradas?|dar entradas?|cadastrar entradas?|entrada dos aparelhos|chegou hoje|chegaram os aparelhos):?\s*/i, '');
+    .replace(/^(?:entradas?|dar entradas?|cadastrar entradas?|entrada dos aparelhos|chegou hoje|chegaram os aparelhos)[:\s]*/i, '');
 
   const resultados: ItemEntradaDetectado[] = [];
 
