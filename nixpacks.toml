@@ -1,0 +1,17 @@
+# Configuração do Nixpacks para o Coolify
+[phases.setup]
+nixPkgs = ["nodejs_20", "pnpm"]
+
+[phases.install]
+cmds = ["pnpm install --frozen-lockfile=false"]
+
+[phases.build]
+cmds = ["pnpm run build"]
+
+[start]
+cmd = "pnpm start"
+
+[variables]
+PORT = "3000"
+HOSTNAME = "0.0.0.0"
+NODE_ENV = "production"
