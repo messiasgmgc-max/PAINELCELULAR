@@ -60,8 +60,23 @@ export function AparelhoCard({
   const [expanded, setExpanded] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const custoNum = (aparelho as any).custo || 0;
-  const precoAtacadoNum = (aparelho as any).precoAtacado;
+  if (!aparelho) return null;
+
+  const precoNum = typeof aparelho.preco === 'number' && !isNaN(aparelho.preco)
+    ? aparelho.preco
+    : Number(String(aparelho.preco || '').replace(',', '.')) || 0;
+
+  const custoNum = typeof (aparelho as any)?.custo === 'number' && !isNaN((aparelho as any).custo)
+    ? (aparelho as any).custo
+    : Number(String((aparelho as any)?.custo || '').replace(',', '.')) || 0;
+
+  const rawAtacado = (aparelho as any)?.precoAtacado ?? (aparelho as any)?.preco_atacado;
+  const precoAtacadoNum = typeof rawAtacado === 'number' && !isNaN(rawAtacado)
+    ? rawAtacado
+    : rawAtacado !== undefined && rawAtacado !== null && rawAtacado !== ''
+    ? Number(String(rawAtacado).replace(',', '.'))
+    : undefined;
+
   const saudeBat = formatarSaudeBateria(aparelho);
   const dadosManut = extrairDadosManutencao(aparelho);
   const estaEmManutencao = dadosManut.emManutencao;
@@ -95,7 +110,7 @@ export function AparelhoCard({
         <div className="flex-1 min-w-0 pr-1">
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-xs sm:text-sm text-white truncate">
-              {aparelho.modelo}
+              {aparelho.modelo || 'Sem Modelo'}
             </span>
             {aparelho.capacidade && (
               <span className="text-[10px] font-semibold text-blue-400 px-1 py-0.2 bg-blue-950/60 rounded border border-blue-500/20 shrink-0">
@@ -124,7 +139,7 @@ export function AparelhoCard({
         <div className="flex items-center gap-2 shrink-0 text-right">
           <div>
             <div className="font-bold text-xs sm:text-sm text-emerald-400">
-              R$ {aparelho.preco.toFixed(2).replace(".", ",")}
+              R$ {precoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <span className={cn(
               "text-[9px] px-1.5 py-0.2 font-semibold rounded border block mt-0.5",
@@ -174,7 +189,7 @@ export function AparelhoCard({
 
           <div className="flex items-baseline gap-2 flex-wrap">
             <h4 className="font-extrabold text-sm sm:text-base text-white truncate max-w-[200px] sm:max-w-none">
-              {aparelho.modelo}
+              {aparelho.modelo || 'Sem Modelo'}
             </h4>
             <div className="flex items-center gap-1.5 text-xs text-slate-400 font-semibold truncate">
               {aparelho.capacidade && <span>{aparelho.capacidade}</span>}
@@ -188,7 +203,7 @@ export function AparelhoCard({
               ID/IMEI: {identificador}
             </span>
             <span className="font-extrabold text-sm text-emerald-400 ml-auto">
-              R$ {aparelho.preco.toFixed(2).replace(".", ",")}
+              R$ {precoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         </div>
@@ -204,13 +219,13 @@ export function AparelhoCard({
             {custoNum > 0 && (
               <div className="text-xs bg-slate-950/50 px-3 py-2 rounded-xl border border-slate-800/80">
                 <span className="text-[10px] text-slate-500 block">Custo</span>
-                <span className="font-semibold text-slate-300">R$ {custoNum.toFixed(2).replace(".", ",")}</span>
+                <span className="font-semibold text-slate-300">R$ {custoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             )}
-            {precoAtacadoNum ? (
+            {precoAtacadoNum !== undefined && !isNaN(precoAtacadoNum) && precoAtacadoNum > 0 ? (
               <div className="text-xs text-blue-300 bg-blue-500/10 px-3 py-2 rounded-xl border border-blue-500/30">
                 <span className="text-[10px] text-blue-400/80 block font-bold">Atacado</span>
-                <span className="font-bold">R$ {Number(precoAtacadoNum).toFixed(2).replace(".", ",")}</span>
+                <span className="font-bold">R$ {precoAtacadoNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             ) : null}
             {aparelho.observacoes && (

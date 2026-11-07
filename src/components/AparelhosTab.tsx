@@ -218,11 +218,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   };
 
   useEffect(() => {
-    const historicoSaidas = aparelhos
+    const historicoSaidas = (aparelhos || [])
       // Tudo que não está no estoque. Antes filtrava só ativo=false, e aparelho marcado como
       // vendido mas ainda ativo (conferência antiga) sumia do estoque E das saídas, sem como
       // devolver. Celular de cliente da OS nunca foi estoque: não é saída nem baixa.
-      .filter((aparelho: any) => !estaNoEstoque(aparelho) && !ehAparelhoDeCliente(aparelho))
+      .filter((aparelho: any) => aparelho && !estaNoEstoque(aparelho) && !ehAparelhoDeCliente(aparelho))
       .map((aparelho: any) => {
         const obs = String(aparelho.observacoes || '');
         const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
@@ -317,7 +317,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
   // Contagens por categoria e status de estoque
   const contagens = useMemo(() => {
-    const ativos = aparelhos.filter((a: any) => a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+    const lista = aparelhos || [];
+    const ativos = lista.filter((a: any) => a && a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
     const emManut = ativos.filter((a: any) => isAparelhoEmManutencao(a)).length;
     return {
       todos: ativos.length,
@@ -332,7 +333,9 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
   // Filtrar aparelhos ativos em estoque (excluindo vendidos e baixados)
   const aparelhosAtivos = useMemo(() => {
-    return aparelhos.filter((aparelho: any) => {
+    const lista = aparelhos || [];
+    return lista.filter((aparelho: any) => {
+      if (!aparelho) return false;
       // Exclui vendido e baixado, e tolera o legado condicao='vendido'.
       if (!estaNoEstoque(aparelho as any)) return false;
       if (categoriaFiltro !== 'todos') {
@@ -1506,7 +1509,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 </p>
               </div>
               <div class="card">
-                <p class="card-value">R$ ${aparelho.preco.toFixed(2).replace(".", ",")}</p>
+                <p class="card-title">Preço</p>
+                <p class="card-value">R$ ${(Number(aparelho.preco) || 0).toFixed(2).replace(".", ",")}</p>
               </div>
             </div>
 
@@ -2179,20 +2183,21 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 </p>
               </div>
             ) : (
-              aparelhosFiltrados.map((aparelho) => (
-                <AparelhoCard 
-                  key={aparelho.id}
-                  aparelho={aparelho}
-                  density={density}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  onPDF={handleGenerateCertificate}
-                  onVender={setAparelhoParaVenda}
-                  onManutencao={setAparelhoParaManutencao}
-                  onRetornoManutencao={setAparelhoParaRetorno}
-                />
-              ))
-
+              aparelhosFiltrados
+                .filter(Boolean)
+                .map((aparelho, idx) => (
+                  <AparelhoCard 
+                    key={aparelho.id || `ap-${idx}`}
+                    aparelho={aparelho}
+                    density={density}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onPDF={handleGenerateCertificate}
+                    onVender={setAparelhoParaVenda}
+                    onManutencao={setAparelhoParaManutencao}
+                    onRetornoManutencao={setAparelhoParaRetorno}
+                  />
+                ))
             )}
           </div>
 
