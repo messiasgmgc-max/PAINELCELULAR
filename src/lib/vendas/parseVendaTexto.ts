@@ -195,21 +195,35 @@ export function sanitizarECompletarVendaParsed(
   // 6. DETECÇÃO ROBUSTA DE UPGRADE / TROCA (TRADE-IN)
   // 6.1 Checkbox marcado específico: (X) Upgrade - Modelo: ... ou [X] Upgrade: ...
   const checkboxUpgradeMatch = trimmedText.match(
-    /(?:\((?:[Xx]|✔|✓)\)|\[(?:[Xx]|✔|✓)\])\s*Upgrade(?:\s*-\s*Modelo)?:\s*([^\n\r]+)/i
+    /(?:\((?:[Xx]|✔|✓)\)|\[(?:[Xx]|✔|✓)\])\s*(?:Upgrade|Troca)(?:\s*-\s*Modelo|\s*\/\s*Troca)?:\s*([^\n\r]+)/i
   );
 
   // 6.2 Linha de texto com modelo de troca
   const textoTrocaMatch =
     checkboxUpgradeMatch ||
     trimmedText.match(
-      /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo)?:\s*([^\n\r]+)/i
+      /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo|\s*\/\s*Troca)?:\s*([^\n\r]+)/i
     );
+
+  // Validação estrita se o texto capturado NÃO é apenas checkbox vazio ou negativa (ex: "( ) Outro:", "( ) Não", "-")
+  let conteudoTrocaValido = '';
+  if (textoTrocaMatch) {
+    const rawConteudo = textoTrocaMatch[1].trim();
+    const ehVazioOuNegativa =
+      /^(?:\(\s*\)|\[\s*\]|\(\s*\)\s*outro:?|\(\s*\)\s*n[aã]o:?|n[aã]o|nenhum|-|nao possui|sem troca)$/i.test(rawConteudo) ||
+      rawConteudo.length < 2;
+
+    if (!ehVazioOuNegativa) {
+      conteudoTrocaValido = rawConteudo;
+    }
+  }
 
   const ehTextoUpgrade =
     Boolean(checkboxUpgradeMatch) ||
-    /trade[- ]?in|upgrade|base de troca|na troca|deu na troca|pegou na troca|aparelho de entrada|entrada de um/i.test(
-      trimmedText
-    );
+    (Boolean(conteudoTrocaValido) &&
+      /trade[- ]?in|base de troca|na troca|deu na troca|pegou na troca|aparelho de entrada|entrada de um/i.test(
+        trimmedText
+      ));
 
   if (ehTextoUpgrade) {
     result.isUpgrade = true;
@@ -218,8 +232,8 @@ export function sanitizarECompletarVendaParsed(
     let valorTroca = 0;
     let capTroca = '';
 
-    if (textoTrocaMatch) {
-      const linhaTroca = textoTrocaMatch[1].trim();
+    if (textoTrocaMatch && conteudoTrocaValido) {
+      const linhaTroca = conteudoTrocaValido;
       // Valor da troca se houver explícito com R$
       const valMatch = linhaTroca.match(/R\$\s*([0-9.,]+)/i);
       if (valMatch) {
@@ -380,9 +394,16 @@ export function sanitizarECompletarVendaParsed(
       .replace(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei|serial|n[ºo°]\s*s[eé]rie):\s*#?[0-9A-Za-z]+/gi, '')
       .replace(/\b[0-9]{14,16}\b/g, '')
       .replace(/\b(\d+GB|\d+TB)\b/gi, '')
-      .replace(/\b(?:lacrado|novo|seminovo|usado)\b/gi, '')
+      .replace(/\b(?:,\s*)?(?:\d+\s*(?:gb|tb)\s*)?(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
+      .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
+      .replace(/\b(?:lacrado|novo|seminovo|usado|caixa\s*fechada)\b/gi, '')
+      .replace(/[,\s]+e\s*$/i, '')
+      .replace(/\s*,\s*e\s+/gi, ' ')
+      .replace(/\s+e\s*$/i, '')
+      .replace(/^[,\s-]+|[,\s-]+$/g, '')
       .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
       .replace(new RegExp(`\\b(?:${result.aparelho.cor || ''}|desert|deserto|natural|titanium|tit[aâ]nio|preto|branco|azul|dourado|rosa|verde|roxo|cinza)\\b`, 'gi'), '')
+      .replace(/\s+/g, ' ')
       .trim();
 
     if (modNome) {

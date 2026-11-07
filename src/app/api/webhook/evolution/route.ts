@@ -32,6 +32,7 @@ import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { ehMensagemDeEntradaEstoque } from './entradaInteligente';
+import { formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 import {
   detectarFormularioOuPedidoVenda,
   cruzarAparelhoComEstoque,
@@ -40,6 +41,10 @@ import {
   interpretarTextoCorrecaoVenda,
   salvarPropostaNotinha,
   emitirNotinhaVenda,
+  limparNomeModelo,
+  salvarFotoRecente,
+  buscarFotoRecente,
+  limparFotoRecente,
   type PropostaNotinha,
 } from './notinhaAutomatica';
 
@@ -1348,7 +1353,10 @@ ${comparativoBateria ? comparativoBateria + '\n' : ''}
 • *Preço na Etiqueta:* ${precoSugerido}
 • *Código da Etiqueta:* ${codigoEtiqueta || 'N/A'}
 
-📥 *Deseja dar entrada desse aparelho no sistema?*
+💡 *Vai emitir uma venda ou notinha?*
+Envie o formulário do pedido em seguida que eu vinculo o IMEI lido automaticamente!
+
+📥 *Ou deseja dar entrada desse aparelho no sistema?*
 Basta responder:
 \`!cadastrar ${modFmt} ${capFmt} ${imeiFmt} ${precoLido || ''}\`
 e eu cadastro no estoque da loja instantaneamente!`.trim();
@@ -2335,6 +2343,37 @@ export async function POST(request: Request) {
               nomeUsuario || pushName || 'Equipe'
             );
 
+            // Disparo automático do Recibo Digital para o WhatsApp do cliente se houver telefone
+            if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
+              const telLimpo = formatarTelefoneWhatsApp(propostaPendente.telefone);
+              if (telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000')) {
+                const destinoCliente = `${telLimpo}@s.whatsapp.net`;
+                const primeiroNomeCli = (propostaPendente.clienteNome || 'Cliente').trim().split(/\s+/)[0];
+
+                let nomeDaLoja = 'Nossa Loja';
+                if (lojaEfetivaId) {
+                  const { data: lojaDb } = await supabase.from('lojas').select('nome').eq('id', lojaEfetivaId).maybeSingle();
+                  if (lojaDb?.nome) nomeDaLoja = lojaDb.nome;
+                }
+
+                const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Guarde este link, ele é o comprovante oficial da sua garantia!_ 📱✨`;
+
+                try {
+                  await enviarMensagemWhatsApp(instanceName, destinoCliente, msgReciboCliente);
+                  resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital enviado para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
+
+                  await supabase.from('whatsapp_logs').insert({
+                    loja_id: lojaEfetivaId,
+                    contato: `${propostaPendente.clienteNome} (${propostaPendente.telefone})`,
+                    mensagem: `[RECIBO_WHATSAPP] Recibo digital enviado para o cliente: ${resultadoEmissao.linkRecibo}`,
+                    created_at: new Date().toISOString(),
+                  });
+                } catch (errZapCli) {
+                  console.warn('Erro ao disparar recibo para o WhatsApp do cliente:', errZapCli);
+                }
+              }
+            }
+
             await editarOuResponderMensagemWhatsApp(
               instanceName,
               targetDestination,
@@ -2436,6 +2475,18 @@ export async function POST(request: Request) {
             const modeloLido = visionData.modelo ? String(visionData.modelo).trim() : null;
             const capLida = visionData.capacidade ? String(visionData.capacidade).trim() : null;
             const corLida = visionData.cor ? String(visionData.cor).trim() : null;
+
+            // Salva no buffer de fotos recentes para vincular automaticamente com formulários de pedido/venda
+            if (lojaId && (imeiLido || modeloLido)) {
+              await salvarFotoRecente(supabase, lojaId, remoteJid, authorPhone, {
+                imei: imeiLido,
+                modelo: modeloLido,
+                capacidade: capLida,
+                cor: corLida,
+                pushName,
+                timestamp: Date.now(),
+              });
+            }
 
             // ── CASO 1: A foto foi enviada junto com formulário de pedido / venda ──
             if (vendaDetectadaNaFoto && lojaId) {
@@ -2754,6 +2805,38 @@ export async function POST(request: Request) {
             propostaPendente,
             nomeUsuario || pushName || 'Equipe'
           );
+
+          // Disparo automático do Recibo Digital para o WhatsApp do cliente se houver telefone
+          if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
+            const telLimpo = formatarTelefoneWhatsApp(propostaPendente.telefone);
+            if (telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000')) {
+              const destinoCliente = `${telLimpo}@s.whatsapp.net`;
+              const primeiroNomeCli = (propostaPendente.clienteNome || 'Cliente').trim().split(/\s+/)[0];
+
+              let nomeDaLoja = 'Nossa Loja';
+              if (lojaEfetivaId) {
+                const { data: lojaDb } = await supabase.from('lojas').select('nome').eq('id', lojaEfetivaId).maybeSingle();
+                if (lojaDb?.nome) nomeDaLoja = lojaDb.nome;
+              }
+
+              const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Guarde este link, ele é o comprovante oficial da sua garantia!_ 📱✨`;
+
+              try {
+                await enviarMensagemWhatsApp(instanceName, destinoCliente, msgReciboCliente);
+                resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital enviado para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
+
+                await supabase.from('whatsapp_logs').insert({
+                  loja_id: lojaEfetivaId,
+                  contato: `${propostaPendente.clienteNome} (${propostaPendente.telefone})`,
+                  mensagem: `[RECIBO_WHATSAPP] Recibo digital enviado para o cliente: ${resultadoEmissao.linkRecibo}`,
+                  created_at: new Date().toISOString(),
+                });
+              } catch (errZapCli) {
+                console.warn('Erro ao disparar recibo para o WhatsApp do cliente:', errZapCli);
+              }
+            }
+          }
+
           await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoEmissao.mensagem);
           return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
         } else {
@@ -2831,6 +2914,29 @@ export async function POST(request: Request) {
     // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA) ──
     const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
     if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal) && lojaId) {
+      // 1. Verifica se há foto da caixa/etiqueta lida recentemente no buffer (últimos 5 minutos)
+      let imeiFotoVinculada: string | null = null;
+      if (!vendaDetectada.aparelho?.imei) {
+        const fotoRecente = await buscarFotoRecente(
+          supabase,
+          lojaId,
+          remoteJid,
+          authorPhone,
+          vendaDetectada.aparelho?.modelo
+        );
+        if (fotoRecente?.imei) {
+          imeiFotoVinculada = fotoRecente.imei;
+          vendaDetectada.aparelho.imei = fotoRecente.imei;
+          if (!vendaDetectada.aparelho.cor && fotoRecente.cor) {
+            vendaDetectada.aparelho.cor = fotoRecente.cor;
+          }
+          if (!vendaDetectada.aparelho.capacidade && fotoRecente.capacidade) {
+            vendaDetectada.aparelho.capacidade = fotoRecente.capacidade;
+          }
+          await limparFotoRecente(supabase, remoteJid, authorPhone);
+        }
+      }
+
       // Busca estoque para conferir e bater aparelho de saída com venda
       const { data: apsEstoque } = await supabase
         .from('aparelhos')
@@ -2868,7 +2974,10 @@ export async function POST(request: Request) {
         vendedor: pushName,
       };
 
-      const msgPrevia = formatarMensagemPreviaNotinha(proposta);
+      const msgPrevia =
+        (imeiFotoVinculada
+          ? `📸 *Foto da caixa associada:* IMEI \`${imeiFotoVinculada}\` vinculado automaticamente da foto enviada há pouco!\n\n`
+          : '') + formatarMensagemPreviaNotinha(proposta);
       const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
       if (envio.messageId) {
         await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
@@ -3193,37 +3302,76 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
 
       const partes = textContent.trim().split(/\s+/);
       if (partes.length < 3) {
-        const msgErro = `⚠️ *Formato de cadastro incompleto!*\nUse: *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]*\nExemplo: *!cadastrar iPhone 13 128GB 356829104829102 2800*`;
+        const msgErro = `⚠️ *Formato de cadastro incompleto!*\nUse: *!cadastrar [Modelo] [Capacidade] [IMEI] [Preço]*\nExemplo: *!cadastrar POCO F8 Pro 512GB 868972083436361* ou *!cadastrar iPhone 13 128GB 356829104829102 2800*`;
         await enviarMensagemWhatsApp(instanceName, targetDestination, msgErro);
         return NextResponse.json({ status: 'ok' }, { status: 200 });
       }
 
-      let precoCad = 0;
-      const ultimo = partes[partes.length - 1].replace(/[^\d.,]/g, '').replace(',', '.');
-      if (!isNaN(parseFloat(ultimo))) {
-        precoCad = parseFloat(ultimo);
-        partes.pop();
-      }
-
+      // Extração robusta dos parâmetros de !cadastrar
       let imeiCad = '';
-      const penultimo = partes[partes.length - 1].replace(/\D/g, '');
-      if (penultimo.length >= 8) {
-        imeiCad = penultimo;
-        partes.pop();
-      }
-
+      let precoCad = 0;
       let capCad = '128GB';
-      const antepenultimo = partes[partes.length - 1];
-      if (/^\d+\s*(?:gb|tb)$/i.test(antepenultimo)) {
-        capCad = antepenultimo.toUpperCase();
-        partes.pop();
+      let capEncontrada = false;
+
+      const tokens = partes.slice(1); // descarta "!cadastrar"
+      const tokensModelo: string[] = [];
+
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i];
+        const apenasDigitos = tok.replace(/\D/g, '');
+
+        // Token de Capacidade (ex: 64GB, 128GB, 256GB, 512GB, 1TB)
+        if (/^\d+\s*(?:gb|tb)$/i.test(tok) && !capEncontrada) {
+          capCad = tok.toUpperCase();
+          capEncontrada = true;
+          continue;
+        }
+
+        // Token de IMEI: qualquer sequência de 11 a 18 dígitos numéricos é SEMPRE IMEI, nunca preço!
+        if (apenasDigitos.length >= 11 && apenasDigitos.length <= 18 && !imeiCad) {
+          imeiCad = apenasDigitos;
+          continue;
+        }
+
+        // Token de Preço: valor razoável (< 100.000) com formatação monetária ou se for o último token
+        const limpoPreco = tok.replace(/[^\d.,]/g, '').replace(',', '.');
+        const numPreco = parseFloat(limpoPreco);
+        if (
+          !isNaN(numPreco) &&
+          numPreco > 0 &&
+          numPreco < 100000 &&
+          (tok.toLowerCase().includes('r$') || i === tokens.length - 1) &&
+          apenasDigitos.length < 10 &&
+          precoCad === 0
+        ) {
+          precoCad = numPreco;
+          continue;
+        }
+
+        tokensModelo.push(tok);
       }
 
-      const modeloCad = partes.slice(1).join(' ').trim() || 'iPhone';
+      let modeloCad = tokensModelo.join(' ').trim() || 'Smartphone';
+      modeloCad = limparNomeModelo(modeloCad);
+
+      // Marca inteligente baseada no modelo
+      let marcaCad = 'Smartphone';
+      const modUpper = modeloCad.toUpperCase();
+      if (modUpper.includes('IPHONE') || modUpper.includes('APPLE')) {
+        marcaCad = 'Apple';
+      } else if (modUpper.includes('POCO') || modUpper.includes('REDMI') || modUpper.includes('XIAOMI')) {
+        marcaCad = 'Xiaomi';
+      } else if (modUpper.includes('SAMSUNG') || modUpper.includes('GALAXY')) {
+        marcaCad = 'Samsung';
+      } else if (modUpper.includes('MOTOROLA') || modUpper.includes('MOTO')) {
+        marcaCad = 'Motorola';
+      } else if (modUpper.includes('REALME')) {
+        marcaCad = 'Realme';
+      }
 
       const novoAparelho = {
         loja_id: lojaId,
-        marca: modeloCad.toUpperCase().includes('IPHONE') ? 'Apple' : 'Smartphone',
+        marca: marcaCad,
         modelo: modeloCad,
         capacidade: capCad,
         imei: imeiCad || null,

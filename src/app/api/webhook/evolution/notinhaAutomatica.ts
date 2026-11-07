@@ -57,16 +57,22 @@ export interface PropostaNotinha {
 const digitos = (val: unknown) => String(val ?? '').replace(/\D/g, '');
 
 /**
- * Limpa palavras parasitas do nome do modelo (como "imei", "lacrado", capacidade, cor)
+ * Limpa palavras parasitas do nome do modelo (como "imei", "lacrado", capacidade, cor, menções a RAM e memória)
  */
 export function limparNomeModelo(m: string): string {
   let limpo = (m || '').trim();
-  // Remove menção a imei, lacrado, seminovo, gb, cores comuns
+  // Remove menção a imei, serial, lacrado, seminovo, gb, cores comuns, fragmentos de RAM/memória
   limpo = limpo
     .replace(/\bimei\b.*$/i, '')
-    .replace(/\b(?:lacrado|seminovo|novo|usado)\b/gi, '')
+    .replace(/\b(?:lacrado|seminovo|novo|usado|caixa\s*fechada)\b/gi, '')
     .replace(/\b\d+\s*(?:gb|tb)\b/gi, '')
-    .replace(/\b(?:preto|branco|azul|dourado|prata|verde|roxo|cinza|grafite|tit[aâ]nio|rose|amarelo|vermelho|natural|black|white|blue|gold|silver|green|purple|gray|graphite|titanium)\b/gi, '')
+    .replace(/\b(?:,\s*)?(?:\d+\s*(?:gb|tb)\s*)?(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
+    .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
+    .replace(/\b(?:preto|branco|azul|dourado|prata|verde|roxo|cinza|grafite|tit[aâ]nio|rose|amarelo|vermelho|natural|black|white|blue|gold|silver|green|purple|gray|graphite|titanium|desert|deserto)\b/gi, '')
+    .replace(/[,\s]+e\s*$/i, '')
+    .replace(/\s*,\s*e\s+/gi, ' ')
+    .replace(/\s+e\s*$/i, '')
+    .replace(/^[,\s-]+|[,\s-]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -415,15 +421,77 @@ export async function emitirNotinhaVenda(
   lojaId: string,
   proposta: PropostaNotinha,
   usuarioNome: string = 'Bot WhatsApp'
-): Promise<{ sucesso: boolean; mensagem: string; vendaId?: string }> {
+): Promise<{ sucesso: boolean; mensagem: string; vendaId?: string; linkRecibo?: string }> {
   try {
     const agora = new Date().toISOString();
     const descricao = `Venda WhatsApp - ${proposta.modelo} para ${proposta.clienteNome}`;
 
+    // 1. Cadastra ou atualiza o cliente na base de dados da loja
+    let clienteId: string | undefined = undefined;
+    const nomeClienteLimpo = (proposta.clienteNome || '').trim();
+    const cpfLimpo = (proposta.cpf || '').replace(/\D/g, '');
+    const telLimpo = (proposta.telefone || '').replace(/\D/g, '');
+
+    if (nomeClienteLimpo) {
+      try {
+        let queryBusca = supabase
+          .from('clientes')
+          .select('id, nome, cpf, telefone, email, endereco')
+          .eq('loja_id', lojaId);
+
+        if (cpfLimpo && cpfLimpo.length >= 11) {
+          queryBusca = queryBusca.eq('cpf', proposta.cpf?.trim());
+        } else if (telLimpo && telLimpo.length >= 8) {
+          queryBusca = queryBusca.ilike('telefone', `%${telLimpo.slice(-8)}%`);
+        } else {
+          queryBusca = queryBusca.ilike('nome', nomeClienteLimpo);
+        }
+
+        const { data: clientesEncontrados } = await queryBusca.limit(1);
+        const clienteExistente = clientesEncontrados?.[0];
+
+        if (clienteExistente) {
+          clienteId = clienteExistente.id;
+          const updates: Record<string, any> = {};
+          if (!clienteExistente.cpf && proposta.cpf) updates.cpf = proposta.cpf.trim();
+          if (!clienteExistente.telefone && proposta.telefone) updates.telefone = proposta.telefone.trim();
+          if (!clienteExistente.email && proposta.email) updates.email = proposta.email.trim();
+          if (!clienteExistente.endereco && proposta.enderecoEntrega) updates.endereco = proposta.enderecoEntrega.trim();
+
+          if (Object.keys(updates).length > 0) {
+            await supabase.from('clientes').update(updates).eq('id', clienteId);
+          }
+        } else {
+          const { data: novoCli } = await supabase
+            .from('clientes')
+            .insert({
+              loja_id: lojaId,
+              nome: nomeClienteLimpo,
+              cpf: proposta.cpf ? proposta.cpf.trim() : null,
+              telefone: proposta.telefone ? proposta.telefone.trim() : '',
+              email: proposta.email ? proposta.email.trim() : '',
+              endereco: proposta.enderecoEntrega ? proposta.enderecoEntrega.trim() : null,
+              ativo: true,
+              dataCadastro: agora,
+            })
+            .select('id')
+            .single();
+
+          if (novoCli?.id) {
+            clienteId = novoCli.id;
+          }
+        }
+      } catch (errCli) {
+        console.warn('[Notinha Automática] Falha ao processar cadastro de cliente:', errCli);
+      }
+    }
+
     const registroVenda = {
       loja_id: lojaId,
+      clienteId: clienteId || undefined,
       clienteNome: proposta.clienteNome,
       cpf: proposta.cpf || null,
+      telefone: proposta.telefone || null,
       valor: proposta.valorTotal,
       custo: proposta.custo || 0,
       lucro: (proposta.valorTotal || 0) - (proposta.custo || 0),
@@ -482,7 +550,10 @@ export async function emitirNotinhaVenda(
       usuarioNome,
     });
 
-    const vendaId = resultado.venda?.id ? String(resultado.venda.id).slice(0, 8).toUpperCase() : 'OK';
+    const vendaUuid = resultado.venda?.id ? String(resultado.venda.id) : '';
+    const vendaId = vendaUuid ? vendaUuid.slice(0, 8).toUpperCase() : 'OK';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://painelcelular.com.br';
+    const linkRecibo = vendaUuid ? `${baseUrl}/recibo/${vendaUuid}` : '';
 
     const msgSucesso = `✅ *NOTINHA EMITIDA COM SUCESSO!* 🧾\n` +
       `──────────────────────────\n` +
@@ -491,7 +562,8 @@ export async function emitirNotinhaVenda(
       `📱 *Aparelho:* ${proposta.modelo}\n` +
       `💰 *Valor:* R$ ${Number(proposta.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
       `📦 *Estoque:* Baixa realizada com sucesso no sistema!\n` +
-      (proposta.isUpgrade ? `🔄 *Troca recebida:* ${proposta.modeloTroca}\n` : '') +
+      (proposta.isUpgrade && proposta.modeloTroca ? `🔄 *Troca recebida:* ${proposta.modeloTroca}\n` : '') +
+      (linkRecibo ? `🔗 *Recibo Digital:* ${linkRecibo}\n` : '') +
       `──────────────────────────\n` +
       `_Venda registrada e auditada no Phone Center!_`;
 
@@ -499,6 +571,7 @@ export async function emitirNotinhaVenda(
       sucesso: true,
       mensagem: sanitizarTextoWhatsApp(msgSucesso),
       vendaId,
+      linkRecibo,
     };
   } catch (err: any) {
     console.error('❌ Falha ao emitir notinha automática:', err);
@@ -515,3 +588,155 @@ export async function emitirNotinhaVenda(
     };
   }
 }
+
+// ── BUFFER INTELIGENTE DE FOTO RECENTE (IA VISION + FORMULÁRIO DE VENDA) ──
+
+export interface FotoRecenteCache {
+  imei?: string | null;
+  modelo?: string | null;
+  capacidade?: string | null;
+  cor?: string | null;
+  pushName?: string;
+  timestamp: number;
+}
+
+/**
+ * Compara se dois nomes de modelo referem-se ao mesmo aparelho
+ * (ex: 'POCO F8 Pro 512GB' e 'POCO F8 Pro' -> compatíveis; 'iPhone 16 Pro' e 'S24' -> incompatíveis)
+ */
+export function modelosSaoCompativeis(modeloA?: string | null, modeloB?: string | null): boolean {
+  if (!modeloA || !modeloB) return true;
+  const limpa = (str: string) =>
+    str
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, ' ')
+      .replace(/\b(xiaomi|apple|iphone|ipad|samsung|galaxy|motorola|moto|realme|smartphone)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const a = limpa(modeloA);
+  const b = limpa(modeloB);
+
+  if (!a || !b) return true;
+  if (a.includes(b) || b.includes(a)) return true;
+
+  // Se ambos têm tokens numéricos de geração (ex: '13' vs '15', 'f8' vs 'f8'), os números devem coincidir
+  const digA = a.split(' ').filter((t) => /\d/.test(t) && !/^\d+(?:gb|tb)$/.test(t));
+  const digB = b.split(' ').filter((t) => /\d/.test(t) && !/^\d+(?:gb|tb)$/.test(t));
+  if (digA.length > 0 && digB.length > 0) {
+    const temDigComum = digA.some((da) => digB.includes(da));
+    if (!temDigComum) return false;
+  }
+
+  const tokensA = a.split(' ').filter((t) => t.length >= 2);
+  const tokensB = b.split(' ').filter((t) => t.length >= 2);
+
+  return tokensA.some((tok) => tokensB.includes(tok));
+}
+
+export async function salvarFotoRecente(
+  supabase: SupabaseClient,
+  lojaId: string,
+  remoteJid: string,
+  authorPhone: string,
+  dados: FotoRecenteCache
+): Promise<void> {
+  const agora = Date.now();
+  const expiraEm = new Date(agora + 5 * 60 * 1000).toISOString();
+
+  try {
+    const payload = {
+      tipo: 'foto_recente',
+      action: 'vincular_foto',
+      loja_id: lojaId,
+      params: dados,
+      resumo: `Foto recente: ${dados.modelo || 'Smartphone'} (IMEI: ${dados.imei || 'N/A'})`,
+      criado_em: new Date(agora).toISOString(),
+      expira_em: expiraEm,
+    };
+
+    if (authorPhone) {
+      await supabase.from('whatsapp_acoes_pendentes').upsert(
+        { ...payload, chave: `foto_recente:${remoteJid}:${authorPhone}` },
+        { onConflict: 'chave' }
+      );
+    }
+
+    await supabase.from('whatsapp_acoes_pendentes').upsert(
+      { ...payload, chave: `foto_recente:${remoteJid}:ultima` },
+      { onConflict: 'chave' }
+    );
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao salvar foto recente no buffer:', err);
+  }
+}
+
+/**
+ * Busca no buffer recente se há foto compatível enviada pelo mesmo remetente ou no chat nos últimos 5 minutos
+ */
+export async function buscarFotoRecente(
+  supabase: SupabaseClient,
+  lojaId: string,
+  remoteJid: string,
+  authorPhone: string,
+  modeloDesejado?: string | null
+): Promise<FotoRecenteCache | null> {
+  try {
+    const chaves = [
+      ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+      `foto_recente:${remoteJid}:ultima`,
+    ];
+
+    const { data: pendentes } = await supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('*')
+      .in('chave', chaves)
+      .order('criado_em', { ascending: false })
+      .limit(2);
+
+    if (!pendentes || pendentes.length === 0) return null;
+
+    const agora = Date.now();
+    for (const item of pendentes) {
+      const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
+      if (agora - criado > 5 * 60 * 1000) continue;
+
+      const foto = item.params as FotoRecenteCache;
+      if (!foto) continue;
+
+      if (modeloDesejado && foto.modelo) {
+        if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
+          continue;
+        }
+      }
+
+      return foto;
+    }
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao buscar foto recente no buffer:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Limpa o buffer de foto recente após o formulário consumi-lo com sucesso
+ */
+export async function limparFotoRecente(
+  supabase: SupabaseClient,
+  remoteJid: string,
+  authorPhone: string
+): Promise<void> {
+  try {
+    const chaves = [
+      ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+      `foto_recente:${remoteJid}:ultima`,
+    ];
+    await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chaves);
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao limpar foto recente:', err);
+  }
+}
+

@@ -6,6 +6,8 @@ import {
   interpretarReacaoNotinha,
   interpretarTextoCorrecaoVenda,
   cruzarAparelhoComEstoque,
+  limparNomeModelo,
+  modelosSaoCompativeis,
   type PropostaNotinha,
 } from './notinhaAutomatica';
 
@@ -150,3 +152,41 @@ test('interpretarTextoCorrecaoVenda atualiza campos específicos', () => {
   assert.equal(correcaoImei?.campo, 'imei');
   assert.equal(correcaoImei?.valor, '350015753668064');
 });
+
+test('limparNomeModelo higieniza menções a RAM, memória e conjunções residuais', () => {
+  assert.equal(limparNomeModelo('POCO F8 Pro, 12GB de RAM e 512GB de memória'), 'POCO F8 Pro');
+  assert.equal(limparNomeModelo('Xiaomi POCO F8 Pro, 12GB de RAM e 512GB de memória'), 'Xiaomi POCO F8 Pro');
+  assert.equal(limparNomeModelo('iPhone 16 Pro 256GB Desert lacrado'), 'iPhone 16 Pro');
+  assert.equal(limparNomeModelo('Samsung S24 Ultra 512GB cinza seminovo'), 'Samsung S24 Ultra');
+});
+
+test('modelosSaoCompativeis valida compatibilidade para buffer de fotos', () => {
+  assert.equal(modelosSaoCompativeis('POCO F8 Pro 512GB', 'POCO F8 Pro'), true);
+  assert.equal(modelosSaoCompativeis('iPhone 16 Pro', '16 Pro'), true);
+  assert.equal(modelosSaoCompativeis('Xiaomi POCO F8 Pro', 'POCO F8 Pro'), true);
+  assert.equal(modelosSaoCompativeis('iPhone 16 Pro', 'Galaxy S24 Ultra'), false);
+  assert.equal(modelosSaoCompativeis('iPhone 13', 'iPhone 15 Pro Max'), false);
+});
+
+test('detectarFormularioOuPedidoVenda ignora checkbox vazio de Upgrade / Troca', () => {
+  const textoMarlon = `👤 DADOS PESSOAIS
+Nome: Marlon Vitor da Rocha
+CPF: 073.647.106-55
+Telefone: 31988887777
+
+💳 FORMA DE PAGAMENTO
+Valor total: 4.999,99
+cartao_credito
+Upgrade / Troca: ( ) Outro:
+
+Modelo: POCO F8 Pro, 12GB de RAM e 512GB de memória`;
+
+  const parsed = detectarFormularioOuPedidoVenda(textoMarlon);
+  assert.ok(parsed);
+  assert.equal(parsed.isUpgrade, false);
+  assert.equal(parsed.tradeIn, null);
+  assert.ok(parsed.aparelho.modelo?.includes('POCO F8 Pro'));
+  assert.ok(!parsed.aparelho.modelo?.includes('de RAM'));
+  assert.ok(!parsed.aparelho.modelo?.includes('de memória'));
+});
+
