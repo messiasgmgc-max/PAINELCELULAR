@@ -209,6 +209,58 @@ async function enviarMensagemWhatsApp(instanceName: string, destination: string,
   return res.ok;
 }
 
+// ── AUXILIAR: Enviar Documento/PDF via Evolution API ──
+async function enviarDocumentoWhatsAppDestino(
+  instanceName: string,
+  destination: string,
+  base64: string,
+  fileName: string,
+  caption?: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!EVOLUTION_URL || !EVOLUTION_API_KEY) {
+    console.warn('⚠️ EVOLUTION_API_URL ou EVOLUTION_API_KEY não configurados no .env.local');
+    return { ok: false, error: 'Evolution API não configurada' };
+  }
+
+  const isGroup = destination.endsWith('@g.us');
+  const normDest = normalizarTelefoneOuLid(destination);
+  const cleanDestination = isGroup ? destination : normDest.replace(/\D/g, '');
+  if (!cleanDestination) return { ok: false, error: 'Destino inválido' };
+
+  const targetInstance = instanceName || DEFAULT_INSTANCE;
+  const endpoint = `${EVOLUTION_URL}/message/sendMedia/${targetInstance}`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        number: cleanDestination,
+        mediatype: 'document',
+        mimetype: 'application/pdf',
+        fileName: fileName || 'Recibo.pdf',
+        caption: caption ? sanitizarTextoWhatsApp(caption) : '',
+        media: base64,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn(`[Evolution API] Falha ao enviar documento para ${cleanDestination}:`, errText);
+      return { ok: false, error: errText };
+    }
+
+    console.log(`✅ Documento PDF "${fileName}" enviado com sucesso para ${cleanDestination} via "${targetInstance}"`);
+    return { ok: true };
+  } catch (err: any) {
+    console.error('❌ Falha ao enviar documento via Evolution API:', err?.message || err);
+    return { ok: false, error: err?.message };
+  }
+}
+
 // ── AUXILIAR: Editar Mensagem Original ou Enviar como Resposta ──
 async function editarOuResponderMensagemWhatsApp(
   instanceName: string,
@@ -2343,7 +2395,7 @@ export async function POST(request: Request) {
               nomeUsuario || pushName || 'Equipe'
             );
 
-            // Disparo automático do Recibo Digital para o WhatsApp do cliente se houver telefone
+            // Disparo automático do Recibo Digital e PDF para o WhatsApp do cliente se houver telefone
             if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
               const telLimpo = formatarTelefoneWhatsApp(propostaPendente.telefone);
               if (telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000')) {
@@ -2356,16 +2408,28 @@ export async function POST(request: Request) {
                   if (lojaDb?.nome) nomeDaLoja = lojaDb.nome;
                 }
 
-                const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Guarde este link, ele é o comprovante oficial da sua garantia!_ 📱✨`;
+                const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Segue em anexo o arquivo PDF oficial do seu recibo e termo de garantia!_ 📱✨`;
 
                 try {
                   await enviarMensagemWhatsApp(instanceName, destinoCliente, msgReciboCliente);
-                  resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital enviado para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
+
+                  // Envia PDF em anexo para o cliente
+                  if (resultadoEmissao.pdfBase64) {
+                    await enviarDocumentoWhatsAppDestino(
+                      instanceName,
+                      destinoCliente,
+                      resultadoEmissao.pdfBase64,
+                      resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
+                      `📄 Recibo de Compra e Termo de Garantia - ${nomeDaLoja}`
+                    );
+                  }
+
+                  resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital e PDF enviados para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
 
                   await supabase.from('whatsapp_logs').insert({
                     loja_id: lojaEfetivaId,
                     contato: `${propostaPendente.clienteNome} (${propostaPendente.telefone})`,
-                    mensagem: `[RECIBO_WHATSAPP] Recibo digital enviado para o cliente: ${resultadoEmissao.linkRecibo}`,
+                    mensagem: `[RECIBO_WHATSAPP] Recibo e PDF enviados para o cliente: ${resultadoEmissao.linkRecibo}`,
                     created_at: new Date().toISOString(),
                   });
                 } catch (errZapCli) {
@@ -2380,6 +2444,17 @@ export async function POST(request: Request) {
               idMensagemReagida,
               resultadoEmissao.mensagem
             );
+
+            // Envia o PDF da compra diretamente para o chat/grupo para impressão imediata da equipe
+            if (resultadoEmissao.sucesso && resultadoEmissao.pdfBase64) {
+              await enviarDocumentoWhatsAppDestino(
+                instanceName,
+                targetDestination,
+                resultadoEmissao.pdfBase64,
+                resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
+                `🖨️ *PDF da Compra #${resultadoEmissao.vendaId} gerado com sucesso!* Pronto para impressão na loja.`
+              );
+            }
 
             return NextResponse.json({
               status: resultadoEmissao.sucesso ? 'ok' : 'error',
@@ -2806,7 +2881,7 @@ export async function POST(request: Request) {
             nomeUsuario || pushName || 'Equipe'
           );
 
-          // Disparo automático do Recibo Digital para o WhatsApp do cliente se houver telefone
+          // Disparo automático do Recibo Digital e PDF para o WhatsApp do cliente se houver telefone
           if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
             const telLimpo = formatarTelefoneWhatsApp(propostaPendente.telefone);
             if (telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000')) {
@@ -2819,16 +2894,28 @@ export async function POST(request: Request) {
                 if (lojaDb?.nome) nomeDaLoja = lojaDb.nome;
               }
 
-              const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Guarde este link, ele é o comprovante oficial da sua garantia!_ 📱✨`;
+              const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Segue em anexo o arquivo PDF oficial do seu recibo e termo de garantia!_ 📱✨`;
 
               try {
                 await enviarMensagemWhatsApp(instanceName, destinoCliente, msgReciboCliente);
-                resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital enviado para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
+
+                // Envia PDF em anexo para o cliente
+                if (resultadoEmissao.pdfBase64) {
+                  await enviarDocumentoWhatsAppDestino(
+                    instanceName,
+                    destinoCliente,
+                    resultadoEmissao.pdfBase64,
+                    resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
+                    `📄 Recibo de Compra e Termo de Garantia - ${nomeDaLoja}`
+                  );
+                }
+
+                resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital e PDF enviados para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
 
                 await supabase.from('whatsapp_logs').insert({
                   loja_id: lojaEfetivaId,
                   contato: `${propostaPendente.clienteNome} (${propostaPendente.telefone})`,
-                  mensagem: `[RECIBO_WHATSAPP] Recibo digital enviado para o cliente: ${resultadoEmissao.linkRecibo}`,
+                  mensagem: `[RECIBO_WHATSAPP] Recibo e PDF enviados para o cliente: ${resultadoEmissao.linkRecibo}`,
                   created_at: new Date().toISOString(),
                 });
               } catch (errZapCli) {
@@ -2838,6 +2925,18 @@ export async function POST(request: Request) {
           }
 
           await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoEmissao.mensagem);
+
+          // Envia o PDF da compra diretamente para o chat/grupo para impressão imediata da equipe
+          if (resultadoEmissao.sucesso && resultadoEmissao.pdfBase64) {
+            await enviarDocumentoWhatsAppDestino(
+              instanceName,
+              targetDestination,
+              resultadoEmissao.pdfBase64,
+              resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
+              `🖨️ *PDF da Compra #${resultadoEmissao.vendaId} gerado com sucesso!* Pronto para impressão na loja.`
+            );
+          }
+
           return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
         } else {
           await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ *Emissão da notinha cancelada por ${pushName}.*`);

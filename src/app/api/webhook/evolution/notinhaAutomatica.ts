@@ -1,3 +1,4 @@
+import { gerarReciboPdfBuffer } from '@/lib/recibo/gerarReciboPdf';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { sanitizarECompletarVendaParsed, normalizarNomeModelo, ParsedVenda, extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
@@ -421,7 +422,14 @@ export async function emitirNotinhaVenda(
   lojaId: string,
   proposta: PropostaNotinha,
   usuarioNome: string = 'Bot WhatsApp'
-): Promise<{ sucesso: boolean; mensagem: string; vendaId?: string; linkRecibo?: string }> {
+): Promise<{
+  sucesso: boolean;
+  mensagem: string;
+  vendaId?: string;
+  linkRecibo?: string;
+  pdfBase64?: string;
+  nomeArquivoPdf?: string;
+}> {
   try {
     const agora = new Date().toISOString();
     const descricao = `Venda WhatsApp - ${proposta.modelo} para ${proposta.clienteNome}`;
@@ -567,11 +575,79 @@ export async function emitirNotinhaVenda(
       `──────────────────────────\n` +
       `_Venda registrada e auditada no Phone Center!_`;
 
+    // Busca dados complementares da loja para compor o cabeçalho do PDF
+    let dadosLoja: any = null;
+    try {
+      const { data: l } = await supabase
+        .from('lojas')
+        .select('nome, cnpj, telefone, whatsapp, endereco, cidade')
+        .eq('id', lojaId)
+        .maybeSingle();
+      dadosLoja = l;
+    } catch (errLoja) {
+      console.warn('Erro ao carregar dados da loja para o PDF:', errLoja);
+    }
+
+    let pdfBase64: string | undefined = undefined;
+    let nomeArquivoPdf: string | undefined = undefined;
+
+    try {
+      const pdfBuffer = await gerarReciboPdfBuffer({
+        vendaId: vendaUuid,
+        codigoVenda: vendaId,
+        dataEmissao: new Date().toLocaleString('pt-BR'),
+        loja: {
+          nome: dadosLoja?.nome || 'Phone Center',
+          cnpj: dadosLoja?.cnpj || null,
+          telefone: dadosLoja?.whatsapp || dadosLoja?.telefone || null,
+          endereco: dadosLoja?.endereco || null,
+          cidade: dadosLoja?.cidade || null,
+        },
+        cliente: {
+          nome: proposta.clienteNome,
+          cpf: proposta.cpf || null,
+          telefone: proposta.telefone || null,
+          email: proposta.email || null,
+          endereco: proposta.enderecoEntrega || null,
+        },
+        aparelho: {
+          modelo: proposta.modelo,
+          capacidade: proposta.capacidade || null,
+          cor: proposta.cor || null,
+          imei: proposta.imei || null,
+          condicao: 'Seminovo',
+          valor: Number(proposta.valorTotal || 0),
+        },
+        upgrade: {
+          ativo: Boolean(proposta.isUpgrade),
+          modelo: proposta.modeloTroca || null,
+          imei: proposta.imeiTroca || null,
+          valor: proposta.valorTroca || null,
+        },
+        pagamento: {
+          forma: proposta.formaPagamento || 'PIX',
+          valorTotal: Number(proposta.valorTotal || 0),
+          valorEntrada: proposta.valorTroca || 0,
+          valorFinal: Number(proposta.valorTotal || 0) - (proposta.valorTroca || 0),
+        },
+        diasGarantia: 90,
+        vendedor: usuarioNome,
+        linkRecibo,
+      });
+
+      pdfBase64 = pdfBuffer.toString('base64');
+      nomeArquivoPdf = `Recibo-${vendaId}.pdf`;
+    } catch (errPdf) {
+      console.warn('Erro ao gerar PDF do recibo:', errPdf);
+    }
+
     return {
       sucesso: true,
       mensagem: sanitizarTextoWhatsApp(msgSucesso),
       vendaId,
       linkRecibo,
+      pdfBase64,
+      nomeArquivoPdf,
     };
   } catch (err: any) {
     console.error('❌ Falha ao emitir notinha automática:', err);
