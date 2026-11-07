@@ -2373,10 +2373,23 @@ export async function POST(request: Request) {
       if (modoChat === 'off') {
         return NextResponse.json({ status: 'ok', message: 'Chat desativado via !modo off.' }, { status: 200 });
       }
+
+      const captionText =
+        messageContent.imageMessage?.caption ||
+        msgData.message?.imageMessage?.caption ||
+        msgData.caption ||
+        '';
+
+      const vendaDetectadaNaFoto = captionText ? detectarFormularioOuPedidoVenda(captionText) : null;
+      const ehEntradaNaFoto = captionText ? ehMensagemDeEntradaEstoque(captionText) : false;
+
       if (modoChat === 'padrao' && isGroup) {
-        const caption = messageContent.imageMessage?.caption || '';
-        if (!caption.trim().startsWith('!')) {
-          return NextResponse.json({ status: 'ok', message: 'Imagem ignorada em grupo no modo padrão.' }, { status: 200 });
+        const ehOperacaoGrupo =
+          captionText.trim().startsWith('!') ||
+          Boolean(vendaDetectadaNaFoto) ||
+          ehEntradaNaFoto;
+        if (!ehOperacaoGrupo) {
+          return NextResponse.json({ status: 'ok', message: 'Imagem sem comando ou operação ignorada em grupo no modo padrão.' }, { status: 200 });
         }
       }
       console.log(`📸 Imagem recebida de ${pushName} (${targetDestination}). Iniciando OCR Vision...`);
@@ -2418,6 +2431,163 @@ export async function POST(request: Request) {
 
           if (visionData) {
             console.log('🤖 Resultado do OCR Vision:', JSON.stringify(visionData));
+
+            const imeiLido = visionData.imei ? String(visionData.imei).replace(/\D/g, '') : null;
+            const modeloLido = visionData.modelo ? String(visionData.modelo).trim() : null;
+            const capLida = visionData.capacidade ? String(visionData.capacidade).trim() : null;
+            const corLida = visionData.cor ? String(visionData.cor).trim() : null;
+
+            // ── CASO 1: A foto foi enviada junto com formulário de pedido / venda ──
+            if (vendaDetectadaNaFoto && lojaId) {
+              if (imeiLido && imeiLido.length >= 4) {
+                vendaDetectadaNaFoto.aparelho.imei = imeiLido;
+              }
+              if (modeloLido && !vendaDetectadaNaFoto.aparelho.modelo) {
+                vendaDetectadaNaFoto.aparelho.modelo = modeloLido;
+              }
+              if (capLida && !vendaDetectadaNaFoto.aparelho.capacidade) {
+                vendaDetectadaNaFoto.aparelho.capacidade = capLida;
+              }
+              if (corLida && !vendaDetectadaNaFoto.aparelho.cor) {
+                vendaDetectadaNaFoto.aparelho.cor = corLida;
+              }
+
+              const { data: apsEstoque } = await supabase
+                .from('aparelhos')
+                .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .eq('loja_id', lojaId)
+                .limit(150);
+
+              const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+                modelo: vendaDetectadaNaFoto.aparelho?.modelo,
+                capacidade: vendaDetectadaNaFoto.aparelho?.capacidade,
+                cor: vendaDetectadaNaFoto.aparelho?.cor,
+                imei: vendaDetectadaNaFoto.aparelho?.imei,
+              });
+
+              const proposta: PropostaNotinha = {
+                id: `notinha-${Date.now()}`,
+                clienteNome: vendaDetectadaNaFoto.cliente?.nome || pushName || 'Cliente',
+                cpf: vendaDetectadaNaFoto.cliente?.cpf || undefined,
+                telefone: vendaDetectadaNaFoto.cliente?.telefone || undefined,
+                email: vendaDetectadaNaFoto.cliente?.email || undefined,
+                enderecoEntrega: vendaDetectadaNaFoto.observacoes || undefined,
+                modelo: vendaDetectadaNaFoto.aparelho?.modelo || 'Smartphone',
+                capacidade: vendaDetectadaNaFoto.aparelho?.capacidade || undefined,
+                cor: vendaDetectadaNaFoto.aparelho?.cor || undefined,
+                imei: cruzamento.aparelhoEncontrado?.imei || vendaDetectadaNaFoto.aparelho?.imei || undefined,
+                statusEstoque: cruzamento.mensagem,
+                aparelhoId: cruzamento.aparelhoEncontrado?.id,
+                valorTotal: vendaDetectadaNaFoto.valorTotal || cruzamento.aparelhoEncontrado?.preco || 0,
+                custo: cruzamento.aparelhoEncontrado?.custo || undefined,
+                formaPagamento: vendaDetectadaNaFoto.formaPagamento || 'Não informada',
+                isUpgrade: Boolean(vendaDetectadaNaFoto.isUpgrade),
+                modeloTroca: vendaDetectadaNaFoto.tradeIn?.modelo || undefined,
+                imeiTroca: vendaDetectadaNaFoto.tradeIn?.imei || undefined,
+                valorTroca: vendaDetectadaNaFoto.tradeIn?.valor || undefined,
+                vendedor: pushName,
+              };
+
+              const msgPrevia = (imeiLido ? `📸 *Foto da caixa:* IMEI \`${imeiLido}\` lido com sucesso e vinculado à notinha!\n\n` : '') + formatarMensagemPreviaNotinha(proposta);
+              const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
+              if (envio.messageId) {
+                await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+                if (targetDestination !== remoteJid) {
+                  await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
+                }
+              }
+
+              if (lojaId) {
+                await supabase.from('whatsapp_logs').insert({
+                  loja_id: lojaId,
+                  contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                  mensagem: `[FOTO+PEDIDO] Notinha gerada: ${proposta.modelo} (IMEI: ${proposta.imei || '-'})`,
+                  created_at: new Date().toISOString(),
+                });
+              }
+
+              return NextResponse.json({ status: 'ok', message: 'Notinha gerada a partir de formulário com foto.' }, { status: 200 });
+            }
+
+            // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou a foto da caixa do aparelho ──
+            const chavesBuscaPend = [
+              `notinha:${remoteJid}:ultima`,
+              `notinha:${targetDestination}:ultima`,
+            ];
+            const { data: pendUltimaFoto } = await supabase
+              .from('whatsapp_acoes_pendentes')
+              .select('*')
+              .in('chave', chavesBuscaPend)
+              .order('expira_em', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (pendUltimaFoto?.params && imeiLido && lojaId) {
+              const proposta = pendUltimaFoto.params as PropostaNotinha;
+              proposta.imei = imeiLido;
+
+              const { data: apsEstoque } = await supabase
+                .from('aparelhos')
+                .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .eq('loja_id', lojaId)
+                .limit(100);
+
+              const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+                modelo: proposta.modelo,
+                capacidade: proposta.capacidade,
+                cor: proposta.cor,
+                imei: imeiLido,
+              });
+
+              proposta.statusEstoque = cruzamento.mensagem;
+              if (cruzamento.aparelhoEncontrado?.id) {
+                proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
+                proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
+                if (cruzamento.aparelhoEncontrado.imei) {
+                  proposta.imei = cruzamento.aparelhoEncontrado.imei;
+                }
+              }
+
+              const msgPreviaAtualizada = `📸 *Foto da caixa lida com sucesso!*\nIMEI \`${imeiLido}\` vinculado à notinha pendente.\n\n` + formatarMensagemPreviaNotinha(proposta);
+              const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
+              if (envio.messageId) {
+                await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+                if (targetDestination !== remoteJid) {
+                  await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
+                }
+              }
+
+              return NextResponse.json({ status: 'ok', message: 'IMEI da foto vinculado à notinha pendente.' }, { status: 200 });
+            }
+
+            // ── CASO 3: A foto veio acompanhada de texto de entrada de estoque ──
+            if (ehEntradaNaFoto && lojaId) {
+              let textoEntradaComImei = captionText;
+              if (imeiLido && !captionText.includes(imeiLido)) {
+                textoEntradaComImei = `${captionText} imei: ${imeiLido}`;
+              }
+
+              const capabilityLote = obterCapability('create_aparelhos_lote');
+              if (capabilityLote) {
+                const resultadoLote = await capabilityLote.executar(
+                  { texto: textoEntradaComImei },
+                  {
+                    supabase,
+                    lojaId,
+                    usuarioId: usuarioResolvido?.usuarioId,
+                    papel: papelCapability,
+                    planoLoja,
+                    isGroup,
+                    authorPhone,
+                  }
+                );
+                const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
+                await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
+                return NextResponse.json({ status: 'ok', message: 'Entrada com foto processada com sucesso.' }, { status: 200 });
+              }
+            }
+
+            // ── CASO 4: Foto isolada de etiqueta/estoque (consulta ou novo aparelho) ──
             const respostaEtiqueta = await processarResultadoVisionEtiqueta(visionData, lojaId, pushName);
             await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEtiqueta);
 
@@ -2549,7 +2719,8 @@ export async function POST(request: Request) {
             authorPhone,
           }
         );
-        await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoLote.texto);
+        const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
+        await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
         return NextResponse.json({ status: 'ok', message: 'Entrada de aparelhos em lote processada com sucesso.' }, { status: 200 });
       }
     }

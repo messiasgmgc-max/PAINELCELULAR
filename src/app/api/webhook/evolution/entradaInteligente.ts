@@ -297,17 +297,13 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
 
 /**
  * Detecta se uma mensagem do WhatsApp é um pedido explícito de entrada de aparelhos.
+ * Aceita marcações como "*Entrada:*", "📦 Entrada", "Entradas:", "dar entrada", etc.
  */
 export function ehMensagemDeEntradaEstoque(texto: string): boolean {
-  const t = texto.trim().toLowerCase();
-  if (t.startsWith('!entradas') || t.startsWith('!entrada') || t.startsWith('!importar')) return true;
-  if (/^entradas?\b/i.test(t)) return true;
-  if (/^dar entradas?\b/i.test(t)) return true;
-  if (/^cadastrar entradas?\b/i.test(t)) return true;
-  if (/^entrada dos aparelhos\b/i.test(t)) return true;
-  if (/^chegou hoje:?/i.test(t)) return true;
-  if (/^chegaram os aparelhos:?/i.test(t)) return true;
-  return false;
+  if (!texto || typeof texto !== 'string') return false;
+  const t = texto.trim();
+  const regexGatilho = /^(?:[\p{Extended_Pictographic}*•\-_\s]*)(?:!(?:entradas?|importar)|entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou\s*hoje|chegaram\s*os\s*aparelhos)\b/iu;
+  return regexGatilho.test(t);
 }
 
 /**
@@ -317,10 +313,10 @@ export function ehMensagemDeEntradaEstoque(texto: string): boolean {
 export function parseTextoEntradaAparelhos(texto: string): ItemEntradaDetectado[] {
   if (!texto || !texto.trim()) return [];
 
-  // Remove o prefixo de gatilho
+  // Remove o prefixo de gatilho (incluindo emojis, asteriscos de negrito, etc.)
   let limpo = texto.trim()
-    .replace(/^!(?:entradas?|importar)\s*/i, '')
-    .replace(/^(?:entradas?|dar entradas?|cadastrar entradas?|entrada dos aparelhos|chegou hoje|chegaram os aparelhos)[:\s]*/i, '');
+    .replace(/^(?:[\p{Extended_Pictographic}*•\-_\s]*)(?:!(?:entradas?|importar)|entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou\s*hoje|chegaram\s*os\s*aparelhos)[:\s*]*/iu, '')
+    .trim();
 
   const resultados: ItemEntradaDetectado[] = [];
 
