@@ -40,6 +40,7 @@ import {
   interpretarReacaoNotinha,
   interpretarTextoCorrecaoVenda,
   salvarPropostaNotinha,
+  buscarPropostaNotinhaRecente,
   emitirNotinhaVenda,
   limparNomeModelo,
   salvarFotoRecente,
@@ -2353,31 +2354,16 @@ export async function POST(request: Request) {
       if (acaoReacao) {
         console.log(`👍 [Reação Notinha] Emoji "${emojiReacao}" -> Ação: ${acaoReacao} para mensagem ${idMensagemReagida} em ${remoteJid}`);
 
-        let propostaPendente: PropostaNotinha | null = null;
         let chaveEncontrada = `notinha:${remoteJid}:${idMensagemReagida}`;
+        const chavesReacao = [
+          `notinha:${remoteJid}:${idMensagemReagida}`,
+          `notinha:${targetDestination}:${idMensagemReagida}`,
+          `notinha:${remoteJid}:ultima`,
+          `notinha:${targetDestination}:ultima`,
+        ];
 
-        // 1. Busca proposta indexada pela mensagem enviada pelo bot
-        const { data: pendExata } = await supabase
-          .from('whatsapp_acoes_pendentes')
-          .select('*')
-          .eq('chave', chaveEncontrada)
-          .maybeSingle();
-
-        if (pendExata?.params) {
-          propostaPendente = pendExata.params as PropostaNotinha;
-        } else {
-          // 2. Fallback: busca pela última proposta pendente deste chat
-          const { data: pendUltima } = await supabase
-            .from('whatsapp_acoes_pendentes')
-            .select('*')
-            .eq('chave', `notinha:${remoteJid}:ultima`)
-            .maybeSingle();
-
-          if (pendUltima?.params) {
-            propostaPendente = pendUltima.params as PropostaNotinha;
-            chaveEncontrada = `notinha:${remoteJid}:ultima`;
-          }
-        }
+        // Busca proposta na memória primeiro e fallback no Supabase
+        const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesReacao, null, 30);
 
         if (propostaPendente) {
           if (acaoReacao === 'confirmar' && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
@@ -2654,77 +2640,70 @@ export async function POST(request: Request) {
               senderPhone ? `notinha:${senderPhone}:ultima` : null,
             ].filter(Boolean))) as string[];
 
-            const { data: pendUltimaFoto } = await supabase
-              .from('whatsapp_acoes_pendentes')
-              .select('*')
-              .in('chave', chavesBuscaPend)
-              .order('criado_em', { ascending: false })
-              .limit(1)
-              .maybeSingle();
+            const proposta = await buscarPropostaNotinhaRecente(
+              supabase,
+              chavesBuscaPend,
+              visionData.modelo,
+              20
+            );
 
-            const agoraMsFoto = Date.now();
-            const criadoMsFoto = pendUltimaFoto?.criado_em ? new Date(pendUltimaFoto.criado_em).getTime() : 0;
-            const notinhaValida = pendUltimaFoto?.params && (agoraMsFoto - criadoMsFoto) < 20 * 60 * 1000;
-
-            if (notinhaValida && imeiLido && lojaId) {
-              const proposta = pendUltimaFoto.params as PropostaNotinha;
-              const ehCompativel = modelosSaoCompativeis(visionData.modelo, proposta.modelo);
-
-              if (ehCompativel) {
-                proposta.imei = imeiLido;
-
-                let avisoDivergencia = '';
-                if (capLida && proposta.capacidade && capLida.toUpperCase() !== proposta.capacidade.toUpperCase()) {
-                  avisoDivergencia = `\n⚠️ *Nota sobre Capacidade:* A etiqueta marca *${capLida}*, enquanto o pedido mencionava *${proposta.capacidade}*. Verifique antes de emitir!`;
-                }
-
-                const { data: apsEstoque } = await supabase
-                  .from('aparelhos')
-                  .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
-                  .eq('loja_id', lojaId)
-                  .limit(100);
-
-                const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
-                  modelo: proposta.modelo,
-                  capacidade: proposta.capacidade,
-                  cor: proposta.cor,
-                  imei: imeiLido,
-                });
-
-                proposta.statusEstoque = cruzamento.mensagem;
-                if (cruzamento.aparelhoEncontrado?.id) {
-                  proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
-                  proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
-                  if (cruzamento.aparelhoEncontrado.imei) {
-                    proposta.imei = cruzamento.aparelhoEncontrado.imei;
-                  }
-                  if (proposta.valorTotal <= 0 && cruzamento.aparelhoEncontrado.preco) {
-                    proposta.valorTotal = cruzamento.aparelhoEncontrado.preco;
-                  }
-                }
-
-                const msgPreviaAtualizada =
-                  `📸 *Foto da caixa associada à notinha pendente!*\n🔢 IMEI \`${imeiLido}\` vinculado com sucesso.${avisoDivergencia}\n\n` +
-                  formatarMensagemPreviaNotinha(proposta);
-
-                const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
-                const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
-                await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
-                if (targetDestination !== remoteJid) {
-                  await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
-                }
-
-                if (lojaId) {
-                  await supabase.from('whatsapp_logs').insert({
-                    loja_id: lojaId,
-                    contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
-                    mensagem: `[FOTO+NOTINHA] IMEI ${imeiLido} vinculado à notinha pendente: ${proposta.modelo}`,
-                    created_at: new Date().toISOString(),
-                  });
-                }
-
-                return NextResponse.json({ status: 'ok', message: 'IMEI da foto vinculado à notinha pendente.' }, { status: 200 });
+            if (proposta && imeiLido && lojaId) {
+              proposta.imei = imeiLido;
+              if (corLida && !proposta.cor) {
+                proposta.cor = corLida;
               }
+
+              let avisoDivergencia = '';
+              if (capLida && proposta.capacidade && capLida.toUpperCase() !== proposta.capacidade.toUpperCase()) {
+                avisoDivergencia = `\n⚠️ *Nota sobre Capacidade:* A etiqueta marca *${capLida}*, enquanto o pedido mencionava *${proposta.capacidade}*. Verifique antes de emitir!`;
+              }
+
+              const { data: apsEstoque } = await supabase
+                .from('aparelhos')
+                .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .eq('loja_id', lojaId)
+                .limit(100);
+
+              const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+                modelo: proposta.modelo,
+                capacidade: proposta.capacidade,
+                cor: proposta.cor,
+                imei: imeiLido,
+              });
+
+              proposta.statusEstoque = cruzamento.mensagem;
+              if (cruzamento.aparelhoEncontrado?.id) {
+                proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
+                proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
+                if (cruzamento.aparelhoEncontrado.imei) {
+                  proposta.imei = cruzamento.aparelhoEncontrado.imei;
+                }
+                if (proposta.valorTotal <= 0 && cruzamento.aparelhoEncontrado.preco) {
+                  proposta.valorTotal = cruzamento.aparelhoEncontrado.preco;
+                }
+              }
+
+              const msgPreviaAtualizada =
+                `📸 *Foto da caixa associada à notinha pendente!*\n🔢 IMEI \`${imeiLido}\` vinculado com sucesso à notinha de *${proposta.clienteNome}*.${avisoDivergencia}\n\n` +
+                formatarMensagemPreviaNotinha(proposta);
+
+              const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
+              const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
+              await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
+              if (targetDestination !== remoteJid) {
+                await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
+              }
+
+              if (lojaId) {
+                await supabase.from('whatsapp_logs').insert({
+                  loja_id: lojaId,
+                  contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                  mensagem: `[FOTO+NOTINHA] IMEI ${imeiLido} vinculado à notinha pendente: ${proposta.modelo}`,
+                  created_at: new Date().toISOString(),
+                });
+              }
+
+              return NextResponse.json({ status: 'ok', message: 'IMEI da foto vinculado à notinha pendente.' }, { status: 200 });
             }
 
             // ── CASO 3: A foto veio acompanhada de texto de entrada de estoque ──
@@ -2736,17 +2715,23 @@ export async function POST(request: Request) {
 
               const capabilityLote = obterCapability('create_aparelhos_lote');
               if (capabilityLote) {
+                const planoLojaFoto: TipoPlano = ehModeradorMaster
+                  ? 'avancado'
+                  : lojaId
+                    ? await obterPlanoLoja(lojaId)
+                    : 'entrada';
+                const papelCapFoto: PapelUsuario = (papelUsuario as PapelUsuario) || 'staff';
                 const resultadoLote = await capabilityLote.executar(
-                  { texto: textoEntradaComImei },
                   {
                     supabase,
                     lojaId,
-                    usuarioId: usuarioResolvido?.usuarioId,
-                    papel: papelCapability,
-                    planoLoja,
+                    usuarioId: usuarioResolvido?.id || (usuarioResolvido as any)?.usuarioId,
+                    papel: papelCapFoto,
+                    planoLoja: planoLojaFoto,
                     isGroup,
                     authorPhone,
-                  }
+                  },
+                  { texto: textoEntradaComImei }
                 );
                 const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
                 await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
@@ -2875,16 +2860,16 @@ export async function POST(request: Request) {
       const capabilityLote = obterCapability('create_aparelhos_lote');
       if (capabilityLote) {
         const resultadoLote = await capabilityLote.executar(
-          { texto: textContent },
           {
             supabase,
             lojaId,
-            usuarioId: usuarioResolvido?.usuarioId,
+            usuarioId: usuarioResolvido?.id || (usuarioResolvido as any)?.usuarioId,
             papel: papelCapability,
             planoLoja,
             isGroup,
             authorPhone,
-          }
+          },
+          { texto: textContent }
         );
         const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
         await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
@@ -2904,16 +2889,9 @@ export async function POST(request: Request) {
         senderPhone ? `notinha:${senderPhone}:ultima` : null,
       ].filter(Boolean))) as string[];
 
-      const { data: pendUltima } = await supabase
-        .from('whatsapp_acoes_pendentes')
-        .select('*')
-        .in('chave', chavesBusca)
-        .order('criado_em', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesBusca, null, 30);
 
-      if (pendUltima?.params) {
-        const propostaPendente = pendUltima.params as PropostaNotinha;
+      if (propostaPendente) {
 
         if (ehConfirmacaoTexto && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
           await enviarMensagemWhatsApp(
@@ -3009,16 +2987,9 @@ export async function POST(request: Request) {
         senderPhone ? `notinha:${senderPhone}:ultima` : null,
       ].filter(Boolean))) as string[];
 
-      const { data: pendUltima } = await supabase
-        .from('whatsapp_acoes_pendentes')
-        .select('*')
-        .in('chave', chavesBusca)
-        .order('criado_em', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const proposta = await buscarPropostaNotinhaRecente(supabase, chavesBusca, null, 30);
 
-      if (pendUltima?.params) {
-        const proposta = pendUltima.params as PropostaNotinha;
+      if (proposta) {
         if (correcaoDetectada.campo === 'valor') {
           proposta.valorTotal = correcaoDetectada.valor;
         } else if (correcaoDetectada.campo === 'imei') {
@@ -3492,21 +3463,23 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
           continue;
         }
 
-        // Token de IMEI: qualquer sequência de 11 a 18 dígitos numéricos é SEMPRE IMEI, nunca preço!
-        if (apenasDigitos.length >= 11 && apenasDigitos.length <= 18 && !imeiCad) {
-          imeiCad = apenasDigitos;
+        // Token de IMEI: qualquer sequência de 10 a 18 dígitos numéricos é SEMPRE IMEI, nunca preço!
+        if (apenasDigitos.length >= 10 && apenasDigitos.length <= 18) {
+          if (!imeiCad) {
+            imeiCad = apenasDigitos;
+          }
           continue;
         }
 
-        // Token de Preço: valor razoável (< 100.000) com formatação monetária ou se for o último token
+        // Token de Preço: valor razoável (< 50.000) com formatação monetária ou se for o último token
         const limpoPreco = tok.replace(/[^\d.,]/g, '').replace(',', '.');
         const numPreco = parseFloat(limpoPreco);
         if (
           !isNaN(numPreco) &&
           numPreco > 0 &&
-          numPreco < 100000 &&
+          numPreco < 50000 &&
+          apenasDigitos.length < 7 &&
           (tok.toLowerCase().includes('r$') || i === tokens.length - 1) &&
-          apenasDigitos.length < 10 &&
           precoCad === 0
         ) {
           precoCad = numPreco;

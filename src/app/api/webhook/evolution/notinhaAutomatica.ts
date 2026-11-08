@@ -413,8 +413,56 @@ export function interpretarTextoCorrecaoVenda(
   return null;
 }
 
+// ── BUFFER EM MEMÓRIA DE ALTA VELOCIDADE (LATÊNCIA 0ms) ──
+// Garante persistência em memória global do Node.js mesmo entre requisições simultâneas
+const globalRef = globalThis as unknown as {
+  _wppFotoBuffer?: Map<string, { dados: FotoRecenteCache; timestamp: number }>;
+  _wppNotinhaBuffer?: Map<string, { proposta: PropostaNotinha; timestamp: number }>;
+};
+if (!globalRef._wppFotoBuffer) globalRef._wppFotoBuffer = new Map();
+if (!globalRef._wppNotinhaBuffer) globalRef._wppNotinhaBuffer = new Map();
+
+const cacheFotosMemoria = globalRef._wppFotoBuffer;
+const cachePropostasMemoria = globalRef._wppNotinhaBuffer;
+
+export function salvarFotoMemoria(chave: string, dados: FotoRecenteCache): void {
+  cacheFotosMemoria.set(chave, { dados: { ...dados }, timestamp: Date.now() });
+}
+
+export function buscarFotoMemoria(chave: string, maxMinutos = 10): FotoRecenteCache | null {
+  const item = cacheFotosMemoria.get(chave);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > maxMinutos * 60 * 1000) {
+    cacheFotosMemoria.delete(chave);
+    return null;
+  }
+  return item.dados;
+}
+
+export function limparFotoMemoria(chave: string): void {
+  cacheFotosMemoria.delete(chave);
+}
+
+export function salvarPropostaMemoria(chave: string, proposta: PropostaNotinha): void {
+  cachePropostasMemoria.set(chave, { proposta: { ...proposta }, timestamp: Date.now() });
+}
+
+export function buscarPropostaMemoria(chave: string, maxMinutos = 30): PropostaNotinha | null {
+  const item = cachePropostasMemoria.get(chave);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > maxMinutos * 60 * 1000) {
+    cachePropostasMemoria.delete(chave);
+    return null;
+  }
+  return item.proposta;
+}
+
+export function limparPropostaMemoria(chave: string): void {
+  cachePropostasMemoria.delete(chave);
+}
+
 /**
- * Salva uma proposta de notinha no banco para aguardar reação.
+ * Salva uma proposta de notinha no banco e em memória para aguardar reação.
  */
 export async function salvarPropostaNotinha(
   supabase: SupabaseClient,
@@ -424,44 +472,98 @@ export async function salvarPropostaNotinha(
   proposta: PropostaNotinha
 ): Promise<void> {
   const agora = Date.now();
-  const expiraEmIso = new Date(agora + 30 * 60 * 1000).toISOString();
   proposta.messageId = messageId;
   proposta.remoteJid = remoteJid;
   proposta.criadoEm = agora;
 
-  try {
-    // 1. Salva indexada pelo messageId enviado pelo bot
-    await supabase.from('whatsapp_acoes_pendentes').upsert(
-      {
-        chave: `notinha:${remoteJid}:${messageId}`,
-        loja_id: lojaId,
-        tipo: 'confirmacao',
-        action: 'emitir_notinha',
-        params: proposta as any,
-        resumo: `Notinha ${proposta.modelo} para ${proposta.clienteNome}`,
-        criado_em: new Date(agora).toISOString(),
-        expira_em: expiraEmIso,
-      },
-      { onConflict: 'chave' }
-    );
+  const chaves = [
+    `notinha:${remoteJid}:${messageId}`,
+    `notinha:${remoteJid}:ultima`,
+  ];
 
-    // 2. Salva também como última proposta do chat
-    await supabase.from('whatsapp_acoes_pendentes').upsert(
-      {
-        chave: `notinha:${remoteJid}:ultima`,
-        loja_id: lojaId,
-        tipo: 'confirmacao',
-        action: 'emitir_notinha',
-        params: proposta as any,
-        resumo: `Última notinha ${proposta.modelo}`,
-        criado_em: new Date(agora).toISOString(),
-        expira_em: expiraEmIso,
-      },
-      { onConflict: 'chave' }
+  // 1. Salva imediatamente em memória com latência zero (0ms)
+  for (const k of chaves) {
+    salvarPropostaMemoria(k, proposta);
+  }
+
+  // 2. Persiste no Supabase respeitando estritamente o schema (tipo: 'confirmacao', sem coluna expira_em)
+  try {
+    const payload = {
+      loja_id: lojaId,
+      tipo: 'confirmacao' as const,
+      action: 'emitir_notinha',
+      params: { ...proposta, expiraEm: agora + 30 * 60 * 1000 } as any,
+      resumo: `Notinha ${proposta.modelo} para ${proposta.clienteNome}`,
+      criado_em: new Date(agora).toISOString(),
+    };
+
+    await Promise.all(
+      chaves.map((chave) =>
+        supabase.from('whatsapp_acoes_pendentes').upsert(
+          { ...payload, chave },
+          { onConflict: 'chave' }
+        )
+      )
     );
   } catch (err) {
-    console.warn('[Notinha Automática] Erro ao salvar proposta pendente:', err);
+    console.warn('[Notinha Automática] Erro ao salvar proposta pendente no Supabase:', err);
   }
+}
+
+/**
+ * Busca proposta de notinha pendente recente (memória primeiro, fallback Supabase)
+ */
+export async function buscarPropostaNotinhaRecente(
+  supabase: SupabaseClient,
+  chaves: string[],
+  modeloDesejado?: string | null,
+  maxMinutos: number = 20
+): Promise<PropostaNotinha | null> {
+  const agora = Date.now();
+  const maxMs = maxMinutos * 60 * 1000;
+
+  // 1. Consulta em memória primeiro (0ms)
+  for (const chave of chaves) {
+    const propMem = buscarPropostaMemoria(chave, maxMinutos);
+    if (propMem) {
+      if (!modeloDesejado || modelosSaoCompativeis(modeloDesejado, propMem.modelo)) {
+        return propMem;
+      }
+    }
+  }
+
+  // 2. Fallback: Consulta no Supabase respeitando o schema
+  try {
+    const { data: pendentes } = await supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('*')
+      .in('chave', chaves)
+      .eq('tipo', 'confirmacao')
+      .order('criado_em', { ascending: false })
+      .limit(5);
+
+    if (pendentes && pendentes.length > 0) {
+      for (const item of pendentes) {
+        const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
+        if (agora - criado > maxMs) continue;
+
+        const prop = item.params as PropostaNotinha;
+        if (!prop) continue;
+
+        if (modeloDesejado && !modelosSaoCompativeis(modeloDesejado, prop.modelo)) {
+          continue;
+        }
+
+        // Atualiza memória para próximas consultas instantâneas
+        salvarPropostaMemoria(item.chave, prop);
+        return prop;
+      }
+    }
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao buscar proposta no Supabase:', err);
+  }
+
+  return null;
 }
 
 /**
@@ -794,78 +896,103 @@ export async function salvarFotoRecente(
   dados: FotoRecenteCache
 ): Promise<void> {
   const agora = Date.now();
-  const expiraEm = new Date(agora + 5 * 60 * 1000).toISOString();
+  dados.timestamp = agora;
 
+  const chaves = [
+    ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+    `foto_recente:${remoteJid}:ultima`,
+  ];
+
+  // 1. Salva imediatamente em memória com latência zero (0ms)
+  for (const k of chaves) {
+    salvarFotoMemoria(k, dados);
+  }
+
+  // 2. Persiste no Supabase com schema compatível (tipo: 'faltando_dados', action: 'vincular_foto', sem expira_em)
   try {
     const payload = {
-      tipo: 'foto_recente',
+      tipo: 'faltando_dados' as const,
       action: 'vincular_foto',
       loja_id: lojaId,
-      params: dados,
+      params: { ...dados, expiraEm: agora + 10 * 60 * 1000 } as any,
       resumo: `Foto recente: ${dados.modelo || 'Smartphone'} (IMEI: ${dados.imei || 'N/A'})`,
       criado_em: new Date(agora).toISOString(),
-      expira_em: expiraEm,
     };
 
-    if (authorPhone) {
-      await supabase.from('whatsapp_acoes_pendentes').upsert(
-        { ...payload, chave: `foto_recente:${remoteJid}:${authorPhone}` },
-        { onConflict: 'chave' }
-      );
-    }
-
-    await supabase.from('whatsapp_acoes_pendentes').upsert(
-      { ...payload, chave: `foto_recente:${remoteJid}:ultima` },
-      { onConflict: 'chave' }
+    await Promise.all(
+      chaves.map((chave) =>
+        supabase.from('whatsapp_acoes_pendentes').upsert(
+          { ...payload, chave },
+          { onConflict: 'chave' }
+        )
+      )
     );
   } catch (err) {
-    console.warn('[Notinha Automática] Erro ao salvar foto recente no buffer:', err);
+    console.warn('[Notinha Automática] Erro ao salvar foto recente no buffer do Supabase:', err);
   }
 }
 
 /**
- * Busca no buffer recente se há foto compatível enviada pelo mesmo remetente ou no chat nos últimos 5 minutos
+ * Busca no buffer recente se há foto compatível enviada pelo mesmo remetente ou no chat nos últimos 10 minutos
+ * (Verifica memória primeiro e fallback no Supabase)
  */
 export async function buscarFotoRecente(
   supabase: SupabaseClient,
   lojaId: string,
   remoteJid: string,
   authorPhone: string,
-  modeloDesejado?: string | null
+  modeloDesejado?: string | null,
+  maxMinutos: number = 10
 ): Promise<FotoRecenteCache | null> {
-  try {
-    const chaves = [
-      ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
-      `foto_recente:${remoteJid}:ultima`,
-    ];
+  const chaves = [
+    ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+    `foto_recente:${remoteJid}:ultima`,
+  ];
 
+  const agora = Date.now();
+  const maxMs = maxMinutos * 60 * 1000;
+
+  // 1. Consulta em memória primeiro (0ms)
+  for (const chave of chaves) {
+    const fotoMem = buscarFotoMemoria(chave, maxMinutos);
+    if (fotoMem) {
+      if (!modeloDesejado || !fotoMem.modelo || modelosSaoCompativeis(fotoMem.modelo, modeloDesejado)) {
+        return fotoMem;
+      }
+    }
+  }
+
+  // 2. Fallback no Supabase
+  try {
     const { data: pendentes } = await supabase
       .from('whatsapp_acoes_pendentes')
       .select('*')
       .in('chave', chaves)
+      .eq('tipo', 'faltando_dados')
       .order('criado_em', { ascending: false })
-      .limit(2);
+      .limit(3);
 
-    if (!pendentes || pendentes.length === 0) return null;
+    if (pendentes && pendentes.length > 0) {
+      for (const item of pendentes) {
+        const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
+        if (agora - criado > maxMs) continue;
 
-    const agora = Date.now();
-    for (const item of pendentes) {
-      const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
-      if (agora - criado > 5 * 60 * 1000) continue;
+        const foto = item.params as FotoRecenteCache;
+        if (!foto) continue;
 
-      const foto = item.params as FotoRecenteCache;
-      if (!foto) continue;
-
-      if (modeloDesejado && foto.modelo) {
-        if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
-          continue;
+        if (modeloDesejado && foto.modelo) {
+          if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
+            continue;
+          }
         }
-      }
 
-      return foto;
+        // Atualiza memória
+        salvarFotoMemoria(item.chave, foto);
+        return foto;
+      }
     }
   } catch (err) {
-    console.warn('[Notinha Automática] Erro ao buscar foto recente no buffer:', err);
+    console.warn('[Notinha Automática] Erro ao buscar foto recente no buffer do Supabase:', err);
   }
 
   return null;
@@ -879,14 +1006,21 @@ export async function limparFotoRecente(
   remoteJid: string,
   authorPhone: string
 ): Promise<void> {
+  const chaves = [
+    ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+    `foto_recente:${remoteJid}:ultima`,
+  ];
+
+  // Limpa da memória
+  for (const k of chaves) {
+    limparFotoMemoria(k);
+  }
+
+  // Limpa do Supabase
   try {
-    const chaves = [
-      ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
-      `foto_recente:${remoteJid}:ultima`,
-    ];
     await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chaves);
   } catch (err) {
-    console.warn('[Notinha Automática] Erro ao limpar foto recente:', err);
+    console.warn('[Notinha Automática] Erro ao limpar foto recente do Supabase:', err);
   }
 }
 

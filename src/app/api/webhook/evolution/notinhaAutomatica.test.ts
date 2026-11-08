@@ -8,6 +8,11 @@ import {
   cruzarAparelhoComEstoque,
   limparNomeModelo,
   modelosSaoCompativeis,
+  salvarFotoRecente,
+  buscarFotoRecente,
+  limparFotoRecente,
+  salvarPropostaNotinha,
+  buscarPropostaNotinhaRecente,
   type PropostaNotinha,
 } from './notinhaAutomatica';
 
@@ -252,5 +257,140 @@ test('modelosSaoCompativeis reconhece iPhone genérico lido em foto com iPhone 1
   assert.equal(modelosSaoCompativeis('iPhone', 'iPhone 15pro 256g'), true);
   assert.equal(modelosSaoCompativeis('iPhone', 'POCO F8 Pro'), false);
   assert.equal(modelosSaoCompativeis('Galaxy', 'iPhone 15 Pro'), false);
+});
+
+test('buffer de fotos recentes salva e recupera com latência zero e valida schema do Supabase', async () => {
+  const chamadasSupabase: any[] = [];
+  const fakeSupabase = {
+    from: (tabela: string) => ({
+      upsert: async (registro: any) => {
+        // Validação estrita do schema do banco de dados real
+        if ('expira_em' in registro) {
+          throw new Error("PGRST204: Could not find the 'expira_em' column of 'whatsapp_acoes_pendentes'");
+        }
+        if (tabela === 'whatsapp_acoes_pendentes') {
+          if (!['faltando_dados', 'confirmacao'].includes(registro.tipo)) {
+            throw new Error("23514: violates check constraint 'whatsapp_acoes_pendentes_tipo_check'");
+          }
+        }
+        chamadasSupabase.push({ tabela, registro });
+        return { data: null, error: null };
+      },
+      select: () => ({
+        in: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: async () => ({ data: [], error: null }),
+            }),
+          }),
+        }),
+      }),
+      delete: () => ({
+        in: async () => ({ data: null, error: null }),
+      }),
+    }),
+  } as any;
+
+  // 1. Salva foto recente
+  await salvarFotoRecente(fakeSupabase, 'loja-123', 'grupo@g.us', '553199999999', {
+    modelo: 'POCO F8 Pro',
+    capacidade: '512GB',
+    imei: '868972083436361',
+    timestamp: Date.now(),
+  });
+
+  // Garante que o Supabase recebeu tipo: 'faltando_dados' e NENHUM expira_em
+  assert.ok(chamadasSupabase.length >= 1);
+  for (const c of chamadasSupabase) {
+    assert.equal(c.registro.tipo, 'faltando_dados');
+    assert.equal('expira_em' in c.registro, false);
+    assert.ok(c.registro.params.expiraEm > Date.now());
+  }
+
+  // 2. Busca foto no buffer (mesmo remetente e mesmo modelo)
+  const achado = await buscarFotoRecente(
+    fakeSupabase,
+    'loja-123',
+    'grupo@g.us',
+    '553199999999',
+    'Xiaomi POCO F8 Pro'
+  );
+  assert.ok(achado, 'Deve encontrar a foto no buffer em memória');
+  assert.equal(achado?.imei, '868972083436361');
+  assert.equal(achado?.capacidade, '512GB');
+
+  // 3. Limpa buffer
+  await limparFotoRecente(fakeSupabase, 'grupo@g.us', '553199999999');
+  const posLimpeza = await buscarFotoRecente(
+    fakeSupabase,
+    'loja-123',
+    'grupo@g.us',
+    '553199999999',
+    'Xiaomi POCO F8 Pro'
+  );
+  assert.equal(posLimpeza, null, 'Buffer deve estar vazio após limpeza');
+});
+
+test('buffer de propostas de notinhas salva e recupera com latência zero e valida schema do Supabase', async () => {
+  const chamadasSupabase: any[] = [];
+  const fakeSupabase = {
+    from: (tabela: string) => ({
+      upsert: async (registro: any) => {
+        if ('expira_em' in registro) {
+          throw new Error("PGRST204: Could not find the 'expira_em' column of 'whatsapp_acoes_pendentes'");
+        }
+        if (tabela === 'whatsapp_acoes_pendentes') {
+          if (!['faltando_dados', 'confirmacao'].includes(registro.tipo)) {
+            throw new Error("23514: violates check constraint 'whatsapp_acoes_pendentes_tipo_check'");
+          }
+        }
+        chamadasSupabase.push({ tabela, registro });
+        return { data: null, error: null };
+      },
+      select: () => ({
+        in: () => ({
+          eq: () => ({
+            order: () => ({
+              limit: async () => ({ data: [], error: null }),
+            }),
+          }),
+        }),
+      }),
+      delete: () => ({
+        in: async () => ({ data: null, error: null }),
+      }),
+    }),
+  } as any;
+
+  const proposta: PropostaNotinha = {
+    id: 'prop-teste-1',
+    clienteNome: 'Marlon Vitor da Rocha',
+    modelo: 'Xiaomi POCO F8 Pro',
+    valorTotal: 4999.99,
+    formaPagamento: 'cartao_credito',
+    statusEstoque: 'Disponível',
+    isUpgrade: false,
+  };
+
+  // 1. Salva proposta
+  await salvarPropostaNotinha(fakeSupabase, 'loja-123', 'grupo@g.us', 'msg-123', proposta);
+
+  assert.ok(chamadasSupabase.length >= 1);
+  for (const c of chamadasSupabase) {
+    assert.equal(c.registro.tipo, 'confirmacao');
+    assert.equal('expira_em' in c.registro, false);
+    assert.ok(c.registro.params.expiraEm > Date.now());
+  }
+
+  // 2. Busca proposta recente via chaves
+  const encontrada = await buscarPropostaNotinhaRecente(
+    fakeSupabase,
+    ['notinha:grupo@g.us:ultima'],
+    'POCO F8 Pro',
+    20
+  );
+  assert.ok(encontrada, 'Deve encontrar a proposta no buffer em memória');
+  assert.equal(encontrada?.clienteNome, 'Marlon Vitor da Rocha');
+  assert.equal(encontrada?.valorTotal, 4999.99);
 });
 
