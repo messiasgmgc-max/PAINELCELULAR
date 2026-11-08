@@ -58,18 +58,24 @@ export interface ParsedVenda {
  * Normaliza nomes de modelos Apple sem o prefixo "iPhone" (ex: "17 pro max" -> "iPhone 17 Pro Max")
  */
 export function normalizarNomeModelo(modeloBruto: string): string {
-  const m = (modeloBruto || '').trim();
+  let m = (modeloBruto || '').trim();
   if (!m) return '';
+
+  // Separa número colado com pro/plus/max/mini (ex: "15pro" -> "15 Pro")
+  m = m
+    .replace(/\b(\d+)(pro\s*max|promax)\b/gi, '$1 Pro Max')
+    .replace(/\b(\d+)(pro)\b/gi, '$1 Pro')
+    .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
+    .replace(/\b(\d+)(mini)\b/gi, '$1 Mini');
 
   // Se já tem iPhone, Galaxy, Xiaomi, Poco, Redmi, etc., apenas ajusta espaços
   if (/^(?:iPhone|iPad|MacBook|Galaxy|Samsung|Xiaomi|Poco|Redmi|Motorola|Moto)/i.test(m)) {
-    // Se começa com "iphone" em minúsculo, capitaliza
-    return m.replace(/^iphone\b/i, 'iPhone');
+    return m.replace(/^iphone\b/i, 'iPhone').replace(/\s+/g, ' ').trim();
   }
 
   // Se começa com número de iPhone (ex: 11, 12, 13, 14, 15, 16, 17, X, XR, XS)
   if (/^(?:1[1-9]|[4-9]|X|XR|XS)(?:\s*(?:pro\s*max|pro|plus|max|mini))?\b/i.test(m)) {
-    return `iPhone ${m}`;
+    return `iPhone ${m}`.replace(/\s+/g, ' ').trim();
   }
 
   return m;
@@ -358,10 +364,33 @@ export function sanitizarECompletarVendaParsed(
   }
 
   if (linhaModelo) {
-    // Capacidade
-    const romMatch = linhaModelo.match(/\b(\d+GB|\d+TB)\b/i);
-    if (romMatch && !result.aparelho.capacidade) {
-      result.aparelho.capacidade = romMatch[1].toUpperCase();
+    // 1. Capacidade de armazenamento (prioriza menção explícita a memória/armazenamento/rom, ignorando RAM)
+    const extrairCapFormatada = (str?: string | null): string | null => {
+      if (!str) return null;
+      let cap = str.toUpperCase().replace(/\s+/g, '');
+      if (/^\d+$/.test(cap)) return `${cap}GB`;
+      if (/^\d+G$/.test(cap)) return `${cap}B`;
+      if (/^\d+T$/.test(cap)) return `${cap}B`;
+      return cap;
+    };
+
+    const romExplicito =
+      linhaModelo.match(/\b(\d+\s*(?:gb|tb|g|t)?)\s*(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)\b/i) ||
+      linhaModelo.match(/(?:mem[oó]ria|armazenamento|rom)\s*[:=]?\s*(\d+\s*(?:gb|tb|g|t)?)\b/i);
+
+    if (romExplicito && !result.aparelho.capacidade) {
+      result.aparelho.capacidade = extrairCapFormatada(romExplicito[1]);
+    } else {
+      // Procura por GB/TB/G que NÃO seja seguido por RAM
+      const romSemRam = linhaModelo.match(/\b(\d+\s*(?:gb|tb|g))\b(?!\s*(?:de\s+)?ram\b)/i);
+      if (romSemRam && !result.aparelho.capacidade) {
+        result.aparelho.capacidade = extrairCapFormatada(romSemRam[1]);
+      } else {
+        const romMatch = linhaModelo.match(/\b(\d+\s*(?:gb|tb|g))\b/i);
+        if (romMatch && !result.aparelho.capacidade) {
+          result.aparelho.capacidade = extrairCapFormatada(romMatch[1]);
+        }
+      }
     }
 
     // IMEI na linha de modelo (aceita 4 a 18 dígitos: completo ou final de 4 dígitos)
@@ -389,20 +418,32 @@ export function sanitizarECompletarVendaParsed(
       }
     }
 
-    // Nome limpo do modelo
+    // Nome limpo do modelo: remove dados técnicos, RAM, memória, IMEI, lacrado, cores
+    const coresParaRemover = [
+      result.aparelho.cor,
+      'desert', 'deserto', 'natural', 'titanium', 'titânio', 'preto', 'branco', 'azul',
+      'dourado', 'rosa', 'verde', 'roxo', 'cinza', 'grafite', 'silver', 'prata'
+    ].filter(Boolean).join('|');
+
     let modNome = linhaModelo
+      .replace(/\b(\d+)(pro\s*max|promax)\b/gi, '$1 Pro Max')
+      .replace(/\b(\d+)(pro)\b/gi, '$1 Pro')
+      .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
+      .replace(/\b(\d+)(mini)\b/gi, '$1 Mini')
       .replace(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei|serial|n[ºo°]\s*s[eé]rie):\s*#?[0-9A-Za-z]+/gi, '')
       .replace(/\b[0-9]{14,16}\b/g, '')
-      .replace(/\b(\d+GB|\d+TB)\b/gi, '')
-      .replace(/\b(?:,\s*)?(?:\d+\s*(?:gb|tb)\s*)?(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
-      .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
+      .replace(/\b\d+\s*(?:gb|tb|g)\s*(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
+      .replace(/\b\d+\s*(?:gb|tb|g)\b/gi, '')
+      .replace(/(?:,\s*)?(?:de\s+)?ram\s*(?:e\s*)?(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)?\b/gi, '')
+      .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
       .replace(/\b(?:lacrado|novo|seminovo|usado|caixa\s*fechada)\b/gi, '')
+      .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
+      .replace(new RegExp(`\\b(?:${coresParaRemover})\\b`, 'gi'), '')
       .replace(/[,\s]+e\s*$/i, '')
       .replace(/\s*,\s*e\s+/gi, ' ')
       .replace(/\s+e\s*$/i, '')
+      .replace(/(?:,\s*de|\s+de)+$/gi, '')
       .replace(/^[,\s-]+|[,\s-]+$/g, '')
-      .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
-      .replace(new RegExp(`\\b(?:${result.aparelho.cor || ''}|desert|deserto|natural|titanium|tit[aâ]nio|preto|branco|azul|dourado|rosa|verde|roxo|cinza)\\b`, 'gi'), '')
       .replace(/\s+/g, ' ')
       .trim();
 

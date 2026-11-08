@@ -2380,10 +2380,21 @@ export async function POST(request: Request) {
         }
 
         if (propostaPendente) {
+          if (acaoReacao === 'confirmar' && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
+            await editarOuResponderMensagemWhatsApp(
+              instanceName,
+              targetDestination,
+              idMensagemReagida,
+              '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
+            );
+            return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
+          }
+
           // Limpa as pendências imediatamente para evitar duplo processamento
           await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
             `notinha:${remoteJid}:${idMensagemReagida}`,
             `notinha:${remoteJid}:ultima`,
+            `notinha:${targetDestination}:ultima`,
           ]);
 
           if (acaoReacao === 'confirmar') {
@@ -2636,54 +2647,84 @@ export async function POST(request: Request) {
             }
 
             // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou a foto da caixa do aparelho ──
-            const chavesBuscaPend = [
+            const chavesBuscaPend = Array.from(new Set([
               `notinha:${remoteJid}:ultima`,
               `notinha:${targetDestination}:ultima`,
-            ];
+              authorPhone ? `notinha:${authorPhone}:ultima` : null,
+              senderPhone ? `notinha:${senderPhone}:ultima` : null,
+            ].filter(Boolean))) as string[];
+
             const { data: pendUltimaFoto } = await supabase
               .from('whatsapp_acoes_pendentes')
               .select('*')
               .in('chave', chavesBuscaPend)
-              .order('expira_em', { ascending: false })
+              .order('criado_em', { ascending: false })
               .limit(1)
               .maybeSingle();
 
-            if (pendUltimaFoto?.params && imeiLido && lojaId) {
+            const agoraMsFoto = Date.now();
+            const criadoMsFoto = pendUltimaFoto?.criado_em ? new Date(pendUltimaFoto.criado_em).getTime() : 0;
+            const notinhaValida = pendUltimaFoto?.params && (agoraMsFoto - criadoMsFoto) < 20 * 60 * 1000;
+
+            if (notinhaValida && imeiLido && lojaId) {
               const proposta = pendUltimaFoto.params as PropostaNotinha;
-              proposta.imei = imeiLido;
+              const ehCompativel = modelosSaoCompativeis(visionData.modelo, proposta.modelo);
 
-              const { data: apsEstoque } = await supabase
-                .from('aparelhos')
-                .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
-                .eq('loja_id', lojaId)
-                .limit(100);
+              if (ehCompativel) {
+                proposta.imei = imeiLido;
 
-              const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
-                modelo: proposta.modelo,
-                capacidade: proposta.capacidade,
-                cor: proposta.cor,
-                imei: imeiLido,
-              });
-
-              proposta.statusEstoque = cruzamento.mensagem;
-              if (cruzamento.aparelhoEncontrado?.id) {
-                proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
-                proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
-                if (cruzamento.aparelhoEncontrado.imei) {
-                  proposta.imei = cruzamento.aparelhoEncontrado.imei;
+                let avisoDivergencia = '';
+                if (capLida && proposta.capacidade && capLida.toUpperCase() !== proposta.capacidade.toUpperCase()) {
+                  avisoDivergencia = `\n⚠️ *Nota sobre Capacidade:* A etiqueta marca *${capLida}*, enquanto o pedido mencionava *${proposta.capacidade}*. Verifique antes de emitir!`;
                 }
-              }
 
-              const msgPreviaAtualizada = `📸 *Foto da caixa lida com sucesso!*\nIMEI \`${imeiLido}\` vinculado à notinha pendente.\n\n` + formatarMensagemPreviaNotinha(proposta);
-              const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
-              if (envio.messageId) {
-                await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
+                const { data: apsEstoque } = await supabase
+                  .from('aparelhos')
+                  .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                  .eq('loja_id', lojaId)
+                  .limit(100);
+
+                const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+                  modelo: proposta.modelo,
+                  capacidade: proposta.capacidade,
+                  cor: proposta.cor,
+                  imei: imeiLido,
+                });
+
+                proposta.statusEstoque = cruzamento.mensagem;
+                if (cruzamento.aparelhoEncontrado?.id) {
+                  proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
+                  proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
+                  if (cruzamento.aparelhoEncontrado.imei) {
+                    proposta.imei = cruzamento.aparelhoEncontrado.imei;
+                  }
+                  if (proposta.valorTotal <= 0 && cruzamento.aparelhoEncontrado.preco) {
+                    proposta.valorTotal = cruzamento.aparelhoEncontrado.preco;
+                  }
+                }
+
+                const msgPreviaAtualizada =
+                  `📸 *Foto da caixa associada à notinha pendente!*\n🔢 IMEI \`${imeiLido}\` vinculado com sucesso.${avisoDivergencia}\n\n` +
+                  formatarMensagemPreviaNotinha(proposta);
+
+                const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
+                const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
+                await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
                 if (targetDestination !== remoteJid) {
-                  await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
+                  await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
                 }
-              }
 
-              return NextResponse.json({ status: 'ok', message: 'IMEI da foto vinculado à notinha pendente.' }, { status: 200 });
+                if (lojaId) {
+                  await supabase.from('whatsapp_logs').insert({
+                    loja_id: lojaId,
+                    contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                    mensagem: `[FOTO+NOTINHA] IMEI ${imeiLido} vinculado à notinha pendente: ${proposta.modelo}`,
+                    created_at: new Date().toISOString(),
+                  });
+                }
+
+                return NextResponse.json({ status: 'ok', message: 'IMEI da foto vinculado à notinha pendente.' }, { status: 200 });
+              }
             }
 
             // ── CASO 3: A foto veio acompanhada de texto de entrada de estoque ──
@@ -2856,20 +2897,33 @@ export async function POST(request: Request) {
     const ehCancelamentoTexto = /^(?:n[aã]o|cancelar|cancela|cancelado|esquece|anular)$/i.test(textContent.trim());
 
     if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
-      const chavesBusca = [
+      const chavesBusca = Array.from(new Set([
         `notinha:${remoteJid}:ultima`,
         `notinha:${targetDestination}:ultima`,
-      ];
+        authorPhone ? `notinha:${authorPhone}:ultima` : null,
+        senderPhone ? `notinha:${senderPhone}:ultima` : null,
+      ].filter(Boolean))) as string[];
+
       const { data: pendUltima } = await supabase
         .from('whatsapp_acoes_pendentes')
         .select('*')
         .in('chave', chavesBusca)
-        .order('expira_em', { ascending: false })
+        .order('criado_em', { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (pendUltima?.params) {
         const propostaPendente = pendUltima.params as PropostaNotinha;
+
+        if (ehConfirmacaoTexto && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
+          await enviarMensagemWhatsApp(
+            instanceName,
+            targetDestination,
+            '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
+          );
+          return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
+        }
+
         await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
 
         if (ehConfirmacaoTexto) {
@@ -2948,15 +3002,18 @@ export async function POST(request: Request) {
     // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
     const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
     if (correcaoDetectada && lojaId) {
-      const chavesBusca = [
+      const chavesBusca = Array.from(new Set([
         `notinha:${remoteJid}:ultima`,
         `notinha:${targetDestination}:ultima`,
-      ];
+        authorPhone ? `notinha:${authorPhone}:ultima` : null,
+        senderPhone ? `notinha:${senderPhone}:ultima` : null,
+      ].filter(Boolean))) as string[];
+
       const { data: pendUltima } = await supabase
         .from('whatsapp_acoes_pendentes')
         .select('*')
         .in('chave', chavesBusca)
-        .order('expira_em', { ascending: false })
+        .order('criado_em', { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -2997,13 +3054,12 @@ export async function POST(request: Request) {
           }
         }
 
-        const msgPreviaAtualizada = formatarMensagemPreviaNotinha(proposta);
+        const msgPreviaAtualizada = `✏️ *Dado atualizado com sucesso!*\n\n` + formatarMensagemPreviaNotinha(proposta);
         const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
-        if (envio.messageId) {
-          await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
-          if (targetDestination !== remoteJid) {
-            await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
-          }
+        const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
+        await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
+        if (targetDestination !== remoteJid) {
+          await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
         }
 
         return NextResponse.json({ status: 'ok', message: 'Notinha corrigida e reenviada para confirmação.' }, { status: 200 });
@@ -3050,6 +3106,17 @@ export async function POST(request: Request) {
         imei: vendaDetectada.aparelho?.imei,
       });
 
+      let valorTotalNotinha = vendaDetectada.valorTotal || cruzamento.aparelhoEncontrado?.preco || 0;
+      if (valorTotalNotinha <= 0 && apsEstoque && vendaDetectada.aparelho?.modelo) {
+        const modAlvo = vendaDetectada.aparelho.modelo.toLowerCase();
+        const comPreco = apsEstoque.find(
+          (a) => (a.modelo || '').toLowerCase().includes(modAlvo) && Number(a.preco) > 0
+        );
+        if (comPreco?.preco) {
+          valorTotalNotinha = Number(comPreco.preco);
+        }
+      }
+
       const proposta: PropostaNotinha = {
         id: `notinha-${Date.now()}`,
         clienteNome: vendaDetectada.cliente?.nome || pushName || 'Cliente',
@@ -3063,7 +3130,7 @@ export async function POST(request: Request) {
         imei: vendaDetectada.aparelho?.imei || cruzamento.aparelhoEncontrado?.imei || undefined,
         statusEstoque: cruzamento.mensagem,
         aparelhoId: cruzamento.aparelhoEncontrado?.id,
-        valorTotal: vendaDetectada.valorTotal || cruzamento.aparelhoEncontrado?.preco || 0,
+        valorTotal: valorTotalNotinha,
         custo: cruzamento.aparelhoEncontrado?.custo || undefined,
         formaPagamento: vendaDetectada.formaPagamento || 'Não informada',
         isUpgrade: Boolean(vendaDetectada.isUpgrade),
@@ -3078,11 +3145,10 @@ export async function POST(request: Request) {
           ? `📸 *Foto da caixa associada:* IMEI \`${imeiFotoVinculada}\` vinculado automaticamente da foto enviada há pouco!\n\n`
           : '') + formatarMensagemPreviaNotinha(proposta);
       const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
-      if (envio.messageId) {
-        await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
-        if (targetDestination !== remoteJid) {
-          await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
-        }
+      const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
+      await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
+      if (targetDestination !== remoteJid) {
+        await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
       }
 
       return NextResponse.json({ status: 'ok', message: 'Prévia de notinha gerada com sucesso a partir de pedido.' }, { status: 200 });

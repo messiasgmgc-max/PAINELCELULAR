@@ -62,17 +62,27 @@ const digitos = (val: unknown) => String(val ?? '').replace(/\D/g, '');
  */
 export function limparNomeModelo(m: string): string {
   let limpo = (m || '').trim();
-  // Remove menção a imei, serial, lacrado, seminovo, gb, cores comuns, fragmentos de RAM/memória
+
+  // Separa número colado com pro/plus/max/mini (ex: "15pro" -> "15 Pro")
+  limpo = limpo
+    .replace(/\b(\d+)(pro\s*max|promax)\b/gi, '$1 Pro Max')
+    .replace(/\b(\d+)(pro)\b/gi, '$1 Pro')
+    .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
+    .replace(/\b(\d+)(mini)\b/gi, '$1 Mini');
+
+  // Remove menção a imei, serial, lacrado, seminovo, gb, cores comuns, fragmentos de RAM/memória e capacidades como "256g"
   limpo = limpo
     .replace(/\bimei\b.*$/i, '')
     .replace(/\b(?:lacrado|seminovo|novo|usado|caixa\s*fechada)\b/gi, '')
-    .replace(/\b\d+\s*(?:gb|tb)\b/gi, '')
-    .replace(/\b(?:,\s*)?(?:\d+\s*(?:gb|tb)\s*)?(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
-    .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento)\b/gi, '')
+    .replace(/\b\d+\s*(?:gb|tb|g)\s*(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
+    .replace(/\b\d+\s*(?:gb|tb|g)\b/gi, '')
+    .replace(/(?:,\s*)?(?:de\s+)?ram\s*(?:e\s*)?(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)?\b/gi, '')
+    .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
     .replace(/\b(?:preto|branco|azul|dourado|prata|verde|roxo|cinza|grafite|tit[aâ]nio|rose|amarelo|vermelho|natural|black|white|blue|gold|silver|green|purple|gray|graphite|titanium|desert|deserto)\b/gi, '')
     .replace(/[,\s]+e\s*$/i, '')
     .replace(/\s*,\s*e\s+/gi, ' ')
     .replace(/\s+e\s*$/i, '')
+    .replace(/(?:,\s*de|\s+de)+$/gi, '')
     .replace(/^[,\s-]+|[,\s-]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -280,7 +290,11 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
     linhas.push(`📦 *Estoque:* ${proposta.statusEstoque}`);
   }
 
-  linhas.push(`💰 *Valor Total:* R$ ${valorFmt}`);
+  if (proposta.valorTotal && proposta.valorTotal > 0) {
+    linhas.push(`💰 *Valor Total:* R$ ${valorFmt}`);
+  } else {
+    linhas.push('💰 *Valor Total:* ⚠️ *Não informado no formulário!*');
+  }
   linhas.push(`💳 *Forma de Pagamento:* ${proposta.formaPagamento || 'Não informada'}`);
 
   if (proposta.isUpgrade && proposta.modeloTroca) {
@@ -298,7 +312,11 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
   }
 
   linhas.push('──────────────────────────');
-  linhas.push('👉 Reaja com ✅ nesta mensagem ou responda "SIM" / "CONFIRMAR" para emitir a notinha.');
+  if (proposta.valorTotal && proposta.valorTotal > 0) {
+    linhas.push('👉 Reaja com ✅ nesta mensagem ou responda "SIM" / "CONFIRMAR" para emitir a notinha.');
+  } else {
+    linhas.push('👉 *Para emitir:* informe o valor respondendo ex: "o valor é 4800" (ou reaja com ✅ após informar o valor).');
+  }
   linhas.push('❌ Reaja com ❌ ou responda "CANCELAR" para cancelar, ou informe o dado a corrigir.');
 
   return sanitizarTextoWhatsApp(linhas.join('\n'));
@@ -328,13 +346,42 @@ export function interpretarTextoCorrecaoVenda(
 ): { campo: 'valor' | 'imei' | 'cliente' | 'modelo' | 'cor'; valor: any } | null {
   if (!texto || typeof texto !== 'string') return null;
   const t = texto.trim();
+  const norm = t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
-  // Correção de valor
-  const matchValor = t.match(/(?:valor|preco|preço|por|total)\s*(?:certo|correto|novo)?\s*(?:é|e|sera|será|pra|para)?\s*R?\$?\s*([\d.,]+)/i);
-  if (matchValor) {
-    const rawVal = matchValor[1].replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(rawVal);
-    if (!isNaN(num) && num > 0) {
+  const parseValorFlexivel = (str: string): number => {
+    const s = str.trim().replace(/^[^\d]+/, '').replace(/[^\d]+$/, '');
+    if (!s) return 0;
+    if (s.includes(',')) {
+      return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    }
+    if (/^\d+\.\d{1,2}$/.test(s)) {
+      return parseFloat(s);
+    }
+    return parseFloat(s.replace(/\./g, ''));
+  };
+
+  // 1. Correção de valor por número direto (ex: "5200", "4999.99", "R$ 4.500")
+  const matchNumeroPuro = t.match(/^R?\$?\s*([0-9.,]+)$/i);
+  if (matchNumeroPuro) {
+    const num = parseValorFlexivel(matchNumeroPuro[1]);
+    const digitosNum = matchNumeroPuro[1].replace(/\D/g, '');
+    if (!isNaN(num) && num > 0 && num < 100000 && digitosNum.length < 10) {
+      return { campo: 'valor', valor: num };
+    }
+  }
+
+  // 2. Correção de valor por frase (ex: "o valor é 5200", "valor certo 4800", "preço: 3500", "o valor e 4800")
+  const matchFraseValor =
+    t.match(/(?:valor|preco|pre[cç]o|total|por)\b[^\d]*?([0-9.,]+)/iu) ||
+    t.match(/\b(?:[eé]|ser[aá]|pra|para|por)\s*R?\$?\s*([0-9.,]+)/iu);
+
+  if (matchFraseValor) {
+    const num = parseValorFlexivel(matchFraseValor[1]);
+    const digitosNum = matchFraseValor[1].replace(/\D/g, '');
+    if (!isNaN(num) && num > 0 && num < 100000 && digitosNum.length < 10) {
       return { campo: 'valor', valor: num };
     }
   }
@@ -377,6 +424,7 @@ export async function salvarPropostaNotinha(
   proposta: PropostaNotinha
 ): Promise<void> {
   const agora = Date.now();
+  const expiraEmIso = new Date(agora + 30 * 60 * 1000).toISOString();
   proposta.messageId = messageId;
   proposta.remoteJid = remoteJid;
   proposta.criadoEm = agora;
@@ -392,6 +440,7 @@ export async function salvarPropostaNotinha(
         params: proposta as any,
         resumo: `Notinha ${proposta.modelo} para ${proposta.clienteNome}`,
         criado_em: new Date(agora).toISOString(),
+        expira_em: expiraEmIso,
       },
       { onConflict: 'chave' }
     );
@@ -406,6 +455,7 @@ export async function salvarPropostaNotinha(
         params: proposta as any,
         resumo: `Última notinha ${proposta.modelo}`,
         criado_em: new Date(agora).toISOString(),
+        expira_em: expiraEmIso,
       },
       { onConflict: 'chave' }
     );
@@ -682,6 +732,25 @@ export interface FotoRecenteCache {
  */
 export function modelosSaoCompativeis(modeloA?: string | null, modeloB?: string | null): boolean {
   if (!modeloA || !modeloB) return true;
+
+  const extrairMarca = (str: string) => {
+    const s = str.toLowerCase();
+    if (/iphone|apple|ipad|macbook/i.test(s)) return 'apple';
+    if (/samsung|galaxy/i.test(s)) return 'samsung';
+    if (/xiaomi|poco|redmi/i.test(s)) return 'xiaomi';
+    if (/motorola|moto/i.test(s)) return 'motorola';
+    if (/realme/i.test(s)) return 'realme';
+    return null;
+  };
+
+  const marcaA = extrairMarca(modeloA);
+  const marcaB = extrairMarca(modeloB);
+
+  // Se ambas têm marcas detectadas e são diferentes, são incompatíveis
+  if (marcaA && marcaB && marcaA !== marcaB) {
+    return false;
+  }
+
   const limpa = (str: string) =>
     str
       .toLowerCase()
@@ -695,7 +764,12 @@ export function modelosSaoCompativeis(modeloA?: string | null, modeloB?: string 
   const a = limpa(modeloA);
   const b = limpa(modeloB);
 
-  if (!a || !b) return true;
+  // Se um dos dois é apenas o nome da marca (ex: etiqueta leu apenas "iPhone" e o pedido é "iPhone 15 Pro")
+  if (!a || !b) {
+    if (marcaA && marcaB) return marcaA === marcaB;
+    return true;
+  }
+
   if (a.includes(b) || b.includes(a)) return true;
 
   // Se ambos têm tokens numéricos de geração (ex: '13' vs '15', 'f8' vs 'f8'), os números devem coincidir

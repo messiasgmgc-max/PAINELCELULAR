@@ -185,8 +185,72 @@ Modelo: POCO F8 Pro, 12GB de RAM e 512GB de memória`;
   assert.ok(parsed);
   assert.equal(parsed.isUpgrade, false);
   assert.equal(parsed.tradeIn, null);
+  assert.equal(parsed.aparelho.capacidade, '512GB');
   assert.ok(parsed.aparelho.modelo?.includes('POCO F8 Pro'));
   assert.ok(!parsed.aparelho.modelo?.includes('de RAM'));
   assert.ok(!parsed.aparelho.modelo?.includes('de memória'));
+});
+
+test('detectarFormularioOuPedidoVenda e formatarMensagemPreviaNotinha tratam Valor total em branco', () => {
+  const textoSemValor = `💳 FORMA DE PAGAMENTO
+Valor total:
+Forma de pagamento:
+( ) Pix  
+(X) Cartão de crédito  
+( ) Upgrade - Modelo:
+
+Modelo: IPhone 15pro 256g`;
+
+  const parsed = detectarFormularioOuPedidoVenda(textoSemValor);
+  assert.ok(parsed);
+  assert.equal(parsed.valorTotal, null);
+  assert.equal(parsed.aparelho.modelo, 'iPhone 15 Pro');
+  assert.equal(parsed.aparelho.capacidade, '256GB');
+
+  const proposta: PropostaNotinha = {
+    id: 'prop-sem-valor',
+    clienteNome: 'Luan Cássio',
+    modelo: 'iPhone 15 Pro',
+    capacidade: '256GB',
+    valorTotal: 0,
+    statusEstoque: 'Nenhum aparelho deste modelo disponível no estoque no momento.',
+    formaPagamento: 'cartao_credito',
+    isUpgrade: false,
+  };
+
+  const previa = formatarMensagemPreviaNotinha(proposta);
+  assert.ok(previa.includes('Não informado no formulário!'));
+  assert.ok(previa.includes('informe o valor respondendo ex: "o valor é 4800"'));
+  assert.ok(!previa.includes('R$ 0,00'));
+});
+
+test('interpretarTextoCorrecaoVenda aceita valores numéricos diretos e protege contra IMEI', () => {
+  const c1 = interpretarTextoCorrecaoVenda('5200');
+  assert.equal(c1?.campo, 'valor');
+  assert.equal(c1?.valor, 5200);
+
+  const c2 = interpretarTextoCorrecaoVenda('4999.99');
+  assert.equal(c2?.campo, 'valor');
+  assert.equal(c2?.valor, 4999.99);
+
+  const c3 = interpretarTextoCorrecaoVenda('o valor é 5200');
+  assert.equal(c3?.campo, 'valor');
+  assert.equal(c3?.valor, 5200);
+
+  // IMEI de 15 dígitos NUNCA deve ser interpretado como valor
+  const cImei = interpretarTextoCorrecaoVenda('868972083436361');
+  assert.notEqual(cImei?.campo, 'valor');
+});
+
+test('limparNomeModelo higieniza template incompleto com "de RAM e de memória"', () => {
+  assert.equal(limparNomeModelo('Xiaomi POCO F8 Pro, de RAM e de memória'), 'Xiaomi POCO F8 Pro');
+  assert.equal(limparNomeModelo('POCO F8 Pro, de RAM e de memória'), 'POCO F8 Pro');
+  assert.equal(limparNomeModelo('iPhone 15pro 256g'), 'iPhone 15 Pro');
+});
+
+test('modelosSaoCompativeis reconhece iPhone genérico lido em foto com iPhone 15 Pro', () => {
+  assert.equal(modelosSaoCompativeis('iPhone', 'iPhone 15pro 256g'), true);
+  assert.equal(modelosSaoCompativeis('iPhone', 'POCO F8 Pro'), false);
+  assert.equal(modelosSaoCompativeis('Galaxy', 'iPhone 15 Pro'), false);
 });
 
