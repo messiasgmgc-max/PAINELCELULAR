@@ -69,6 +69,19 @@ function formatarMoeda(valor: number): string {
 }
 
 /**
+ * Remove emojis e pares substitutos UTF-16 não suportados pelas fontes padrão WinAnsi (Helvetica) do PDFKit,
+ * evitando caracteres corrompidos como "Ø=Üñ" ou "Ø=Ý" no PDF gerado.
+ */
+export function limparTextoPdf(texto?: string | null): string {
+  if (!texto || typeof texto !== 'string') return '';
+  return texto
+    .replace(/[\uD800-\uDFFF]/g, '')
+    .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Converte data URI (base64) ou URL pública em Buffer de imagem (PNG/JPEG) para o PDFKit.
  */
 async function carregarBufferImagem(src?: string | null): Promise<Buffer | null> {
@@ -107,7 +120,7 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
 
   return new Promise((resolve, reject) => {
     try {
-      const nomeLoja = (dados.loja.nome || 'Phone Center').trim();
+      const nomeLoja = limparTextoPdf(dados.loja.nome || 'Phone Center') || 'Phone Center';
       const doc = new PDFDocument({
         size: 'A4',
         margin: 30,
@@ -125,8 +138,8 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
 
       const x = 30;
       const w = 535;
-      const codigoVenda = dados.codigoVenda;
-      const nomeCliente = dados.cliente.nome || 'Não informado';
+      const codigoVenda = limparTextoPdf(dados.codigoVenda) || 'OK';
+      const nomeCliente = limparTextoPdf(dados.cliente.nome || 'Não informado') || 'Não informado';
 
       // ─────────────────────────────────────────────────────────────
       // 1. CANHOTO DE RECEBIMENTO (Fiel ao cabeçalho de reciboA4.ts)
@@ -183,22 +196,22 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
       doc.text(nomeLoja, xTextoLoja, y, { width: larguraTextoLoja });
 
       doc.fontSize(8).font('Helvetica');
-      const enderecoLoja = dados.loja.endereco || dados.loja.cidade || 'Endereço da loja';
+      const enderecoLoja = limparTextoPdf(dados.loja.endereco || dados.loja.cidade || 'Endereço da loja');
       doc.text(enderecoLoja, xTextoLoja, y + 17, { width: larguraTextoLoja });
 
       const infoEmpresa = [
-        dados.loja.cnpj ? `CPF/CNPJ: ${dados.loja.cnpj}` : null,
-        dados.loja.telefone ? `Tel: ${dados.loja.telefone}` : null,
+        dados.loja.cnpj ? `CPF/CNPJ: ${limparTextoPdf(dados.loja.cnpj)}` : null,
+        dados.loja.telefone ? `Tel: ${limparTextoPdf(dados.loja.telefone)}` : null,
       ]
         .filter(Boolean)
         .join(' | ') || 'Telefone não informado';
       doc.text(infoEmpresa, xTextoLoja, y + 28, { width: larguraTextoLoja });
 
       // Lado direito: Data, Vendedor e Código
-      const dataHoraFmt = dados.dataEmissao || new Date().toLocaleString('pt-BR');
+      const dataHoraFmt = limparTextoPdf(dados.dataEmissao || new Date().toLocaleString('pt-BR'));
       doc.fontSize(8).font('Helvetica');
       doc.text(`Data: ${dataHoraFmt}`, x + 330, y + 4, { align: 'right', width: 205 });
-      doc.text(`VENDEDOR: ${dados.vendedor || 'Não informado'}`, x + 330, y + 16, { align: 'right', width: 205 });
+      doc.text(`VENDEDOR: ${limparTextoPdf(dados.vendedor || 'Não informado')}`, x + 330, y + 16, { align: 'right', width: 205 });
       doc.fontSize(9).font('Helvetica-Bold');
       doc.text(`RECIBO DA VENDA: #${codigoVenda}`, x + 330, y + 28, { align: 'right', width: 205 });
 
@@ -281,16 +294,16 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
 
         const batTxt = (itemAp as any).bateria ? ` (Bat: ${(itemAp as any).bateria}%)` : '';
         const obsTxt = (itemAp as any).observacao ? ` - ${(itemAp as any).observacao}` : '';
-        const modCompleto = `${itemAp.modelo} ${itemAp.capacidade || ''} ${itemAp.cor || ''}${batTxt}${obsTxt}`
-          .replace(/\s+/g, ' ')
-          .trim();
+        const modCompleto = limparTextoPdf(
+          `${itemAp.modelo} ${itemAp.capacidade || ''} ${itemAp.cor || ''}${batTxt}${obsTxt}`
+        );
 
         doc.fontSize(8.5).font('Helvetica-Bold');
         doc.text(modCompleto, x + colW.cod + 4, y + 4, { width: colW.desc - 6, ellipsis: true });
 
         if (itemAp.imei) {
           doc.fontSize(7.5).font('Helvetica-Bold');
-          doc.text(`📱 IMEI / Serial: ${itemAp.imei}`, x + colW.cod + 4, y + (altLinhaItem > 30 ? 18 : 15), {
+          doc.text(`IMEI / Serial: ${limparTextoPdf(itemAp.imei)}`, x + colW.cod + 4, y + (altLinhaItem > 30 ? 18 : 15), {
             width: colW.desc - 6,
           });
         }
@@ -346,8 +359,9 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
         listaUpgradesPdf.forEach((trItem, idxTr) => {
           doc.rect(x, y, w, altLinhaTroca).fillAndStroke('#f0fdf4', '#000000');
 
-          doc.fillColor('#166534').fontSize(9).font('Helvetica-Bold');
-          doc.text('🔁', x, y + 7, { width: colW.cod, align: 'center' });
+          const codTrocaLabel = listaUpgradesPdf.length > 1 ? `TR${idxTr + 1}` : 'TR';
+          doc.fillColor('#166534').fontSize(7.5).font('Helvetica-Bold');
+          doc.text(codTrocaLabel, x, y + 8, { width: colW.cod, align: 'center' });
 
           doc.fontSize(7).font('Helvetica-Bold');
           const labelEntrada =
@@ -356,9 +370,9 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
               : 'ENTRADA: APARELHO RECEBIDO NA TROCA (UPGRADE)';
           doc.text(labelEntrada, x + colW.cod + 4, y + 3, { width: colW.desc - 6 });
 
-          const descTroca = `${trItem.modelo || 'Aparelho na Troca'}${trItem.capacidade ? ` ${trItem.capacidade}` : ''}${trItem.cor ? ` ${trItem.cor}` : ''}${trItem.imei ? ` (IMEI: ${trItem.imei})` : ''}`
-            .replace(/\s+/g, ' ')
-            .trim();
+          const descTroca = limparTextoPdf(
+            `${trItem.modelo || 'Aparelho na Troca'}${trItem.capacidade ? ` ${trItem.capacidade}` : ''}${trItem.cor ? ` ${trItem.cor}` : ''}${trItem.imei ? ` (IMEI: ${trItem.imei})` : ''}`
+          );
           doc.fillColor('#000000').fontSize(7.5).font('Helvetica');
           doc.text(descTroca, x + colW.cod + 4, y + (altLinhaTroca > 28 ? 15 : 13), {
             width: colW.desc - 6,
@@ -437,7 +451,7 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
       doc.rect(x, y, w, 22).fillAndStroke('#fafafa', '#000000');
       doc.fillColor('#000000').fontSize(8).font('Helvetica');
       doc.text('Forma(s) de Pagamento: ', x + 10, y + 6, { continued: true });
-      doc.font('Helvetica-Bold').text(dados.pagamento.forma.toUpperCase());
+      doc.font('Helvetica-Bold').text(limparTextoPdf(dados.pagamento.forma).toUpperCase() || 'PIX');
 
       doc.fontSize(8).font('Helvetica-Bold').fillColor('#16a34a');
       doc.text('Status: PAGO / CONCLUÍDO', x + 350, y + 6, { align: 'right', width: 175 });

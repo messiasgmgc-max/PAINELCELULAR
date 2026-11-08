@@ -806,6 +806,9 @@ Modelo:
 
   assert.ok(pdfBuffer.length > 1000);
   assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
+  const pdfLatin1 = pdfBuffer.toString('latin1');
+  assert.ok(!pdfLatin1.includes('\xd8=\xdc\xf1'), 'Não deve conter mojibake Ø=Üñ do emoji 📱 no PDF');
+  assert.ok(!pdfLatin1.includes('\xd8=\xdd'), 'Não deve conter mojibake Ø=Ý do emoji 🔁 no PDF');
 });
 
 test('Suporta pedidos com múltiplos Upgrades em seta (Entrada -> Saída + R$ valor) como o da nota do Bruno Henrique', async () => {
@@ -990,6 +993,9 @@ Pagamento confirmado`;
 
   assert.ok(pdfBuffer.length > 1000);
   assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
+  const pdfLatin1 = pdfBuffer.toString('latin1');
+  assert.ok(!pdfLatin1.includes('\xd8=\xdc\xf1'), 'Não deve conter mojibake Ø=Üñ do emoji 📱 no PDF');
+  assert.ok(!pdfLatin1.includes('\xd8=\xdd'), 'Não deve conter mojibake Ø=Ý do emoji 🔁 no PDF');
 });
 
 
