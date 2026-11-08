@@ -20,6 +20,7 @@ export interface ParsedAparelho {
   observacoes?: string | null;
   preco?: number | null;
   custo?: number | null;
+  tradeIn?: ParsedTradeIn | null;
 }
 
 export interface ParsedTradeIn {
@@ -46,6 +47,7 @@ export interface ParsedVenda {
   aparelhos?: ParsedAparelho[];
   isUpgrade: boolean;
   tradeIn: ParsedTradeIn | null;
+  tradeIns?: ParsedTradeIn[];
   vendedor?: string | null;
   formaPagamento?: string | null;
   pagamentos?: ParsedPagamentoItem[] | null;
@@ -388,6 +390,7 @@ export function sanitizarECompletarVendaParsed(
   ): ParsedAparelho | null => {
     let limpo = textoLinha
       .replace(/^\s*(?:\d+\s*(?:[-–—.)]|x|un|unid(?:ades?)?)\s*|[•*-]\s*)/i, '')
+      .replace(/^\s*(?:upgrade|troca|trade[- ]?in|entrada|deu|pegou|levou|saiu)\s*[:=-]?\s*/i, '')
       .trim();
     if (!limpo || ehLinhaDeRodapeOuOutroCampo(limpo)) return null;
 
@@ -433,10 +436,15 @@ export function sanitizarECompletarVendaParsed(
       }
     }
 
-    // 4. Observações específicas do item (ex: "garantia Apple", "caixa aberta")
+    // 4. Observações específicas do item (ex: "garantia Apple", "com detalhes", "sem detalhes")
     const obsPartes: string[] = [];
     if (/\bgarantia\s+apple\b/i.test(limpo)) {
       obsPartes.push('Garantia Apple');
+    }
+    if (/\bcom\s+detalhes?\b/i.test(limpo)) {
+      obsPartes.push('Com detalhes');
+    } else if (/\bsem\s+detalhes?\b/i.test(limpo)) {
+      obsPartes.push('Sem detalhes');
     }
     if (obsPartes.length > 0) {
       item.observacoes = obsPartes.join(' | ');
@@ -445,7 +453,7 @@ export function sanitizarECompletarVendaParsed(
     // 5. Condição na linha de modelo
     if (/lacrado|novo|caixa fechada/i.test(limpo)) {
       item.condicao = 'novo';
-    } else if (/usado|seminovo/i.test(limpo) || (item.bateria && item.bateria < 100)) {
+    } else if (/usado|seminovo|\bcom\s+detalhes?\b/i.test(limpo) || (item.bateria && item.bateria < 100)) {
       item.condicao = 'seminovo';
     }
 
@@ -455,7 +463,7 @@ export function sanitizarECompletarVendaParsed(
       item.cor = corEncontrada;
     }
 
-    // 7. Preço individual na linha se houver (ex: "R$ 5.200")
+    // 7. Preço / Volta individual na linha se houver (ex: "+ R$2.000,00" ou "R$ 5.200")
     const precoItemMatch = limpo.match(/R\$\s*([0-9.,]+)/i);
     if (precoItemMatch) {
       const valItem = parseFloat(precoItemMatch[1].replace(/\./g, '').replace(',', '.'));
@@ -464,27 +472,32 @@ export function sanitizarECompletarVendaParsed(
       }
     }
 
-    // 8. Nome limpo do modelo: remove dados técnicos, bateria, garantia, RAM, memória, IMEI, lacrado, cores
+    // 8. Nome limpo do modelo: remove dados técnicos, bateria, garantia, detalhes, RAM, memória, IMEI, lacrado, cores
     const coresParaRemover = [
       item.cor,
       'deep\\s*blue', 'sierra\\s*blue', 'pacific\\s*blue', 'space\\s*black', 'space\\s*grey', 'space\\s*gray',
+      'meia\\s*noite', 'meia-noite', 'midnight', 'starlight', 'estelar', 'ultramarine', 'ultramarino', 'alpine', 'teal',
       'desert', 'deserto', 'natural', 'titanium', 'titânio', 'titanio', 'preto', 'preta', 'branco', 'branca', 'azul',
-      'dourado', 'dourada', 'rosa', 'verde', 'roxo', 'cinza', 'grafite', 'silver', 'prata', 'gold', 'black', 'white', 'blue'
+      'dourado', 'dourada', 'rosa', 'verde', 'roxo', 'cinza', 'grafite', 'silver', 'prata', 'gold', 'black', 'white',
+      'blue', 'laranja', 'orange', 'coral', 'vermelho', 'vermelha', 'red', 'amarelo', 'yellow', 'purple', 'pink', 'green'
     ].filter(Boolean).join('|');
 
     let modNome = limpo
       .replace(/^\s*(?:\d+\s*(?:[-–—.)]|x|un|unid(?:ades?)?)\s*|[•*-]\s*)/i, '')
+      .replace(/\b(?:upgrade|troca|trade[- ]?in)\b\s*[:=-]?/gi, '')
+      .replace(/(?:->|-->|=>|➔|➜|➡️|➡)/g, ' ')
       .replace(/\b(\d+)(pro\s*max|promax)\b/gi, '$1 Pro Max')
       .replace(/\b(\d+)(pro)\b/gi, '$1 Pro')
       .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
       .replace(/\b(\d+)(mini)\b/gi, '$1 Mini')
       .replace(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei|serial|n[ºo°]\s*s[eé]rie):\s*#?[0-9A-Za-z]+/gi, '')
       .replace(/\b[0-9]{14,16}\b/g, '')
-      .replace(/R\$\s*[0-9.,]+/gi, '')
+      .replace(/\+?\s*R\$\s*[0-9.,]+/gi, '')
       .replace(/(?:bateria|bat|sa[úu]de(?:\s*da\s*bateria)?)\s*[:=]?\s*\d{1,3}\s*%?/gi, '')
       .replace(/\b\d{1,3}\s*%/g, '')
       .replace(/\bgarantia\s+apple\b/gi, '')
       .replace(/\b(?:com\s+)?garantia\b/gi, '')
+      .replace(/\b(?:com|sem)\s+detalhes?\b/gi, '')
       .replace(/\b\d+\s*(?:gb|tb|g)\s*(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
       .replace(/\b\d+\s*(?:gb|tb|g)\b/gi, '')
       .replace(/(?:,\s*)?(?:de\s+)?ram\s*(?:e\s*)?(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)?\b/gi, '')
@@ -492,6 +505,7 @@ export function sanitizarECompletarVendaParsed(
       .replace(/\b(?:lacrado|novo|seminovo|usado|caixa\s*fechada)\b/gi, '')
       .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
       .replace(new RegExp(`\\b(?:${coresParaRemover})\\b`, 'gi'), '')
+      .replace(/[+]/g, ' ')
       .replace(/[,\s]+e\s*$/i, '')
       .replace(/\s*,\s*e\s+/gi, ' ')
       .replace(/\s+e\s*$/i, '')
@@ -515,7 +529,9 @@ export function sanitizarECompletarVendaParsed(
 
   for (let i = 0; i < linhasTexto.length; i++) {
     const lin = linhasTexto[i];
-    if (/(?:upgrade|trade[- ]?in)/i.test(lin)) continue;
+    // Ignora linha de opção de pagamento "( ) Upgrade - Modelo:"
+    if (/^\s*(?:\(\s*[xX✔✓]?\s*\)|\[\s*[xX✔✓]?\s*\])\s*(?:upgrade|troca|trade[- ]?in)/i.test(lin)) continue;
+    if (/(?:upgrade|trade[- ]?in)\s*-\s*modelo\s*:/i.test(lin)) continue;
     const m = lin.match(/^\s*[•*-]?\s*(?:Modelos?|Aparelhos?|Produtos?):\s*(.*)$/i);
     if (m) {
       idxSecaoModelo = i;
@@ -527,7 +543,7 @@ export function sanitizarECompletarVendaParsed(
     }
   }
 
-  // Coleta também linhas subsequentes após "Modelo:" que descrevam aparelhos (ex: listas "1 - iPhone 15...", "1 - iPhone 14 Pro Max...")
+  // Coleta também linhas subsequentes após "Modelo:" que descrevam aparelhos ou upgrades (ex: "Upgrade 15 pro max -> 17 pro max...")
   if (idxSecaoModelo !== -1) {
     for (let j = idxSecaoModelo + 1; j < linhasTexto.length; j++) {
       const linSub = linhasTexto[j].trim();
@@ -536,7 +552,9 @@ export function sanitizarECompletarVendaParsed(
 
       const pareceLinhaAparelho =
         /^\d+\s*(?:[-–—.)]|x|un)\s*\S+/i.test(linSub) ||
-        /^[•*-]\s*(?:iPhone|iPad|MacBook|Apple|Galaxy|Samsung|Xiaomi|Redmi|Poco|Motorola|Moto|\d{2}\b)/i.test(linSub) ||
+        /^(?:upgrade|troca|trade[- ]?in)\b/i.test(linSub) ||
+        /(?:->|-->|=>|➔|➜|➡️|➡)/.test(linSub) ||
+        /^[•*-]\s*(?:iPhone|iPad|MacBook|Apple|Galaxy|Samsung|Xiaomi|Redmi|Poco|Motorola|Moto|Upgrade|\d{2}\b)/i.test(linSub) ||
         /\b(?:iPhone|iPad|MacBook|Galaxy|Samsung|Xiaomi|Redmi|Poco|Motorola|Moto|\d+\s*(?:gb|tb))\b/i.test(linSub);
 
       if (pareceLinhaAparelho) {
@@ -547,15 +565,24 @@ export function sanitizarECompletarVendaParsed(
     }
   }
 
-  // Se uma única linha contiver múltiplos aparelhos separados por " + " ou " / " (ex: "1x iPhone 15 128gb + 1x iPhone 14 Pro Max 128gb")
+  // Se uma única linha contiver múltiplos aparelhos separados por " + " (ex: "1x iPhone 15 128gb + 1x iPhone 14 Pro Max 128gb"),
+  // mas NÃO divide se for seta de upgrade ("-> ... + R$2.000,00") ou se o que vier após "+" for apenas valor monetário ("+ R$ 2.000")
   const linhasExpandidas: string[] = [];
   for (const rawLine of linhasAparelhosRaw) {
-    if (/\s+\+\s+/.test(rawLine)) {
+    const temSetaUpgrade = /(?:->|-->|=>|➔|➜|➡️|➡)/.test(rawLine);
+    if (!temSetaUpgrade && /\s+\+\s+/.test(rawLine)) {
       const partes = rawLine
         .split(/\s+\+\s+/)
         .map((p) => p.trim())
         .filter(Boolean);
-      if (partes.length > 1) {
+      const todasPartesParecemAparelhos =
+        partes.length > 1 &&
+        partes.every(
+          (p) =>
+            !/^(?:volta|diferen[cç]a|valor|pix|cart[aã]o|dinheiro)?\s*R?\$?\s*[\d.,]+$/i.test(p) &&
+            /\b(?:iPhone|iPad|MacBook|Galaxy|Samsung|Xiaomi|Redmi|Poco|Motorola|Moto|1[1-7]\b|\d+\s*(?:gb|tb))/i.test(p)
+        );
+      if (todasPartesParecemAparelhos) {
         linhasExpandidas.push(...partes);
         continue;
       }
@@ -564,9 +591,49 @@ export function sanitizarECompletarVendaParsed(
   }
 
   const aparelhosExtraidos: ParsedAparelho[] = [];
+  const tradeInsExtraidos: ParsedTradeIn[] = [];
   const usarResultAparelhoComoBase = linhasExpandidas.length <= 1;
 
   for (const rawLine of linhasExpandidas) {
+    // Verifica se a linha é um Upgrade em formato de seta:
+    // Ex: "Upgrade 15 pro max 512gb preto -> 17 pro max 256gb laranja com detalhes + R$2.000,00"
+    const matchSetaUpgrade = rawLine.match(/^(.+?)\s*(?:->|-->|=>|➔|➜|➡️|➡)\s*(.+)$/);
+    if (matchSetaUpgrade) {
+      const parteEntradaRaw = matchSetaUpgrade[1].trim();
+      const parteSaidaRaw = matchSetaUpgrade[2].trim();
+
+      const parsedEntrada = parseLinhaAparelhoIndividual(parteEntradaRaw);
+      const parsedSaida = parseLinhaAparelhoIndividual(
+        parteSaidaRaw,
+        usarResultAparelhoComoBase ? result.aparelho : undefined
+      );
+
+      if (parsedSaida) {
+        let tradeInVinculado: ParsedTradeIn | null = null;
+        if (parsedEntrada && parsedEntrada.modelo) {
+          tradeInVinculado = {
+            marca: inferirMarcaPorModelo(parsedEntrada.modelo, parsedEntrada.marca || 'Apple'),
+            modelo: parsedEntrada.modelo,
+            capacidade: parsedEntrada.capacidade || '',
+            cor: parsedEntrada.cor || '',
+            imei: parsedEntrada.imei || null,
+            bateria: parsedEntrada.bateria ?? null,
+            valor: parsedEntrada.preco ?? 0,
+            condicao: 'seminovo',
+            observacoes: parsedEntrada.observacoes || 'Recebido como troca (upgrade) no pedido',
+          };
+          tradeInsExtraidos.push(tradeInVinculado);
+          result.isUpgrade = true;
+        }
+
+        aparelhosExtraidos.push({
+          ...parsedSaida,
+          tradeIn: tradeInVinculado,
+        });
+        continue;
+      }
+    }
+
     // Verifica se a linha indica quantidade explícita > 1 para o mesmo modelo (ex: "2x iPhone 17 Pro Max 256gb" ou linha única "2 - iPhone 17 Pro Max")
     const qtdExplicitaMatch = rawLine.match(/^\s*(\d+)\s*(?:x|un|unid(?:ades?)?)\b/i);
     const qtdTracoMatch = rawLine.match(/^\s*(\d+)\s*[-–—]\s+/);
@@ -588,10 +655,33 @@ export function sanitizarECompletarVendaParsed(
       for (let q = 0; q < quantidade; q++) {
         aparelhosExtraidos.push({
           ...parsedItem,
-          // Se expandiu quantidade > 1 da mesma linha, apenas o primeiro fica com eventual IMEI único da linha
           imei: q === 0 ? parsedItem.imei : null,
         });
       }
+    }
+  }
+
+  // Consolida múltiplos trade-ins (vindos das linhas "Upgrade X -> Y" ou do campo de troca superior)
+  if (tradeInsExtraidos.length > 0) {
+    result.isUpgrade = true;
+    result.tradeIns = tradeInsExtraidos;
+
+    const formatarResumoTradeIn = (t: ParsedTradeIn) =>
+      [t.modelo, t.capacidade, t.cor].filter(Boolean).join(' ').trim();
+
+    const somaValorTrocas = tradeInsExtraidos.reduce((acc, t) => acc + Number(t.valor || 0), 0);
+    result.tradeIn = {
+      ...tradeInsExtraidos[0],
+      modelo:
+        tradeInsExtraidos.length > 1
+          ? tradeInsExtraidos.map(formatarResumoTradeIn).join(' + ')
+          : tradeInsExtraidos[0].modelo,
+      valor: somaValorTrocas || (result.tradeIn?.valor ?? 0),
+    };
+  } else if (result.isUpgrade && result.tradeIn) {
+    result.tradeIns = [result.tradeIn];
+    if (aparelhosExtraidos.length === 1 && !aparelhosExtraidos[0].tradeIn) {
+      aparelhosExtraidos[0].tradeIn = result.tradeIn;
     }
   }
 
@@ -607,6 +697,8 @@ export function sanitizarECompletarVendaParsed(
     }
   }
 
+  const extraiuMultiplosOuUpgradeSeta = aparelhosExtraidos.length > 1 || tradeInsExtraidos.length > 0;
+
   if (aparelhosExtraidos.length > 0) {
     result.aparelho = {
       ...result.aparelho,
@@ -615,7 +707,7 @@ export function sanitizarECompletarVendaParsed(
   }
 
   // Linha explícita de cor no formulário (ex: "Cor: 🖤", "Cor: Desert", "Cor: Preto")
-  if (!result.aparelho.cor) {
+  if (!result.aparelho.cor && !extraiuMultiplosOuUpgradeSeta) {
     const linhaCorMatch = trimmedText.match(/(?:^|\n|\r)\s*(?:Cor|Cores):\s*([^\n\r]+)/i);
     if (linhaCorMatch) {
       const corExtraida = extrairCorDeTexto(linhaCorMatch[1]);
@@ -625,13 +717,13 @@ export function sanitizarECompletarVendaParsed(
     }
   }
 
-  // Fallback geral de cor no texto se não identificou acima
-  if (!result.aparelho.cor) {
+  // Fallback geral de cor no texto se não identificou acima (apenas para venda simples de 1 aparelho sem seta de upgrade)
+  if (!result.aparelho.cor && !extraiuMultiplosOuUpgradeSeta) {
     const corFallback = extrairCorDeTexto(trimmedText);
     if (corFallback) {
       result.aparelho.cor = corFallback;
     }
-  } else {
+  } else if (result.aparelho.cor) {
     // Normaliza caso a IA tenha retornado um emoji puro no campo de cor
     const norm = extrairCorDeTexto(result.aparelho.cor);
     if (norm) {
@@ -644,8 +736,8 @@ export function sanitizarECompletarVendaParsed(
     result.aparelho.modelo = normalizarNomeModelo(result.aparelho.modelo);
   }
 
-  // Capacidade geral fallback
-  if (!result.aparelho.capacidade) {
+  // Capacidade geral fallback (apenas para venda simples de 1 aparelho)
+  if (!result.aparelho.capacidade && !extraiuMultiplosOuUpgradeSeta) {
     const romMatch = trimmedText.match(/\b(\d+GB|\d+TB)\b/i);
     if (romMatch) {
       result.aparelho.capacidade = romMatch[1].toUpperCase();
@@ -653,7 +745,7 @@ export function sanitizarECompletarVendaParsed(
   }
 
   // IMEI geral fallback (reconhece IMEI completo de 15 dígitos ou final de 4 dígitos)
-  if (!result.aparelho.imei) {
+  if (!result.aparelho.imei && aparelhosExtraidos.length <= 1) {
     const imeiRotuloMatch =
       trimmedText.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei\s*\(?\s*(?:últimos\s*)?4\s*(?:d[íi]gitos)?\s*\)?|imei|imei\s*1|n[ºo°]\s*s[eé]rie|serial):\s*#?([0-9A-Za-z]{4,18})/i) ||
       trimmedText.match(/(?:final):\s*#?([0-9]{4,6})\b/i) ||
@@ -687,10 +779,12 @@ export function sanitizarECompletarVendaParsed(
 
   // Sincroniza lista consolidada `result.aparelhos`
   if (aparelhosExtraidos.length > 0) {
-    aparelhosExtraidos[0] = {
-      ...aparelhosExtraidos[0],
-      ...result.aparelho,
-    };
+    if (aparelhosExtraidos.length === 1) {
+      aparelhosExtraidos[0] = {
+        ...aparelhosExtraidos[0],
+        ...result.aparelho,
+      };
+    }
     result.aparelhos = aparelhosExtraidos.map((item) => ({
       ...item,
       condicao: item.condicao || result.aparelho.condicao || 'seminovo',

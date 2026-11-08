@@ -44,6 +44,13 @@ export interface DadosReciboPdf {
     imei?: string | null;
     valor?: number | null;
   } | null;
+  upgrades?: Array<{
+    modelo: string;
+    capacidade?: string | null;
+    cor?: string | null;
+    imei?: string | null;
+    valor?: number | null;
+  }>;
   pagamento: {
     forma: string;
     valorTotal: number;
@@ -312,55 +319,90 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
         y += altLinhaItem;
       });
 
-      // Linha especial de Trade-In (se houver upgrade)
+      // Linhas especiais de Trade-In (se houver 1 ou múltiplos upgrades)
+      const listaUpgradesPdf =
+        Array.isArray(dados.upgrades) && dados.upgrades.length > 0
+          ? dados.upgrades
+          : dados.upgrade && dados.upgrade.ativo && (dados.upgrade.valor || dados.upgrade.modelo)
+          ? [
+              {
+                modelo: dados.upgrade.modelo || 'Aparelho na Troca',
+                capacidade: null,
+                cor: null,
+                imei: dados.upgrade.imei || null,
+                valor: dados.upgrade.valor || null,
+              },
+            ]
+          : [];
+
       const temUpgrade = Boolean(
-        dados.upgrade && dados.upgrade.ativo && (dados.upgrade.valor || dados.upgrade.modelo)
+        (dados.upgrade && dados.upgrade.ativo && (dados.upgrade.valor || dados.upgrade.modelo)) ||
+          listaUpgradesPdf.length > 0
       );
 
       if (temUpgrade) {
-        const altLinhaTroca = 32;
-        doc.rect(x, y, w, altLinhaTroca).fillAndStroke('#f0fdf4', '#000000');
+        const altLinhaTroca = listaUpgradesPdf.length > 1 ? 26 : 32;
 
-        doc.fillColor('#166534').fontSize(9).font('Helvetica-Bold');
-        doc.text('🔁', x, y + 8, { width: colW.cod, align: 'center' });
+        listaUpgradesPdf.forEach((trItem, idxTr) => {
+          doc.rect(x, y, w, altLinhaTroca).fillAndStroke('#f0fdf4', '#000000');
 
-        doc.fontSize(7.5).font('Helvetica-Bold');
-        doc.text('ENTRADA: APARELHO RECEBIDO NA TROCA (UPGRADE)', x + colW.cod + 4, y + 4, { width: colW.desc - 6 });
+          doc.fillColor('#166534').fontSize(9).font('Helvetica-Bold');
+          doc.text('🔁', x, y + 7, { width: colW.cod, align: 'center' });
 
-        const descTroca = `${dados.upgrade?.modelo || 'Aparelho na Troca'}${dados.upgrade?.imei ? ` (IMEI: ${dados.upgrade.imei})` : ''}`;
-        doc.fillColor('#000000').fontSize(7.5).font('Helvetica');
-        doc.text(descTroca, x + colW.cod + 4, y + 16, { width: colW.desc - 6 });
+          doc.fontSize(7).font('Helvetica-Bold');
+          const labelEntrada =
+            listaUpgradesPdf.length > 1
+              ? `ENTRADA #${idxTr + 1}: APARELHO RECEBIDO NA TROCA (UPGRADE)`
+              : 'ENTRADA: APARELHO RECEBIDO NA TROCA (UPGRADE)';
+          doc.text(labelEntrada, x + colW.cod + 4, y + 3, { width: colW.desc - 6 });
 
-        doc.text('1', x + colW.cod + colW.desc, y + 10, { width: colW.qtd, align: 'center' });
+          const descTroca = `${trItem.modelo || 'Aparelho na Troca'}${trItem.capacidade ? ` ${trItem.capacidade}` : ''}${trItem.cor ? ` ${trItem.cor}` : ''}${trItem.imei ? ` (IMEI: ${trItem.imei})` : ''}`
+            .replace(/\s+/g, ' ')
+            .trim();
+          doc.fillColor('#000000').fontSize(7.5).font('Helvetica');
+          doc.text(descTroca, x + colW.cod + 4, y + (altLinhaTroca > 28 ? 15 : 13), {
+            width: colW.desc - 6,
+            ellipsis: true,
+          });
 
-        const valTrocaFmt = `- ${formatarMoeda(dados.upgrade?.valor || 0)}`;
-        doc.fillColor('#166534').fontSize(8).font('Helvetica-Bold');
-        doc.text(valTrocaFmt, x + colW.cod + colW.desc + colW.qtd, y + 10, { width: colW.unit, align: 'right' });
-        doc.text('-', x + colW.cod + colW.desc + colW.qtd + colW.unit, y + 10, { width: colW.descVal, align: 'center' });
-        doc.text(valTrocaFmt, x + colW.cod + colW.desc + colW.qtd + colW.unit + colW.descVal, y + 10, {
-          width: colW.tot - 4,
-          align: 'right',
+          doc.text('1', x + colW.cod + colW.desc, y + 8, { width: colW.qtd, align: 'center' });
+
+          const valTrNum = Number(trItem.valor || 0);
+          const valTrocaFmt = valTrNum > 0 ? `- ${formatarMoeda(valTrNum)}` : 'Incluso na Volta';
+          doc.fillColor('#166534').fontSize(valTrNum > 0 ? 8 : 7).font('Helvetica-Bold');
+          doc.text(valTrocaFmt, x + colW.cod + colW.desc + colW.qtd, y + 8, { width: colW.unit, align: 'right' });
+          doc.text('-', x + colW.cod + colW.desc + colW.qtd + colW.unit, y + 8, {
+            width: colW.descVal,
+            align: 'center',
+          });
+          doc.text(valTrocaFmt, x + colW.cod + colW.desc + colW.qtd + colW.unit + colW.descVal, y + 8, {
+            width: colW.tot - 4,
+            align: 'right',
+          });
+          y += altLinhaTroca;
         });
-        y += altLinhaTroca;
 
-        // Subtotais de Upgrade
-        doc.rect(x, y, w, 15).stroke('#000000');
-        doc.fillColor('#475569').fontSize(7.5).font('Helvetica-Bold');
-        doc.text('SUBTOTAL (APARELHO ADQUIRIDO)', x, y + 4, { width: w - colW.tot - 8, align: 'right' });
-        doc.text(formatarMoeda(dados.pagamento.valorTotal), x + w - colW.tot, y + 4, {
-          width: colW.tot - 4,
-          align: 'right',
-        });
-        y += 15;
+        const valorEntradaTotal = Number(dados.upgrade?.valor || dados.pagamento.valorEntrada || 0);
+        if (valorEntradaTotal > 0) {
+          // Subtotais de Upgrade quando há valor explícito da avaliação de entrada
+          doc.rect(x, y, w, 15).stroke('#000000');
+          doc.fillColor('#475569').fontSize(7.5).font('Helvetica-Bold');
+          doc.text('SUBTOTAL (APARELHO ADQUIRIDO)', x, y + 4, { width: w - colW.tot - 8, align: 'right' });
+          doc.text(formatarMoeda(dados.pagamento.valorTotal), x + w - colW.tot, y + 4, {
+            width: colW.tot - 4,
+            align: 'right',
+          });
+          y += 15;
 
-        doc.rect(x, y, w, 15).stroke('#000000');
-        doc.fillColor('#166534').fontSize(7.5).font('Helvetica-Bold');
-        doc.text('(-) ENTRADA BASE DE TROCA (UPGRADE)', x, y + 4, { width: w - colW.tot - 8, align: 'right' });
-        doc.text(`- ${formatarMoeda(dados.upgrade?.valor || 0)}`, x + w - colW.tot, y + 4, {
-          width: colW.tot - 4,
-          align: 'right',
-        });
-        y += 15;
+          doc.rect(x, y, w, 15).stroke('#000000');
+          doc.fillColor('#166534').fontSize(7.5).font('Helvetica-Bold');
+          doc.text('(-) ENTRADA BASE DE TROCA (UPGRADE)', x, y + 4, { width: w - colW.tot - 8, align: 'right' });
+          doc.text(`- ${formatarMoeda(valorEntradaTotal)}`, x + w - colW.tot, y + 4, {
+            width: colW.tot - 4,
+            align: 'right',
+          });
+          y += 15;
+        }
 
         doc.rect(x, y, w, 16).fillAndStroke('#fafafa', '#000000');
         doc.fillColor('#000000').fontSize(8.5).font('Helvetica-Bold');

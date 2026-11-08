@@ -2,6 +2,7 @@ import { gerarReciboPdfBuffer } from '@/lib/recibo/gerarReciboPdf';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { sanitizarECompletarVendaParsed, normalizarNomeModelo, ParsedVenda, extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
+import { registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { registrarVendaAtomica, ErroVenda } from '@/lib/vendas/vendaAtomica';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { obterEmojiDaCor } from './entradaInteligente';
@@ -40,6 +41,21 @@ export interface ItemPropostaNotinha {
   aparelhoId?: string;
   custo?: number;
   valorUnitario?: number;
+  modeloTroca?: string;
+  capacidadeTroca?: string;
+  corTroca?: string;
+  imeiTroca?: string;
+  valorTroca?: number;
+}
+
+export interface TrocaPropostaNotinha {
+  modelo: string;
+  capacidade?: string;
+  cor?: string;
+  imei?: string;
+  bateria?: number;
+  valor?: number;
+  observacoes?: string;
 }
 
 export interface PropostaNotinha {
@@ -66,6 +82,7 @@ export interface PropostaNotinha {
   modeloTroca?: string;
   imeiTroca?: string;
   valorTroca?: number;
+  trocas?: TrocaPropostaNotinha[];
   vendedor?: string;
   observacoes?: string;
   criadoEm?: number;
@@ -79,8 +96,9 @@ const digitos = (val: unknown) => String(val ?? '').replace(/\D/g, '');
 export function limparNomeModelo(m: string): string {
   let limpo = (m || '').trim();
 
-  // Remove prefixo numérico de lista/quantidade (ex: "1 - ", "2x ", "• ")
+  // Remove prefixo numérico de lista/quantidade ou prefixo "Upgrade" (ex: "1 - ", "2x ", "• ", "Upgrade ")
   limpo = limpo.replace(/^\s*(?:\d+\s*(?:[-–—.)]|x|un|unid(?:ades?)?)\s*|[•*-]\s*)/i, '');
+  limpo = limpo.replace(/^\s*(?:upgrade|troca|trade[- ]?in)\b\s*[:=-]?\s*/i, '');
 
   // Separa número colado com pro/plus/max/mini (ex: "15pro" -> "15 Pro")
   limpo = limpo
@@ -92,6 +110,10 @@ export function limparNomeModelo(m: string): string {
   // Remove menção a imei, serial, lacrado, seminovo, bateria, garantia, gb, cores comuns, fragmentos de RAM/memória e capacidades como "256g"
   limpo = limpo
     .replace(/\bimei\b.*$/i, '')
+    .replace(/\+?\s*R\$\s*[0-9.,]+/gi, '')
+    .replace(/(?:->|-->|=>|➔|➜|➡️|➡)/g, ' ')
+    .replace(/\b(?:com|sem)\s+detalhes?\b/gi, '')
+    .replace(/\b(?:upgrade|troca|trade[- ]?in)\b/gi, '')
     .replace(/(?:bateria|bat|sa[úu]de(?:\s*da\s*bateria)?)\s*[:=]?\s*\d{1,3}\s*%?/gi, '')
     .replace(/\b\d{1,3}\s*%/g, '')
     .replace(/\bgarantia\s+apple\b/gi, '')
@@ -101,12 +123,15 @@ export function limparNomeModelo(m: string): string {
     .replace(/\b\d+\s*(?:gb|tb|g)\b/gi, '')
     .replace(/(?:,\s*)?(?:de\s+)?ram\s*(?:e\s*)?(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)?\b/gi, '')
     .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
-    .replace(/\b(?:deep\s*blue|sierra\s*blue|pacific\s*blue|space\s*black|space\s*gr[ae]y|preto|preta|branco|branca|azul|dourado|dourada|prata|verde|roxo|cinza|grafite|tit[aâ]nio|titanio|rose|rosa|amarelo|vermelho|vermelha|natural|black|white|blue|gold|silver|green|purple|gray|grey|graphite|titanium|desert|deserto)\b/gi, '')
+    .replace(
+      /\b(?:deep\s*blue|sierra\s*blue|pacific\s*blue|space\s*black|space\s*gr[ae]y|meia\s*noite|meia-noite|midnight|starlight|estelar|ultramarine|ultramarino|preto|preta|branco|branca|azul|dourado|dourada|prata|verde|roxo|cinza|grafite|tit[aâ]nio|titanio|rose|rosa|amarelo|vermelho|vermelha|laranja|orange|coral|natural|black|white|blue|gold|silver|green|purple|gray|grey|graphite|titanium|desert|deserto|alpine|teal)\b/gi,
+      ''
+    )
     .replace(/[,\s]+e\s*$/i, '')
     .replace(/\s*,\s*e\s+/gi, ' ')
     .replace(/\s+e\s*$/i, '')
     .replace(/(?:,\s*de|\s+de)+$/gi, '')
-    .replace(/^[,\s-]+|[,\s-]+$/g, '')
+    .replace(/^[,\s+-]+|[,\s+-]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -487,7 +512,7 @@ export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | nu
     return null;
   }
 
-  // Se tem modelo, limpa e normaliza (inclusive na lista de múltiplos aparelhos)
+  // Se tem modelo, limpa e normaliza (inclusive na lista de múltiplos aparelhos e trocas)
   if (parsed.aparelho?.modelo) {
     parsed.aparelho.modelo = limparNomeModelo(parsed.aparelho.modelo);
   }
@@ -495,6 +520,21 @@ export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | nu
     parsed.aparelhos = parsed.aparelhos.map((ap) => ({
       ...ap,
       modelo: ap.modelo ? limparNomeModelo(ap.modelo) : ap.modelo,
+      tradeIn: ap.tradeIn
+        ? {
+            ...ap.tradeIn,
+            modelo: ap.tradeIn.modelo ? limparNomeModelo(ap.tradeIn.modelo) : ap.tradeIn.modelo,
+          }
+        : ap.tradeIn,
+    }));
+  }
+  if (parsed.tradeIn?.modelo) {
+    parsed.tradeIn.modelo = limparNomeModelo(parsed.tradeIn.modelo);
+  }
+  if (Array.isArray(parsed.tradeIns) && parsed.tradeIns.length > 0) {
+    parsed.tradeIns = parsed.tradeIns.map((t) => ({
+      ...t,
+      modelo: t.modelo ? limparNomeModelo(t.modelo) : t.modelo,
     }));
   }
 
@@ -695,6 +735,12 @@ export function construirPropostaNotinha(params: {
   const fotosDisponiveis = [...fotosRecentes];
   const aparelhoIdsUsados = new Set<string>();
   const itensProposta: ItemPropostaNotinha[] = [];
+  const tevePrecoExplicitoFormulario: boolean[] = [];
+
+  const modelosExatamenteIguais = (modA?: string | null, modB?: string | null) => {
+    if (!modA || !modB) return false;
+    return limparNomeModelo(modA).toLowerCase() === limparNomeModelo(modB).toLowerCase();
+  };
 
   for (const ap of aparelhosBrutos) {
     let modelo = limparNomeModelo(ap.modelo || '') || 'Smartphone';
@@ -704,12 +750,28 @@ export function construirPropostaNotinha(params: {
     const bateria = ap.bateria ?? undefined;
     const condicao = ap.condicao || (bateria && bateria < 100 ? 'seminovo' : 'novo');
     const observacaoItem = ap.observacoes || undefined;
+    const precoExplicito = ap.preco && ap.preco > 0 ? Number(ap.preco) : undefined;
+    tevePrecoExplicitoFormulario.push(Boolean(precoExplicito));
 
     // Se este item ainda não tem IMEI e há fotos recentes disponíveis, escolhe a foto mais compatível
     if (!imei && fotosDisponiveis.length > 0) {
       let idxFoto = -1;
-      // 1ª prioridade: modelo compatível + mesma cor
+      // 1ª prioridade: modelo exatamente igual + mesma cor
       if (cor) {
+        idxFoto = fotosDisponiveis.findIndex((f) => {
+          const corFoto = extrairCorDeTexto(f.cor) || f.cor;
+          return (
+            Boolean(corFoto && corFoto.toLowerCase() === cor!.toLowerCase()) &&
+            modelosExatamenteIguais(f.modelo, modelo)
+          );
+        });
+      }
+      // 2ª prioridade: modelo exatamente igual
+      if (idxFoto === -1) {
+        idxFoto = fotosDisponiveis.findIndex((f) => modelosExatamenteIguais(f.modelo, modelo));
+      }
+      // 3ª prioridade: modelo compatível + mesma cor
+      if (idxFoto === -1 && cor) {
         idxFoto = fotosDisponiveis.findIndex((f) => {
           const corFoto = extrairCorDeTexto(f.cor) || f.cor;
           return (
@@ -718,7 +780,7 @@ export function construirPropostaNotinha(params: {
           );
         });
       }
-      // 2ª prioridade: modelo compatível
+      // 4ª prioridade: modelo compatível
       if (idxFoto === -1) {
         idxFoto = fotosDisponiveis.findIndex(
           (f) => !f.modelo || modelosSaoCompativeis(f.modelo, modelo) || !marcasConflitantes(f.modelo, modelo)
@@ -761,6 +823,15 @@ export function construirPropostaNotinha(params: {
     const corBruta = cor || apEnc?.cor || undefined;
     const corFinal = corBruta ? extrairCorDeTexto(corBruta) || corBruta : undefined;
 
+    const tradeInItem = ap.tradeIn;
+    const modeloTrocaItem = tradeInItem?.modelo ? limparNomeModelo(tradeInItem.modelo) : undefined;
+    const capTrocaItem = tradeInItem?.capacidade || undefined;
+    const corTrocaItem = tradeInItem?.cor
+      ? extrairCorDeTexto(tradeInItem.cor) || tradeInItem.cor
+      : undefined;
+    const imeiTrocaItem = tradeInItem?.imei || undefined;
+    const valorTrocaItem = tradeInItem?.valor ? Number(tradeInItem.valor) : undefined;
+
     itensProposta.push({
       modelo,
       capacidade: capFinal,
@@ -772,7 +843,12 @@ export function construirPropostaNotinha(params: {
       statusEstoque: cruzamento.mensagem,
       aparelhoId: apEnc?.id,
       custo: Number(apEnc?.custo || ap.custo || 0),
-      valorUnitario: ap.preco && ap.preco > 0 ? Number(ap.preco) : (apEnc?.preco ? Number(apEnc.preco) : undefined),
+      valorUnitario: precoExplicito ?? (apEnc?.preco ? Number(apEnc.preco) : undefined),
+      modeloTroca: modeloTrocaItem,
+      capacidadeTroca: capTrocaItem,
+      corTroca: corTrocaItem,
+      imeiTroca: imeiTrocaItem,
+      valorTroca: valorTrocaItem,
     });
   }
 
@@ -786,16 +862,73 @@ export function construirPropostaNotinha(params: {
   }
 
   if (valorTotal > 0 && itensProposta.length > 0) {
-    const valorPorItem = Number((valorTotal / itensProposta.length).toFixed(2));
-    itensProposta.forEach((it, idx) => {
-      if (!it.valorUnitario || itensProposta.length > 1) {
-        it.valorUnitario =
-          idx === itensProposta.length - 1
-            ? Number((valorTotal - valorPorItem * (itensProposta.length - 1)).toFixed(2))
-            : valorPorItem;
+    const todosComPrecoExplicito = tevePrecoExplicitoFormulario.every(Boolean);
+    if (!todosComPrecoExplicito) {
+      const valorPorItem = Number((valorTotal / itensProposta.length).toFixed(2));
+      itensProposta.forEach((it, idx) => {
+        if (!tevePrecoExplicitoFormulario[idx] && (!it.valorUnitario || itensProposta.length > 1)) {
+          it.valorUnitario =
+            idx === itensProposta.length - 1
+              ? Number((valorTotal - valorPorItem * (itensProposta.length - 1)).toFixed(2))
+              : valorPorItem;
+        }
+      });
+    }
+  }
+
+  // Consolida aparelhos recebidos na troca (suporta 1 ou múltiplos upgrades)
+  const trocasLista: TrocaPropostaNotinha[] = [];
+  if (Array.isArray(vendaDetectada.tradeIns) && vendaDetectada.tradeIns.length > 0) {
+    for (const tr of vendaDetectada.tradeIns) {
+      if (tr?.modelo) {
+        trocasLista.push({
+          modelo: limparNomeModelo(tr.modelo) || tr.modelo,
+          capacidade: tr.capacidade || undefined,
+          cor: tr.cor ? extrairCorDeTexto(tr.cor) || tr.cor : undefined,
+          imei: tr.imei || undefined,
+          bateria: tr.bateria ?? undefined,
+          valor: tr.valor ? Number(tr.valor) : undefined,
+          observacoes: tr.observacoes || undefined,
+        });
       }
+    }
+  } else if (vendaDetectada.tradeIn?.modelo) {
+    const tr = vendaDetectada.tradeIn;
+    trocasLista.push({
+      modelo: limparNomeModelo(tr.modelo) || tr.modelo,
+      capacidade: tr.capacidade || undefined,
+      cor: tr.cor ? extrairCorDeTexto(tr.cor) || tr.cor : undefined,
+      imei: tr.imei || undefined,
+      bateria: tr.bateria ?? undefined,
+      valor: tr.valor ? Number(tr.valor) : undefined,
+      observacoes: tr.observacoes || undefined,
     });
   }
+
+  // Se houver 1 item vendido e 1 troca geral, vincula também no item
+  if (itensProposta.length === 1 && trocasLista.length === 1 && !itensProposta[0].modeloTroca) {
+    itensProposta[0].modeloTroca = trocasLista[0].modelo;
+    itensProposta[0].capacidadeTroca = trocasLista[0].capacidade;
+    itensProposta[0].corTroca = trocasLista[0].cor;
+    itensProposta[0].imeiTroca = trocasLista[0].imei;
+    itensProposta[0].valorTroca = trocasLista[0].valor;
+  }
+
+  const formatarDescTrocaCurta = (tr: TrocaPropostaNotinha) =>
+    `${tr.modelo}${tr.capacidade ? ` ${tr.capacidade}` : ''}${tr.cor ? ` ${tr.cor}` : ''}`
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const modeloTrocaConsolidado =
+    trocasLista.length > 0
+      ? trocasLista.map(formatarDescTrocaCurta).join(' + ')
+      : vendaDetectada.tradeIn?.modelo
+      ? limparNomeModelo(vendaDetectada.tradeIn.modelo)
+      : undefined;
+
+  const valorTrocaTotal =
+    trocasLista.reduce((acc, tr) => acc + Number(tr.valor || 0), 0) ||
+    Number(vendaDetectada.tradeIn?.valor || vendaDetectada.valorEntradaTroca || 0);
 
   const proposta: PropostaNotinha = {
     id,
@@ -815,10 +948,14 @@ export function construirPropostaNotinha(params: {
     valorTotal,
     custo: itensProposta.reduce((acc, it) => acc + Number(it.custo || 0), 0),
     formaPagamento: vendaDetectada.formaPagamento || 'Pix',
-    isUpgrade: Boolean(vendaDetectada.isUpgrade),
-    modeloTroca: vendaDetectada.tradeIn?.modelo || undefined,
-    imeiTroca: vendaDetectada.tradeIn?.imei || undefined,
-    valorTroca: Number(vendaDetectada.tradeIn?.valor || vendaDetectada.valorEntradaTroca || 0),
+    isUpgrade: Boolean(vendaDetectada.isUpgrade || trocasLista.length > 0),
+    modeloTroca: modeloTrocaConsolidado,
+    imeiTroca:
+      trocasLista.length > 0
+        ? trocasLista.map((tr) => tr.imei).filter(Boolean).join(' / ') || undefined
+        : vendaDetectada.tradeIn?.imei || undefined,
+    valorTroca: valorTrocaTotal,
+    trocas: trocasLista.length > 0 ? trocasLista : undefined,
     vendedor: vendaDetectada.vendedor || pushName || 'WhatsApp',
     observacoes: vendaDetectada.observacoes || undefined,
   };
@@ -859,6 +996,10 @@ export function vincularFotoEmPropostaNotinha(
   const itens = proposta.itens;
   const imeiFoto = (foto.imei || '').trim();
   const corFotoNorm = foto.cor ? extrairCorDeTexto(foto.cor) || foto.cor : undefined;
+  const modelosExatamenteIguais = (modA?: string | null, modB?: string | null) => {
+    if (!modA || !modB) return false;
+    return limparNomeModelo(modA).toLowerCase() === limparNomeModelo(modB).toLowerCase();
+  };
 
   let idxAlvo = -1;
 
@@ -868,7 +1009,22 @@ export function vincularFotoEmPropostaNotinha(
   }
 
   // 2. Procura entre os itens que AINDA NÃO possuem IMEI:
-  //    2a. Modelo compatível + mesma cor
+  //    2a. Modelo exatamente igual + mesma cor
+  if (idxAlvo === -1 && foto.modelo && corFotoNorm) {
+    idxAlvo = itens.findIndex(
+      (it) =>
+        !it.imei &&
+        modelosExatamenteIguais(foto.modelo, it.modelo) &&
+        Boolean(it.cor && (extrairCorDeTexto(it.cor) || it.cor).toLowerCase() === corFotoNorm.toLowerCase())
+    );
+  }
+
+  //    2b. Modelo exatamente igual sem IMEI
+  if (idxAlvo === -1 && foto.modelo) {
+    idxAlvo = itens.findIndex((it) => !it.imei && modelosExatamenteIguais(foto.modelo, it.modelo));
+  }
+
+  //    2c. Modelo compatível + mesma cor
   if (idxAlvo === -1 && corFotoNorm) {
     idxAlvo = itens.findIndex(
       (it) =>
@@ -878,24 +1034,27 @@ export function vincularFotoEmPropostaNotinha(
     );
   }
 
-  //    2b. Modelo compatível sem IMEI
+  //    2d. Modelo compatível sem IMEI
   if (idxAlvo === -1 && foto.modelo) {
     idxAlvo = itens.findIndex((it) => !it.imei && modelosSaoCompativeis(foto.modelo, it.modelo));
   }
 
-  //    2c. Qualquer item sem IMEI de marca não conflitante
+  //    2e. Qualquer item sem IMEI de marca não conflitante
   if (idxAlvo === -1) {
     idxAlvo = itens.findIndex((it) => !it.imei && (!foto.modelo || !marcasConflitantes(foto.modelo, it.modelo)));
   }
 
-  //    2d. Qualquer item sem IMEI
+  //    2f. Qualquer item sem IMEI
   if (idxAlvo === -1) {
     idxAlvo = itens.findIndex((it) => !it.imei);
   }
 
   // 3. Fallback caso todos os itens já tenham IMEI: atualiza o item mais compatível (ou o primeiro)
   if (idxAlvo === -1) {
-    if (corFotoNorm) {
+    if (foto.modelo) {
+      idxAlvo = itens.findIndex((it) => modelosExatamenteIguais(foto.modelo, it.modelo));
+    }
+    if (idxAlvo === -1 && corFotoNorm) {
       idxAlvo = itens.findIndex(
         (it) => Boolean(it.cor && (extrairCorDeTexto(it.cor) || it.cor).toLowerCase() === corFotoNorm.toLowerCase())
       );
@@ -953,7 +1112,7 @@ export function vincularFotoEmPropostaNotinha(
 }
 
 /**
- * Formata a mensagem de prévia da notinha para envio no WhatsApp (suporta 1 ou múltiplos aparelhos).
+ * Formata a mensagem de prévia da notinha para envio no WhatsApp (suporta 1 ou múltiplos aparelhos e 1 ou múltiplos upgrades).
  */
 export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string {
   const valorFmt = Number(proposta.valorTotal || 0).toLocaleString('pt-BR', {
@@ -976,7 +1135,11 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
       const corItemFmt = item.cor ? ` ${emojiCorItem} ${item.cor}` : '';
       const batFmt = item.bateria ? ` (Bat: ${item.bateria}%)` : '';
       const obsFmt = item.observacaoItem ? ` [${item.observacaoItem}]` : '';
-      const descItem = `${item.modelo} ${item.capacidade || ''}${corItemFmt}${batFmt}${obsFmt}`
+      const valUnitFmt =
+        item.valorUnitario && item.valorUnitario > 0
+          ? ` — R$ ${Number(item.valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '';
+      const descItem = `${item.modelo} ${item.capacidade || ''}${corItemFmt}${batFmt}${obsFmt}${valUnitFmt}`
         .replace(/\s+/g, ' ')
         .trim();
 
@@ -985,6 +1148,14 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
         linhas.push(`      🔢 *IMEI:* ${item.imei} [${item.statusEstoque}]`);
       } else {
         linhas.push(`      📦 *Estoque:* ${item.statusEstoque}`);
+      }
+      if (item.modeloTroca) {
+        const emojiCorTroca = item.corTroca ? obterEmojiDaCor(item.corTroca) : '';
+        const corTrocaFmt = item.corTroca ? ` ${emojiCorTroca} ${item.corTroca}` : '';
+        const descTrocaItem = `${item.modeloTroca} ${item.capacidadeTroca || ''}${corTrocaFmt}`
+          .replace(/\s+/g, ' ')
+          .trim();
+        linhas.push(`      🔄 *Upgrade (Entrada):* ${descTrocaItem}`);
       }
     });
   } else {
@@ -1015,11 +1186,33 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
   }
   linhas.push(`💳 *Forma de Pagamento:* ${proposta.formaPagamento || 'Não informada'}`);
 
-  if (proposta.isUpgrade && proposta.modeloTroca) {
+  const trocasLista = Array.isArray(proposta.trocas) && proposta.trocas.length > 0 ? proposta.trocas : null;
+  if (proposta.isUpgrade && trocasLista && trocasLista.length > 1) {
+    linhas.push(`🔄 *Upgrade / Troca (${trocasLista.length} aparelhos de entrada):*`);
+    trocasLista.forEach((tr) => {
+      const emojiCorTr = tr.cor ? obterEmojiDaCor(tr.cor) : '';
+      const corTrFmt = tr.cor ? ` ${emojiCorTr} ${tr.cor}` : '';
+      const valTrFmt =
+        tr.valor && tr.valor > 0
+          ? ` (Avaliado em R$ ${Number(tr.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
+          : '';
+      const descTr = `${tr.modelo} ${tr.capacidade || ''}${corTrFmt}${valTrFmt}`.replace(/\s+/g, ' ').trim();
+      linhas.push(`   • ${descTr}`);
+      if (tr.imei) {
+        linhas.push(`     *IMEI Entrada:* ${tr.imei}`);
+      }
+    });
+  } else if (proposta.isUpgrade && (proposta.modeloTroca || (trocasLista && trocasLista.length === 1))) {
+    const trUnica = trocasLista?.[0];
+    const emojiCorTr = trUnica?.cor ? obterEmojiDaCor(trUnica.cor) : '';
+    const corTrFmt = trUnica?.cor ? ` ${emojiCorTr} ${trUnica.cor}` : '';
+    const descTrUnica = trUnica
+      ? `${trUnica.modelo} ${trUnica.capacidade || ''}${corTrFmt}`.replace(/\s+/g, ' ').trim()
+      : proposta.modeloTroca!;
     const valTrocaFmt = proposta.valorTroca
       ? ` (Avaliado em R$ ${Number(proposta.valorTroca).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
       : '';
-    linhas.push(`🔄 *Upgrade / Troca:* ${proposta.modeloTroca}${valTrocaFmt}`);
+    linhas.push(`🔄 *Upgrade / Troca:* ${descTrUnica}${valTrocaFmt}`);
     if (proposta.imeiTroca) {
       linhas.push(`   *IMEI Entrada:* ${proposta.imeiTroca}`);
     }
@@ -1386,6 +1579,12 @@ export async function emitirNotinhaVenda(
       if (it.imei) obsPartes.push(`IMEI: ${it.imei}`);
       if (it.bateria) obsPartes.push(`Bateria: ${it.bateria}%`);
       if (it.observacaoItem) obsPartes.push(it.observacaoItem);
+      if (it.modeloTroca) {
+        const descTrocaObs = `${it.modeloTroca}${it.capacidadeTroca ? ` ${it.capacidadeTroca}` : ''}${it.corTroca ? ` ${it.corTroca}` : ''}`
+          .replace(/\s+/g, ' ')
+          .trim();
+        obsPartes.push(`Upgrade (Entrada): ${descTrocaObs}`);
+      }
 
       return {
         id: `${Date.now()}-${idx}`,
@@ -1439,17 +1638,35 @@ export async function emitirNotinhaVenda(
         ? Object.fromEntries(aparelhoIds.map((aid) => [aid, { cliente: proposta.clienteNome }]))
         : undefined;
 
+    const listaTrocas: TrocaPropostaNotinha[] =
+      Array.isArray(proposta.trocas) && proposta.trocas.length > 0
+        ? proposta.trocas
+        : proposta.isUpgrade && proposta.modeloTroca
+        ? [
+            {
+              modelo: proposta.modeloTroca,
+              imei: proposta.imeiTroca || undefined,
+              valor: proposta.valorTroca || 0,
+            },
+          ]
+        : [];
+
     let tradeInPayload: Record<string, unknown> | null = null;
-    if (proposta.isUpgrade && proposta.modeloTroca) {
+    if (proposta.isUpgrade && listaTrocas.length > 0) {
+      const primeiraTroca = listaTrocas[0];
       tradeInPayload = {
         loja_id: lojaIdFinal,
-        modelo: proposta.modeloTroca,
-        imei: proposta.imeiTroca || null,
-        valor: proposta.valorTroca || 0,
+        modelo: primeiraTroca.modelo,
+        capacidade: primeiraTroca.capacidade || null,
+        cor: primeiraTroca.cor || null,
+        imei: primeiraTroca.imei || proposta.imeiTroca || null,
+        valor: primeiraTroca.valor || proposta.valorTroca || 0,
+        custo: Number(primeiraTroca.valor || proposta.valorTroca || 0),
         condicao: 'seminovo',
         ativo: true,
         status: 'disponivel',
         origem: 'upgrade_venda',
+        observacoes: `Entrada via Upgrade (Venda WhatsApp - Cliente: ${proposta.clienteNome})`,
       };
     }
 
@@ -1461,6 +1678,46 @@ export async function emitirNotinhaVenda(
       origem: 'whatsapp_notinha_automatica',
       usuarioNome,
     });
+
+    // Caso a venda possua 2 ou mais aparelhos recebidos na troca (múltiplos upgrades), dá entrada dos aparelhos adicionais no estoque
+    if (proposta.isUpgrade && listaTrocas.length > 1) {
+      for (const trocaExtra of listaTrocas.slice(1)) {
+        try {
+          // estoque-guard: auditado
+          const { data: apTrocaInserido } = await supabase
+            .from('aparelhos')
+            .insert({
+              loja_id: lojaIdFinal,
+              modelo: trocaExtra.modelo,
+              capacidade: trocaExtra.capacidade || null,
+              cor: trocaExtra.cor || null,
+              imei: trocaExtra.imei || null,
+              custo: Number(trocaExtra.valor || 0),
+              condicao: 'seminovo',
+              categoria: 'aparelho',
+              quantidade: 1,
+              ativo: true,
+              status: 'disponivel',
+              dataCadastro: agora,
+              observacoes: `Entrada via Upgrade (2º Aparelho - Venda WhatsApp - Cliente: ${proposta.clienteNome})`,
+            })
+            .select('*')
+            .single();
+
+          if (apTrocaInserido?.id) {
+            await registrarEntradaEstoque(supabase, {
+              aparelhos: [apTrocaInserido as any],
+              origem: 'whatsapp_notinha_automatica' as any,
+              lojaId: lojaIdFinal,
+              usuarioNome,
+              observacao: `Recebido como troca adicional na venda #${resultado.venda?.id ? String(resultado.venda.id).slice(-6).toUpperCase() : 'OK'}`,
+            });
+          }
+        } catch (errTrocaExtra) {
+          console.warn('[Notinha Automática] Erro ao cadastrar troca adicional no estoque:', errTrocaExtra);
+        }
+      }
+    }
 
     const vendaUuid = resultado.venda?.id ? String(resultado.venda.id) : '';
     const vendaId = vendaUuid ? vendaUuid.slice(0, 8).toUpperCase() : 'OK';
@@ -1479,6 +1736,20 @@ export async function emitirNotinhaVenda(
           '\n'
         : `📱 *Aparelho:* ${proposta.modelo}\n`;
 
+    const resumoTrocasMsg =
+      proposta.isUpgrade && listaTrocas.length > 1
+        ? `🔄 *Trocas recebidas (${listaTrocas.length}):*\n` +
+          listaTrocas
+            .map(
+              (tr, i) =>
+                `   ${i + 1}. ${tr.modelo}${tr.capacidade ? ` ${tr.capacidade}` : ''}${tr.cor ? ` ${tr.cor}` : ''}${tr.imei ? ` (IMEI: ${tr.imei})` : ''}`
+            )
+            .join('\n') +
+          '\n'
+        : proposta.isUpgrade && proposta.modeloTroca
+        ? `🔄 *Troca recebida:* ${proposta.modeloTroca}\n`
+        : '';
+
     const msgSucesso = `✅ *NOTINHA EMITIDA COM SUCESSO!* 🧾\n` +
       `──────────────────────────\n` +
       `📄 *Venda:* #${vendaId}\n` +
@@ -1486,7 +1757,7 @@ export async function emitirNotinhaVenda(
       resumoAparelhosMsg +
       `💰 *Valor:* R$ ${Number(proposta.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
       `📦 *Estoque:* Baixa realizada com sucesso no sistema!\n` +
-      (proposta.isUpgrade && proposta.modeloTroca ? `🔄 *Troca recebida:* ${proposta.modeloTroca}\n` : '') +
+      resumoTrocasMsg +
       (linkRecibo ? `🔗 *Recibo Digital:* ${linkRecibo}\n` : '') +
       `──────────────────────────\n` +
       `_Venda registrada e auditada no Phone Center!_`;
@@ -1539,6 +1810,13 @@ export async function emitirNotinhaVenda(
           imei: proposta.imeiTroca || null,
           valor: proposta.valorTroca || null,
         },
+        upgrades: listaTrocas.map((tr) => ({
+          modelo: tr.modelo,
+          capacidade: tr.capacidade || null,
+          cor: tr.cor || null,
+          imei: tr.imei || null,
+          valor: tr.valor || null,
+        })),
         pagamento: {
           forma: proposta.formaPagamento || 'PIX',
           valorTotal: Number(proposta.valorTotal || 0),

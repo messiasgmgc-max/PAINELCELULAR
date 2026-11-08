@@ -248,7 +248,7 @@ export default function ReciboPublicoPage() {
                   )}
 
                   {/* Linha de Aparelho Recebido na Troca / Upgrade */}
-                  {isUpgrade && valorEntradaTroca > 0 && (
+                  {isUpgrade && (
                     <tr className="bg-emerald-950/30 print:bg-emerald-50 border-t border-emerald-500/30">
                       <td className="p-3">
                         <p className="font-bold text-emerald-400 print:text-emerald-800 text-xs flex items-center gap-1.5">
@@ -265,8 +265,8 @@ export default function ReciboPublicoPage() {
                         )}
                       </td>
                       <td className="p-3 text-center font-bold text-emerald-400 print:text-emerald-800">1</td>
-                      <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-emerald-800">- R$ {valorEntradaTroca.toFixed(2).replace(".", ",")}</td>
-                      <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-emerald-800">- R$ {valorEntradaTroca.toFixed(2).replace(".", ",")}</td>
+                      <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-emerald-800">{valorEntradaTroca > 0 ? `- R$ ${valorEntradaTroca.toFixed(2).replace(".", ",")}` : "Incluso na Volta"}</td>
+                      <td className="p-3 text-right font-mono font-bold text-emerald-400 print:text-emerald-800">{valorEntradaTroca > 0 ? `- R$ ${valorEntradaTroca.toFixed(2).replace(".", ",")}` : "Incluso na Volta"}</td>
                     </tr>
                   )}
                 </tbody>

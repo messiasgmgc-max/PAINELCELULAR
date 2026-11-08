@@ -808,5 +808,190 @@ Modelo:
   assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
 });
 
+test('Suporta pedidos com múltiplos Upgrades em seta (Entrada -> Saída + R$ valor) como o da nota do Bruno Henrique', async () => {
+  const formBruno = `Para finalizar seu pedido, preencha os dados abaixo 👇
+
+Data da compra: 07/11/2026
+
+👤 DADOS PESSOAIS
+•  Nome completo:  Bruno Henrique Silva Rocha 
+•  CPF:  102.354.956-54
+•  Data de nascimento:  05/02/90
+•  Telefone / WhatsApp:  31 9 9996-4383
+•  E-mail:  estofadosestacao123@gmail.com
+
+🏠 ENDEREÇO PARA ENTREGA
+•  Rua / Avenida:  
+•  Número:  
+•  Complemento:  
+•  Bairro:  
+•  Cidade:  
+•  CEP:  
+
+💳 FORMA DE PAGAMENTO
+Valor total: R$5.000,00
+Forma de pagamento:
+(x) Pix  
+( ) Cartão de crédito  
+( ) Cartão de débito  
+( ) Dinheiro  
+( ) Upgrade - Modelo:
+( ) Outro: __
+
+Modelo:
+
+Upgrade 15 pro max 512gb preto -> 17 pro max 256gb laranja com detalhes + R$2.000,00 
+
+
+Upgrade 15 pro max 256gb -> 17 pro silver 256gb bateria 100% + R$3.000,00 
+
+
+Pagamento confirmado`;
+
+  const detectado = detectarFormularioOuPedidoVenda(formBruno);
+  assert.ok(detectado, 'Deve detectar o formulário do Bruno Henrique');
+  assert.equal(detectado?.cliente.nome, 'Bruno Henrique Silva Rocha');
+  assert.equal(detectado?.cliente.cpf, '102.354.956-54');
+  assert.equal(detectado?.valorTotal, 5000);
+  assert.equal(detectado?.isUpgrade, true, 'Deve marcar isUpgrade = true');
+
+  // Aparelhos vendidos (Saída)
+  assert.equal(detectado?.aparelhos?.length, 2, 'Deve extrair 2 aparelhos vendidos (saída)');
+  assert.equal(detectado?.aparelhos?.[0].modelo, 'iPhone 17 Pro Max');
+  assert.equal(detectado?.aparelhos?.[0].capacidade, '256GB');
+  assert.equal(detectado?.aparelhos?.[0].cor, 'Laranja');
+  assert.equal(detectado?.aparelhos?.[0].observacoes, 'Com detalhes');
+  assert.equal(detectado?.aparelhos?.[0].preco, 2000);
+
+  assert.equal(detectado?.aparelhos?.[1].modelo, 'iPhone 17 Pro');
+  assert.equal(detectado?.aparelhos?.[1].capacidade, '256GB');
+  assert.equal(detectado?.aparelhos?.[1].cor, 'Branco');
+  assert.equal(detectado?.aparelhos?.[1].bateria, 100);
+  assert.equal(detectado?.aparelhos?.[1].preco, 3000);
+
+  // Aparelhos recebidos na troca (Entrada)
+  assert.equal(detectado?.tradeIns?.length, 2, 'Deve extrair os 2 aparelhos de entrada (upgrade)');
+  assert.equal(detectado?.tradeIns?.[0].modelo, 'iPhone 15 Pro Max');
+  assert.equal(detectado?.tradeIns?.[0].capacidade, '512GB');
+  assert.equal(detectado?.tradeIns?.[0].cor, 'Preto');
+
+  assert.equal(detectado?.tradeIns?.[1].modelo, 'iPhone 15 Pro Max');
+  assert.equal(detectado?.tradeIns?.[1].capacidade, '256GB');
+
+  // Constrói proposta e vincula as 2 fotos de IMEI enviadas para o 17 Pro Max e 17 Pro
+  const proposta = construirPropostaNotinha({
+    id: 'prop-bruno-2-upgrades',
+    lojaId: 'loja-lucas',
+    remoteJid: '5531999999999@s.whatsapp.net',
+    vendaDetectada: detectado!,
+    estoque: [],
+    fotosRecentes: [],
+  });
+
+  vincularFotoEmPropostaNotinha(
+    proposta,
+    {
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Laranja',
+      imei: '359426261378396',
+    },
+    []
+  );
+
+  vincularFotoEmPropostaNotinha(
+    proposta,
+    {
+      modelo: 'iPhone 17 Pro',
+      capacidade: '256GB',
+      cor: 'Silver',
+      imei: '354198260038124',
+    },
+    []
+  );
+
+  assert.equal(proposta.isUpgrade, true);
+  assert.equal(proposta.trocas?.length, 2);
+  assert.equal(proposta.itens?.[0].modelo, 'iPhone 17 Pro Max');
+  assert.equal(proposta.itens?.[0].capacidade, '256GB');
+  assert.equal(proposta.itens?.[0].cor, 'Laranja');
+  assert.equal(proposta.itens?.[0].imei, '359426261378396');
+  assert.equal(proposta.itens?.[0].valorUnitario, 2000);
+  assert.equal(proposta.itens?.[0].modeloTroca, 'iPhone 15 Pro Max');
+  assert.equal(proposta.itens?.[0].capacidadeTroca, '512GB');
+  assert.equal(proposta.itens?.[0].corTroca, 'Preto');
+
+  assert.equal(proposta.itens?.[1].modelo, 'iPhone 17 Pro');
+  assert.equal(proposta.itens?.[1].capacidade, '256GB');
+  assert.equal(proposta.itens?.[1].cor, 'Branco');
+  assert.equal(proposta.itens?.[1].imei, '354198260038124');
+  assert.equal(proposta.itens?.[1].valorUnitario, 3000);
+  assert.equal(proposta.itens?.[1].modeloTroca, 'iPhone 15 Pro Max');
+  assert.equal(proposta.itens?.[1].capacidadeTroca, '256GB');
+
+  const previaBruno = formatarMensagemPreviaNotinha(proposta);
+  assert.ok(previaBruno.includes('iPhone 17 Pro Max 256GB 🧡 Laranja [Com detalhes] — R$ 2.000,00'));
+  assert.ok(previaBruno.includes('iPhone 17 Pro 256GB 🤍 Branco (Bat: 100%) — R$ 3.000,00'));
+  assert.ok(previaBruno.includes('Upgrade (Entrada):* iPhone 15 Pro Max 512GB 🖤 Preto'));
+  assert.ok(previaBruno.includes('Upgrade (Entrada):* iPhone 15 Pro Max 256GB'));
+  assert.ok(previaBruno.includes('Upgrade / Troca (2 aparelhos de entrada):'));
+  assert.ok(!previaBruno.includes('Upgrade 15 Pro Max ->'), 'Não deve vazar a seta bruta no nome do aparelho vendido');
+
+  // Verifica que o gerador de PDF aceita múltiplos upgrades sem erros
+  const pdfBuffer = await gerarReciboPdfBuffer({
+    vendaId: 'venda-bruno-1',
+    codigoVenda: 'BRUNO01',
+    loja: { nome: 'Lucas Imports' },
+    cliente: { nome: 'Bruno Henrique Silva Rocha', cpf: '102.354.956-54' },
+    aparelho: {
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Laranja',
+      imei: '359426261378396',
+      valor: 2000,
+    },
+    itens: [
+      {
+        modelo: 'iPhone 17 Pro Max',
+        capacidade: '256GB',
+        cor: 'Laranja',
+        imei: '359426261378396',
+        observacao: 'Com detalhes',
+        valor: 2000,
+      },
+      {
+        modelo: 'iPhone 17 Pro',
+        capacidade: '256GB',
+        cor: 'Branco',
+        imei: '354198260038124',
+        bateria: 100,
+        valor: 3000,
+      },
+    ],
+    upgrade: {
+      ativo: true,
+      modelo: proposta.modeloTroca || null,
+      valor: 0,
+    },
+    upgrades: proposta.trocas?.map((tr) => ({
+      modelo: tr.modelo,
+      capacidade: tr.capacidade || null,
+      cor: tr.cor || null,
+      imei: tr.imei || null,
+      valor: tr.valor || null,
+    })),
+    pagamento: {
+      forma: 'PIX',
+      valorTotal: 5000,
+      valorEntrada: 0,
+      valorFinal: 5000,
+    },
+  });
+
+  assert.ok(pdfBuffer.length > 1000);
+  assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
+});
+
+
 
 
