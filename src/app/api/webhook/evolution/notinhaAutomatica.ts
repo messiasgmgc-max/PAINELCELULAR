@@ -198,13 +198,18 @@ export function cruzarAparelhoComEstoque(
     }
 
     if (comMesmoImei.length > 0) {
-      const primeiro = comMesmoImei[0];
+      // Prioriza aparelho que está efetivamente disponível no estoque ativo
+      const primeiro = comMesmoImei.find((a) => estaNoEstoque(a as any)) || comMesmoImei[0];
       const noEstoqueAtivo = estaNoEstoque(primeiro as any);
 
       if (noEstoqueAtivo) {
-        const msgConfirmado = imeiAlvo.length < 15 && primeiro.imei
-          ? `Aparelho confirmado no estoque pelo final ${imeiAlvo} (IMEI completo: ${primeiro.imei}) ✅`
-          : 'Aparelho confirmado no estoque ✅';
+        const cadDig = digitos(primeiro.imei);
+        let msgConfirmado = 'Aparelho confirmado no estoque ✅';
+        if (imeiAlvo.length >= 15 && cadDig.length > 0 && cadDig.length < 15) {
+          msgConfirmado = `Aparelho confirmado no estoque pelo final ${cadDig} (IMEI: ${imeiAlvo}) ✅`;
+        } else if (imeiAlvo.length < 15 && primeiro.imei) {
+          msgConfirmado = `Aparelho confirmado no estoque pelo final ${imeiAlvo} (IMEI: ${primeiro.imei}) ✅`;
+        }
 
         return {
           status: 'confirmado',
@@ -225,21 +230,31 @@ export function cruzarAparelhoComEstoque(
     } else {
       return {
         status: 'nao_encontrado',
-        mensagem: `IMEI final ${imeiAlvo} não localizado no estoque (será associado à venda)`,
+        mensagem: `IMEI ${imeiAlvo} não localizado no estoque (será associado à venda)`,
       };
     }
   }
 
   // 2. Busca por modelo/capacidade/cor quando não tem IMEI
-  const modeloAlvo = (dadosAparelho.modelo || '').toLowerCase().trim();
-  const capacidadeAlvo = (dadosAparelho.capacidade || '').toLowerCase().trim();
+  const normModeloComparacao = (str?: string | null) =>
+    limparNomeModelo(str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\b(apple|xiaomi|samsung|motorola|realme)\b/gi, '')
+      .replace(/[^a-z0-9]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const modeloAlvoNorm = normModeloComparacao(dadosAparelho.modelo);
+  const capAlvoDig = digitos(dadosAparelho.capacidade);
 
   const ativos = estoque.filter((a) => estaNoEstoque(a as any));
   const candidatos = ativos.filter((a) => {
-    const mod = (a.modelo || '').toLowerCase();
-    const cap = (a.capacidade || '').toLowerCase();
-    const bateModelo = mod.includes(modeloAlvo) || modeloAlvo.includes(mod);
-    const bateCap = !capacidadeAlvo || cap.includes(capacidadeAlvo) || capacidadeAlvo.includes(cap);
+    const modItemNorm = normModeloComparacao(a.modelo);
+    const capItemDig = digitos(a.capacidade);
+    const bateModelo = Boolean(modeloAlvoNorm && modItemNorm && modeloAlvoNorm === modItemNorm);
+    const bateCap = !capAlvoDig || (Boolean(capItemDig) && capAlvoDig === capItemDig);
     return bateModelo && bateCap;
   });
 
@@ -413,56 +428,8 @@ export function interpretarTextoCorrecaoVenda(
   return null;
 }
 
-// ── BUFFER EM MEMÓRIA DE ALTA VELOCIDADE (LATÊNCIA 0ms) ──
-// Garante persistência em memória global do Node.js mesmo entre requisições simultâneas
-const globalRef = globalThis as unknown as {
-  _wppFotoBuffer?: Map<string, { dados: FotoRecenteCache; timestamp: number }>;
-  _wppNotinhaBuffer?: Map<string, { proposta: PropostaNotinha; timestamp: number }>;
-};
-if (!globalRef._wppFotoBuffer) globalRef._wppFotoBuffer = new Map();
-if (!globalRef._wppNotinhaBuffer) globalRef._wppNotinhaBuffer = new Map();
-
-const cacheFotosMemoria = globalRef._wppFotoBuffer;
-const cachePropostasMemoria = globalRef._wppNotinhaBuffer;
-
-export function salvarFotoMemoria(chave: string, dados: FotoRecenteCache): void {
-  cacheFotosMemoria.set(chave, { dados: { ...dados }, timestamp: Date.now() });
-}
-
-export function buscarFotoMemoria(chave: string, maxMinutos = 10): FotoRecenteCache | null {
-  const item = cacheFotosMemoria.get(chave);
-  if (!item) return null;
-  if (Date.now() - item.timestamp > maxMinutos * 60 * 1000) {
-    cacheFotosMemoria.delete(chave);
-    return null;
-  }
-  return item.dados;
-}
-
-export function limparFotoMemoria(chave: string): void {
-  cacheFotosMemoria.delete(chave);
-}
-
-export function salvarPropostaMemoria(chave: string, proposta: PropostaNotinha): void {
-  cachePropostasMemoria.set(chave, { proposta: { ...proposta }, timestamp: Date.now() });
-}
-
-export function buscarPropostaMemoria(chave: string, maxMinutos = 30): PropostaNotinha | null {
-  const item = cachePropostasMemoria.get(chave);
-  if (!item) return null;
-  if (Date.now() - item.timestamp > maxMinutos * 60 * 1000) {
-    cachePropostasMemoria.delete(chave);
-    return null;
-  }
-  return item.proposta;
-}
-
-export function limparPropostaMemoria(chave: string): void {
-  cachePropostasMemoria.delete(chave);
-}
-
 /**
- * Salva uma proposta de notinha no banco e em memória para aguardar reação.
+ * Salva uma proposta de notinha diretamente no banco Supabase para aguardar reação ou confirmação.
  */
 export async function salvarPropostaNotinha(
   supabase: SupabaseClient,
@@ -481,12 +448,6 @@ export async function salvarPropostaNotinha(
     `notinha:${remoteJid}:ultima`,
   ];
 
-  // 1. Salva imediatamente em memória com latência zero (0ms)
-  for (const k of chaves) {
-    salvarPropostaMemoria(k, proposta);
-  }
-
-  // 2. Persiste no Supabase respeitando estritamente o schema (tipo: 'confirmacao', sem coluna expira_em)
   try {
     const payload = {
       loja_id: lojaId,
@@ -511,7 +472,7 @@ export async function salvarPropostaNotinha(
 }
 
 /**
- * Busca proposta de notinha pendente recente (memória primeiro, fallback Supabase)
+ * Busca proposta de notinha pendente recente diretamente no Supabase (whatsapp_acoes_pendentes).
  */
 export async function buscarPropostaNotinhaRecente(
   supabase: SupabaseClient,
@@ -522,17 +483,6 @@ export async function buscarPropostaNotinhaRecente(
   const agora = Date.now();
   const maxMs = maxMinutos * 60 * 1000;
 
-  // 1. Consulta em memória primeiro (0ms)
-  for (const chave of chaves) {
-    const propMem = buscarPropostaMemoria(chave, maxMinutos);
-    if (propMem) {
-      if (!modeloDesejado || modelosSaoCompativeis(modeloDesejado, propMem.modelo)) {
-        return propMem;
-      }
-    }
-  }
-
-  // 2. Fallback: Consulta no Supabase respeitando o schema
   try {
     const { data: pendentes } = await supabase
       .from('whatsapp_acoes_pendentes')
@@ -545,17 +495,25 @@ export async function buscarPropostaNotinhaRecente(
     if (pendentes && pendentes.length > 0) {
       for (const item of pendentes) {
         const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
-        if (agora - criado > maxMs) continue;
+        const idadeMs = agora - criado;
+        if (idadeMs > maxMs) continue;
 
         const prop = item.params as PropostaNotinha;
         if (!prop) continue;
 
-        if (modeloDesejado && !modelosSaoCompativeis(modeloDesejado, prop.modelo)) {
-          continue;
+        if (modeloDesejado) {
+          // Se a proposta de notinha foi criada nos últimos 3 minutos no mesmo chat,
+          // aceita vincular mesmo que o OCR da etiqueta tenha alucinado outra geração da mesma marca
+          // (ex: etiqueta da Apple sem número explícito lida como "iPhone 14 Pro" ou "iPhone" para um pedido de "iPhone 15 Pro")
+          if (idadeMs < 180_000) {
+            if (marcasConflitantes(modeloDesejado, prop.modelo)) {
+              continue;
+            }
+          } else if (!modelosSaoCompativeis(modeloDesejado, prop.modelo)) {
+            continue;
+          }
         }
 
-        // Atualiza memória para próximas consultas instantâneas
-        salvarPropostaMemoria(item.chave, prop);
         return prop;
       }
     }
@@ -817,7 +775,7 @@ export async function emitirNotinhaVenda(
   }
 }
 
-// ── BUFFER INTELIGENTE DE FOTO RECENTE (IA VISION + FORMULÁRIO DE VENDA) ──
+// ── SINCRONIZAÇÃO DE FOTO + FORMULÁRIO DE VENDA 100% VIA SUPABASE ──
 
 export interface FotoRecenteCache {
   imei?: string | null;
@@ -828,6 +786,26 @@ export interface FotoRecenteCache {
   timestamp: number;
 }
 
+function extrairMarcaAparelho(str?: string | null): string | null {
+  if (!str) return null;
+  const s = str.toLowerCase();
+  if (/iphone|apple|ipad|macbook/i.test(s)) return 'apple';
+  if (/samsung|galaxy/i.test(s)) return 'samsung';
+  if (/xiaomi|poco|redmi/i.test(s)) return 'xiaomi';
+  if (/motorola|moto/i.test(s)) return 'motorola';
+  if (/realme/i.test(s)) return 'realme';
+  return null;
+}
+
+/**
+ * Verifica se dois modelos pertencem a marcas claramente conflitantes (ex: Apple vs Xiaomi).
+ */
+export function marcasConflitantes(modeloA?: string | null, modeloB?: string | null): boolean {
+  const marcaA = extrairMarcaAparelho(modeloA);
+  const marcaB = extrairMarcaAparelho(modeloB);
+  return Boolean(marcaA && marcaB && marcaA !== marcaB);
+}
+
 /**
  * Compara se dois nomes de modelo referem-se ao mesmo aparelho
  * (ex: 'POCO F8 Pro 512GB' e 'POCO F8 Pro' -> compatíveis; 'iPhone 16 Pro' e 'S24' -> incompatíveis)
@@ -835,18 +813,8 @@ export interface FotoRecenteCache {
 export function modelosSaoCompativeis(modeloA?: string | null, modeloB?: string | null): boolean {
   if (!modeloA || !modeloB) return true;
 
-  const extrairMarca = (str: string) => {
-    const s = str.toLowerCase();
-    if (/iphone|apple|ipad|macbook/i.test(s)) return 'apple';
-    if (/samsung|galaxy/i.test(s)) return 'samsung';
-    if (/xiaomi|poco|redmi/i.test(s)) return 'xiaomi';
-    if (/motorola|moto/i.test(s)) return 'motorola';
-    if (/realme/i.test(s)) return 'realme';
-    return null;
-  };
-
-  const marcaA = extrairMarca(modeloA);
-  const marcaB = extrairMarca(modeloB);
+  const marcaA = extrairMarcaAparelho(modeloA);
+  const marcaB = extrairMarcaAparelho(modeloB);
 
   // Se ambas têm marcas detectadas e são diferentes, são incompatíveis
   if (marcaA && marcaB && marcaA !== marcaB) {
@@ -888,6 +856,54 @@ export function modelosSaoCompativeis(modeloA?: string | null, modeloB?: string 
   return tokensA.some((tok) => tokensB.includes(tok));
 }
 
+/**
+ * Registra no Supabase que uma foto acabou de chegar neste chat e está em processamento pelo OCR Vision.
+ * Assim, se o formulário de pedido chegar 50ms depois em outra instância serverless, ele aguarda o OCR terminar!
+ */
+export async function registrarFotoProcessando(
+  supabase: SupabaseClient,
+  lojaId: string,
+  remoteJid: string,
+  authorPhone: string
+): Promise<void> {
+  if (!lojaId || !remoteJid) return;
+  try {
+    const agora = Date.now();
+    await supabase.from('whatsapp_acoes_pendentes').upsert(
+      {
+        chave: `foto_processando:${remoteJid}`,
+        loja_id: lojaId,
+        tipo: 'faltando_dados',
+        action: 'processando_foto',
+        params: { authorPhone, timestamp: agora } as any,
+        resumo: 'Processando foto da etiqueta via OCR Vision',
+        criado_em: new Date(agora).toISOString(),
+      },
+      { onConflict: 'chave' }
+    );
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao registrar foto_processando no Supabase:', err);
+  }
+}
+
+/**
+ * Remove a trava foto_processando do Supabase (ex: em caso de falha na leitura da imagem).
+ */
+export async function limparFotoProcessando(
+  supabase: SupabaseClient,
+  remoteJid: string
+): Promise<void> {
+  if (!remoteJid) return;
+  try {
+    await supabase.from('whatsapp_acoes_pendentes').delete().eq('chave', `foto_processando:${remoteJid}`);
+  } catch {
+    // silencioso
+  }
+}
+
+/**
+ * Salva os dados lidos da foto no Supabase e remove a flag foto_processando.
+ */
 export async function salvarFotoRecente(
   supabase: SupabaseClient,
   lojaId: string,
@@ -903,12 +919,6 @@ export async function salvarFotoRecente(
     `foto_recente:${remoteJid}:ultima`,
   ];
 
-  // 1. Salva imediatamente em memória com latência zero (0ms)
-  for (const k of chaves) {
-    salvarFotoMemoria(k, dados);
-  }
-
-  // 2. Persiste no Supabase com schema compatível (tipo: 'faltando_dados', action: 'vincular_foto', sem expira_em)
   try {
     const payload = {
       tipo: 'faltando_dados' as const,
@@ -919,22 +929,22 @@ export async function salvarFotoRecente(
       criado_em: new Date(agora).toISOString(),
     };
 
-    await Promise.all(
-      chaves.map((chave) =>
+    await Promise.all([
+      ...chaves.map((chave) =>
         supabase.from('whatsapp_acoes_pendentes').upsert(
           { ...payload, chave },
           { onConflict: 'chave' }
         )
-      )
-    );
+      ),
+      supabase.from('whatsapp_acoes_pendentes').delete().eq('chave', `foto_processando:${remoteJid}`),
+    ]);
   } catch (err) {
-    console.warn('[Notinha Automática] Erro ao salvar foto recente no buffer do Supabase:', err);
+    console.warn('[Notinha Automática] Erro ao salvar foto recente no Supabase:', err);
   }
 }
 
 /**
- * Busca no buffer recente se há foto compatível enviada pelo mesmo remetente ou no chat nos últimos 10 minutos
- * (Verifica memória primeiro e fallback no Supabase)
+ * Busca no Supabase se há foto compatível enviada nos últimos minutos.
  */
 export async function buscarFotoRecente(
   supabase: SupabaseClient,
@@ -952,17 +962,6 @@ export async function buscarFotoRecente(
   const agora = Date.now();
   const maxMs = maxMinutos * 60 * 1000;
 
-  // 1. Consulta em memória primeiro (0ms)
-  for (const chave of chaves) {
-    const fotoMem = buscarFotoMemoria(chave, maxMinutos);
-    if (fotoMem) {
-      if (!modeloDesejado || !fotoMem.modelo || modelosSaoCompativeis(fotoMem.modelo, modeloDesejado)) {
-        return fotoMem;
-      }
-    }
-  }
-
-  // 2. Fallback no Supabase
   try {
     const { data: pendentes } = await supabase
       .from('whatsapp_acoes_pendentes')
@@ -975,31 +974,163 @@ export async function buscarFotoRecente(
     if (pendentes && pendentes.length > 0) {
       for (const item of pendentes) {
         const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
-        if (agora - criado > maxMs) continue;
+        const idadeMs = agora - criado;
+        if (idadeMs > maxMs) continue;
 
         const foto = item.params as FotoRecenteCache;
         if (!foto) continue;
 
         if (modeloDesejado && foto.modelo) {
-          if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
+          // Se a foto foi enviada há menos de 3 minutos no mesmo chat, aceita desde que não seja marca conflitante
+          if (idadeMs < 180_000) {
+            if (marcasConflitantes(foto.modelo, modeloDesejado)) continue;
+          } else if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
             continue;
           }
         }
 
-        // Atualiza memória
-        salvarFotoMemoria(item.chave, foto);
         return foto;
       }
     }
   } catch (err) {
-    console.warn('[Notinha Automática] Erro ao buscar foto recente no buffer do Supabase:', err);
+    console.warn('[Notinha Automática] Erro ao buscar foto recente no Supabase:', err);
   }
 
   return null;
 }
 
 /**
- * Limpa o buffer de foto recente após o formulário consumi-lo com sucesso
+ * Aguarda caso exista uma foto sendo processada pelo OCR neste exato instante no mesmo chat,
+ * consome a foto recente assim que ficar pronta e registra `foto_consumida` no Supabase
+ * para que o webhook da foto não dispare mensagem avulsa.
+ */
+export async function aguardarEBuscarFotoRecente(
+  supabase: SupabaseClient,
+  lojaId: string,
+  remoteJid: string,
+  authorPhone: string,
+  modeloDesejado?: string | null,
+  maxMinutos: number = 10
+): Promise<FotoRecenteCache | null> {
+  const chaveProcessando = `foto_processando:${remoteJid}`;
+  const chavesFoto = [
+    ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+    `foto_recente:${remoteJid}:ultima`,
+  ];
+
+  const inicio = Date.now();
+  const timeoutWaitMs = 9500; // Aguarda até 9.5s se houver foto sendo lida no OCR
+
+  while (Date.now() - inicio < timeoutWaitMs) {
+    try {
+      const { data: registros } = await supabase
+        .from('whatsapp_acoes_pendentes')
+        .select('*')
+        .in('chave', [chaveProcessando, ...chavesFoto])
+        .eq('tipo', 'faltando_dados')
+        .order('criado_em', { ascending: false });
+
+      const agora = Date.now();
+      const maxMs = maxMinutos * 60 * 1000;
+
+      // 1. Verifica se a foto_recente já está pronta
+      const itensFoto = (registros || []).filter((r) => r.chave.startsWith('foto_recente:'));
+      for (const item of itensFoto) {
+        const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
+        const idadeMs = agora - criado;
+        if (idadeMs > maxMs) continue;
+
+        const foto = item.params as FotoRecenteCache;
+        if (!foto) continue;
+
+        if (modeloDesejado && foto.modelo) {
+          if (idadeMs < 180_000) {
+            if (marcasConflitantes(foto.modelo, modeloDesejado)) continue;
+          } else if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
+            continue;
+          }
+        }
+
+        // Consome a foto e avisa o webhook da imagem (via foto_consumida) que o formulário já unificou!
+        await Promise.all([
+          supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [...chavesFoto, chaveProcessando]),
+          supabase.from('whatsapp_acoes_pendentes').upsert(
+            {
+              chave: `foto_consumida:${remoteJid}`,
+              loja_id: lojaId,
+              tipo: 'faltando_dados',
+              action: 'foto_consumida',
+              params: { imei: foto.imei, timestamp: agora } as any,
+              resumo: `Foto IMEI ${foto.imei || ''} consumida pelo formulário`,
+              criado_em: new Date(agora).toISOString(),
+            },
+            { onConflict: 'chave' }
+          ),
+        ]);
+
+        return foto;
+      }
+
+      // 2. Se ainda não há foto_recente, verifica se há uma foto_processando ativa (criada há menos de 25s)
+      const proc = (registros || []).find((r) => r.chave === chaveProcessando);
+      if (proc) {
+        const criadoProc = proc.criado_em ? new Date(proc.criado_em).getTime() : 0;
+        if (agora - criadoProc < 25_000) {
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+      }
+
+      break;
+    } catch (err) {
+      console.warn('[Notinha Automática] Erro em aguardarEBuscarFotoRecente:', err);
+      break;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Usado pelo webhook da foto logo após terminar o OCR Vision:
+ * Aguarda uma curta janela (ex: 2.4s) verificando se um formulário enviado junto consumiu a foto.
+ */
+export async function aguardarOuVerificarFotoConsumida(
+  supabase: SupabaseClient,
+  remoteJid: string,
+  esperaMs: number = 2400
+): Promise<boolean> {
+  const chaveConsumida = `foto_consumida:${remoteJid}`;
+  const inicio = Date.now();
+
+  while (Date.now() - inicio <= esperaMs) {
+    try {
+      const { data: item } = await supabase
+        .from('whatsapp_acoes_pendentes')
+        .select('chave, criado_em')
+        .eq('chave', chaveConsumida)
+        .maybeSingle();
+
+      if (item) {
+        const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
+        if (Date.now() - criado < 60_000) {
+          await supabase.from('whatsapp_acoes_pendentes').delete().eq('chave', chaveConsumida);
+          return true;
+        }
+      }
+    } catch {
+      // silencioso
+    }
+
+    if (Date.now() - inicio + 600 > esperaMs) break;
+    await new Promise((r) => setTimeout(r, 600));
+  }
+
+  return false;
+}
+
+/**
+ * Limpa o buffer de foto recente após o formulário ou proposta consumi-lo com sucesso
  */
 export async function limparFotoRecente(
   supabase: SupabaseClient,
@@ -1009,14 +1140,9 @@ export async function limparFotoRecente(
   const chaves = [
     ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
     `foto_recente:${remoteJid}:ultima`,
+    `foto_processando:${remoteJid}`,
   ];
 
-  // Limpa da memória
-  for (const k of chaves) {
-    limparFotoMemoria(k);
-  }
-
-  // Limpa do Supabase
   try {
     await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chaves);
   } catch (err) {

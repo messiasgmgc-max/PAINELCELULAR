@@ -43,8 +43,12 @@ import {
   buscarPropostaNotinhaRecente,
   emitirNotinhaVenda,
   limparNomeModelo,
+  registrarFotoProcessando,
+  limparFotoProcessando,
   salvarFotoRecente,
   buscarFotoRecente,
+  aguardarEBuscarFotoRecente,
+  aguardarOuVerificarFotoConsumida,
   limparFotoRecente,
   type PropostaNotinha,
 } from './notinhaAutomatica';
@@ -1277,14 +1281,22 @@ async function processarResultadoVisionEtiqueta(
 
   let aparelhoEncontrado: any = null;
 
-  // Busca 1: Por IMEI no Supabase (exato ou que termine com os dígitos)
+  // Busca 1: Por IMEI no Supabase (exato, que contenha os dígitos ou pelos 4 últimos dígitos cadastrados na entrada)
   if (imei && imei.length >= 4) {
     const qImei = supabase.from('aparelhos').select('*').eq('loja_id', lojaId);
+    const ultimos4 = imei.slice(-4);
+    const filtroImei =
+      imei.length > 4
+        ? `imei.eq.${imei},imei.ilike.%${imei}%,imei.eq.${ultimos4},imei.ilike.%${ultimos4}`
+        : `imei.eq.${imei},imei.ilike.%${imei}%`;
 
-    const { data: porImei } = await qImei.or(`imei.eq.${imei},imei.ilike.%${imei}%`).limit(5);
+    const { data: porImei } = await qImei.or(filtroImei).limit(10);
     if (porImei && porImei.length > 0) {
-      // O mesmo IMEI pode ter um registro antigo já vendido: o que está no estoque vem primeiro.
-      aparelhoEncontrado = porImei.find((a) => estaNoEstoque(a)) || porImei[0];
+      // Prioriza correspondência exata de 15 dígitos ativa, depois final de 4 dígitos ativo
+      aparelhoEncontrado =
+        porImei.find((a) => estaNoEstoque(a) && String(a.imei || '').replace(/\D/g, '') === imei) ||
+        porImei.find((a) => estaNoEstoque(a)) ||
+        porImei[0];
     }
   }
 
@@ -2494,15 +2506,25 @@ export async function POST(request: Request) {
       const vendaDetectadaNaFoto = captionText ? detectarFormularioOuPedidoVenda(captionText) : null;
       const ehEntradaNaFoto = captionText ? ehMensagemDeEntradaEstoque(captionText) : false;
 
-      if (modoChat === 'padrao' && isGroup) {
-        const ehOperacaoGrupo =
-          captionText.trim().startsWith('!') ||
-          Boolean(vendaDetectadaNaFoto) ||
-          ehEntradaNaFoto;
-        if (!ehOperacaoGrupo) {
-          return NextResponse.json({ status: 'ok', message: 'Imagem sem comando ou operação ignorada em grupo no modo padrão.' }, { status: 200 });
+      const ehOperacaoGrupo =
+        captionText.trim().startsWith('!') ||
+        Boolean(vendaDetectadaNaFoto) ||
+        ehEntradaNaFoto;
+
+      if (lojaId) {
+        const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+        if (!perm.autorizado) {
+          if (!isGroup || ehOperacaoGrupo) {
+            await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
+          }
+          return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
         }
+
+        // Registra IMEDIATAMENTE no Supabase que há uma foto em processamento neste chat,
+        // antes mesmo do download da mídia e do OCR Vision, eliminando qualquer condição de corrida com o formulário!
+        await registrarFotoProcessando(supabase, lojaId, remoteJid, authorPhone);
       }
+
       console.log(`📸 Imagem recebida de ${pushName} (${targetDestination}). Iniciando OCR Vision...`);
 
       let rawBase64 =
@@ -2525,18 +2547,11 @@ export async function POST(request: Request) {
         }
       }
 
+      if (!rawBase64) {
+        await limparFotoProcessando(supabase, remoteJid);
+      }
+
       if (rawBase64) {
-        if (lojaId) {
-          const perm = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
-          if (!perm.autorizado) {
-            await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Este comando é restrito à equipe autorizada da loja.');
-            return NextResponse.json({ status: 'error', message: 'Acesso negado' }, { status: 200 });
-          }
-        }
-
-        // Envia mensagem imediata informando processamento
-        await enviarMensagemWhatsApp(instanceName, targetDestination, '🔍 *Analisando foto com IA Vision...* Só um instante! ⏳');
-
         try {
           const visionData = await processImageVision(rawBase64, mimeType);
 
@@ -2544,11 +2559,53 @@ export async function POST(request: Request) {
             console.log('🤖 Resultado do OCR Vision:', JSON.stringify(visionData));
 
             const imeiLido = visionData.imei ? String(visionData.imei).replace(/\D/g, '') : null;
-            const modeloLido = visionData.modelo ? String(visionData.modelo).trim() : null;
-            const capLida = visionData.capacidade ? String(visionData.capacidade).trim() : null;
-            const corLida = visionData.cor ? String(visionData.cor).trim() : null;
+            let modeloLido = visionData.modelo ? String(visionData.modelo).trim() : null;
+            let capLida = visionData.capacidade ? String(visionData.capacidade).trim() : null;
+            let corLida = visionData.cor ? String(visionData.cor).trim() : null;
 
-            // Salva no buffer de fotos recentes para vincular automaticamente com formulários de pedido/venda
+            // Enriquecimento com a tabela 'aparelhos' pelo IMEI completo (15 dígitos) ou pelos 4 últimos dígitos
+            if (lojaId && imeiLido && imeiLido.length >= 4) {
+              try {
+                const ultimos4 = imeiLido.slice(-4);
+                const filtroImei =
+                  imeiLido.length > 4
+                    ? `imei.eq.${imeiLido},imei.ilike.%${imeiLido}%,imei.eq.${ultimos4},imei.ilike.%${ultimos4}`
+                    : `imei.eq.${imeiLido},imei.ilike.%${imeiLido}%`;
+
+                const { data: apsMatch } = await supabase
+                  .from('aparelhos')
+                  .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo')
+                  .eq('loja_id', lojaId)
+                  .or(filtroImei)
+                  .limit(10);
+
+                if (apsMatch && apsMatch.length > 0) {
+                  const apAtivo =
+                    apsMatch.find((a) => estaNoEstoque(a) && String(a.imei || '').replace(/\D/g, '') === imeiLido) ||
+                    apsMatch.find((a) => estaNoEstoque(a)) ||
+                    apsMatch[0];
+
+                  if (apAtivo) {
+                    if (apAtivo.modelo) {
+                      modeloLido = String(apAtivo.modelo).trim();
+                      visionData.modelo = modeloLido;
+                    }
+                    if (apAtivo.capacidade) {
+                      capLida = String(apAtivo.capacidade).trim();
+                      visionData.capacidade = capLida;
+                    }
+                    if (apAtivo.cor) {
+                      corLida = String(apAtivo.cor).trim();
+                      visionData.cor = corLida;
+                    }
+                  }
+                }
+              } catch (errEnrich) {
+                console.warn('[Vision OCR] Aviso ao enriquecer dados da foto com estoque:', errEnrich);
+              }
+            }
+
+            // Salva no Supabase (whatsapp_acoes_pendentes) e remove a flag foto_processando
             if (lojaId && (imeiLido || modeloLido)) {
               await salvarFotoRecente(supabase, lojaId, remoteJid, authorPhone, {
                 imei: imeiLido,
@@ -2558,9 +2615,11 @@ export async function POST(request: Request) {
                 pushName,
                 timestamp: Date.now(),
               });
+            } else {
+              await limparFotoProcessando(supabase, remoteJid);
             }
 
-            // ── CASO 1: A foto foi enviada junto com formulário de pedido / venda ──
+            // ── CASO 1: A foto foi enviada na mesma mensagem com legenda de formulário de pedido / venda ──
             if (vendaDetectadaNaFoto && lojaId) {
               if (imeiLido && imeiLido.length >= 4) {
                 vendaDetectadaNaFoto.aparelho.imei = imeiLido;
@@ -2575,11 +2634,15 @@ export async function POST(request: Request) {
                 vendaDetectadaNaFoto.aparelho.cor = corLida;
               }
 
+              await limparFotoRecente(supabase, remoteJid, authorPhone);
+
               const { data: apsEstoque } = await supabase
                 .from('aparelhos')
                 .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
                 .eq('loja_id', lojaId)
-                .limit(150);
+                .order('ativo', { ascending: false })
+                .order('dataCadastro', { ascending: false })
+                .limit(600);
 
               const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
                 modelo: vendaDetectadaNaFoto.aparelho?.modelo,
@@ -2587,6 +2650,11 @@ export async function POST(request: Request) {
                 cor: vendaDetectadaNaFoto.aparelho?.cor,
                 imei: vendaDetectadaNaFoto.aparelho?.imei,
               });
+
+              const imeiFinalProposta =
+                vendaDetectadaNaFoto.aparelho?.imei && vendaDetectadaNaFoto.aparelho.imei.length >= 14
+                  ? vendaDetectadaNaFoto.aparelho.imei
+                  : cruzamento.aparelhoEncontrado?.imei || vendaDetectadaNaFoto.aparelho?.imei || undefined;
 
               const proposta: PropostaNotinha = {
                 id: `notinha-${Date.now()}`,
@@ -2596,12 +2664,12 @@ export async function POST(request: Request) {
                 email: vendaDetectadaNaFoto.cliente?.email || undefined,
                 enderecoEntrega: vendaDetectadaNaFoto.observacoes || undefined,
                 modelo: vendaDetectadaNaFoto.aparelho?.modelo || 'Smartphone',
-                capacidade: vendaDetectadaNaFoto.aparelho?.capacidade || undefined,
-                cor: vendaDetectadaNaFoto.aparelho?.cor || undefined,
-                imei: cruzamento.aparelhoEncontrado?.imei || vendaDetectadaNaFoto.aparelho?.imei || undefined,
+                capacidade: vendaDetectadaNaFoto.aparelho?.capacidade || cruzamento.aparelhoEncontrado?.capacidade || undefined,
+                cor: vendaDetectadaNaFoto.aparelho?.cor || cruzamento.aparelhoEncontrado?.cor || undefined,
+                imei: imeiFinalProposta,
                 statusEstoque: cruzamento.mensagem,
                 aparelhoId: cruzamento.aparelhoEncontrado?.id,
-                valorTotal: vendaDetectadaNaFoto.valorTotal || cruzamento.aparelhoEncontrado?.preco || 0,
+                valorTotal: vendaDetectadaNaFoto.valorTotal || 0,
                 custo: cruzamento.aparelhoEncontrado?.custo || undefined,
                 formaPagamento: vendaDetectadaNaFoto.formaPagamento || 'Não informada',
                 isUpgrade: Boolean(vendaDetectadaNaFoto.isUpgrade),
@@ -2632,7 +2700,7 @@ export async function POST(request: Request) {
               return NextResponse.json({ status: 'ok', message: 'Notinha gerada a partir de formulário com foto.' }, { status: 200 });
             }
 
-            // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou a foto da caixa do aparelho ──
+            // ── SINCRONIZAÇÃO COM FORMULÁRIO ENVIADO JUNTO OU LOGO ANTES/DEPOIS ──
             const chavesBuscaPend = Array.from(new Set([
               `notinha:${remoteJid}:ultima`,
               `notinha:${targetDestination}:ultima`,
@@ -2640,29 +2708,48 @@ export async function POST(request: Request) {
               senderPhone ? `notinha:${senderPhone}:ultima` : null,
             ].filter(Boolean))) as string[];
 
-            const proposta = await buscarPropostaNotinhaRecente(
+            // 1. Verifica se o formulário já havia criado uma proposta antes do OCR terminar
+            let proposta = await buscarPropostaNotinhaRecente(
               supabase,
               chavesBuscaPend,
-              visionData.modelo,
+              modeloLido,
               20
             );
 
+            // 2. Se ainda não há proposta pronta, aguarda até 2.4s para verificar se um formulário simultâneo
+            // que estava aguardando o término do OCR acabou de consumir a foto_recente!
+            if (!proposta && lojaId && (imeiLido || modeloLido)) {
+              const foiConsumida = await aguardarOuVerificarFotoConsumida(supabase, remoteJid, 2400);
+              if (foiConsumida) {
+                console.log(`✅ [FOTO+FORMULÁRIO] Foto (IMEI: ${imeiLido}) já unificada pelo webhook do formulário!`);
+                return NextResponse.json({ status: 'ok', message: 'Foto unificada automaticamente com o formulário de venda.' }, { status: 200 });
+              }
+
+              // Verifica novamente se uma proposta foi criada durante a janela de espera
+              proposta = await buscarPropostaNotinhaRecente(
+                supabase,
+                chavesBuscaPend,
+                modeloLido,
+                20
+              );
+            }
+
+            // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou a foto da caixa do aparelho ──
             if (proposta && imeiLido && lojaId) {
               proposta.imei = imeiLido;
               if (corLida && !proposta.cor) {
                 proposta.cor = corLida;
               }
 
-              let avisoDivergencia = '';
-              if (capLida && proposta.capacidade && capLida.toUpperCase() !== proposta.capacidade.toUpperCase()) {
-                avisoDivergencia = `\n⚠️ *Nota sobre Capacidade:* A etiqueta marca *${capLida}*, enquanto o pedido mencionava *${proposta.capacidade}*. Verifique antes de emitir!`;
-              }
+              await limparFotoRecente(supabase, remoteJid, authorPhone);
 
               const { data: apsEstoque } = await supabase
                 .from('aparelhos')
                 .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
                 .eq('loja_id', lojaId)
-                .limit(100);
+                .order('ativo', { ascending: false })
+                .order('dataCadastro', { ascending: false })
+                .limit(600);
 
               const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
                 modelo: proposta.modelo,
@@ -2675,20 +2762,27 @@ export async function POST(request: Request) {
               if (cruzamento.aparelhoEncontrado?.id) {
                 proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
                 proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
-                if (cruzamento.aparelhoEncontrado.imei) {
-                  proposta.imei = cruzamento.aparelhoEncontrado.imei;
+                if (!proposta.cor && cruzamento.aparelhoEncontrado.cor) {
+                  proposta.cor = cruzamento.aparelhoEncontrado.cor;
                 }
-                if (proposta.valorTotal <= 0 && cruzamento.aparelhoEncontrado.preco) {
-                  proposta.valorTotal = cruzamento.aparelhoEncontrado.preco;
+                if (!proposta.capacidade && cruzamento.aparelhoEncontrado.capacidade) {
+                  proposta.capacidade = cruzamento.aparelhoEncontrado.capacidade;
+                }
+                // Preserva o IMEI completo de 15 dígitos da foto mesmo quando o estoque tem apenas os 4 dígitos finais
+                if (
+                  cruzamento.aparelhoEncontrado.imei &&
+                  String(cruzamento.aparelhoEncontrado.imei).replace(/\D/g, '').length > imeiLido.length
+                ) {
+                  proposta.imei = cruzamento.aparelhoEncontrado.imei;
                 }
               }
 
               const msgPreviaAtualizada =
-                `📸 *Foto da caixa associada à notinha pendente!*\n🔢 IMEI \`${imeiLido}\` vinculado com sucesso à notinha de *${proposta.clienteNome}*.${avisoDivergencia}\n\n` +
+                `📸 *Foto da caixa associada à notinha!*\n🔢 IMEI \`${proposta.imei}\` vinculado com sucesso ao pedido de *${proposta.clienteNome}*.\n\n` +
                 formatarMensagemPreviaNotinha(proposta);
 
               const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
-              const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
+              const refMsgId = envio.messageId || proposta.messageId || `notinha-prev-${Date.now()}`;
               await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
               if (targetDestination !== remoteJid) {
                 await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
@@ -2698,7 +2792,7 @@ export async function POST(request: Request) {
                 await supabase.from('whatsapp_logs').insert({
                   loja_id: lojaId,
                   contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
-                  mensagem: `[FOTO+NOTINHA] IMEI ${imeiLido} vinculado à notinha pendente: ${proposta.modelo}`,
+                  mensagem: `[FOTO+NOTINHA] IMEI ${proposta.imei} vinculado à notinha pendente: ${proposta.modelo}`,
                   created_at: new Date().toISOString(),
                 });
               }
@@ -2712,6 +2806,8 @@ export async function POST(request: Request) {
               if (imeiLido && !captionText.includes(imeiLido)) {
                 textoEntradaComImei = `${captionText} imei: ${imeiLido}`;
               }
+
+              await limparFotoRecente(supabase, remoteJid, authorPhone);
 
               const capabilityLote = obterCapability('create_aparelhos_lote');
               if (capabilityLote) {
@@ -2739,6 +2835,12 @@ export async function POST(request: Request) {
               }
             }
 
+            // Em grupos no modo padrão, se a foto foi enviada sem comando/legenda e ainda não tinha formulário,
+            // mantém a foto salva em `whatsapp_acoes_pendentes` (por 10 min) para quando o formulário chegar, sem poluir o grupo.
+            if (modoChat === 'padrao' && isGroup && !ehOperacaoGrupo) {
+              return NextResponse.json({ status: 'ok', message: 'Foto salva no buffer do grupo aguardando formulário.' }, { status: 200 });
+            }
+
             // ── CASO 4: Foto isolada de etiqueta/estoque (consulta ou novo aparelho) ──
             const respostaEtiqueta = await processarResultadoVisionEtiqueta(visionData, lojaId, pushName);
             await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEtiqueta);
@@ -2754,6 +2856,7 @@ export async function POST(request: Request) {
 
             return NextResponse.json({ status: 'ok', message: 'Foto processada com sucesso via IA Vision.' }, { status: 200 });
           } else {
+            await limparFotoProcessando(supabase, remoteJid);
             await enviarMensagemWhatsApp(
               instanceName,
               targetDestination,
@@ -2762,6 +2865,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ status: 'ok', message: 'Falha na leitura da imagem.' }, { status: 200 });
           }
         } catch (visionErr: any) {
+          await limparFotoProcessando(supabase, remoteJid);
           console.error('❌ Erro no processamento de visão OCR:', visionErr);
           await enviarMensagemWhatsApp(
             instanceName,
@@ -3006,7 +3110,9 @@ export async function POST(request: Request) {
             .from('aparelhos')
             .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
             .eq('loja_id', lojaId)
-            .limit(100);
+            .order('ativo', { ascending: false })
+            .order('dataCadastro', { ascending: false })
+            .limit(600);
 
           const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
             modelo: proposta.modelo,
@@ -3019,7 +3125,14 @@ export async function POST(request: Request) {
           if (cruzamento.aparelhoEncontrado?.id) {
             proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
             proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
-            if (cruzamento.aparelhoEncontrado.imei) {
+            if (!proposta.cor && cruzamento.aparelhoEncontrado.cor) {
+              proposta.cor = cruzamento.aparelhoEncontrado.cor;
+            }
+            if (
+              cruzamento.aparelhoEncontrado.imei &&
+              String(cruzamento.aparelhoEncontrado.imei).replace(/\D/g, '').length >
+                String(proposta.imei || '').replace(/\D/g, '').length
+            ) {
               proposta.imei = cruzamento.aparelhoEncontrado.imei;
             }
           }
@@ -3040,10 +3153,10 @@ export async function POST(request: Request) {
     // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA) ──
     const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
     if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal) && lojaId) {
-      // 1. Verifica se há foto da caixa/etiqueta lida recentemente no buffer (últimos 5 minutos)
+      // 1. Verifica (e aguarda caso o OCR ainda esteja rodando) se há foto da etiqueta enviada no chat via Supabase
       let imeiFotoVinculada: string | null = null;
       if (!vendaDetectada.aparelho?.imei) {
-        const fotoRecente = await buscarFotoRecente(
+        const fotoRecente = await aguardarEBuscarFotoRecente(
           supabase,
           lojaId,
           remoteJid,
@@ -3059,16 +3172,17 @@ export async function POST(request: Request) {
           if (!vendaDetectada.aparelho.capacidade && fotoRecente.capacidade) {
             vendaDetectada.aparelho.capacidade = fotoRecente.capacidade;
           }
-          await limparFotoRecente(supabase, remoteJid, authorPhone);
         }
       }
 
-      // Busca estoque para conferir e bater aparelho de saída com venda
+      // Busca estoque completo (priorizando ativos) para conferir aparelho pelo IMEI (15 dígitos ou final de 4 dígitos) ou modelo
       const { data: apsEstoque } = await supabase
         .from('aparelhos')
         .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
         .eq('loja_id', lojaId)
-        .limit(150);
+        .order('ativo', { ascending: false })
+        .order('dataCadastro', { ascending: false })
+        .limit(600);
 
       const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
         modelo: vendaDetectada.aparelho?.modelo,
@@ -3077,16 +3191,13 @@ export async function POST(request: Request) {
         imei: vendaDetectada.aparelho?.imei,
       });
 
-      let valorTotalNotinha = vendaDetectada.valorTotal || cruzamento.aparelhoEncontrado?.preco || 0;
-      if (valorTotalNotinha <= 0 && apsEstoque && vendaDetectada.aparelho?.modelo) {
-        const modAlvo = vendaDetectada.aparelho.modelo.toLowerCase();
-        const comPreco = apsEstoque.find(
-          (a) => (a.modelo || '').toLowerCase().includes(modAlvo) && Number(a.preco) > 0
-        );
-        if (comPreco?.preco) {
-          valorTotalNotinha = Number(comPreco.preco);
-        }
-      }
+      const valorTotalNotinha = vendaDetectada.valorTotal || 0;
+
+      // Preserva o IMEI completo de 15 dígitos da foto mesmo quando o estoque tem apenas os 4 dígitos finais
+      const imeiProposta =
+        vendaDetectada.aparelho?.imei && String(vendaDetectada.aparelho.imei).replace(/\D/g, '').length >= 14
+          ? vendaDetectada.aparelho.imei
+          : cruzamento.aparelhoEncontrado?.imei || vendaDetectada.aparelho?.imei || undefined;
 
       const proposta: PropostaNotinha = {
         id: `notinha-${Date.now()}`,
@@ -3096,9 +3207,9 @@ export async function POST(request: Request) {
         email: vendaDetectada.cliente?.email || undefined,
         enderecoEntrega: vendaDetectada.observacoes || undefined,
         modelo: vendaDetectada.aparelho?.modelo || 'Smartphone',
-        capacidade: vendaDetectada.aparelho?.capacidade || undefined,
-        cor: vendaDetectada.aparelho?.cor || undefined,
-        imei: vendaDetectada.aparelho?.imei || cruzamento.aparelhoEncontrado?.imei || undefined,
+        capacidade: vendaDetectada.aparelho?.capacidade || cruzamento.aparelhoEncontrado?.capacidade || undefined,
+        cor: vendaDetectada.aparelho?.cor || cruzamento.aparelhoEncontrado?.cor || undefined,
+        imei: imeiProposta,
         statusEstoque: cruzamento.mensagem,
         aparelhoId: cruzamento.aparelhoEncontrado?.id,
         valorTotal: valorTotalNotinha,
@@ -3113,7 +3224,7 @@ export async function POST(request: Request) {
 
       const msgPrevia =
         (imeiFotoVinculada
-          ? `📸 *Foto da caixa associada:* IMEI \`${imeiFotoVinculada}\` vinculado automaticamente da foto enviada há pouco!\n\n`
+          ? `📸 *Foto da caixa associada:* IMEI \`${imeiFotoVinculada}\` vinculado automaticamente da foto enviada!\n\n`
           : '') + formatarMensagemPreviaNotinha(proposta);
       const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
       const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;

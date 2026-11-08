@@ -56,7 +56,7 @@ A imagem pode ser:
 1. Uma ETIQUETA DE CELULAR, caixa ou adesivo de aparelho (iPhone, Xiaomi, Samsung, Motorola, etc.). Extraia:
 {
   "tipo_documento": "etiqueta_aparelho",
-  "modelo": "Nome do modelo (ex: iPhone 13, iPhone 14 Pro Max, Redmi Note 13)",
+  "modelo": "Nome do modelo EXATAMENTE como escrito na etiqueta (se só estiver escrito 'iPhone' sem número da geração, retorne 'iPhone'; se não houver modelo legível, retorne null. NUNCA adivinhe ou invente a geração do aparelho)",
   "capacidade": "Capacidade de armazenamento (ex: 128GB, 256GB, 64GB) ou null",
   "cor": "Cor do aparelho (ex: Azul, Preto, Branco, Estelar, Dourado) ou null",
   "imei": "Número do IMEI com 15 dígitos numéricos (apenas dígitos) ou os dígitos legíveis",

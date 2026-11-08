@@ -8,8 +8,11 @@ import {
   cruzarAparelhoComEstoque,
   limparNomeModelo,
   modelosSaoCompativeis,
+  registrarFotoProcessando,
   salvarFotoRecente,
   buscarFotoRecente,
+  aguardarEBuscarFotoRecente,
+  aguardarOuVerificarFotoConsumida,
   limparFotoRecente,
   salvarPropostaNotinha,
   buscarPropostaNotinhaRecente,
@@ -259,12 +262,13 @@ test('modelosSaoCompativeis reconhece iPhone genérico lido em foto com iPhone 1
   assert.equal(modelosSaoCompativeis('Galaxy', 'iPhone 15 Pro'), false);
 });
 
-test('buffer de fotos recentes salva e recupera com latência zero e valida schema do Supabase', async () => {
-  const chamadasSupabase: any[] = [];
-  const fakeSupabase = {
+function criarMockSupabaseAcoesPendentes() {
+  const store = new Map<string, any>();
+
+  return {
+    store,
     from: (tabela: string) => ({
       upsert: async (registro: any) => {
-        // Validação estrita do schema do banco de dados real
         if ('expira_em' in registro) {
           throw new Error("PGRST204: Could not find the 'expira_em' column of 'whatsapp_acoes_pendentes'");
         }
@@ -273,124 +277,154 @@ test('buffer de fotos recentes salva e recupera com latência zero e valida sche
             throw new Error("23514: violates check constraint 'whatsapp_acoes_pendentes_tipo_check'");
           }
         }
-        chamadasSupabase.push({ tabela, registro });
-        return { data: null, error: null };
+        store.set(registro.chave, { ...registro });
+        return { data: registro, error: null };
       },
       select: () => ({
-        in: () => ({
-          eq: () => ({
-            order: () => ({
-              limit: async () => ({ data: [], error: null }),
-            }),
+        in: (_col: string, chaves: string[]) => ({
+          eq: (_col2: string, tipo: string) => ({
+            order: () => {
+              const rows = chaves
+                .map((k) => store.get(k))
+                .filter((r) => r && r.tipo === tipo);
+              const promise = Promise.resolve({ data: rows, error: null }) as any;
+              promise.limit = async (n: number) => ({ data: rows.slice(0, n), error: null });
+              return promise;
+            },
           }),
+        }),
+        eq: (_col: string, chave: string) => ({
+          maybeSingle: async () => ({ data: store.get(chave) || null, error: null }),
         }),
       }),
       delete: () => ({
-        in: async () => ({ data: null, error: null }),
+        in: async (_col: string, chaves: string[]) => {
+          for (const k of chaves) store.delete(k);
+          return { data: null, error: null };
+        },
+        eq: async (_col: string, chave: string) => {
+          store.delete(chave);
+          return { data: null, error: null };
+        },
       }),
     }),
   } as any;
+}
 
-  // 1. Salva foto recente
-  await salvarFotoRecente(fakeSupabase, 'loja-123', 'grupo@g.us', '553199999999', {
-    modelo: 'POCO F8 Pro',
-    capacidade: '512GB',
-    imei: '868972083436361',
-    timestamp: Date.now(),
-  });
+test('sincronização de fotos e propostas 100% via Supabase (incluindo espera por foto_processando)', async () => {
+  const fakeSupabase = criarMockSupabaseAcoesPendentes();
 
-  // Garante que o Supabase recebeu tipo: 'faltando_dados' e NENHUM expira_em
-  assert.ok(chamadasSupabase.length >= 1);
-  for (const c of chamadasSupabase) {
-    assert.equal(c.registro.tipo, 'faltando_dados');
-    assert.equal('expira_em' in c.registro, false);
-    assert.ok(c.registro.params.expiraEm > Date.now());
-  }
+  // 1. Webhook da foto inicia e registra foto_processando
+  await registrarFotoProcessando(fakeSupabase, 'loja-123', 'chat-1@s.whatsapp.net', '553199999999');
+  assert.ok(fakeSupabase.store.has('foto_processando:chat-1@s.whatsapp.net'));
 
-  // 2. Busca foto no buffer (mesmo remetente e mesmo modelo)
-  const achado = await buscarFotoRecente(
+  // 2. Simula o OCR terminando após 300ms em paralelo enquanto o formulário aguarda
+  setTimeout(async () => {
+    await salvarFotoRecente(fakeSupabase, 'loja-123', 'chat-1@s.whatsapp.net', '553199999999', {
+      modelo: 'iPhone 14 Pro', // Simula até mesmo alucinação de geração da mesma marca pelo OCR
+      capacidade: '256GB',
+      imei: '357627943412501',
+      timestamp: Date.now(),
+    });
+  }, 300);
+
+  // 3. Webhook do formulário aguarda o OCR terminar e consome a foto automaticamente
+  const fotoUnificada = await aguardarEBuscarFotoRecente(
     fakeSupabase,
     'loja-123',
-    'grupo@g.us',
+    'chat-1@s.whatsapp.net',
     '553199999999',
-    'Xiaomi POCO F8 Pro'
+    'iPhone 15 Pro'
   );
-  assert.ok(achado, 'Deve encontrar a foto no buffer em memória');
-  assert.equal(achado?.imei, '868972083436361');
-  assert.equal(achado?.capacidade, '512GB');
 
-  // 3. Limpa buffer
-  await limparFotoRecente(fakeSupabase, 'grupo@g.us', '553199999999');
-  const posLimpeza = await buscarFotoRecente(
-    fakeSupabase,
-    'loja-123',
-    'grupo@g.us',
-    '553199999999',
-    'Xiaomi POCO F8 Pro'
-  );
-  assert.equal(posLimpeza, null, 'Buffer deve estar vazio após limpeza');
+  assert.ok(fotoUnificada, 'Formulário deve aguardar e receber a foto recém-processada no Supabase');
+  assert.equal(fotoUnificada?.imei, '357627943412501');
+
+  // 4. Webhook da foto verifica que a foto já foi consumida pelo formulário e encerra sem duplicar mensagem
+  const foiConsumida = await aguardarOuVerificarFotoConsumida(fakeSupabase, 'chat-1@s.whatsapp.net', 500);
+  assert.equal(foiConsumida, true, 'Webhook da foto deve detectar que o formulário já consumiu a foto');
 });
 
-test('buffer de propostas de notinhas salva e recupera com latência zero e valida schema do Supabase', async () => {
-  const chamadasSupabase: any[] = [];
-  const fakeSupabase = {
-    from: (tabela: string) => ({
-      upsert: async (registro: any) => {
-        if ('expira_em' in registro) {
-          throw new Error("PGRST204: Could not find the 'expira_em' column of 'whatsapp_acoes_pendentes'");
-        }
-        if (tabela === 'whatsapp_acoes_pendentes') {
-          if (!['faltando_dados', 'confirmacao'].includes(registro.tipo)) {
-            throw new Error("23514: violates check constraint 'whatsapp_acoes_pendentes_tipo_check'");
-          }
-        }
-        chamadasSupabase.push({ tabela, registro });
-        return { data: null, error: null };
-      },
-      select: () => ({
-        in: () => ({
-          eq: () => ({
-            order: () => ({
-              limit: async () => ({ data: [], error: null }),
-            }),
-          }),
-        }),
-      }),
-      delete: () => ({
-        in: async () => ({ data: null, error: null }),
-      }),
-    }),
-  } as any;
+test('cruzarAparelhoComEstoque vincula IMEI de 15 dígitos da etiqueta com final de 4 dígitos do estoque e não confunde modelos', () => {
+  const estoque = [
+    {
+      id: 'ap-15-base',
+      modelo: 'iPhone 15',
+      capacidade: '128GB',
+      cor: 'Preto',
+      imei: '9911',
+      preco: 3800,
+      status: 'disponivel',
+      ativo: true,
+    },
+    {
+      id: 'ap-15-pro-azul',
+      modelo: 'iPhone 15 Pro',
+      capacidade: '256GB',
+      cor: '🔵 Azul',
+      imei: '2501',
+      preco: 5200,
+      custo: 4300,
+      status: 'disponivel',
+      ativo: true,
+    },
+    {
+      id: 'ap-15-promax',
+      modelo: 'iPhone 15 Pro Max',
+      capacidade: '256GB',
+      cor: 'Natural',
+      imei: '8822',
+      preco: 6100,
+      status: 'disponivel',
+      ativo: true,
+    },
+  ];
+
+  // 1. Etiqueta com IMEI de 15 dígitos (final 2501) bate com o iPhone 15 Pro cadastrado com '2501'
+  const porImei15 = cruzarAparelhoComEstoque(estoque, {
+    modelo: 'iPhone 15 Pro',
+    capacidade: '256GB',
+    imei: '357627943412501',
+  });
+  assert.equal(porImei15.status, 'confirmado');
+  assert.equal(porImei15.aparelhoEncontrado?.id, 'ap-15-pro-azul');
+  assert.ok(porImei15.mensagem.includes('2501'));
+  assert.ok(porImei15.mensagem.includes('357627943412501'));
+
+  // 2. Sem IMEI, buscando 'iPhone 15 Pro 256GB', encontra apenas o iPhone 15 Pro (não mistura com iPhone 15 nem 15 Pro Max)
+  const porModeloExato = cruzarAparelhoComEstoque(estoque, {
+    modelo: 'iPhone 15 Pro',
+    capacidade: '256GB',
+  });
+  assert.equal(porModeloExato.status, 'confirmado');
+  assert.equal(porModeloExato.aparelhoEncontrado?.id, 'ap-15-pro-azul');
+});
+
+test('salvarPropostaNotinha e buscarPropostaNotinhaRecente operam 100% via Supabase', async () => {
+  const fakeSupabase = criarMockSupabaseAcoesPendentes();
 
   const proposta: PropostaNotinha = {
     id: 'prop-teste-1',
-    clienteNome: 'Marlon Vitor da Rocha',
-    modelo: 'Xiaomi POCO F8 Pro',
-    valorTotal: 4999.99,
+    clienteNome: 'Luan Cássio de Jesus Tavares Santos',
+    modelo: 'iPhone 15 Pro',
+    capacidade: '256GB',
+    valorTotal: 0,
     formaPagamento: 'cartao_credito',
-    statusEstoque: 'Disponível',
+    statusEstoque: 'Confirmado',
     isUpgrade: false,
   };
 
-  // 1. Salva proposta
   await salvarPropostaNotinha(fakeSupabase, 'loja-123', 'grupo@g.us', 'msg-123', proposta);
 
-  assert.ok(chamadasSupabase.length >= 1);
-  for (const c of chamadasSupabase) {
-    assert.equal(c.registro.tipo, 'confirmacao');
-    assert.equal('expira_em' in c.registro, false);
-    assert.ok(c.registro.params.expiraEm > Date.now());
-  }
-
-  // 2. Busca proposta recente via chaves
+  // Mesmo se o OCR da etiqueta ler apenas "iPhone" ou "iPhone 14 Pro" segundos depois, vincula à proposta recente da mesma marca
   const encontrada = await buscarPropostaNotinhaRecente(
     fakeSupabase,
     ['notinha:grupo@g.us:ultima'],
-    'POCO F8 Pro',
+    'iPhone 14 Pro',
     20
   );
-  assert.ok(encontrada, 'Deve encontrar a proposta no buffer em memória');
-  assert.equal(encontrada?.clienteNome, 'Marlon Vitor da Rocha');
-  assert.equal(encontrada?.valorTotal, 4999.99);
+  assert.ok(encontrada, 'Deve encontrar a proposta no Supabase');
+  assert.equal(encontrada?.clienteNome, 'Luan Cássio de Jesus Tavares Santos');
+  assert.equal(encontrada?.modelo, 'iPhone 15 Pro');
 });
 
