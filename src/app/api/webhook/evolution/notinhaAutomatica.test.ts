@@ -16,6 +16,7 @@ import {
   aguardarEBuscarFotoRecente,
   aguardarEBuscarFotosRecentes,
   aguardarOuVerificarFotoConsumida,
+  propostaJaContemImei,
   limparFotoRecente,
   salvarPropostaNotinha,
   buscarPropostaNotinhaRecente,
@@ -809,6 +810,10 @@ Modelo:
   const pdfLatin1 = pdfBuffer.toString('latin1');
   assert.ok(!pdfLatin1.includes('\xd8=\xdc\xf1'), 'Não deve conter mojibake Ø=Üñ do emoji 📱 no PDF');
   assert.ok(!pdfLatin1.includes('\xd8=\xdd'), 'Não deve conter mojibake Ø=Ý do emoji 🔁 no PDF');
+
+  // Evita envio duplicado caso o webhook de uma das fotos verifique a proposta após o formulário já ter consumido ambos os IMEIs
+  assert.equal(propostaJaContemImei(propostaSemFotos, '353587235432902'), true);
+  assert.equal(propostaJaContemImei(propostaSemFotos, '351586496377246'), true);
 });
 
 test('Suporta pedidos com múltiplos Upgrades em seta (Entrada -> Saída + R$ valor) como o da nota do Bruno Henrique', async () => {
@@ -996,6 +1001,11 @@ Pagamento confirmado`;
   const pdfLatin1 = pdfBuffer.toString('latin1');
   assert.ok(!pdfLatin1.includes('\xd8=\xdc\xf1'), 'Não deve conter mojibake Ø=Üñ do emoji 📱 no PDF');
   assert.ok(!pdfLatin1.includes('\xd8=\xdd'), 'Não deve conter mojibake Ø=Ý do emoji 🔁 no PDF');
+
+  // Evita envio duplicado caso o webhook de uma das fotos verifique a proposta após o formulário já ter consumido ambos os IMEIs
+  assert.equal(propostaJaContemImei(proposta, '359426261378396'), true);
+  assert.equal(propostaJaContemImei(proposta, '354198260038124'), true);
+  assert.equal(propostaJaContemImei(proposta, '359999999999999'), false);
 });
 
 

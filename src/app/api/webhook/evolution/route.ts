@@ -53,6 +53,7 @@ import {
   aguardarEBuscarFotoRecente,
   aguardarEBuscarFotosRecentes,
   aguardarOuVerificarFotoConsumida,
+  propostaJaContemImei,
   limparFotoRecente,
   limparMencoesBot,
   extrairMensagemMarcadaParaBot,
@@ -2780,11 +2781,18 @@ export async function POST(request: Request) {
               20
             );
 
+            // Se a proposta encontrada já contém este exato IMEI (porque o webhook do formulário já consumiu esta foto e enviou a prévia),
+            // ignora para não enviar uma segunda mensagem repetida!
+            if (proposta && imeiLido && propostaJaContemImei(proposta, imeiLido)) {
+              console.log(`✅ [FOTO+FORMULÁRIO] IMEI ${imeiLido} já consta na proposta recém-criada; evitando envio duplicado.`);
+              return NextResponse.json({ status: 'ok', message: 'Foto já incluída na prévia da notinha.' }, { status: 200 });
+            }
+
             // 2. Se ainda não há proposta pronta, aguarda até 2.4s (ou 4.8s quando marcou o bot) para verificar se um formulário simultâneo
             // que estava aguardando o término do OCR acabou de consumir a foto_recente!
             if (!proposta && lojaId && (imeiLido || modeloLido)) {
               const esperaConsumoMs = marcacaoBot.foiMarcado ? 4800 : 2400;
-              const foiConsumida = await aguardarOuVerificarFotoConsumida(supabase, remoteJid, esperaConsumoMs);
+              const foiConsumida = await aguardarOuVerificarFotoConsumida(supabase, remoteJid, esperaConsumoMs, imeiLido);
               if (foiConsumida) {
                 console.log(`✅ [FOTO+FORMULÁRIO] Foto (IMEI: ${imeiLido}) já unificada pelo webhook do formulário!`);
                 return NextResponse.json({ status: 'ok', message: 'Foto unificada automaticamente com o formulário de venda.' }, { status: 200 });
@@ -2797,6 +2805,11 @@ export async function POST(request: Request) {
                 modeloLido,
                 20
               );
+
+              if (proposta && imeiLido && propostaJaContemImei(proposta, imeiLido)) {
+                console.log(`✅ [FOTO+FORMULÁRIO] IMEI ${imeiLido} já consta na proposta criada durante a espera; evitando envio duplicado.`);
+                return NextResponse.json({ status: 'ok', message: 'Foto já incluída na prévia da notinha.' }, { status: 200 });
+              }
             }
 
             // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou/marcou a foto da caixa do aparelho ──

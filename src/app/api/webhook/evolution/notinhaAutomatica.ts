@@ -2288,30 +2288,69 @@ export async function aguardarEBuscarFotoRecente(
 }
 
 /**
+ * Verifica se uma proposta de notinha já possui determinado IMEI vinculado (em qualquer um dos seus itens),
+ * evitando que o webhook paralelo de uma foto envie uma segunda prévia duplicada quando o formulário já consumiu a foto.
+ */
+export function propostaJaContemImei(
+  proposta?: PropostaNotinha | null,
+  imei?: string | null
+): boolean {
+  if (!proposta || !imei) return false;
+  const imeiLimpo = digitos(imei);
+  if (imeiLimpo.length < 4) return false;
+
+  if (Array.isArray(proposta.itens) && proposta.itens.length > 0) {
+    if (proposta.itens.some((it) => it.imei && digitos(it.imei) === imeiLimpo)) {
+      return true;
+    }
+  }
+
+  if (proposta.imei) {
+    const partes = proposta.imei.split('/').map((p) => digitos(p));
+    if (partes.includes(imeiLimpo)) return true;
+  }
+
+  return false;
+}
+
+/**
  * Usado pelo webhook da foto logo após terminar o OCR Vision:
  * Aguarda uma curta janela (ex: 2.4s) verificando se um formulário enviado junto consumiu a foto.
  */
 export async function aguardarOuVerificarFotoConsumida(
   supabase: SupabaseClient,
   remoteJid: string,
-  esperaMs: number = 2400
+  esperaMs: number = 2400,
+  imeiLido?: string | null
 ): Promise<boolean> {
   const chaveConsumida = `foto_consumida:${remoteJid}`;
   const inicio = Date.now();
+  const imeiAlvo = digitos(imeiLido);
 
   while (Date.now() - inicio <= esperaMs) {
     try {
       const { data: item } = await supabase
         .from('whatsapp_acoes_pendentes')
-        .select('chave, criado_em')
+        .select('chave, criado_em, params')
         .eq('chave', chaveConsumida)
         .maybeSingle();
 
       if (item) {
         const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
-        if (Date.now() - criado < 60_000) {
-          await supabase.from('whatsapp_acoes_pendentes').delete().eq('chave', chaveConsumida);
-          return true;
+        if (Date.now() - criado < 25_000) {
+          const params = (item as any).params || {};
+          const listaImeis: string[] = Array.isArray(params.imeis)
+            ? params.imeis.map((x: unknown) => digitos(x)).filter(Boolean)
+            : params.imei
+            ? [digitos(params.imei)]
+            : [];
+
+          if (!imeiAlvo || listaImeis.length === 0 || listaImeis.includes(imeiAlvo)) {
+            if (listaImeis.length <= 1) {
+              await supabase.from('whatsapp_acoes_pendentes').delete().eq('chave', chaveConsumida);
+            }
+            return true;
+          }
         }
       }
     } catch {
