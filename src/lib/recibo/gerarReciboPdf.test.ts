@@ -71,3 +71,34 @@ test('gerarReciboPdfBuffer funciona com upgrade/trade-in', async () => {
   assert.ok(buffer.length > 1000);
   assert.equal(buffer.slice(0, 4).toString(), '%PDF');
 });
+
+test('gerarReciboPdfBuffer inclui logoUrl e assinaturaUrl em base64 da loja', async () => {
+  // PNG 1x1 transparente válido em base64
+  const png1x1 =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  const buffer = await gerarReciboPdfBuffer({
+    vendaId: '99999999-b19d-4289-a4a2-bac8955d06e6',
+    codigoVenda: '999999',
+    loja: {
+      nome: 'Lucas Imports',
+      cnpj: '00.000.000/0000-00',
+      telefone: '31994986029',
+      endereco: 'Av Gov Valadares 851, Centro - Betim - MG',
+      logoUrl: png1x1,
+      assinaturaUrl: png1x1,
+    },
+    cliente: { nome: 'Luan Cássio' },
+    aparelho: { modelo: 'iPhone 15 Pro', capacidade: '256GB', imei: '357627943412501', valor: 4800 },
+    pagamento: {
+      forma: 'cartao_credito',
+      valorTotal: 4800,
+      valorFinal: 4800,
+    },
+    diasGarantia: 180,
+  });
+
+  assert.ok(buffer);
+  assert.ok(buffer.length > 1200);
+  assert.equal(buffer.slice(0, 4).toString(), '%PDF');
+});

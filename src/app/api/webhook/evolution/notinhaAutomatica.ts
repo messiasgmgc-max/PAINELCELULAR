@@ -30,6 +30,7 @@ export interface ResultadoCruzamentoEstoque {
 
 export interface PropostaNotinha {
   id: string;
+  lojaId?: string;
   remoteJid?: string;
   messageId?: string;
   clienteNome: string;
@@ -439,6 +440,7 @@ export async function salvarPropostaNotinha(
   proposta: PropostaNotinha
 ): Promise<void> {
   const agora = Date.now();
+  if (lojaId) proposta.lojaId = lojaId;
   proposta.messageId = messageId;
   proposta.remoteJid = remoteJid;
   proposta.criadoEm = agora;
@@ -544,6 +546,40 @@ export async function emitirNotinhaVenda(
     const agora = new Date().toISOString();
     const descricao = `Venda WhatsApp - ${proposta.modelo} para ${proposta.clienteNome}`;
 
+    // 0. Carrega os dados oficiais da loja (nome, CNPJ, telefone, endereço, logo, assinatura e dias de garantia)
+    const COLUNAS_LOJA_PDF =
+      'id, nome, subtitulo, cnpj, telefone, dono_whatsapp, email, endereco, cidade, logo_url, assinatura_url, garantia_dias, dias_garantia';
+    const lojaIdCandidata =
+      (lojaId && lojaId !== 'loja-master' ? lojaId : proposta.lojaId) ||
+      lojaId ||
+      'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
+
+    let dadosLoja: any = null;
+    try {
+      if (lojaIdCandidata && lojaIdCandidata !== 'loja-master') {
+        const { data: l } = await supabase
+          .from('lojas')
+          .select(COLUNAS_LOJA_PDF)
+          .eq('id', lojaIdCandidata)
+          .maybeSingle();
+        dadosLoja = l;
+      }
+      if (!dadosLoja) {
+        const { data: lLucas } = await supabase
+          .from('lojas')
+          .select(COLUNAS_LOJA_PDF)
+          .ilike('nome', '%lucas%')
+          .limit(1)
+          .maybeSingle();
+        dadosLoja = lLucas;
+      }
+    } catch (errLoja) {
+      console.warn('Erro ao carregar dados da loja para o PDF:', errLoja);
+    }
+
+    const lojaIdFinal = dadosLoja?.id || lojaIdCandidata;
+    const diasGarantiaLoja = Number(dadosLoja?.garantia_dias || dadosLoja?.dias_garantia || 90);
+
     // 1. Cadastra ou atualiza o cliente na base de dados da loja
     let clienteId: string | undefined = undefined;
     const nomeClienteLimpo = (proposta.clienteNome || '').trim();
@@ -555,7 +591,7 @@ export async function emitirNotinhaVenda(
         let queryBusca = supabase
           .from('clientes')
           .select('id, nome, cpf, telefone, email, endereco')
-          .eq('loja_id', lojaId);
+          .eq('loja_id', lojaIdFinal);
 
         if (cpfLimpo && cpfLimpo.length >= 11) {
           queryBusca = queryBusca.eq('cpf', proposta.cpf?.trim());
@@ -583,7 +619,7 @@ export async function emitirNotinhaVenda(
           const { data: novoCli } = await supabase
             .from('clientes')
             .insert({
-              loja_id: lojaId,
+              loja_id: lojaIdFinal,
               nome: nomeClienteLimpo,
               cpf: proposta.cpf ? proposta.cpf.trim() : null,
               telefone: proposta.telefone ? proposta.telefone.trim() : '',
@@ -605,7 +641,7 @@ export async function emitirNotinhaVenda(
     }
 
     const registroVenda = {
-      loja_id: lojaId,
+      loja_id: lojaIdFinal,
       clienteId: clienteId || undefined,
       clienteNome: proposta.clienteNome,
       cpf: proposta.cpf || null,
@@ -620,6 +656,7 @@ export async function emitirNotinhaVenda(
       tipoEntrega: 'Varejo',
       vendedor: usuarioNome,
       dataPagamento: agora,
+      garantia: `${diasGarantiaLoja} dias`,
       descricao,
       itens: [
         {
@@ -648,7 +685,7 @@ export async function emitirNotinhaVenda(
     let tradeInPayload: Record<string, unknown> | null = null;
     if (proposta.isUpgrade && proposta.modeloTroca) {
       tradeInPayload = {
-        loja_id: lojaId,
+        loja_id: lojaIdFinal,
         modelo: proposta.modeloTroca,
         imei: proposta.imeiTroca || null,
         valor: proposta.valorTroca || 0,
@@ -685,19 +722,6 @@ export async function emitirNotinhaVenda(
       `──────────────────────────\n` +
       `_Venda registrada e auditada no Phone Center!_`;
 
-    // Busca dados complementares da loja para compor o cabeçalho do PDF
-    let dadosLoja: any = null;
-    try {
-      const { data: l } = await supabase
-        .from('lojas')
-        .select('nome, cnpj, telefone, whatsapp, endereco, cidade')
-        .eq('id', lojaId)
-        .maybeSingle();
-      dadosLoja = l;
-    } catch (errLoja) {
-      console.warn('Erro ao carregar dados da loja para o PDF:', errLoja);
-    }
-
     let pdfBase64: string | undefined = undefined;
     let nomeArquivoPdf: string | undefined = undefined;
 
@@ -707,11 +731,13 @@ export async function emitirNotinhaVenda(
         codigoVenda: vendaId,
         dataEmissao: new Date().toLocaleString('pt-BR'),
         loja: {
-          nome: dadosLoja?.nome || 'Phone Center',
+          nome: (dadosLoja?.nome || 'Lucas Imports').trim(),
           cnpj: dadosLoja?.cnpj || null,
-          telefone: dadosLoja?.whatsapp || dadosLoja?.telefone || null,
+          telefone: dadosLoja?.telefone || dadosLoja?.dono_whatsapp || null,
           endereco: dadosLoja?.endereco || null,
           cidade: dadosLoja?.cidade || null,
+          logoUrl: dadosLoja?.logo_url || null,
+          assinaturaUrl: dadosLoja?.assinatura_url || null,
         },
         cliente: {
           nome: proposta.clienteNome,
@@ -740,7 +766,7 @@ export async function emitirNotinhaVenda(
           valorEntrada: proposta.valorTroca || 0,
           valorFinal: Number(proposta.valorTotal || 0) - (proposta.valorTroca || 0),
         },
-        diasGarantia: 90,
+        diasGarantia: diasGarantiaLoja,
         vendedor: usuarioNome,
         linkRecibo,
       });

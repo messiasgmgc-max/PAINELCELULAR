@@ -10,6 +10,8 @@ export interface DadosReciboPdf {
     telefone?: string | null;
     endereco?: string | null;
     cidade?: string | null;
+    logoUrl?: string | null;
+    assinaturaUrl?: string | null;
   };
   cliente: {
     nome: string;
@@ -50,19 +52,51 @@ function formatarMoeda(valor: number): string {
 }
 
 /**
+ * Converte data URI (base64) ou URL pública em Buffer de imagem (PNG/JPEG) para o PDFKit.
+ */
+async function carregarBufferImagem(src?: string | null): Promise<Buffer | null> {
+  if (!src || typeof src !== 'string') return null;
+  const limpo = src.trim();
+  if (!limpo) return null;
+
+  try {
+    const matchDataUri = limpo.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,([\s\S]+)$/i);
+    if (matchDataUri && matchDataUri[1]) {
+      return Buffer.from(matchDataUri[1].replace(/\s+/g, ''), 'base64');
+    }
+
+    if (limpo.startsWith('http://') || limpo.startsWith('https://')) {
+      const resp = await fetch(limpo);
+      if (!resp.ok) return null;
+      const arr = await resp.arrayBuffer();
+      return Buffer.from(arr);
+    }
+  } catch (err) {
+    console.warn('[gerarReciboPdfBuffer] Aviso ao decodificar imagem da loja:', err);
+  }
+  return null;
+}
+
+/**
  * Gera o Recibo A4 oficial fiel ao modelo do sistema (src/lib/reciboA4.ts).
- * Contém o Canhoto de recebimento, cabeçalho da loja, dados do cliente,
- * tabela de produtos/aparelhos com IMEI, termo oficial de garantia de 90 dias e assinaturas.
+ * Contém o Canhoto de recebimento, cabeçalho da loja (com logo), dados do cliente,
+ * tabela de produtos/aparelhos com IMEI, termo oficial de garantia da loja e assinaturas (com assinatura da loja).
  */
 export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffer> {
+  const [logoBuffer, assinaturaBuffer] = await Promise.all([
+    carregarBufferImagem(dados.loja.logoUrl),
+    carregarBufferImagem(dados.loja.assinaturaUrl),
+  ]);
+
   return new Promise((resolve, reject) => {
     try {
+      const nomeLoja = (dados.loja.nome || 'Phone Center').trim();
       const doc = new PDFDocument({
         size: 'A4',
         margin: 30,
         info: {
-          Title: `Recibo #${dados.codigoVenda} - ${dados.loja.nome}`,
-          Author: dados.loja.nome,
+          Title: `Recibo #${dados.codigoVenda} - ${nomeLoja}`,
+          Author: nomeLoja,
           Subject: 'Recibo de Venda e Termo de Garantia',
         },
       });
@@ -74,7 +108,6 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
 
       const x = 30;
       const w = 535;
-      const nomeLoja = dados.loja.nome || 'Phone Center';
       const codigoVenda = dados.codigoVenda;
       const nomeCliente = dados.cliente.nome || 'Não informado';
 
@@ -112,13 +145,29 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
       // 2. DADOS DA EMPRESA / CABEÇALHO DO PEDIDO
       // ─────────────────────────────────────────────────────────────
       let y = 96;
+      let xTextoLoja = x;
+      let larguraTextoLoja = 330;
+
+      if (logoBuffer) {
+        try {
+          doc.image(logoBuffer, x, y - 2, {
+            fit: [80, 44],
+            align: 'left',
+            valign: 'center',
+          });
+          xTextoLoja = x + 88;
+          larguraTextoLoja = 242;
+        } catch (errLogo) {
+          console.warn('[gerarReciboPdfBuffer] Falha ao inserir logo da loja no PDF:', errLogo);
+        }
+      }
 
       doc.fillColor('#000000').fontSize(14).font('Helvetica-Bold');
-      doc.text(nomeLoja, x, y, { width: 330 });
+      doc.text(nomeLoja, xTextoLoja, y, { width: larguraTextoLoja });
 
       doc.fontSize(8).font('Helvetica');
       const enderecoLoja = dados.loja.endereco || dados.loja.cidade || 'Endereço da loja';
-      doc.text(enderecoLoja, x, y + 17, { width: 330 });
+      doc.text(enderecoLoja, xTextoLoja, y + 17, { width: larguraTextoLoja });
 
       const infoEmpresa = [
         dados.loja.cnpj ? `CPF/CNPJ: ${dados.loja.cnpj}` : null,
@@ -126,7 +175,7 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
       ]
         .filter(Boolean)
         .join(' | ') || 'Telefone não informado';
-      doc.text(infoEmpresa, x, y + 28, { width: 330 });
+      doc.text(infoEmpresa, xTextoLoja, y + 28, { width: larguraTextoLoja });
 
       // Lado direito: Data, Vendedor e Código
       const dataHoraFmt = dados.dataEmissao || new Date().toLocaleString('pt-BR');
@@ -356,7 +405,19 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
       // ─────────────────────────────────────────────────────────────
       // 7. ASSINATURAS (CLIENTE E LOJA)
       // ─────────────────────────────────────────────────────────────
-      y = Math.min(y + 25, 730);
+      y = Math.min(y + 48, 730);
+
+      if (assinaturaBuffer) {
+        try {
+          doc.image(assinaturaBuffer, x + 335, y - 44, {
+            fit: [140, 42],
+            align: 'center',
+            valign: 'bottom',
+          });
+        } catch (errAss) {
+          console.warn('[gerarReciboPdfBuffer] Falha ao inserir assinatura da loja no PDF:', errAss);
+        }
+      }
 
       doc.strokeColor('#000000').lineWidth(1);
       doc.moveTo(x + 40, y).lineTo(x + 220, y).stroke();
