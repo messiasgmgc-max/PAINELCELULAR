@@ -99,12 +99,319 @@ export function limparNomeModelo(m: string): string {
 }
 
 /**
+ * Remove menções de WhatsApp (@5531..., @lid, @Astrogeek, @bot, etc.) preservando as quebras de linha do formulário.
+ */
+export function limparMencoesBot(texto: string): string {
+  if (!texto || typeof texto !== 'string') return '';
+  return texto
+    .replace(/(^|[\s,;(])@\d{6,22}\b/g, '$1 ')
+    .replace(/(^|[\s,;(])@(?:astrogeek|phone\s*center|phonecenter|lucas\s*imports|lucasimports|bot)\b/gi, '$1 ')
+    .split(/\r?\n/)
+    .map((linha) => linha.replace(/[ \t]{2,}/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export interface ResultadoMensagemMarcadaBot {
+  foiMarcado: boolean;
+  usouMensagemCitada: boolean;
+  tipoCitado?: 'texto' | 'imagem' | 'resumo_etiqueta';
+  textoEfetivo: string;
+  textoOriginalUsuario: string;
+  textoSemMencao: string;
+  quotedImageMessage?: any;
+  quotedStanzaId?: string;
+  quotedParticipant?: string;
+  dadosEtiquetaCitada?: {
+    imei?: string | null;
+    modelo?: string | null;
+    capacidade?: string | null;
+    cor?: string | null;
+  };
+}
+
+/**
+ * Detecta quando o usuário marca o bot (@Astrogeek / @número / @lid) em um grupo ou conversa,
+ * ou responde (cita) uma mensagem de formulário ou foto pedindo para o bot reler e processar.
+ */
+export function extrairMensagemMarcadaParaBot(params: {
+  msgData: any;
+  payload?: any;
+  botPhones?: string[];
+}): ResultadoMensagemMarcadaBot {
+  const { msgData, payload, botPhones = [] } = params || {};
+  const messageContent = msgData?.message || {};
+
+  const contextInfo =
+    msgData?.contextInfo ||
+    messageContent?.extendedTextMessage?.contextInfo ||
+    messageContent?.imageMessage?.contextInfo ||
+    messageContent?.conversation?.contextInfo ||
+    messageContent?.ephemeralMessage?.message?.extendedTextMessage?.contextInfo ||
+    messageContent?.ephemeralMessage?.message?.imageMessage?.contextInfo ||
+    messageContent?.viewOnceMessage?.message?.extendedTextMessage?.contextInfo ||
+    payload?.data?.contextInfo ||
+    payload?.data?.message?.extendedTextMessage?.contextInfo ||
+    null;
+
+  const mentionedJids: string[] = Array.isArray(contextInfo?.mentionedJid)
+    ? contextInfo.mentionedJid.map((j: unknown) => String(j || ''))
+    : [];
+
+  const quotedStanzaId: string | undefined =
+    contextInfo?.stanzaId || contextInfo?.key?.id || undefined;
+  const quotedParticipant: string | undefined =
+    contextInfo?.participant || contextInfo?.key?.participant || undefined;
+
+  const quotedContainer = contextInfo?.quotedMessage;
+  const rawQuoted =
+    quotedContainer?.ephemeralMessage?.message ||
+    quotedContainer?.viewOnceMessage?.message ||
+    quotedContainer?.viewOnceMessageV2?.message ||
+    quotedContainer?.viewOnceMessageV2Extension?.message ||
+    quotedContainer?.documentWithCaptionMessage?.message ||
+    quotedContainer ||
+    null;
+
+  const textoOriginalUsuario = String(
+    messageContent?.conversation ||
+      messageContent?.extendedTextMessage?.text ||
+      messageContent?.imageMessage?.caption ||
+      msgData?.caption ||
+      ''
+  );
+  const textoSemMencao = limparMencoesBot(textoOriginalUsuario);
+
+  const quotedImageMessage =
+    rawQuoted?.imageMessage ||
+    (rawQuoted?.messageType === 'imageMessage' ? rawQuoted : null) ||
+    null;
+
+  const quotedTextRaw = String(
+    rawQuoted?.conversation ||
+      rawQuoted?.extendedTextMessage?.text ||
+      rawQuoted?.imageMessage?.caption ||
+      rawQuoted?.caption ||
+      ''
+  ).trim();
+  const quotedTextLimpo = limparMencoesBot(quotedTextRaw);
+
+  const temMencaoPorNome = /(?:^|[\s,;(])@(?:astrogeek|phone\s*center|phonecenter|lucas\s*imports|lucasimports|bot)\b/i.test(
+    textoOriginalUsuario
+  );
+  const mencoesNumericasTexto = Array.from(
+    textoOriginalUsuario.matchAll(/(?:^|[\s,;(])@(\d{6,22})\b/g)
+  ).map((m) => m[1]);
+
+  const todosJidsMencionados = [
+    ...mentionedJids.map((j) => j.replace(/@.*$/, '').replace(/\D/g, '')),
+    ...mencoesNumericasTexto,
+  ].filter(Boolean);
+
+  const botPhonesLimpos = botPhones
+    .map((p) => String(p || '').replace(/@.*$/, '').replace(/\D/g, ''))
+    .filter((p) => p.length >= 8);
+
+  const bateuBotPhone =
+    botPhonesLimpos.length > 0 &&
+    todosJidsMencionados.some((m) =>
+      botPhonesLimpos.some((bp) => m.endsWith(bp.slice(-8)) || bp.endsWith(m.slice(-8)))
+    );
+
+  const temAlgumaMencao =
+    temMencaoPorNome || mencoesNumericasTexto.length > 0 || mentionedJids.length > 0;
+
+  const ehPalavraGatilhoReleitura =
+    /^(?:!?\s*(?:ler|releia|reler|notinha|nota|pedido|venda|estoque|cadastrar|cadastra|entrada|processar|processa|emitir|analisa|analisar)|bot|astrogeek|faz\s*a\s*notinha|faz\s*a\s*nota|gera\s*a\s*notinha|gera\s*a\s*nota|l[eê]\s*a[ií]|l[eê]\s*isso|olha\s*isso|veja\s*isso)$/i.test(
+      textoSemMencao
+    );
+
+  const ehQuotedPreviaOuReciboBot =
+    /PR[ÉE]VIA DA NOTINHA|NOTINHA EMITIDA COM SUCESSO/i.test(quotedTextRaw);
+
+  const ehQuotedResumoEtiquetaBot =
+    /Dados lidos da etiqueta com IA:/i.test(quotedTextRaw) &&
+    /IMEI:/i.test(quotedTextRaw);
+
+  const ehQuotedOperacaoValida =
+    Boolean(quotedImageMessage) ||
+    ehQuotedResumoEtiquetaBot ||
+    Boolean(quotedTextLimpo && detectarFormularioOuPedidoVenda(quotedTextLimpo)) ||
+    Boolean(quotedTextLimpo && /^(?:!|entrada\b|cadastrar\b|cadastra\b)/i.test(quotedTextLimpo));
+
+  let foiMarcado = false;
+  if (rawQuoted) {
+    if (
+      temMencaoPorNome ||
+      bateuBotPhone ||
+      ehPalavraGatilhoReleitura ||
+      (temAlgumaMencao &&
+        (textoSemMencao === '' ||
+          ehQuotedOperacaoValida ||
+          ehQuotedPreviaOuReciboBot ||
+          Boolean(interpretarTextoCorrecaoVenda(textoSemMencao))))
+    ) {
+      foiMarcado = true;
+    }
+  } else if (temAlgumaMencao) {
+    const mencionouOutroTelefoneExplicito =
+      botPhonesLimpos.length > 0 &&
+      !bateuBotPhone &&
+      !temMencaoPorNome &&
+      mentionedJids.length > 0 &&
+      mentionedJids.every((j) => j.endsWith('@s.whatsapp.net'));
+
+    if (
+      temMencaoPorNome ||
+      bateuBotPhone ||
+      Boolean(detectarFormularioOuPedidoVenda(textoSemMencao)) ||
+      (!mencionouOutroTelefoneExplicito &&
+        (Boolean(interpretarTextoCorrecaoVenda(textoSemMencao)) ||
+          /^(?:!|entrada\b|cadastrar\b|cadastra\b|estoque\b|vendido\b|vendi\b)/i.test(textoSemMencao)))
+    ) {
+      foiMarcado = true;
+    }
+  }
+
+  // 1. Se marcou o bot respondendo a uma FOTO (quotedImageMessage)
+  if (foiMarcado && quotedImageMessage) {
+    const legendaCombinada =
+      textoSemMencao && !ehPalavraGatilhoReleitura
+        ? [quotedTextLimpo, textoSemMencao].filter(Boolean).join('\n')
+        : quotedTextLimpo;
+
+    return {
+      foiMarcado: true,
+      usouMensagemCitada: true,
+      tipoCitado: 'imagem',
+      textoEfetivo: legendaCombinada,
+      textoOriginalUsuario,
+      textoSemMencao,
+      quotedImageMessage,
+      quotedStanzaId,
+      quotedParticipant,
+    };
+  }
+
+  // 2. Se marcou o bot respondendo ao resumo de etiqueta já lido pelo bot ("Dados lidos da etiqueta com IA:")
+  if (foiMarcado && ehQuotedResumoEtiquetaBot) {
+    const imeiMatch = quotedTextRaw.match(/IMEI:\*?\s*`?(\d{4,18})`?/i);
+    const modMatch = quotedTextRaw.match(/Modelo:\*?\s*([^\n\r•*]+)/i);
+    const capMatch = quotedTextRaw.match(/Capacidade:\*?\s*([^\n\r•*]+)/i);
+    const corMatch = quotedTextRaw.match(/Cor:\*?\s*([^\n\r•*]+)/i);
+
+    const limparCampoEtiqueta = (v?: string) => {
+      const s = (v || '').replace(/[*`_]/g, '').trim();
+      return !s || /n[aã]o informad[oa]|padr[aã]o/i.test(s) ? null : s;
+    };
+
+    return {
+      foiMarcado: true,
+      usouMensagemCitada: true,
+      tipoCitado: 'resumo_etiqueta',
+      textoEfetivo: textoSemMencao,
+      textoOriginalUsuario,
+      textoSemMencao,
+      quotedStanzaId,
+      quotedParticipant,
+      dadosEtiquetaCitada: {
+        imei: imeiMatch ? imeiMatch[1].replace(/\D/g, '') : null,
+        modelo: limparCampoEtiqueta(modMatch?.[1]),
+        capacidade: limparCampoEtiqueta(capMatch?.[1]),
+        cor: limparCampoEtiqueta(corMatch?.[1]),
+      },
+    };
+  }
+
+  // 3. Se respondeu à própria PRÉVIA DA NOTINHA do bot (ex: "@Astrogeek sim" ou "@Astrogeek 4800")
+  if (rawQuoted && ehQuotedPreviaOuReciboBot) {
+    return {
+      foiMarcado,
+      usouMensagemCitada: false,
+      textoEfetivo: textoSemMencao,
+      textoOriginalUsuario,
+      textoSemMencao,
+      quotedStanzaId,
+      quotedParticipant,
+    };
+  }
+
+  // 4. Se marcou o bot respondendo a uma mensagem de texto (ex: Formulário de pedido, Entrada de estoque, Comando)
+  if (foiMarcado && quotedTextLimpo) {
+    let textoFinalCitado = quotedTextLimpo;
+
+    // Se o usuário enviou um complemento junto com a marcação (ex: "@Astrogeek 4800" ao marcar um formulário sem valor)
+    if (textoSemMencao && !ehPalavraGatilhoReleitura) {
+      const correcao = interpretarTextoCorrecaoVenda(textoSemMencao);
+      if (correcao?.campo === 'valor') {
+        textoFinalCitado = `${quotedTextLimpo}\nValor total: R$ ${correcao.valor}`;
+      } else if (correcao?.campo === 'imei') {
+        textoFinalCitado = `${quotedTextLimpo}\nIMEI: ${correcao.valor}`;
+      } else if (correcao?.campo === 'cor') {
+        textoFinalCitado = `${quotedTextLimpo}\nCor: ${correcao.valor}`;
+      } else if (correcao?.campo === 'cliente') {
+        textoFinalCitado = `${quotedTextLimpo}\nNome: ${correcao.valor}`;
+      }
+    }
+
+    return {
+      foiMarcado: true,
+      usouMensagemCitada: true,
+      tipoCitado: 'texto',
+      textoEfetivo: textoFinalCitado,
+      textoOriginalUsuario,
+      textoSemMencao,
+      quotedStanzaId,
+      quotedParticipant,
+    };
+  }
+
+  // 5. Caso o usuário envie uma FOTO direta citando um formulário de texto anterior
+  const enviouFotoDireta = Boolean(
+    messageContent?.imageMessage || msgData?.imageMessage || msgData?.messageType === 'imageMessage'
+  );
+  if (enviouFotoDireta && quotedTextLimpo && !ehQuotedPreviaOuReciboBot && detectarFormularioOuPedidoVenda(quotedTextLimpo)) {
+    const legendaComFormularioCitado = [textoSemMencao, quotedTextLimpo].filter(Boolean).join('\n');
+    return {
+      foiMarcado: true,
+      usouMensagemCitada: true,
+      tipoCitado: 'texto',
+      textoEfetivo: legendaComFormularioCitado,
+      textoOriginalUsuario,
+      textoSemMencao,
+      quotedStanzaId,
+      quotedParticipant,
+    };
+  }
+
+  return {
+    foiMarcado,
+    usouMensagemCitada: false,
+    textoEfetivo: foiMarcado ? textoSemMencao : textoOriginalUsuario,
+    textoOriginalUsuario,
+    textoSemMencao,
+    quotedStanzaId,
+    quotedParticipant,
+  };
+}
+
+/**
  * Detecta se a mensagem enviada contém dados de um pedido ou venda a ser faturada.
  */
 export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | null {
   if (!texto || typeof texto !== 'string') return null;
-  const t = texto.trim();
+  const t = limparMencoesBot(texto);
   if (t.length < 15) return null;
+
+  // Ignora mensagens geradas pelo próprio bot (prévias, recibos emitidos ou resumos de OCR de etiqueta)
+  if (
+    /PR[ÉE]VIA DA NOTINHA|NOTINHA EMITIDA COM SUCESSO|Dados lidos da etiqueta com IA:|APARELHO N[AÃ]O ENCONTRADO NO ESTOQUE|NOVO APARELHO CADASTRADO NO ESTOQUE/i.test(
+      t
+    )
+  ) {
+    return null;
+  }
 
   // Checa se tem indício de venda/pedido (aceita atalhos, formulários ou frases naturais)
   const indicios = [
@@ -391,8 +698,9 @@ export function interpretarTextoCorrecaoVenda(
 
   // 2. Correção de valor por frase (ex: "o valor é 5200", "valor certo 4800", "preço: 3500", "o valor e 4800")
   const matchFraseValor =
-    t.match(/(?:valor|preco|pre[cç]o|total|por)\b[^\d]*?([0-9.,]+)/iu) ||
-    t.match(/\b(?:[eé]|ser[aá]|pra|para|por)\s*R?\$?\s*([0-9.,]+)/iu);
+    t.match(/(?:valor|preco|pre[cç]o|total|fica|ficou)\b[^\d]*?([0-9.,]+)/iu) ||
+    t.match(/(?:^|\b(?:[eé]|ser[aá]|por)\s+)R\$\s*([0-9.,]+)/iu) ||
+    t.match(/^(?:[eé]|ser[aá]|fica|ficou|por)\s*R?\$?\s*([0-9.,]+)$/iu);
 
   if (matchFraseValor) {
     const num = parseValorFlexivel(matchFraseValor[1]);
@@ -1036,7 +1344,8 @@ export async function aguardarEBuscarFotoRecente(
   remoteJid: string,
   authorPhone: string,
   modeloDesejado?: string | null,
-  maxMinutos: number = 10
+  maxMinutos: number = 10,
+  esperaNovaFotoMs: number = 0
 ): Promise<FotoRecenteCache | null> {
   const chaveProcessando = `foto_processando:${remoteJid}`;
   const chavesFoto = [
@@ -1045,7 +1354,7 @@ export async function aguardarEBuscarFotoRecente(
   ];
 
   const inicio = Date.now();
-  const timeoutWaitMs = 9500; // Aguarda até 9.5s se houver foto sendo lida no OCR
+  const timeoutWaitMs = Math.max(9500, esperaNovaFotoMs + 6500); // Aguarda até 9.5s+ se houver foto sendo lida no OCR
 
   while (Date.now() - inicio < timeoutWaitMs) {
     try {
@@ -1105,6 +1414,12 @@ export async function aguardarEBuscarFotoRecente(
           await new Promise((r) => setTimeout(r, 600));
           continue;
         }
+      }
+
+      // 3. Janela de espera inicial (ex: usuário marcou o formulário e 2 segundos depois marca a foto)
+      if (esperaNovaFotoMs > 0 && Date.now() - inicio < esperaNovaFotoMs) {
+        await new Promise((r) => setTimeout(r, 600));
+        continue;
       }
 
       break;

@@ -50,6 +50,8 @@ import {
   aguardarEBuscarFotoRecente,
   aguardarOuVerificarFotoConsumida,
   limparFotoRecente,
+  limparMencoesBot,
+  extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
 } from './notinhaAutomatica';
 
@@ -1140,7 +1142,8 @@ async function verificarSeLojaLucasImports(lojaId: string | null, instanceName: 
 async function buscarMidiaBase64Evolution(
   instanceName: string,
   messageId: string,
-  messageObj: any
+  messageObj: any,
+  remoteJid?: string
 ): Promise<{ base64: string; mimetype: string } | null> {
   if (!EVOLUTION_URL || !EVOLUTION_API_KEY) return null;
   const targetInstance = instanceName || DEFAULT_INSTANCE;
@@ -1155,7 +1158,10 @@ async function buscarMidiaBase64Evolution(
       },
       body: JSON.stringify({
         message: {
-          key: { id: messageId },
+          key: {
+            id: messageId,
+            ...(remoteJid ? { remoteJid } : {}),
+          },
         },
         convertToMp4: false,
       }),
@@ -2323,15 +2329,33 @@ export async function POST(request: Request) {
     const nomeUsuario = usuarioResolvido?.usuarioNome || pushName;
     const papelUsuario = ehModeradorMaster ? 'owner' : (usuarioResolvido?.papel || 'staff');
 
+    // ── DETECÇÃO DE MARCAÇÃO DO BOT (@MENCÃO / REPLY EM MENSAGEM CITADA) ──
+    const botSenderPhone = String(payload.sender || (msgData as any)?.me?.id || '')
+      .replace(/@.*$/, '')
+      .replace(/\D/g, '');
+    const marcacaoBot = extrairMensagemMarcadaParaBot({
+      msgData,
+      payload,
+      botPhones: [botSenderPhone].filter(Boolean),
+    });
+
+    if (marcacaoBot.foiMarcado && marcacaoBot.usouMensagemCitada) {
+      console.log(
+        `🏷️ [Marcação do Bot] ${pushName} marcou o bot em mensagem citada (${marcacaoBot.tipoCitado || 'texto'} | stanzaId: ${marcacaoBot.quotedStanzaId || '-'})`
+      );
+    }
+
     // ── O BOT NÃO RESPONDE CLIENTES EM CHAT PRIVADO ──
     // Clientes que enviarem mensagens privadas sem formulário/operação são ignorados em silêncio.
     // Mas pedidos/notinhas, entradas de estoque e comandos sempre são atendidos no privado para teste ou uso da equipe!
     const rawPreviewText =
+      marcacaoBot.textoEfetivo ||
       msgData.message?.conversation ||
       msgData.message?.extendedTextMessage?.text ||
       msgData.message?.imageMessage?.caption ||
       '';
     const ehOperacaoEquipePreview =
+      marcacaoBot.foiMarcado ||
       rawPreviewText.trim().startsWith('!') ||
       ehMensagemDeEntradaEstoque(rawPreviewText) ||
       Boolean(detectarFormularioOuPedidoVenda(rawPreviewText)) ||
@@ -2484,13 +2508,26 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 3.1. RECONHECIMENTO DE IMAGEM / ETIQUETA COM IA VISION OCR ──
-    const hasImage = Boolean(
+    // ── 3.1. RECONHECIMENTO DE IMAGEM / ETIQUETA COM IA VISION OCR (DIRETA OU MARCADA EM REPLY) ──
+    const hasDirectImage = Boolean(
       messageContent.imageMessage ||
       msgData.imageMessage ||
       msgData.messageType === 'imageMessage' ||
       payload.data?.messageType === 'imageMessage'
     );
+    const hasQuotedImage = Boolean(
+      marcacaoBot.foiMarcado &&
+      marcacaoBot.usouMensagemCitada &&
+      marcacaoBot.tipoCitado === 'imagem' &&
+      marcacaoBot.quotedImageMessage
+    );
+    const hasQuotedResumoEtiqueta = Boolean(
+      marcacaoBot.foiMarcado &&
+      marcacaoBot.usouMensagemCitada &&
+      marcacaoBot.tipoCitado === 'resumo_etiqueta' &&
+      marcacaoBot.dadosEtiquetaCitada
+    );
+    const hasImage = hasDirectImage || hasQuotedImage || hasQuotedResumoEtiqueta;
 
     if (hasImage) {
       if (modoChat === 'off') {
@@ -2498,6 +2535,7 @@ export async function POST(request: Request) {
       }
 
       const captionText =
+        (marcacaoBot.usouMensagemCitada ? marcacaoBot.textoEfetivo : '') ||
         messageContent.imageMessage?.caption ||
         msgData.message?.imageMessage?.caption ||
         msgData.caption ||
@@ -2507,6 +2545,7 @@ export async function POST(request: Request) {
       const ehEntradaNaFoto = captionText ? ehMensagemDeEntradaEstoque(captionText) : false;
 
       const ehOperacaoGrupo =
+        marcacaoBot.foiMarcado ||
         captionText.trim().startsWith('!') ||
         Boolean(vendaDetectadaNaFoto) ||
         ehEntradaNaFoto;
@@ -2525,35 +2564,79 @@ export async function POST(request: Request) {
         await registrarFotoProcessando(supabase, lojaId, remoteJid, authorPhone);
       }
 
-      console.log(`📸 Imagem recebida de ${pushName} (${targetDestination}). Iniciando OCR Vision...`);
+      console.log(
+        `📸 Imagem ${hasQuotedImage ? 'citada/marcada' : hasQuotedResumoEtiqueta ? 'de etiqueta citada' : 'recebida'} de ${pushName} (${targetDestination}). Iniciando processamento...`
+      );
 
-      let rawBase64 =
-        msgData.base64 ||
-        msgData.message?.base64 ||
-        payload.data?.base64 ||
-        payload.data?.message?.base64 ||
-        messageContent.imageMessage?.base64 ||
-        '';
+      let rawBase64 = '';
+      let mimeType = 'image/jpeg';
 
-      let mimeType = messageContent.imageMessage?.mimetype || 'image/jpeg';
+      if (hasDirectImage) {
+        rawBase64 =
+          msgData.base64 ||
+          msgData.message?.base64 ||
+          payload.data?.base64 ||
+          payload.data?.message?.base64 ||
+          messageContent.imageMessage?.base64 ||
+          '';
+        mimeType = messageContent.imageMessage?.mimetype || 'image/jpeg';
 
-      // Se não veio base64 direto no payload, busca na Evolution API
-      if (!rawBase64 && key.id) {
-        console.log(`📥 Buscando mídia base64 na Evolution API para a mensagem ${key.id}...`);
-        const mediaResult = await buscarMidiaBase64Evolution(instanceName, key.id, msgData);
-        if (mediaResult) {
-          rawBase64 = mediaResult.base64;
-          mimeType = mediaResult.mimetype || mimeType;
+        // Se não veio base64 direto no payload, busca na Evolution API
+        if (!rawBase64 && key.id) {
+          console.log(`📥 Buscando mídia base64 na Evolution API para a mensagem ${key.id}...`);
+          const mediaResult = await buscarMidiaBase64Evolution(instanceName, key.id, msgData, remoteJid);
+          if (mediaResult) {
+            rawBase64 = mediaResult.base64;
+            mimeType = mediaResult.mimetype || mimeType;
+          }
+        }
+      } else if (hasQuotedImage && marcacaoBot.quotedImageMessage) {
+        const qImg = marcacaoBot.quotedImageMessage;
+        rawBase64 = qImg.base64 || '';
+        mimeType = qImg.mimetype || 'image/jpeg';
+
+        const stanzaAlvo = marcacaoBot.quotedStanzaId || key.id;
+        if (!rawBase64 && stanzaAlvo) {
+          console.log(`📥 Buscando mídia base64 da FOTO CITADA (${stanzaAlvo}) na Evolution API...`);
+          const quotedMsgWrapper = {
+            key: {
+              id: stanzaAlvo,
+              remoteJid,
+              fromMe: false,
+              ...(marcacaoBot.quotedParticipant ? { participant: marcacaoBot.quotedParticipant } : {}),
+            },
+            message: {
+              imageMessage: qImg,
+            },
+          };
+          const mediaResult = await buscarMidiaBase64Evolution(
+            instanceName,
+            stanzaAlvo,
+            quotedMsgWrapper,
+            remoteJid
+          );
+          if (mediaResult) {
+            rawBase64 = mediaResult.base64;
+            mimeType = mediaResult.mimetype || mimeType;
+          }
         }
       }
 
-      if (!rawBase64) {
+      if (!rawBase64 && !hasQuotedResumoEtiqueta) {
         await limparFotoProcessando(supabase, remoteJid);
       }
 
-      if (rawBase64) {
+      if (rawBase64 || hasQuotedResumoEtiqueta) {
         try {
-          const visionData = await processImageVision(rawBase64, mimeType);
+          const visionData: VisionEtiquetaResult | null = hasQuotedResumoEtiqueta
+            ? ({
+                tipo_documento: 'etiqueta_caixa',
+                modelo: marcacaoBot.dadosEtiquetaCitada?.modelo || null,
+                capacidade: marcacaoBot.dadosEtiquetaCitada?.capacidade || null,
+                cor: marcacaoBot.dadosEtiquetaCitada?.cor || null,
+                imei: marcacaoBot.dadosEtiquetaCitada?.imei || null,
+              } as VisionEtiquetaResult)
+            : await processImageVision(rawBase64, mimeType);
 
           if (visionData) {
             console.log('🤖 Resultado do OCR Vision:', JSON.stringify(visionData));
@@ -2716,10 +2799,11 @@ export async function POST(request: Request) {
               20
             );
 
-            // 2. Se ainda não há proposta pronta, aguarda até 2.4s para verificar se um formulário simultâneo
+            // 2. Se ainda não há proposta pronta, aguarda até 2.4s (ou 4.8s quando marcou o bot) para verificar se um formulário simultâneo
             // que estava aguardando o término do OCR acabou de consumir a foto_recente!
             if (!proposta && lojaId && (imeiLido || modeloLido)) {
-              const foiConsumida = await aguardarOuVerificarFotoConsumida(supabase, remoteJid, 2400);
+              const esperaConsumoMs = marcacaoBot.foiMarcado ? 4800 : 2400;
+              const foiConsumida = await aguardarOuVerificarFotoConsumida(supabase, remoteJid, esperaConsumoMs);
               if (foiConsumida) {
                 console.log(`✅ [FOTO+FORMULÁRIO] Foto (IMEI: ${imeiLido}) já unificada pelo webhook do formulário!`);
                 return NextResponse.json({ status: 'ok', message: 'Foto unificada automaticamente com o formulário de venda.' }, { status: 200 });
@@ -2734,7 +2818,7 @@ export async function POST(request: Request) {
               );
             }
 
-            // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou a foto da caixa do aparelho ──
+            // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou/marcou a foto da caixa do aparelho ──
             if (proposta && imeiLido && lojaId) {
               proposta.imei = imeiLido;
               if (corLida && !proposta.cor) {
@@ -2781,9 +2865,13 @@ export async function POST(request: Request) {
                 `📸 *Foto da caixa associada à notinha!*\n🔢 IMEI \`${proposta.imei}\` vinculado com sucesso ao pedido de *${proposta.clienteNome}*.\n\n` +
                 formatarMensagemPreviaNotinha(proposta);
 
+              const msgIdAnterior = proposta.messageId;
               const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
-              const refMsgId = envio.messageId || proposta.messageId || `notinha-prev-${Date.now()}`;
+              const refMsgId = envio.messageId || msgIdAnterior || `notinha-prev-${Date.now()}`;
               await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
+              if (msgIdAnterior && msgIdAnterior !== refMsgId) {
+                await salvarPropostaNotinha(supabase, lojaId, remoteJid, msgIdAnterior, proposta);
+              }
               if (targetDestination !== remoteJid) {
                 await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
               }
@@ -2877,8 +2965,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 3.2. EXTRAÇÃO E TRATAMENTO DE TEXTO ──
+    // ── 3.2. EXTRAÇÃO E TRATAMENTO DE TEXTO (INCLUINDO MENSAGEM CITADA MARCANDO O BOT) ──
     const textContent =
+      (marcacaoBot.foiMarcado ? marcacaoBot.textoEfetivo : '') ||
       messageContent.conversation ||
       messageContent.extendedTextMessage?.text ||
       messageContent.imageMessage?.caption ||
@@ -2933,11 +3022,13 @@ export async function POST(request: Request) {
       }
     } else if (modoChat === 'padrao') {
       // Se for grupo no modo padrão, o bot fica calado e atende apenas a:
-      // 1. Comandos explícitos iniciados com !
-      // 2. Entradas inteligentes de estoque (ex: "Entrada iPhone 13...")
-      // 3. Pedidos / formulários de venda para geração de notinha automática
-      // 4. Correções de dados de notinha pendente
+      // 1. Mensagens onde o bot foi marcado (@Astrogeek / reply)
+      // 2. Comandos explícitos iniciados com !
+      // 3. Entradas inteligentes de estoque (ex: "Entrada iPhone 13...")
+      // 4. Pedidos / formulários de venda para geração de notinha automática
+      // 5. Correções de dados de notinha pendente
       const ehOperacaoLoja =
+        marcacaoBot.foiMarcado ||
         ehComandoExplicito ||
         ehMensagemDeEntradaEstoque(textContent) ||
         Boolean(detectarFormularioOuPedidoVenda(textContent)) ||
@@ -2987,6 +3078,8 @@ export async function POST(request: Request) {
 
     if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
       const chavesBusca = Array.from(new Set([
+        marcacaoBot.quotedStanzaId ? `notinha:${remoteJid}:${marcacaoBot.quotedStanzaId}` : null,
+        marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
         `notinha:${remoteJid}:ultima`,
         `notinha:${targetDestination}:ultima`,
         authorPhone ? `notinha:${authorPhone}:ultima` : null,
@@ -3085,6 +3178,8 @@ export async function POST(request: Request) {
     const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
     if (correcaoDetectada && lojaId) {
       const chavesBusca = Array.from(new Set([
+        marcacaoBot.quotedStanzaId ? `notinha:${remoteJid}:${marcacaoBot.quotedStanzaId}` : null,
+        marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
         `notinha:${remoteJid}:ultima`,
         `notinha:${targetDestination}:ultima`,
         authorPhone ? `notinha:${authorPhone}:ultima` : null,
@@ -3138,10 +3233,14 @@ export async function POST(request: Request) {
           }
         }
 
+        const msgIdAnterior = proposta.messageId;
         const msgPreviaAtualizada = `✏️ *Dado atualizado com sucesso!*\n\n` + formatarMensagemPreviaNotinha(proposta);
         const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
-        const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
+        const refMsgId = envio.messageId || msgIdAnterior || `notinha-prev-${Date.now()}`;
         await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
+        if (msgIdAnterior && msgIdAnterior !== refMsgId) {
+          await salvarPropostaNotinha(supabase, lojaId, remoteJid, msgIdAnterior, proposta);
+        }
         if (targetDestination !== remoteJid) {
           await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
         }
@@ -3153,15 +3252,18 @@ export async function POST(request: Request) {
     // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA) ──
     const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
     if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal) && lojaId) {
-      // 1. Verifica (e aguarda caso o OCR ainda esteja rodando) se há foto da etiqueta enviada no chat via Supabase
+      // 1. Verifica (e aguarda caso o OCR ainda esteja rodando ou o usuário marque a foto logo em seguida) se há foto da etiqueta via Supabase
       let imeiFotoVinculada: string | null = null;
       if (!vendaDetectada.aparelho?.imei) {
+        const esperaNovaFotoMs = marcacaoBot.foiMarcado ? 3600 : 1200;
         const fotoRecente = await aguardarEBuscarFotoRecente(
           supabase,
           lojaId,
           remoteJid,
           authorPhone,
-          vendaDetectada.aparelho?.modelo
+          vendaDetectada.aparelho?.modelo,
+          10,
+          esperaNovaFotoMs
         );
         if (fotoRecente?.imei) {
           imeiFotoVinculada = fotoRecente.imei;

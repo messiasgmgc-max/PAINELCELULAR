@@ -16,6 +16,8 @@ import {
   limparFotoRecente,
   salvarPropostaNotinha,
   buscarPropostaNotinhaRecente,
+  limparMencoesBot,
+  extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
 } from './notinhaAutomatica';
 
@@ -427,4 +429,159 @@ test('salvarPropostaNotinha e buscarPropostaNotinhaRecente operam 100% via Supab
   assert.equal(encontrada?.clienteNome, 'Luan Cássio de Jesus Tavares Santos');
   assert.equal(encontrada?.modelo, 'iPhone 15 Pro');
 });
+
+test('extrairMensagemMarcadaParaBot relê formulário citado e foto citada marcando o bot e unifica os dois', async () => {
+  const fakeSupabase = criarMockSupabaseAcoesPendentes();
+  const textoFormularioCitado = `👤 DADOS PESSOAIS
+Nome: Luan Cássio de Jesus Tavares Santos
+CPF: 164.144.496-79
+Telefone: 31988776655
+
+💳 FORMA DE PAGAMENTO
+Valor total:
+Forma de pagamento:
+( ) Pix
+(X) Cartão de crédito
+
+Modelo: iPhone 15pro 256g`;
+
+  // 1. Usuário marca o bot (@105278892703905 - LID de 15 dígitos!) no formulário e já informa o valor "4800"
+  const msgMarcandoFormulario = {
+    message: {
+      extendedTextMessage: {
+        text: '@105278892703905 4800',
+        contextInfo: {
+          stanzaId: 'msg-form-original-1',
+          participant: '5531988776655@s.whatsapp.net',
+          mentionedJid: ['105278892703905@lid'],
+          quotedMessage: {
+            conversation: textoFormularioCitado,
+          },
+        },
+      },
+    },
+  };
+
+  const extraidoForm = extrairMensagemMarcadaParaBot({
+    msgData: msgMarcandoFormulario,
+    botPhones: ['5531999990000'],
+  });
+
+  assert.equal(extraidoForm.foiMarcado, true);
+  assert.equal(extraidoForm.usouMensagemCitada, true);
+  assert.equal(extraidoForm.tipoCitado, 'texto');
+
+  const vendaParsed = detectarFormularioOuPedidoVenda(extraidoForm.textoEfetivo);
+  assert.ok(vendaParsed);
+  assert.equal(vendaParsed.cliente.nome, 'Luan Cássio de Jesus Tavares Santos');
+  assert.equal(vendaParsed.aparelho.modelo, 'iPhone 15 Pro');
+  assert.equal(vendaParsed.aparelho.capacidade, '256GB');
+  assert.equal(vendaParsed.valorTotal, 4800, 'Complemento de valor enviado junto à marcação deve ser incluído');
+  assert.equal(vendaParsed.aparelho.imei, undefined, 'O @lid de 15 dígitos NUNCA deve ser confundido com IMEI');
+
+  // 2. Logo após (200ms depois), o usuário marca o bot na foto da caixa (quotedMessage.imageMessage)
+  const msgMarcandoFoto = {
+    message: {
+      extendedTextMessage: {
+        text: '@105278892703905',
+        contextInfo: {
+          stanzaId: 'msg-foto-original-2',
+          participant: '5531988776655@s.whatsapp.net',
+          mentionedJid: ['105278892703905@lid'],
+          quotedMessage: {
+            imageMessage: {
+              mimetype: 'image/jpeg',
+              url: 'https://mmg.whatsapp.net/v/t62.7118-24/foto.enc',
+              mediaKey: 'abc123',
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const extraidoFoto = extrairMensagemMarcadaParaBot({
+    msgData: msgMarcandoFoto,
+    botPhones: ['5531999990000'],
+  });
+
+  assert.equal(extraidoFoto.foiMarcado, true);
+  assert.equal(extraidoFoto.usouMensagemCitada, true);
+  assert.equal(extraidoFoto.tipoCitado, 'imagem');
+  assert.equal(extraidoFoto.quotedStanzaId, 'msg-foto-original-2');
+  assert.ok(extraidoFoto.quotedImageMessage);
+
+  // Simula o webhook da foto chegando 200ms após o usuário marcar o formulário (janela esperaNovaFotoMs)
+  setTimeout(async () => {
+    await registrarFotoProcessando(fakeSupabase, 'loja-123', 'grupo@g.us', '5531994986029');
+    setTimeout(async () => {
+      await salvarFotoRecente(fakeSupabase, 'loja-123', 'grupo@g.us', '5531994986029', {
+        modelo: 'iPhone',
+        capacidade: '256GB',
+        imei: '357627943412501',
+        timestamp: Date.now(),
+      });
+    }, 150);
+  }, 150);
+
+  const fotoUnificada = await aguardarEBuscarFotoRecente(
+    fakeSupabase,
+    'loja-123',
+    'grupo@g.us',
+    '5531994986029',
+    vendaParsed.aparelho.modelo,
+    10,
+    1500
+  );
+
+  assert.ok(fotoUnificada, 'Mesmo marcando o formulário antes e a foto logo depois, deve aguardar e unificar');
+  assert.equal(fotoUnificada?.imei, '357627943412501');
+});
+
+test('extrairMensagemMarcadaParaBot não sobrescreve resposta à PRÉVIA DA NOTINHA nem confunde menção a colega', () => {
+  // 1. Respondendo à própria prévia do bot com "@Astrogeek sim"
+  const msgConfirmandoPrevia = {
+    message: {
+      extendedTextMessage: {
+        text: '@Astrogeek sim',
+        contextInfo: {
+          stanzaId: 'msg-previa-99',
+          quotedMessage: {
+            conversation: '🧾 *PRÉVIA DA NOTINHA — LUCAS IMPORTS*\n👤 *Cliente:* Luan\n📱 *Aparelho:* iPhone 15 Pro',
+          },
+        },
+      },
+    },
+  };
+
+  const resConfirm = extrairMensagemMarcadaParaBot({ msgData: msgConfirmandoPrevia });
+  assert.equal(resConfirm.foiMarcado, true);
+  assert.equal(resConfirm.usouMensagemCitada, false);
+  assert.equal(resConfirm.textoEfetivo, 'sim');
+  assert.equal(resConfirm.quotedStanzaId, 'msg-previa-99');
+  assert.equal(
+    detectarFormularioOuPedidoVenda('🧾 *PRÉVIA DA NOTINHA — LUCAS IMPORTS*\n👤 *Cliente:* Luan\n📱 *Aparelho:* iPhone 15 Pro'),
+    null
+  );
+
+  // 2. Menção normal a outro colega de equipe no grupo sem citar formulário/foto
+  const msgConversaColega = {
+    message: {
+      extendedTextMessage: {
+        text: '@5531988881111 separa 2 películas e 1 capinha pro cliente',
+        contextInfo: {
+          mentionedJid: ['5531988881111@s.whatsapp.net'],
+        },
+      },
+    },
+  };
+
+  const resColega = extrairMensagemMarcadaParaBot({
+    msgData: msgConversaColega,
+    botPhones: ['5531994986029'],
+  });
+  assert.equal(resColega.foiMarcado, false);
+  assert.equal(limparMencoesBot('@5531988881111 separa 2 películas'), 'separa 2 películas');
+});
+
 

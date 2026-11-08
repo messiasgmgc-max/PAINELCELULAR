@@ -134,8 +134,11 @@ export function extrairCorDeTexto(texto?: string | null): string | undefined {
  */
 export function sanitizarECompletarVendaParsed(
   parsedJsonInput: Partial<ParsedVenda> | null | undefined,
-  trimmedText: string
+  rawInputText: string
 ): ParsedVenda {
+  // Remove menções numéricas de WhatsApp/LID (ex: @5531994986029 ou @105278892703905) para nunca confundir com IMEI ou telefone
+  const trimmedText = String(rawInputText || '').replace(/(^|[\s,;(])@\d{6,22}\b/g, '$1').trim();
+
   const result: ParsedVenda = {
     cliente: parsedJsonInput?.cliente ? { ...parsedJsonInput.cliente } : {},
     aparelho: parsedJsonInput?.aparelho ? { ...parsedJsonInput.aparelho } : {},
