@@ -28,6 +28,16 @@ export interface DadosReciboPdf {
     condicao?: string | null;
     valor: number;
   };
+  itens?: Array<{
+    modelo: string;
+    capacidade?: string | null;
+    cor?: string | null;
+    imei?: string | null;
+    bateria?: number | null;
+    observacao?: string | null;
+    condicao?: string | null;
+    valor: number;
+  }>;
   upgrade?: {
     ativo: boolean;
     modelo?: string | null;
@@ -251,39 +261,56 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
       });
       y += 15;
 
-      // Linha do Item Vendido
-      const altLinhaItem = 34;
-      doc.rect(x, y, w, altLinhaItem).stroke('#000000');
+      // Linhas dos Itens Vendidos (suporta 1 ou múltiplos aparelhos)
+      const listaItensPdf =
+        Array.isArray(dados.itens) && dados.itens.length > 0 ? dados.itens : [dados.aparelho];
+      const altLinhaItem = listaItensPdf.length > 1 ? 28 : 34;
 
-      doc.fillColor('#000000').fontSize(8).font('Helvetica');
-      doc.text('1', x, y + 6, { width: colW.cod, align: 'center' });
+      listaItensPdf.forEach((itemAp, idxItem) => {
+        doc.rect(x, y, w, altLinhaItem).stroke('#000000');
 
-      const modCompleto = `${dados.aparelho.modelo} ${dados.aparelho.capacidade || ''} ${dados.aparelho.cor || ''}`.trim();
-      doc.fontSize(8.5).font('Helvetica-Bold');
-      doc.text(modCompleto, x + colW.cod + 4, y + 6, { width: colW.desc - 6 });
+        doc.fillColor('#000000').fontSize(8).font('Helvetica');
+        doc.text(String(idxItem + 1), x, y + 6, { width: colW.cod, align: 'center' });
 
-      if (dados.aparelho.imei) {
-        doc.fontSize(7.5).font('Helvetica-Bold');
-        doc.text(`📱 IMEI / Serial: ${dados.aparelho.imei}`, x + colW.cod + 4, y + 19, { width: colW.desc - 6 });
-      }
+        const batTxt = (itemAp as any).bateria ? ` (Bat: ${(itemAp as any).bateria}%)` : '';
+        const obsTxt = (itemAp as any).observacao ? ` - ${(itemAp as any).observacao}` : '';
+        const modCompleto = `${itemAp.modelo} ${itemAp.capacidade || ''} ${itemAp.cor || ''}${batTxt}${obsTxt}`
+          .replace(/\s+/g, ' ')
+          .trim();
 
-      doc.fontSize(8).font('Helvetica');
-      doc.text('1', x + colW.cod + colW.desc, y + 10, { width: colW.qtd, align: 'center' });
-      doc.text(formatarMoeda(dados.aparelho.valor), x + colW.cod + colW.desc + colW.qtd, y + 10, {
-        width: colW.unit,
-        align: 'right',
+        doc.fontSize(8.5).font('Helvetica-Bold');
+        doc.text(modCompleto, x + colW.cod + 4, y + 4, { width: colW.desc - 6, ellipsis: true });
+
+        if (itemAp.imei) {
+          doc.fontSize(7.5).font('Helvetica-Bold');
+          doc.text(`📱 IMEI / Serial: ${itemAp.imei}`, x + colW.cod + 4, y + (altLinhaItem > 30 ? 18 : 15), {
+            width: colW.desc - 6,
+          });
+        }
+
+        doc.fontSize(8).font('Helvetica');
+        doc.text('1', x + colW.cod + colW.desc, y + 8, { width: colW.qtd, align: 'center' });
+        doc.text(formatarMoeda(itemAp.valor), x + colW.cod + colW.desc + colW.qtd, y + 8, {
+          width: colW.unit,
+          align: 'right',
+        });
+        doc.text('R$ 0,00', x + colW.cod + colW.desc + colW.qtd + colW.unit, y + 8, {
+          width: colW.descVal,
+          align: 'right',
+        });
+
+        doc.fontSize(8.5).font('Helvetica-Bold');
+        doc.text(
+          formatarMoeda(itemAp.valor),
+          x + colW.cod + colW.desc + colW.qtd + colW.unit + colW.descVal,
+          y + 8,
+          {
+            width: colW.tot - 4,
+            align: 'right',
+          }
+        );
+        y += altLinhaItem;
       });
-      doc.text('R$ 0,00', x + colW.cod + colW.desc + colW.qtd + colW.unit, y + 10, {
-        width: colW.descVal,
-        align: 'right',
-      });
-
-      doc.fontSize(8.5).font('Helvetica-Bold');
-      doc.text(formatarMoeda(dados.aparelho.valor), x + colW.cod + colW.desc + colW.qtd + colW.unit + colW.descVal, y + 10, {
-        width: colW.tot - 4,
-        align: 'right',
-      });
-      y += altLinhaItem;
 
       // Linha especial de Trade-In (se houver upgrade)
       const temUpgrade = Boolean(

@@ -6,12 +6,15 @@ import {
   interpretarReacaoNotinha,
   interpretarTextoCorrecaoVenda,
   cruzarAparelhoComEstoque,
+  construirPropostaNotinha,
+  vincularFotoEmPropostaNotinha,
   limparNomeModelo,
   modelosSaoCompativeis,
   registrarFotoProcessando,
   salvarFotoRecente,
   buscarFotoRecente,
   aguardarEBuscarFotoRecente,
+  aguardarEBuscarFotosRecentes,
   aguardarOuVerificarFotoConsumida,
   limparFotoRecente,
   salvarPropostaNotinha,
@@ -20,6 +23,7 @@ import {
   extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
 } from './notinhaAutomatica';
+import { gerarReciboPdfBuffer } from '@/lib/recibo/gerarReciboPdf';
 
 test('detectarFormularioOuPedidoVenda identifica formulário completo da Lucas Imports', () => {
   const texto = `Para finalizar seu pedido, preencha os dados abaixo 👇
@@ -583,5 +587,226 @@ test('extrairMensagemMarcadaParaBot não sobrescreve resposta à PRÉVIA DA NOTI
   assert.equal(resColega.foiMarcado, false);
   assert.equal(limparMencoesBot('@5531988881111 separa 2 películas'), 'separa 2 películas');
 });
+
+test('detectarFormularioOuPedidoVenda extrai múltiplos aparelhos do formulário da Sabrina Silva Castro', () => {
+  const textoSabrina = `Para finalizar seu pedido, preencha os dados abaixo 👇
+
+Data da compra: 07/11/2026
+
+👤 DADOS PESSOAIS
+•⁠  ⁠Nome completo:  Sabrina Silva Castro 
+•⁠  ⁠CPF:  023.473.866-97
+•⁠  ⁠Data de nascimento:  08/05/2003
+•⁠  ⁠Telefone / WhatsApp:  31 9 7101-9306
+•⁠  ⁠E-mail:  Sabrina.s.castros@gmail.com
+
+🏠 ENDEREÇO PARA ENTREGA
+•⁠  ⁠Rua / Avenida:  
+•⁠  ⁠Número:  
+•⁠  ⁠Complemento:  
+•⁠  ⁠Bairro:  
+•⁠  ⁠Cidade:  
+•⁠  ⁠CEP:  
+
+💳 FORMA DE PAGAMENTO
+Valor total: R$10.200
+Forma de pagamento:
+( x) Pix  
+( ) Cartão de crédito  
+( ) Cartão de débito  
+( ) Dinheiro  
+( ) Upgrade - Modelo:
+( ) Outro: __
+
+Modelo:
+
+1 - iPhone 15 128gb azul 94% garantia Apple 
+1 - iPhone 14 Pro Max 128gb bateria 92%
+
+Pagamento confirmado pix`;
+
+  const parsed = detectarFormularioOuPedidoVenda(textoSabrina);
+  assert.ok(parsed, 'Deve detectar o formulário da Sabrina');
+  assert.equal(parsed.cliente.nome, 'Sabrina Silva Castro');
+  assert.equal(parsed.cliente.cpf, '023.473.866-97');
+  assert.equal(parsed.cliente.email, 'Sabrina.s.castros@gmail.com');
+  assert.equal(parsed.valorTotal, 10200);
+  assert.equal(parsed.formaPagamento, 'pix');
+  assert.equal(parsed.isUpgrade, false);
+
+  assert.ok(Array.isArray(parsed.aparelhos));
+  assert.equal(parsed.aparelhos?.length, 2, 'Deve extrair exatamente os 2 aparelhos');
+
+  const ap1 = parsed.aparelhos![0];
+  assert.equal(ap1.modelo, 'iPhone 15');
+  assert.equal(ap1.capacidade, '128GB');
+  assert.equal(ap1.cor, 'Azul');
+  assert.equal(ap1.bateria, 94);
+  assert.equal(ap1.observacoes, 'Garantia Apple');
+  assert.equal(ap1.condicao, 'seminovo');
+
+  const ap2 = parsed.aparelhos![1];
+  assert.equal(ap2.modelo, 'iPhone 14 Pro Max');
+  assert.equal(ap2.capacidade, '128GB');
+  assert.equal(ap2.bateria, 92);
+  assert.equal(ap2.condicao, 'seminovo');
+});
+
+test('construirPropostaNotinha, vincularFotoEmPropostaNotinha e aguardarEBuscarFotosRecentes suportam 2+ fotos de etiqueta', async () => {
+  const fakeSupabase = criarMockSupabaseAcoesPendentes();
+
+  // 1. Duas fotos de etiquetas (ex: iPhone 17 Pro Max Deep Blue 256GB e iPhone 17 Pro Max Silver 256GB) chegam em sequência
+  await salvarFotoRecente(fakeSupabase, 'loja-123', 'grupo@g.us', '5531994986029', {
+    modelo: 'iPhone 17 Pro Max',
+    capacidade: '256GB',
+    cor: 'Deep Blue',
+    imei: '353587235432902',
+    timestamp: Date.now(),
+  });
+  await salvarFotoRecente(fakeSupabase, 'loja-123', 'grupo@g.us', '5531994986029', {
+    modelo: 'iPhone 17 Pro Max',
+    capacidade: '256GB',
+    cor: 'Silver',
+    imei: '351586496377246',
+    timestamp: Date.now() + 50,
+  });
+
+  const fotosColetadas = await aguardarEBuscarFotosRecentes(
+    fakeSupabase,
+    'loja-123',
+    'grupo@g.us',
+    '5531994986029',
+    ['iPhone 17 Pro Max', 'iPhone 17 Pro Max']
+  );
+
+  assert.equal(fotosColetadas.length, 2, 'Ambas as fotos devem ser preservadas e retornadas');
+  assert.equal(fotosColetadas[0].imei, '353587235432902');
+  assert.equal(fotosColetadas[1].imei, '351586496377246');
+
+  // 2. Testa também o fluxo inverso: formulário de 2 aparelhos enviado primeiro, depois Foto 1 e Foto 2 vinculadas uma a uma
+  const textoDoisAparelhos = `👤 DADOS PESSOAIS
+Nome completo: Sabrina Silva Castro
+CPF: 023.473.866-97
+Valor total: R$ 15.600
+( x) Pix
+Modelo:
+1 - iPhone 17 Pro Max 256GB Deep Blue
+1 - iPhone 17 Pro Max 256GB Silver`;
+
+  const venda = detectarFormularioOuPedidoVenda(textoDoisAparelhos)!;
+  assert.equal(venda.aparelhos?.length, 2);
+  assert.equal(venda.aparelhos?.[0].cor, 'Azul');
+  assert.equal(venda.aparelhos?.[1].cor, 'Branco');
+
+  const estoque = [
+    {
+      id: 'est-17pm-azul',
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Azul',
+      imei: '353587235432902',
+      preco: 7800,
+      custo: 6800,
+      status: 'disponivel',
+      ativo: true,
+    },
+    {
+      id: 'est-17pm-branco',
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Branco',
+      imei: '351586496377246',
+      preco: 7800,
+      custo: 6800,
+      status: 'disponivel',
+      ativo: true,
+    },
+  ];
+
+  // Constrói proposta inicialmente sem IMEIs no texto e sem estoque pareado por IMEI
+  const propostaSemFotos = construirPropostaNotinha({
+    vendaDetectada: venda,
+    estoque: [],
+    fotosRecentes: [],
+  });
+  assert.equal(propostaSemFotos.itens?.length, 2);
+  assert.equal(propostaSemFotos.itens?.[0].imei, undefined);
+  assert.equal(propostaSemFotos.itens?.[1].imei, undefined);
+
+  // Vincula Foto 1 (Deep Blue - 353587235432902)
+  vincularFotoEmPropostaNotinha(
+    propostaSemFotos,
+    {
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Deep Blue',
+      imei: '353587235432902',
+    },
+    estoque
+  );
+  assert.equal(propostaSemFotos.itens?.[0].imei, '353587235432902');
+  assert.equal(propostaSemFotos.itens?.[0].aparelhoId, 'est-17pm-azul');
+  assert.equal(propostaSemFotos.itens?.[1].imei, undefined, 'Segundo item continua aguardando a segunda foto');
+
+  // Vincula Foto 2 (Silver - 351586496377246) -> NÃO deve sobrescrever o Item 1!
+  vincularFotoEmPropostaNotinha(
+    propostaSemFotos,
+    {
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Silver',
+      imei: '351586496377246',
+    },
+    estoque
+  );
+  assert.equal(propostaSemFotos.itens?.[0].imei, '353587235432902', 'Primeiro IMEI deve permanecer intacto');
+  assert.equal(propostaSemFotos.itens?.[1].imei, '351586496377246', 'Segundo IMEI deve preencher o segundo item');
+  assert.equal(propostaSemFotos.itens?.[1].aparelhoId, 'est-17pm-branco');
+
+  const previaMulti = formatarMensagemPreviaNotinha(propostaSemFotos);
+  assert.ok(previaMulti.includes('Aparelhos (2):'));
+  assert.ok(previaMulti.includes('353587235432902'));
+  assert.ok(previaMulti.includes('351586496377246'));
+
+  // 3. Gera o PDF com múltiplos aparelhos e garante que é um PDF válido
+  const pdfBuffer = await gerarReciboPdfBuffer({
+    vendaId: 'venda-multi-1',
+    codigoVenda: 'MULTI001',
+    loja: { nome: 'Lucas Imports' },
+    cliente: { nome: 'Sabrina Silva Castro', cpf: '023.473.866-97' },
+    aparelho: {
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Azul',
+      imei: '353587235432902',
+      valor: 7800,
+    },
+    itens: [
+      {
+        modelo: 'iPhone 17 Pro Max',
+        capacidade: '256GB',
+        cor: 'Azul',
+        imei: '353587235432902',
+        valor: 7800,
+      },
+      {
+        modelo: 'iPhone 17 Pro Max',
+        capacidade: '256GB',
+        cor: 'Branco',
+        imei: '351586496377246',
+        valor: 7800,
+      },
+    ],
+    pagamento: {
+      forma: 'PIX',
+      valorTotal: 15600,
+      valorFinal: 15600,
+    },
+  });
+
+  assert.ok(pdfBuffer.length > 1000);
+  assert.equal(pdfBuffer.subarray(0, 4).toString(), '%PDF');
+});
+
 
 

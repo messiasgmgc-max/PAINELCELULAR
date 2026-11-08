@@ -28,6 +28,20 @@ export interface ResultadoCruzamentoEstoque {
   candidatos?: AparelhoEstoqueConsulta[];
 }
 
+export interface ItemPropostaNotinha {
+  modelo: string;
+  capacidade?: string;
+  cor?: string;
+  imei?: string;
+  bateria?: number;
+  condicao?: string;
+  observacaoItem?: string;
+  statusEstoque: string;
+  aparelhoId?: string;
+  custo?: number;
+  valorUnitario?: number;
+}
+
 export interface PropostaNotinha {
   id: string;
   lojaId?: string;
@@ -44,6 +58,7 @@ export interface PropostaNotinha {
   imei?: string;
   statusEstoque: string;
   aparelhoId?: string;
+  itens?: ItemPropostaNotinha[];
   valorTotal: number;
   custo?: number;
   formaPagamento: string;
@@ -59,10 +74,13 @@ export interface PropostaNotinha {
 const digitos = (val: unknown) => String(val ?? '').replace(/\D/g, '');
 
 /**
- * Limpa palavras parasitas do nome do modelo (como "imei", "lacrado", capacidade, cor, menções a RAM e memória)
+ * Limpa palavras parasitas do nome do modelo (como "imei", "lacrado", capacidade, cor, bateria, garantia, menções a RAM e memória)
  */
 export function limparNomeModelo(m: string): string {
   let limpo = (m || '').trim();
+
+  // Remove prefixo numérico de lista/quantidade (ex: "1 - ", "2x ", "• ")
+  limpo = limpo.replace(/^\s*(?:\d+\s*(?:[-–—.)]|x|un|unid(?:ades?)?)\s*|[•*-]\s*)/i, '');
 
   // Separa número colado com pro/plus/max/mini (ex: "15pro" -> "15 Pro")
   limpo = limpo
@@ -71,15 +89,19 @@ export function limparNomeModelo(m: string): string {
     .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
     .replace(/\b(\d+)(mini)\b/gi, '$1 Mini');
 
-  // Remove menção a imei, serial, lacrado, seminovo, gb, cores comuns, fragmentos de RAM/memória e capacidades como "256g"
+  // Remove menção a imei, serial, lacrado, seminovo, bateria, garantia, gb, cores comuns, fragmentos de RAM/memória e capacidades como "256g"
   limpo = limpo
     .replace(/\bimei\b.*$/i, '')
+    .replace(/(?:bateria|bat|sa[úu]de(?:\s*da\s*bateria)?)\s*[:=]?\s*\d{1,3}\s*%?/gi, '')
+    .replace(/\b\d{1,3}\s*%/g, '')
+    .replace(/\bgarantia\s+apple\b/gi, '')
+    .replace(/\b(?:com\s+)?garantia\b/gi, '')
     .replace(/\b(?:lacrado|seminovo|novo|usado|caixa\s*fechada)\b/gi, '')
     .replace(/\b\d+\s*(?:gb|tb|g)\s*(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
     .replace(/\b\d+\s*(?:gb|tb|g)\b/gi, '')
     .replace(/(?:,\s*)?(?:de\s+)?ram\s*(?:e\s*)?(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)?\b/gi, '')
     .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
-    .replace(/\b(?:preto|branco|azul|dourado|prata|verde|roxo|cinza|grafite|tit[aâ]nio|rose|amarelo|vermelho|natural|black|white|blue|gold|silver|green|purple|gray|graphite|titanium|desert|deserto)\b/gi, '')
+    .replace(/\b(?:deep\s*blue|sierra\s*blue|pacific\s*blue|space\s*black|space\s*gr[ae]y|preto|preta|branco|branca|azul|dourado|dourada|prata|verde|roxo|cinza|grafite|tit[aâ]nio|titanio|rose|rosa|amarelo|vermelho|vermelha|natural|black|white|blue|gold|silver|green|purple|gray|grey|graphite|titanium|desert|deserto)\b/gi, '')
     .replace(/[,\s]+e\s*$/i, '')
     .replace(/\s*,\s*e\s+/gi, ' ')
     .replace(/\s+e\s*$/i, '')
@@ -465,9 +487,15 @@ export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | nu
     return null;
   }
 
-  // Se tem modelo, limpa e normaliza
+  // Se tem modelo, limpa e normaliza (inclusive na lista de múltiplos aparelhos)
   if (parsed.aparelho?.modelo) {
     parsed.aparelho.modelo = limparNomeModelo(parsed.aparelho.modelo);
+  }
+  if (Array.isArray(parsed.aparelhos) && parsed.aparelhos.length > 0) {
+    parsed.aparelhos = parsed.aparelhos.map((ap) => ({
+      ...ap,
+      modelo: ap.modelo ? limparNomeModelo(ap.modelo) : ap.modelo,
+    }));
   }
 
   return parsed;
@@ -558,13 +586,25 @@ export function cruzarAparelhoComEstoque(
   const capAlvoDig = digitos(dadosAparelho.capacidade);
 
   const ativos = estoque.filter((a) => estaNoEstoque(a as any));
-  const candidatos = ativos.filter((a) => {
+  let candidatos = ativos.filter((a) => {
     const modItemNorm = normModeloComparacao(a.modelo);
     const capItemDig = digitos(a.capacidade);
     const bateModelo = Boolean(modeloAlvoNorm && modItemNorm && modeloAlvoNorm === modItemNorm);
     const bateCap = !capAlvoDig || (Boolean(capItemDig) && capAlvoDig === capItemDig);
     return bateModelo && bateCap;
   });
+
+  // Se houver múltiplos aparelhos do mesmo modelo/capacidade e a cor foi informada, desempata pela cor
+  if (candidatos.length > 1 && dadosAparelho.cor) {
+    const corAlvo = extrairCorDeTexto(dadosAparelho.cor) || dadosAparelho.cor.trim().toLowerCase();
+    const porCor = candidatos.filter((a) => {
+      const corItem = extrairCorDeTexto(a.cor) || (a.cor || '').trim().toLowerCase();
+      return Boolean(corItem && corAlvo && corItem.toLowerCase() === corAlvo.toLowerCase());
+    });
+    if (porCor.length > 0) {
+      candidatos = porCor;
+    }
+  }
 
   if (candidatos.length === 1) {
     return {
@@ -589,7 +629,331 @@ export function cruzarAparelhoComEstoque(
 }
 
 /**
- * Formata a mensagem de prévia da notinha para envio no WhatsApp.
+ * Sincroniza os campos de resumo de `PropostaNotinha` a partir da lista `proposta.itens`.
+ */
+export function sincronizarResumoPropostaMultiItens(proposta: PropostaNotinha): PropostaNotinha {
+  const itens = proposta.itens || [];
+  if (itens.length === 0) return proposta;
+
+  if (itens.length === 1) {
+    const primeiro = itens[0];
+    proposta.modelo = primeiro.modelo;
+    proposta.capacidade = primeiro.capacidade;
+    proposta.cor = primeiro.cor;
+    proposta.imei = primeiro.imei;
+    proposta.statusEstoque = primeiro.statusEstoque;
+    proposta.aparelhoId = primeiro.aparelhoId;
+    proposta.custo = primeiro.custo || 0;
+  } else {
+    proposta.modelo = itens.map((it) => it.modelo).join(' + ');
+    proposta.capacidade = itens[0].capacidade;
+    proposta.cor = itens[0].cor;
+    const todosImeis = itens.map((it) => it.imei).filter(Boolean);
+    proposta.imei = todosImeis.length > 0 ? todosImeis.join(' / ') : undefined;
+    proposta.aparelhoId = itens[0].aparelhoId;
+    proposta.custo = itens.reduce((acc, it) => acc + Number(it.custo || 0), 0);
+
+    const confirmados = itens.filter((it) => Boolean(it.aparelhoId) || /confirmado/i.test(it.statusEstoque)).length;
+    if (confirmados === itens.length) {
+      proposta.statusEstoque = `Todos os ${itens.length} aparelhos confirmados no estoque ✅`;
+    } else {
+      proposta.statusEstoque = itens.map((it, idx) => `Item ${idx + 1}: ${it.statusEstoque}`).join(' | ');
+    }
+  }
+
+  return proposta;
+}
+
+/**
+ * Constrói uma `PropostaNotinha` (de 1 ou múltiplos aparelhos) cruzando cada item com o estoque
+ * e vinculando fotos recentes de etiquetas sem repetir o mesmo aparelho físico ou a mesma foto.
+ */
+export function construirPropostaNotinha(params: {
+  id?: string;
+  lojaId?: string;
+  remoteJid?: string;
+  vendaDetectada: ParsedVenda;
+  estoque: AparelhoEstoqueConsulta[];
+  fotosRecentes?: FotoRecenteCache[];
+  pushName?: string;
+}): PropostaNotinha {
+  const {
+    id = `prop-${Date.now()}`,
+    lojaId,
+    remoteJid,
+    vendaDetectada,
+    estoque,
+    fotosRecentes = [],
+    pushName,
+  } = params;
+
+  const aparelhosBrutos =
+    Array.isArray(vendaDetectada.aparelhos) && vendaDetectada.aparelhos.length > 0
+      ? vendaDetectada.aparelhos
+      : [vendaDetectada.aparelho || {}];
+
+  const fotosDisponiveis = [...fotosRecentes];
+  const aparelhoIdsUsados = new Set<string>();
+  const itensProposta: ItemPropostaNotinha[] = [];
+
+  for (const ap of aparelhosBrutos) {
+    let modelo = limparNomeModelo(ap.modelo || '') || 'Smartphone';
+    let capacidade = ap.capacidade || undefined;
+    let cor = ap.cor ? extrairCorDeTexto(ap.cor) || ap.cor : undefined;
+    let imei = ap.imei || undefined;
+    const bateria = ap.bateria ?? undefined;
+    const condicao = ap.condicao || (bateria && bateria < 100 ? 'seminovo' : 'novo');
+    const observacaoItem = ap.observacoes || undefined;
+
+    // Se este item ainda não tem IMEI e há fotos recentes disponíveis, escolhe a foto mais compatível
+    if (!imei && fotosDisponiveis.length > 0) {
+      let idxFoto = -1;
+      // 1ª prioridade: modelo compatível + mesma cor
+      if (cor) {
+        idxFoto = fotosDisponiveis.findIndex((f) => {
+          const corFoto = extrairCorDeTexto(f.cor) || f.cor;
+          return (
+            Boolean(corFoto && corFoto.toLowerCase() === cor!.toLowerCase()) &&
+            (!f.modelo || !marcasConflitantes(f.modelo, modelo))
+          );
+        });
+      }
+      // 2ª prioridade: modelo compatível
+      if (idxFoto === -1) {
+        idxFoto = fotosDisponiveis.findIndex(
+          (f) => !f.modelo || modelosSaoCompativeis(f.modelo, modelo) || !marcasConflitantes(f.modelo, modelo)
+        );
+      }
+
+      if (idxFoto !== -1) {
+        const [fotoConsumida] = fotosDisponiveis.splice(idxFoto, 1);
+        if (fotoConsumida.imei) imei = fotoConsumida.imei;
+        if (!capacidade && fotoConsumida.capacidade) capacidade = fotoConsumida.capacidade;
+        if (!cor && fotoConsumida.cor) cor = extrairCorDeTexto(fotoConsumida.cor) || fotoConsumida.cor;
+        if (modelo === 'Smartphone' && fotoConsumida.modelo) {
+          modelo = limparNomeModelo(fotoConsumida.modelo) || modelo;
+        }
+      }
+    }
+
+    // Filtra estoque para não atribuir o mesmo aparelho físico a 2 itens diferentes na mesma venda
+    const estoqueDisponivel = estoque.filter(
+      (e) => !e.id || !aparelhoIdsUsados.has(e.id) || (imei && digitos(e.imei) === digitos(imei))
+    );
+
+    const cruzamento = cruzarAparelhoComEstoque(estoqueDisponivel, {
+      modelo,
+      capacidade,
+      cor,
+      imei,
+    });
+
+    const apEnc = cruzamento.aparelhoEncontrado;
+    if (apEnc?.id) {
+      aparelhoIdsUsados.add(apEnc.id);
+    }
+
+    const imeiFinal =
+      imei && imei.replace(/\D/g, '').length >= 14
+        ? imei
+        : apEnc?.imei || imei || undefined;
+    const capFinal = capacidade || apEnc?.capacidade || undefined;
+    const corBruta = cor || apEnc?.cor || undefined;
+    const corFinal = corBruta ? extrairCorDeTexto(corBruta) || corBruta : undefined;
+
+    itensProposta.push({
+      modelo,
+      capacidade: capFinal,
+      cor: corFinal,
+      imei: imeiFinal,
+      bateria,
+      condicao,
+      observacaoItem,
+      statusEstoque: cruzamento.mensagem,
+      aparelhoId: apEnc?.id,
+      custo: Number(apEnc?.custo || ap.custo || 0),
+      valorUnitario: ap.preco && ap.preco > 0 ? Number(ap.preco) : (apEnc?.preco ? Number(apEnc.preco) : undefined),
+    });
+  }
+
+  // Calcula valor total e distribui entre os itens caso o formulário informe apenas o Valor Total geral
+  let valorTotal = Number(vendaDetectada.valorTotal || 0);
+  if (valorTotal <= 0) {
+    const somaUnitarios = itensProposta.reduce((acc, it) => acc + Number(it.valorUnitario || 0), 0);
+    if (somaUnitarios > 0 && itensProposta.every((it) => (it.valorUnitario || 0) > 0)) {
+      valorTotal = somaUnitarios;
+    }
+  }
+
+  if (valorTotal > 0 && itensProposta.length > 0) {
+    const valorPorItem = Number((valorTotal / itensProposta.length).toFixed(2));
+    itensProposta.forEach((it, idx) => {
+      if (!it.valorUnitario || itensProposta.length > 1) {
+        it.valorUnitario =
+          idx === itensProposta.length - 1
+            ? Number((valorTotal - valorPorItem * (itensProposta.length - 1)).toFixed(2))
+            : valorPorItem;
+      }
+    });
+  }
+
+  const proposta: PropostaNotinha = {
+    id,
+    lojaId,
+    remoteJid,
+    clienteNome: vendaDetectada.cliente?.nome || pushName || 'Cliente Balcão',
+    cpf: vendaDetectada.cliente?.cpf || undefined,
+    telefone: vendaDetectada.cliente?.telefone || undefined,
+    email: vendaDetectada.cliente?.email || undefined,
+    modelo: itensProposta[0]?.modelo || 'Smartphone',
+    capacidade: itensProposta[0]?.capacidade,
+    cor: itensProposta[0]?.cor,
+    imei: itensProposta[0]?.imei,
+    statusEstoque: itensProposta[0]?.statusEstoque || '',
+    aparelhoId: itensProposta[0]?.aparelhoId,
+    itens: itensProposta,
+    valorTotal,
+    custo: itensProposta.reduce((acc, it) => acc + Number(it.custo || 0), 0),
+    formaPagamento: vendaDetectada.formaPagamento || 'Pix',
+    isUpgrade: Boolean(vendaDetectada.isUpgrade),
+    modeloTroca: vendaDetectada.tradeIn?.modelo || undefined,
+    imeiTroca: vendaDetectada.tradeIn?.imei || undefined,
+    valorTroca: Number(vendaDetectada.tradeIn?.valor || vendaDetectada.valorEntradaTroca || 0),
+    vendedor: vendaDetectada.vendedor || pushName || 'WhatsApp',
+    observacoes: vendaDetectada.observacoes || undefined,
+  };
+
+  return sincronizarResumoPropostaMultiItens(proposta);
+}
+
+/**
+ * Vincula os dados lidos de uma etiqueta (foto) a uma proposta pendente.
+ * Quando a proposta possui múltiplos aparelhos (`proposta.itens`), preenche o primeiro aparelho
+ * compatível que ainda esteja sem IMEI, preservando os IMEIs já vinculados anteriormente!
+ */
+export function vincularFotoEmPropostaNotinha(
+  proposta: PropostaNotinha,
+  foto: {
+    imei?: string | null;
+    modelo?: string | null;
+    capacidade?: string | null;
+    cor?: string | null;
+  },
+  estoque: AparelhoEstoqueConsulta[]
+): PropostaNotinha {
+  if (!Array.isArray(proposta.itens) || proposta.itens.length === 0) {
+    proposta.itens = [
+      {
+        modelo: proposta.modelo,
+        capacidade: proposta.capacidade,
+        cor: proposta.cor,
+        imei: proposta.imei,
+        statusEstoque: proposta.statusEstoque,
+        aparelhoId: proposta.aparelhoId,
+        custo: proposta.custo,
+        valorUnitario: proposta.valorTotal,
+      },
+    ];
+  }
+
+  const itens = proposta.itens;
+  const imeiFoto = (foto.imei || '').trim();
+  const corFotoNorm = foto.cor ? extrairCorDeTexto(foto.cor) || foto.cor : undefined;
+
+  let idxAlvo = -1;
+
+  // 1. Se este exato IMEI já está em algum item, atualiza esse mesmo item
+  if (imeiFoto) {
+    idxAlvo = itens.findIndex((it) => it.imei && digitos(it.imei) === digitos(imeiFoto));
+  }
+
+  // 2. Procura entre os itens que AINDA NÃO possuem IMEI:
+  //    2a. Modelo compatível + mesma cor
+  if (idxAlvo === -1 && corFotoNorm) {
+    idxAlvo = itens.findIndex(
+      (it) =>
+        !it.imei &&
+        Boolean(it.cor && (extrairCorDeTexto(it.cor) || it.cor).toLowerCase() === corFotoNorm.toLowerCase()) &&
+        (!foto.modelo || modelosSaoCompativeis(foto.modelo, it.modelo) || !marcasConflitantes(foto.modelo, it.modelo))
+    );
+  }
+
+  //    2b. Modelo compatível sem IMEI
+  if (idxAlvo === -1 && foto.modelo) {
+    idxAlvo = itens.findIndex((it) => !it.imei && modelosSaoCompativeis(foto.modelo, it.modelo));
+  }
+
+  //    2c. Qualquer item sem IMEI de marca não conflitante
+  if (idxAlvo === -1) {
+    idxAlvo = itens.findIndex((it) => !it.imei && (!foto.modelo || !marcasConflitantes(foto.modelo, it.modelo)));
+  }
+
+  //    2d. Qualquer item sem IMEI
+  if (idxAlvo === -1) {
+    idxAlvo = itens.findIndex((it) => !it.imei);
+  }
+
+  // 3. Fallback caso todos os itens já tenham IMEI: atualiza o item mais compatível (ou o primeiro)
+  if (idxAlvo === -1) {
+    if (corFotoNorm) {
+      idxAlvo = itens.findIndex(
+        (it) => Boolean(it.cor && (extrairCorDeTexto(it.cor) || it.cor).toLowerCase() === corFotoNorm.toLowerCase())
+      );
+    }
+    if (idxAlvo === -1 && foto.modelo) {
+      idxAlvo = itens.findIndex((it) => modelosSaoCompativeis(foto.modelo, it.modelo));
+    }
+    if (idxAlvo === -1) idxAlvo = 0;
+  }
+
+  const itemAlvo = itens[idxAlvo];
+  if (imeiFoto) itemAlvo.imei = imeiFoto;
+  if (!itemAlvo.capacidade && foto.capacidade) itemAlvo.capacidade = foto.capacidade;
+  if (!itemAlvo.cor && corFotoNorm) itemAlvo.cor = corFotoNorm;
+  if ((!itemAlvo.modelo || itemAlvo.modelo === 'Smartphone') && foto.modelo) {
+    itemAlvo.modelo = limparNomeModelo(foto.modelo) || itemAlvo.modelo;
+  }
+
+  // IDs de estoque já usados pelos OUTROS itens da proposta
+  const idsUsadosOutros = new Set<string>(
+    itens
+      .filter((_, i) => i !== idxAlvo)
+      .map((it) => it.aparelhoId)
+      .filter((id): id is string => Boolean(id))
+  );
+
+  const estoqueDisponivel = estoque.filter(
+    (e) => !e.id || !idsUsadosOutros.has(e.id) || (itemAlvo.imei && digitos(e.imei) === digitos(itemAlvo.imei))
+  );
+
+  const cruzamento = cruzarAparelhoComEstoque(estoqueDisponivel, {
+    modelo: itemAlvo.modelo,
+    capacidade: itemAlvo.capacidade,
+    cor: itemAlvo.cor,
+    imei: itemAlvo.imei,
+  });
+
+  itemAlvo.statusEstoque = cruzamento.mensagem;
+  if (cruzamento.aparelhoEncontrado) {
+    const apEnc = cruzamento.aparelhoEncontrado;
+    itemAlvo.aparelhoId = apEnc.id;
+    itemAlvo.custo = Number(apEnc.custo || itemAlvo.custo || 0);
+    if (!itemAlvo.imei || itemAlvo.imei.replace(/\D/g, '').length < 14) {
+      itemAlvo.imei = apEnc.imei || itemAlvo.imei;
+    }
+    if (!itemAlvo.capacidade && apEnc.capacidade) itemAlvo.capacidade = apEnc.capacidade;
+    if (!itemAlvo.cor && apEnc.cor) itemAlvo.cor = extrairCorDeTexto(apEnc.cor) || apEnc.cor;
+    if ((!proposta.valorTotal || proposta.valorTotal <= 0) && itens.length === 1 && apEnc.preco) {
+      proposta.valorTotal = Number(apEnc.preco);
+      itemAlvo.valorUnitario = Number(apEnc.preco);
+    }
+  }
+
+  return sincronizarResumoPropostaMultiItens(proposta);
+}
+
+/**
+ * Formata a mensagem de prévia da notinha para envio no WhatsApp (suporta 1 ou múltiplos aparelhos).
  */
 export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string {
   const valorFmt = Number(proposta.valorTotal || 0).toLocaleString('pt-BR', {
@@ -597,20 +961,51 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
     maximumFractionDigits: 2,
   });
 
-  const emojiCor = obterEmojiDaCor(proposta.cor);
-  const corFmt = proposta.cor ? ` ${emojiCor} ${proposta.cor}` : '';
-
   const linhas: string[] = [
     '🧾 *PRÉVIA DA NOTINHA — LUCAS IMPORTS*',
     '──────────────────────────',
     `👤 *Cliente:* ${proposta.clienteNome || 'Cliente Não Informado'}${proposta.cpf ? ` (CPF: ${proposta.cpf})` : ''}`,
-    `📱 *Aparelho:* ${proposta.modelo} ${proposta.capacidade || ''}${corFmt}`.replace(/\s+/g, ' ').trim(),
   ];
 
-  if (proposta.imei) {
-    linhas.push(`🔢 *IMEI:* ${proposta.imei} [${proposta.statusEstoque}]`);
+  const itens = Array.isArray(proposta.itens) && proposta.itens.length > 0 ? proposta.itens : null;
+
+  if (itens && itens.length > 1) {
+    linhas.push(`📱 *Aparelhos (${itens.length}):*`);
+    itens.forEach((item, idx) => {
+      const emojiCorItem = obterEmojiDaCor(item.cor);
+      const corItemFmt = item.cor ? ` ${emojiCorItem} ${item.cor}` : '';
+      const batFmt = item.bateria ? ` (Bat: ${item.bateria}%)` : '';
+      const obsFmt = item.observacaoItem ? ` [${item.observacaoItem}]` : '';
+      const descItem = `${item.modelo} ${item.capacidade || ''}${corItemFmt}${batFmt}${obsFmt}`
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      linhas.push(`   *${idx + 1}.* ${descItem}`);
+      if (item.imei) {
+        linhas.push(`      🔢 *IMEI:* ${item.imei} [${item.statusEstoque}]`);
+      } else {
+        linhas.push(`      📦 *Estoque:* ${item.statusEstoque}`);
+      }
+    });
   } else {
-    linhas.push(`📦 *Estoque:* ${proposta.statusEstoque}`);
+    const itemUnico = itens?.[0];
+    const corAlvo = itemUnico?.cor || proposta.cor;
+    const emojiCor = obterEmojiDaCor(corAlvo);
+    const corFmt = corAlvo ? ` ${emojiCor} ${corAlvo}` : '';
+    const batFmt = itemUnico?.bateria ? ` (Bat: ${itemUnico.bateria}%)` : '';
+    const obsFmt = itemUnico?.observacaoItem ? ` [${itemUnico.observacaoItem}]` : '';
+
+    linhas.push(
+      `📱 *Aparelho:* ${proposta.modelo} ${proposta.capacidade || ''}${corFmt}${batFmt}${obsFmt}`
+        .replace(/\s+/g, ' ')
+        .trim()
+    );
+
+    if (proposta.imei) {
+      linhas.push(`🔢 *IMEI:* ${proposta.imei} [${proposta.statusEstoque}]`);
+    } else {
+      linhas.push(`📦 *Estoque:* ${proposta.statusEstoque}`);
+    }
   }
 
   if (proposta.valorTotal && proposta.valorTotal > 0) {
@@ -812,15 +1207,27 @@ export async function buscarPropostaNotinhaRecente(
         if (!prop) continue;
 
         if (modeloDesejado) {
+          const modelosDaProposta =
+            Array.isArray(prop.itens) && prop.itens.length > 0
+              ? prop.itens.map((it) => it.modelo)
+              : [prop.modelo];
+
           // Se a proposta de notinha foi criada nos últimos 3 minutos no mesmo chat,
           // aceita vincular mesmo que o OCR da etiqueta tenha alucinado outra geração da mesma marca
-          // (ex: etiqueta da Apple sem número explícito lida como "iPhone 14 Pro" ou "iPhone" para um pedido de "iPhone 15 Pro")
           if (idadeMs < 180_000) {
-            if (marcasConflitantes(modeloDesejado, prop.modelo)) {
+            const conflitaComTodos = modelosDaProposta.every((m) =>
+              marcasConflitantes(modeloDesejado, m)
+            );
+            if (conflitaComTodos) {
               continue;
             }
-          } else if (!modelosSaoCompativeis(modeloDesejado, prop.modelo)) {
-            continue;
+          } else {
+            const compativelComAlgum = modelosDaProposta.some((m) =>
+              modelosSaoCompativeis(modeloDesejado, m)
+            );
+            if (!compativelComAlgum) {
+              continue;
+            }
           }
         }
 
@@ -948,47 +1355,89 @@ export async function emitirNotinhaVenda(
       }
     }
 
+    const itensProposta: ItemPropostaNotinha[] =
+      Array.isArray(proposta.itens) && proposta.itens.length > 0
+        ? proposta.itens
+        : [
+            {
+              modelo: proposta.modelo,
+              capacidade: proposta.capacidade,
+              cor: proposta.cor,
+              imei: proposta.imei,
+              statusEstoque: proposta.statusEstoque,
+              aparelhoId: proposta.aparelhoId,
+              custo: proposta.custo || 0,
+              valorUnitario: proposta.valorTotal,
+            },
+          ];
+
+    const valorTotalNum = Number(proposta.valorTotal || 0);
+    const valorDivididoPadrao = itensProposta.length > 0 ? Number((valorTotalNum / itensProposta.length).toFixed(2)) : valorTotalNum;
+
+    const itensVendaPayload = itensProposta.map((it, idx) => {
+      const valItem =
+        it.valorUnitario && it.valorUnitario > 0
+          ? Number(it.valorUnitario)
+          : idx === itensProposta.length - 1
+          ? Number((valorTotalNum - valorDivididoPadrao * (itensProposta.length - 1)).toFixed(2))
+          : valorDivididoPadrao;
+
+      const obsPartes: string[] = [];
+      if (it.imei) obsPartes.push(`IMEI: ${it.imei}`);
+      if (it.bateria) obsPartes.push(`Bateria: ${it.bateria}%`);
+      if (it.observacaoItem) obsPartes.push(it.observacaoItem);
+
+      return {
+        id: `${Date.now()}-${idx}`,
+        aparelhoId: it.aparelhoId || undefined,
+        descricao: `${it.modelo} ${it.capacidade || ''} ${it.cor || ''}`.replace(/\s+/g, ' ').trim(),
+        quantidade: 1,
+        valorInterno: Number(it.custo || 0),
+        valorExibir: valItem,
+        desconto: 0,
+        tipoDesconto: 'R$',
+        total: valItem,
+        observacao: obsPartes.join(' | '),
+        imei: it.imei || '',
+      };
+    });
+
+    const custoTotalConsolidado = itensProposta.reduce((acc, it) => acc + Number(it.custo || 0), 0) || Number(proposta.custo || 0);
+
     const registroVenda = {
       loja_id: lojaIdFinal,
       clienteId: clienteId || undefined,
       clienteNome: proposta.clienteNome,
       cpf: proposta.cpf || null,
       telefone: proposta.telefone || null,
-      valor: proposta.valorTotal,
-      custo: proposta.custo || 0,
-      lucro: (proposta.valorTotal || 0) - (proposta.custo || 0),
+      valor: valorTotalNum,
+      custo: custoTotalConsolidado,
+      lucro: valorTotalNum - custoTotalConsolidado,
       metodo: proposta.formaPagamento.toLowerCase().includes('cart') ? 'cartao_credito' : (proposta.formaPagamento.toLowerCase().includes('pix') ? 'pix' : 'dinheiro'),
       status: 'pago',
-      valorPago: proposta.valorTotal,
+      valorPago: valorTotalNum,
       saldoDevedor: 0,
       tipoEntrega: 'Varejo',
       vendedor: usuarioNome,
       dataPagamento: agora,
       garantia: `${diasGarantiaLoja} dias`,
       descricao,
-      itens: [
-        {
-          id: Date.now().toString(),
-          aparelhoId: proposta.aparelhoId || undefined,
-          descricao: `${proposta.modelo} ${proposta.capacidade || ''} ${proposta.cor || ''}`.trim(),
-          quantidade: 1,
-          valorInterno: proposta.custo || 0,
-          valorExibir: proposta.valorTotal,
-          desconto: 0,
-          tipoDesconto: 'R$',
-          total: proposta.valorTotal,
-          observacao: proposta.imei ? `IMEI: ${proposta.imei}` : '',
-          imei: proposta.imei || '',
-        },
-      ],
+      itens: itensVendaPayload,
       ativo: true,
       taxa_cartao: 0,
     };
 
-    const aparelhoIds = proposta.aparelhoId ? [proposta.aparelhoId] : [];
-    const camposAparelho = proposta.aparelhoId
-      ? { [proposta.aparelhoId]: { cliente: proposta.clienteNome } }
-      : undefined;
+    const aparelhoIds = Array.from(
+      new Set(
+        itensProposta
+          .map((it) => it.aparelhoId)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    const camposAparelho =
+      aparelhoIds.length > 0
+        ? Object.fromEntries(aparelhoIds.map((aid) => [aid, { cliente: proposta.clienteNome }]))
+        : undefined;
 
     let tradeInPayload: Record<string, unknown> | null = null;
     if (proposta.isUpgrade && proposta.modeloTroca) {
@@ -1018,11 +1467,23 @@ export async function emitirNotinhaVenda(
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://painelcelular.com.br';
     const linkRecibo = vendaUuid ? `${baseUrl}/recibo/${vendaUuid}` : '';
 
+    const resumoAparelhosMsg =
+      itensProposta.length > 1
+        ? `📱 *Aparelhos (${itensProposta.length}):*\n` +
+          itensProposta
+            .map(
+              (it, i) =>
+                `   ${i + 1}. ${it.modelo}${it.capacidade ? ` ${it.capacidade}` : ''}${it.cor ? ` ${it.cor}` : ''}${it.imei ? ` (IMEI: ${it.imei})` : ''}`
+            )
+            .join('\n') +
+          '\n'
+        : `📱 *Aparelho:* ${proposta.modelo}\n`;
+
     const msgSucesso = `✅ *NOTINHA EMITIDA COM SUCESSO!* 🧾\n` +
       `──────────────────────────\n` +
       `📄 *Venda:* #${vendaId}\n` +
       `👤 *Cliente:* ${proposta.clienteNome}\n` +
-      `📱 *Aparelho:* ${proposta.modelo}\n` +
+      resumoAparelhosMsg +
       `💰 *Valor:* R$ ${Number(proposta.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
       `📦 *Estoque:* Baixa realizada com sucesso no sistema!\n` +
       (proposta.isUpgrade && proposta.modeloTroca ? `🔄 *Troca recebida:* ${proposta.modeloTroca}\n` : '') +
@@ -1055,13 +1516,23 @@ export async function emitirNotinhaVenda(
           endereco: proposta.enderecoEntrega || null,
         },
         aparelho: {
-          modelo: proposta.modelo,
-          capacidade: proposta.capacidade || null,
-          cor: proposta.cor || null,
-          imei: proposta.imei || null,
-          condicao: 'Seminovo',
-          valor: Number(proposta.valorTotal || 0),
+          modelo: itensProposta[0]?.modelo || proposta.modelo,
+          capacidade: itensProposta[0]?.capacidade || proposta.capacidade || null,
+          cor: itensProposta[0]?.cor || proposta.cor || null,
+          imei: itensProposta[0]?.imei || proposta.imei || null,
+          condicao: itensProposta[0]?.condicao === 'novo' ? 'Lacrado / Novo' : 'Seminovo',
+          valor: Number(itensVendaPayload[0]?.total || proposta.valorTotal || 0),
         },
+        itens: itensProposta.map((it, idx) => ({
+          modelo: it.modelo,
+          capacidade: it.capacidade || null,
+          cor: it.cor || null,
+          imei: it.imei || null,
+          bateria: it.bateria || null,
+          observacao: it.observacaoItem || null,
+          condicao: it.condicao === 'novo' ? 'Lacrado / Novo' : 'Seminovo',
+          valor: Number(itensVendaPayload[idx]?.total || it.valorUnitario || 0),
+        })),
         upgrade: {
           ativo: Boolean(proposta.isUpgrade),
           modelo: proposta.modeloTroca || null,
@@ -1118,6 +1589,7 @@ export interface FotoRecenteCache {
   cor?: string | null;
   pushName?: string;
   timestamp: number;
+  historicoFotos?: FotoRecenteCache[];
 }
 
 function extrairMarcaAparelho(str?: string | null): string | null {
@@ -1236,7 +1708,8 @@ export async function limparFotoProcessando(
 }
 
 /**
- * Salva os dados lidos da foto no Supabase e remove a flag foto_processando.
+ * Salva os dados lidos da foto no Supabase (acumulando múltiplas fotos recentes no mesmo chat para pedidos com 2+ aparelhos)
+ * e remove a flag foto_processando.
  */
 export async function salvarFotoRecente(
   supabase: SupabaseClient,
@@ -1246,6 +1719,14 @@ export async function salvarFotoRecente(
   dados: FotoRecenteCache
 ): Promise<void> {
   const agora = Date.now();
+  const itemLimpo: FotoRecenteCache = {
+    imei: dados.imei,
+    modelo: dados.modelo,
+    capacidade: dados.capacidade,
+    cor: dados.cor,
+    pushName: dados.pushName,
+    timestamp: agora,
+  };
   dados.timestamp = agora;
 
   const chaves = [
@@ -1254,11 +1735,50 @@ export async function salvarFotoRecente(
   ];
 
   try {
+    let historicoFotos: FotoRecenteCache[] = [];
+    try {
+      const { data: existente } = await supabase
+        .from('whatsapp_acoes_pendentes')
+        .select('*')
+        .eq('chave', `foto_recente:${remoteJid}:ultima`)
+        .maybeSingle();
+
+      if (existente && existente.params) {
+        const criadoAnt = existente.criado_em ? new Date(existente.criado_em).getTime() : 0;
+        if (agora - criadoAnt < 10 * 60 * 1000) {
+          const paramsAnt = existente.params as FotoRecenteCache;
+          const listaAnt = Array.isArray(paramsAnt.historicoFotos)
+            ? paramsAnt.historicoFotos
+            : [
+                {
+                  imei: paramsAnt.imei,
+                  modelo: paramsAnt.modelo,
+                  capacidade: paramsAnt.capacidade,
+                  cor: paramsAnt.cor,
+                  pushName: paramsAnt.pushName,
+                  timestamp: paramsAnt.timestamp || criadoAnt,
+                },
+              ];
+          historicoFotos = listaAnt.filter(
+            (f) => f && (!itemLimpo.imei || !f.imei || digitos(f.imei) !== digitos(itemLimpo.imei))
+          );
+        }
+      }
+    } catch {
+      // silencioso
+    }
+
+    historicoFotos.push(itemLimpo);
+
     const payload = {
       tipo: 'faltando_dados' as const,
       action: 'vincular_foto',
       loja_id: lojaId,
-      params: { ...dados, expiraEm: agora + 10 * 60 * 1000 } as any,
+      params: {
+        ...itemLimpo,
+        historicoFotos,
+        expiraEm: agora + 10 * 60 * 1000,
+      } as any,
       resumo: `Foto recente: ${dados.modelo || 'Smartphone'} (IMEI: ${dados.imei || 'N/A'})`,
       criado_em: new Date(agora).toISOString(),
     };
@@ -1334,27 +1854,29 @@ export async function buscarFotoRecente(
 }
 
 /**
- * Aguarda caso exista uma foto sendo processada pelo OCR neste exato instante no mesmo chat,
- * consome a foto recente assim que ficar pronta e registra `foto_consumida` no Supabase
- * para que o webhook da foto não dispare mensagem avulsa.
+ * Aguarda caso exista uma ou mais fotos sendo processadas pelo OCR neste exato instante no mesmo chat,
+ * consome todas as fotos recentes compatíveis e registra `foto_consumida` no Supabase.
  */
-export async function aguardarEBuscarFotoRecente(
+export async function aguardarEBuscarFotosRecentes(
   supabase: SupabaseClient,
   lojaId: string,
   remoteJid: string,
   authorPhone: string,
-  modeloDesejado?: string | null,
+  modelosDesejados?: Array<string | null | undefined>,
   maxMinutos: number = 10,
   esperaNovaFotoMs: number = 0
-): Promise<FotoRecenteCache | null> {
+): Promise<FotoRecenteCache[]> {
   const chaveProcessando = `foto_processando:${remoteJid}`;
   const chavesFoto = [
     ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
     `foto_recente:${remoteJid}:ultima`,
   ];
 
+  const listaModelos = (modelosDesejados || []).filter((m): m is string => Boolean(m));
+  const qtdAlvo = Math.max(1, listaModelos.length);
+
   const inicio = Date.now();
-  const timeoutWaitMs = Math.max(9500, esperaNovaFotoMs + 6500); // Aguarda até 9.5s+ se houver foto sendo lida no OCR
+  const timeoutWaitMs = Math.max(9500, esperaNovaFotoMs + 6500);
 
   while (Date.now() - inicio < timeoutWaitMs) {
     try {
@@ -1368,25 +1890,56 @@ export async function aguardarEBuscarFotoRecente(
       const agora = Date.now();
       const maxMs = maxMinutos * 60 * 1000;
 
-      // 1. Verifica se a foto_recente já está pronta
+      // Verifica se ainda há uma foto_processando ativa (ex: 2ª foto sendo lida pelo OCR)
+      const proc = (registros || []).find((r) => r.chave === chaveProcessando);
+      const temFotoProcessandoAtiva =
+        Boolean(proc) &&
+        agora - (proc?.criado_em ? new Date(proc.criado_em).getTime() : 0) < 25_000;
+
       const itensFoto = (registros || []).filter((r) => r.chave.startsWith('foto_recente:'));
+      const fotosColetadas: FotoRecenteCache[] = [];
+
       for (const item of itensFoto) {
         const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
         const idadeMs = agora - criado;
         if (idadeMs > maxMs) continue;
 
-        const foto = item.params as FotoRecenteCache;
-        if (!foto) continue;
+        const fotoParams = item.params as FotoRecenteCache;
+        if (!fotoParams) continue;
 
-        if (modeloDesejado && foto.modelo) {
-          if (idadeMs < 180_000) {
-            if (marcasConflitantes(foto.modelo, modeloDesejado)) continue;
-          } else if (!modelosSaoCompativeis(foto.modelo, modeloDesejado)) {
-            continue;
+        const candidatas = Array.isArray(fotoParams.historicoFotos) && fotoParams.historicoFotos.length > 0
+          ? fotoParams.historicoFotos
+          : [fotoParams];
+
+        for (const f of candidatas) {
+          if (!f) continue;
+          if (listaModelos.length > 0 && f.modelo) {
+            if (idadeMs < 180_000) {
+              const conflitaTodos = listaModelos.every((m) => marcasConflitantes(f.modelo, m));
+              if (conflitaTodos) continue;
+            } else {
+              const compativelAlgum = listaModelos.some((m) => modelosSaoCompativeis(f.modelo, m));
+              if (!compativelAlgum) continue;
+            }
+          }
+
+          const jaIncluida = fotosColetadas.some(
+            (ex) => (ex.imei && f.imei && digitos(ex.imei) === digitos(f.imei)) || ex === f
+          );
+          if (!jaIncluida) {
+            fotosColetadas.push(f);
           }
         }
+      }
 
-        // Consome a foto e avisa o webhook da imagem (via foto_consumida) que o formulário já unificou!
+      // Se já coletamos fotos, mas o pedido tem múltiplos aparelhos e ainda há outra foto sendo processada pelo OCR, aguarda
+      if (fotosColetadas.length > 0 && fotosColetadas.length < qtdAlvo && temFotoProcessandoAtiva) {
+        await new Promise((r) => setTimeout(r, 600));
+        continue;
+      }
+
+      if (fotosColetadas.length > 0) {
+        const ultimaFoto = fotosColetadas[fotosColetadas.length - 1];
         await Promise.all([
           supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [...chavesFoto, chaveProcessando]),
           supabase.from('whatsapp_acoes_pendentes').upsert(
@@ -1395,28 +1948,26 @@ export async function aguardarEBuscarFotoRecente(
               loja_id: lojaId,
               tipo: 'faltando_dados',
               action: 'foto_consumida',
-              params: { imei: foto.imei, timestamp: agora } as any,
-              resumo: `Foto IMEI ${foto.imei || ''} consumida pelo formulário`,
+              params: {
+                imei: ultimaFoto.imei,
+                imeis: fotosColetadas.map((f) => f.imei).filter(Boolean),
+                timestamp: agora,
+              } as any,
+              resumo: `Fotos (${fotosColetadas.length}) consumidas pelo formulário`,
               criado_em: new Date(agora).toISOString(),
             },
             { onConflict: 'chave' }
           ),
         ]);
 
-        return foto;
+        return fotosColetadas;
       }
 
-      // 2. Se ainda não há foto_recente, verifica se há uma foto_processando ativa (criada há menos de 25s)
-      const proc = (registros || []).find((r) => r.chave === chaveProcessando);
-      if (proc) {
-        const criadoProc = proc.criado_em ? new Date(proc.criado_em).getTime() : 0;
-        if (agora - criadoProc < 25_000) {
-          await new Promise((r) => setTimeout(r, 600));
-          continue;
-        }
+      if (temFotoProcessandoAtiva) {
+        await new Promise((r) => setTimeout(r, 600));
+        continue;
       }
 
-      // 3. Janela de espera inicial (ex: usuário marcou o formulário e 2 segundos depois marca a foto)
       if (esperaNovaFotoMs > 0 && Date.now() - inicio < esperaNovaFotoMs) {
         await new Promise((r) => setTimeout(r, 600));
         continue;
@@ -1424,12 +1975,38 @@ export async function aguardarEBuscarFotoRecente(
 
       break;
     } catch (err) {
-      console.warn('[Notinha Automática] Erro em aguardarEBuscarFotoRecente:', err);
+      console.warn('[Notinha Automática] Erro em aguardarEBuscarFotosRecentes:', err);
       break;
     }
   }
 
-  return null;
+  return [];
+}
+
+/**
+ * Aguarda caso exista uma foto sendo processada pelo OCR neste exato instante no mesmo chat,
+ * consome a foto recente assim que ficar pronta e registra `foto_consumida` no Supabase
+ * para que o webhook da foto não dispare mensagem avulsa.
+ */
+export async function aguardarEBuscarFotoRecente(
+  supabase: SupabaseClient,
+  lojaId: string,
+  remoteJid: string,
+  authorPhone: string,
+  modeloDesejado?: string | null,
+  maxMinutos: number = 10,
+  esperaNovaFotoMs: number = 0
+): Promise<FotoRecenteCache | null> {
+  const fotos = await aguardarEBuscarFotosRecentes(
+    supabase,
+    lojaId,
+    remoteJid,
+    authorPhone,
+    modeloDesejado ? [modeloDesejado] : undefined,
+    maxMinutos,
+    esperaNovaFotoMs
+  );
+  return fotos.length > 0 ? fotos[fotos.length - 1] : null;
 }
 
 /**

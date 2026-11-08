@@ -36,6 +36,9 @@ import { formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 import {
   detectarFormularioOuPedidoVenda,
   cruzarAparelhoComEstoque,
+  construirPropostaNotinha,
+  vincularFotoEmPropostaNotinha,
+  sincronizarResumoPropostaMultiItens,
   formatarMensagemPreviaNotinha,
   interpretarReacaoNotinha,
   interpretarTextoCorrecaoVenda,
@@ -48,11 +51,13 @@ import {
   salvarFotoRecente,
   buscarFotoRecente,
   aguardarEBuscarFotoRecente,
+  aguardarEBuscarFotosRecentes,
   aguardarOuVerificarFotoConsumida,
   limparFotoRecente,
   limparMencoesBot,
   extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
+  type FotoRecenteCache,
 } from './notinhaAutomatica';
 
 export const maxDuration = 300; // Permite até 5 minutos para ciclo de vida do PIX no Vercel
@@ -2704,19 +2709,6 @@ export async function POST(request: Request) {
 
             // ── CASO 1: A foto foi enviada na mesma mensagem com legenda de formulário de pedido / venda ──
             if (vendaDetectadaNaFoto && lojaId) {
-              if (imeiLido && imeiLido.length >= 4) {
-                vendaDetectadaNaFoto.aparelho.imei = imeiLido;
-              }
-              if (modeloLido && !vendaDetectadaNaFoto.aparelho.modelo) {
-                vendaDetectadaNaFoto.aparelho.modelo = modeloLido;
-              }
-              if (capLida && !vendaDetectadaNaFoto.aparelho.capacidade) {
-                vendaDetectadaNaFoto.aparelho.capacidade = capLida;
-              }
-              if (corLida && !vendaDetectadaNaFoto.aparelho.cor) {
-                vendaDetectadaNaFoto.aparelho.cor = corLida;
-              }
-
               await limparFotoRecente(supabase, remoteJid, authorPhone);
 
               const { data: apsEstoque } = await supabase
@@ -2727,40 +2719,29 @@ export async function POST(request: Request) {
                 .order('dataCadastro', { ascending: false })
                 .limit(600);
 
-              const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
-                modelo: vendaDetectadaNaFoto.aparelho?.modelo,
-                capacidade: vendaDetectadaNaFoto.aparelho?.capacidade,
-                cor: vendaDetectadaNaFoto.aparelho?.cor,
-                imei: vendaDetectadaNaFoto.aparelho?.imei,
-              });
+              const fotosLegenda: FotoRecenteCache[] =
+                imeiLido || modeloLido
+                  ? [
+                      {
+                        imei: imeiLido,
+                        modelo: modeloLido,
+                        capacidade: capLida,
+                        cor: corLida,
+                        pushName,
+                        timestamp: Date.now(),
+                      },
+                    ]
+                  : [];
 
-              const imeiFinalProposta =
-                vendaDetectadaNaFoto.aparelho?.imei && vendaDetectadaNaFoto.aparelho.imei.length >= 14
-                  ? vendaDetectadaNaFoto.aparelho.imei
-                  : cruzamento.aparelhoEncontrado?.imei || vendaDetectadaNaFoto.aparelho?.imei || undefined;
-
-              const proposta: PropostaNotinha = {
+              const proposta = construirPropostaNotinha({
                 id: `notinha-${Date.now()}`,
-                clienteNome: vendaDetectadaNaFoto.cliente?.nome || pushName || 'Cliente',
-                cpf: vendaDetectadaNaFoto.cliente?.cpf || undefined,
-                telefone: vendaDetectadaNaFoto.cliente?.telefone || undefined,
-                email: vendaDetectadaNaFoto.cliente?.email || undefined,
-                enderecoEntrega: vendaDetectadaNaFoto.observacoes || undefined,
-                modelo: vendaDetectadaNaFoto.aparelho?.modelo || 'Smartphone',
-                capacidade: vendaDetectadaNaFoto.aparelho?.capacidade || cruzamento.aparelhoEncontrado?.capacidade || undefined,
-                cor: vendaDetectadaNaFoto.aparelho?.cor || cruzamento.aparelhoEncontrado?.cor || undefined,
-                imei: imeiFinalProposta,
-                statusEstoque: cruzamento.mensagem,
-                aparelhoId: cruzamento.aparelhoEncontrado?.id,
-                valorTotal: vendaDetectadaNaFoto.valorTotal || 0,
-                custo: cruzamento.aparelhoEncontrado?.custo || undefined,
-                formaPagamento: vendaDetectadaNaFoto.formaPagamento || 'Não informada',
-                isUpgrade: Boolean(vendaDetectadaNaFoto.isUpgrade),
-                modeloTroca: vendaDetectadaNaFoto.tradeIn?.modelo || undefined,
-                imeiTroca: vendaDetectadaNaFoto.tradeIn?.imei || undefined,
-                valorTroca: vendaDetectadaNaFoto.tradeIn?.valor || undefined,
-                vendedor: pushName,
-              };
+                lojaId,
+                remoteJid,
+                vendaDetectada: vendaDetectadaNaFoto,
+                estoque: apsEstoque || [],
+                fotosRecentes: fotosLegenda,
+                pushName,
+              });
 
               const msgPrevia = (imeiLido ? `📸 *Foto da caixa:* IMEI \`${imeiLido}\` lido com sucesso e vinculado à notinha!\n\n` : '') + formatarMensagemPreviaNotinha(proposta);
               const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
@@ -2820,11 +2801,6 @@ export async function POST(request: Request) {
 
             // ── CASO 2: Há uma notinha pendente de confirmação no chat e o usuário mandou/marcou a foto da caixa do aparelho ──
             if (proposta && imeiLido && lojaId) {
-              proposta.imei = imeiLido;
-              if (corLida && !proposta.cor) {
-                proposta.cor = corLida;
-              }
-
               await limparFotoRecente(supabase, remoteJid, authorPhone);
 
               const { data: apsEstoque } = await supabase
@@ -2835,34 +2811,19 @@ export async function POST(request: Request) {
                 .order('dataCadastro', { ascending: false })
                 .limit(600);
 
-              const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
-                modelo: proposta.modelo,
-                capacidade: proposta.capacidade,
-                cor: proposta.cor,
-                imei: imeiLido,
-              });
-
-              proposta.statusEstoque = cruzamento.mensagem;
-              if (cruzamento.aparelhoEncontrado?.id) {
-                proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
-                proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
-                if (!proposta.cor && cruzamento.aparelhoEncontrado.cor) {
-                  proposta.cor = cruzamento.aparelhoEncontrado.cor;
-                }
-                if (!proposta.capacidade && cruzamento.aparelhoEncontrado.capacidade) {
-                  proposta.capacidade = cruzamento.aparelhoEncontrado.capacidade;
-                }
-                // Preserva o IMEI completo de 15 dígitos da foto mesmo quando o estoque tem apenas os 4 dígitos finais
-                if (
-                  cruzamento.aparelhoEncontrado.imei &&
-                  String(cruzamento.aparelhoEncontrado.imei).replace(/\D/g, '').length > imeiLido.length
-                ) {
-                  proposta.imei = cruzamento.aparelhoEncontrado.imei;
-                }
-              }
+              vincularFotoEmPropostaNotinha(
+                proposta,
+                {
+                  imei: imeiLido,
+                  modelo: modeloLido,
+                  capacidade: capLida,
+                  cor: corLida,
+                },
+                apsEstoque || []
+              );
 
               const msgPreviaAtualizada =
-                `📸 *Foto da caixa associada à notinha!*\n🔢 IMEI \`${proposta.imei}\` vinculado com sucesso ao pedido de *${proposta.clienteNome}*.\n\n` +
+                `📸 *Foto da caixa associada à notinha!*\n🔢 IMEI \`${imeiLido}\` vinculado com sucesso ao pedido de *${proposta.clienteNome}*.\n\n` +
                 formatarMensagemPreviaNotinha(proposta);
 
               const msgIdAnterior = proposta.messageId;
@@ -3191,16 +3152,18 @@ export async function POST(request: Request) {
       if (proposta) {
         if (correcaoDetectada.campo === 'valor') {
           proposta.valorTotal = correcaoDetectada.valor;
-        } else if (correcaoDetectada.campo === 'imei') {
-          proposta.imei = correcaoDetectada.valor;
+          if (Array.isArray(proposta.itens) && proposta.itens.length > 0) {
+            const valDiv = Number((proposta.valorTotal / proposta.itens.length).toFixed(2));
+            proposta.itens.forEach((it, idx) => {
+              it.valorUnitario =
+                idx === proposta.itens!.length - 1
+                  ? Number((proposta.valorTotal - valDiv * (proposta.itens!.length - 1)).toFixed(2))
+                  : valDiv;
+            });
+          }
         } else if (correcaoDetectada.campo === 'cliente') {
           proposta.clienteNome = correcaoDetectada.valor;
-        } else if (correcaoDetectada.campo === 'cor') {
-          proposta.cor = correcaoDetectada.valor;
-        }
-
-        // Reavalia estoque se o IMEI ou modelo mudou
-        if (correcaoDetectada.campo === 'imei' || correcaoDetectada.campo === 'cor') {
+        } else if (correcaoDetectada.campo === 'imei' || correcaoDetectada.campo === 'cor') {
           const { data: apsEstoque } = await supabase
             .from('aparelhos')
             .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
@@ -3209,26 +3172,27 @@ export async function POST(request: Request) {
             .order('dataCadastro', { ascending: false })
             .limit(600);
 
-          const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
-            modelo: proposta.modelo,
-            capacidade: proposta.capacidade,
-            cor: proposta.cor,
-            imei: proposta.imei,
-          });
-
-          proposta.statusEstoque = cruzamento.mensagem;
-          if (cruzamento.aparelhoEncontrado?.id) {
-            proposta.aparelhoId = cruzamento.aparelhoEncontrado.id;
-            proposta.custo = cruzamento.aparelhoEncontrado.custo || undefined;
-            if (!proposta.cor && cruzamento.aparelhoEncontrado.cor) {
-              proposta.cor = cruzamento.aparelhoEncontrado.cor;
+          if (correcaoDetectada.campo === 'imei') {
+            vincularFotoEmPropostaNotinha(proposta, { imei: correcaoDetectada.valor }, apsEstoque || []);
+          } else if (correcaoDetectada.campo === 'cor') {
+            proposta.cor = correcaoDetectada.valor;
+            if (Array.isArray(proposta.itens) && proposta.itens.length > 0) {
+              proposta.itens[0].cor = correcaoDetectada.valor;
             }
-            if (
-              cruzamento.aparelhoEncontrado.imei &&
-              String(cruzamento.aparelhoEncontrado.imei).replace(/\D/g, '').length >
-                String(proposta.imei || '').replace(/\D/g, '').length
-            ) {
-              proposta.imei = cruzamento.aparelhoEncontrado.imei;
+            const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
+              modelo: proposta.itens?.[0]?.modelo || proposta.modelo,
+              capacidade: proposta.itens?.[0]?.capacidade || proposta.capacidade,
+              cor: proposta.cor,
+              imei: proposta.itens?.[0]?.imei || proposta.imei,
+            });
+            proposta.statusEstoque = cruzamento.mensagem;
+            if (proposta.itens && proposta.itens.length > 0) {
+              proposta.itens[0].statusEstoque = cruzamento.mensagem;
+              if (cruzamento.aparelhoEncontrado?.id) {
+                proposta.itens[0].aparelhoId = cruzamento.aparelhoEncontrado.id;
+                proposta.itens[0].custo = cruzamento.aparelhoEncontrado.custo || undefined;
+              }
+              sincronizarResumoPropostaMultiItens(proposta);
             }
           }
         }
@@ -3249,35 +3213,32 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA) ──
+    // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA COM 1 OU MAIS APARELHOS) ──
     const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
     if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal) && lojaId) {
-      // 1. Verifica (e aguarda caso o OCR ainda esteja rodando ou o usuário marque a foto logo em seguida) se há foto da etiqueta via Supabase
-      let imeiFotoVinculada: string | null = null;
-      if (!vendaDetectada.aparelho?.imei) {
+      const listaAparelhosPedido =
+        Array.isArray(vendaDetectada.aparelhos) && vendaDetectada.aparelhos.length > 0
+          ? vendaDetectada.aparelhos
+          : [vendaDetectada.aparelho];
+
+      const algumSemImei = listaAparelhosPedido.some((ap) => !ap?.imei);
+      let fotosRecentesVinculadas: FotoRecenteCache[] = [];
+
+      if (algumSemImei) {
         const esperaNovaFotoMs = marcacaoBot.foiMarcado ? 3600 : 1200;
-        const fotoRecente = await aguardarEBuscarFotoRecente(
+        const modelosAlvo = listaAparelhosPedido.map((ap) => ap?.modelo);
+        fotosRecentesVinculadas = await aguardarEBuscarFotosRecentes(
           supabase,
           lojaId,
           remoteJid,
           authorPhone,
-          vendaDetectada.aparelho?.modelo,
+          modelosAlvo,
           10,
           esperaNovaFotoMs
         );
-        if (fotoRecente?.imei) {
-          imeiFotoVinculada = fotoRecente.imei;
-          vendaDetectada.aparelho.imei = fotoRecente.imei;
-          if (!vendaDetectada.aparelho.cor && fotoRecente.cor) {
-            vendaDetectada.aparelho.cor = fotoRecente.cor;
-          }
-          if (!vendaDetectada.aparelho.capacidade && fotoRecente.capacidade) {
-            vendaDetectada.aparelho.capacidade = fotoRecente.capacidade;
-          }
-        }
       }
 
-      // Busca estoque completo (priorizando ativos) para conferir aparelho pelo IMEI (15 dígitos ou final de 4 dígitos) ou modelo
+      // Busca estoque completo (priorizando ativos) para conferir aparelhos pelo IMEI (15 dígitos ou final de 4 dígitos) ou modelo
       const { data: apsEstoque } = await supabase
         .from('aparelhos')
         .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
@@ -3286,48 +3247,25 @@ export async function POST(request: Request) {
         .order('dataCadastro', { ascending: false })
         .limit(600);
 
-      const cruzamento = cruzarAparelhoComEstoque(apsEstoque || [], {
-        modelo: vendaDetectada.aparelho?.modelo,
-        capacidade: vendaDetectada.aparelho?.capacidade,
-        cor: vendaDetectada.aparelho?.cor,
-        imei: vendaDetectada.aparelho?.imei,
+      const proposta = construirPropostaNotinha({
+        id: `notinha-${Date.now()}`,
+        lojaId,
+        remoteJid,
+        vendaDetectada,
+        estoque: apsEstoque || [],
+        fotosRecentes: fotosRecentesVinculadas,
+        pushName,
       });
 
-      const valorTotalNotinha = vendaDetectada.valorTotal || 0;
+      const imeisDaFoto = fotosRecentesVinculadas.map((f) => f.imei).filter(Boolean);
+      const cabecalhoFotoAssociada =
+        imeisDaFoto.length > 1
+          ? `📸 *Fotos das caixas associadas:* IMEIs \`${imeisDaFoto.join('`, `')}\` vinculados automaticamente!\n\n`
+          : imeisDaFoto.length === 1
+          ? `📸 *Foto da caixa associada:* IMEI \`${imeisDaFoto[0]}\` vinculado automaticamente da foto enviada!\n\n`
+          : '';
 
-      // Preserva o IMEI completo de 15 dígitos da foto mesmo quando o estoque tem apenas os 4 dígitos finais
-      const imeiProposta =
-        vendaDetectada.aparelho?.imei && String(vendaDetectada.aparelho.imei).replace(/\D/g, '').length >= 14
-          ? vendaDetectada.aparelho.imei
-          : cruzamento.aparelhoEncontrado?.imei || vendaDetectada.aparelho?.imei || undefined;
-
-      const proposta: PropostaNotinha = {
-        id: `notinha-${Date.now()}`,
-        clienteNome: vendaDetectada.cliente?.nome || pushName || 'Cliente',
-        cpf: vendaDetectada.cliente?.cpf || undefined,
-        telefone: vendaDetectada.cliente?.telefone || undefined,
-        email: vendaDetectada.cliente?.email || undefined,
-        enderecoEntrega: vendaDetectada.observacoes || undefined,
-        modelo: vendaDetectada.aparelho?.modelo || 'Smartphone',
-        capacidade: vendaDetectada.aparelho?.capacidade || cruzamento.aparelhoEncontrado?.capacidade || undefined,
-        cor: vendaDetectada.aparelho?.cor || cruzamento.aparelhoEncontrado?.cor || undefined,
-        imei: imeiProposta,
-        statusEstoque: cruzamento.mensagem,
-        aparelhoId: cruzamento.aparelhoEncontrado?.id,
-        valorTotal: valorTotalNotinha,
-        custo: cruzamento.aparelhoEncontrado?.custo || undefined,
-        formaPagamento: vendaDetectada.formaPagamento || 'Não informada',
-        isUpgrade: Boolean(vendaDetectada.isUpgrade),
-        modeloTroca: vendaDetectada.tradeIn?.modelo || undefined,
-        imeiTroca: vendaDetectada.tradeIn?.imei || undefined,
-        valorTroca: vendaDetectada.tradeIn?.valor || undefined,
-        vendedor: pushName,
-      };
-
-      const msgPrevia =
-        (imeiFotoVinculada
-          ? `📸 *Foto da caixa associada:* IMEI \`${imeiFotoVinculada}\` vinculado automaticamente da foto enviada!\n\n`
-          : '') + formatarMensagemPreviaNotinha(proposta);
+      const msgPrevia = cabecalhoFotoAssociada + formatarMensagemPreviaNotinha(proposta);
       const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
       const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
       await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
