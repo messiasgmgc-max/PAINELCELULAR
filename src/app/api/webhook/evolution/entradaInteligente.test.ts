@@ -5,6 +5,7 @@ import {
   parseTextoEntradaAparelhos,
   parseLinhaEntrada,
   normalizarNomeModelo,
+  ehRelatorioOuConferencia,
 } from './entradaInteligente';
 
 describe('Entrada Inteligente de Aparelhos', () => {
@@ -133,5 +134,62 @@ describe('Entrada Inteligente de Aparelhos', () => {
     assert.equal(itemC.modelo, 'iPhone 16 Pro');
     assert.equal(itemC.custo, 5200);
     assert.equal(itemC.imei, '356829104829102');
+  });
+
+  it('NUNCA interpreta relatórios de conferência de estoque ou listas de faltantes como entrada', () => {
+    const relatorioConferenciaReal = `📦 *CONFERÊNCIA DE ESTOQUE - LUCAS IMPORTS *
+📅 Data: 09/11/2026 às 09:06
+📊 Resumo: 86 de 105 encontrados (19 faltantes)
+
+⚠️ *APARELHOS FALTANTES (19):*
+
+🔹 *iPhone 13* (7 un):
+  - iPhone 13 · 128GB · ⚪️  Branco 3265
+  - iPhone 13 · 128GB · ⚫️  Preto · IMEI final: ...5314
+  - iPhone 13 · 128GB · ⚫️ Preto · IMEI final: ...6648
+  - iPhone 13 · 128GB · 🌸 Rosa · IMEI final: ...3681
+  - iPhone 13 · 128GB · 🔵 Azul · IMEI final: ...6814
+  - iPhone 13 · 128GB · 🔵 Azul · IMEI final: ...9802
+  - iPhone 13 · 128GB · 🟢 Verde · IMEI final: ...9230
+
+🔹 *iPhone 14 Pro* (2 un):
+  - iPhone 14 Pro · 128GB · 🟣  Roxo · IMEI final: ...9576
+  - iPhone 14 Pro · 128GB · 🟣  Roxo · IMEI final: ...8066
+
+🔹 *iPhone 14 Pro Max* (2 un):
+  - iPhone 14 Pro Max · 128GB
+  - iPhone 14 Pro Max · 128GB · ⚫️  Preto · IMEI final: ...5601
+
+🔹 *iPhone 15* (3 un):
+  - iPhone 15 · 128GB
+  - iPhone 15 · 128GB · 🔵 Azul · IMEI final: ...6714
+  - iPhone 15 · 128GB · Azul
+
+🔹 *iPhone 15 Pro Max* (3 un):
+  - iPhone 15 Pro Max · 256GB
+  - iPhone 15 Pro Max · 256GB · 🔵  Azul · IMEI final: ...8508
+  - iPhone 15 Pro Max · 512GB · Preto
+
+🔹 *iPhone Apple iPhone 16 Pro* (1 un):
+  - iPhone Apple iPhone 16 Pro · 128GB
+
+🔹 *iPhone 17 Pro* (1 un):
+  - iPhone 17 Pro · 256GB · ⚪️  Branco · IMEI final: ...9305
+
+_Relatório gerado pelo Painel Phone Center_`;
+
+    assert.equal(ehRelatorioOuConferencia(relatorioConferenciaReal), true);
+    assert.equal(ehMensagemDeEntradaEstoque(relatorioConferenciaReal), false);
+    assert.deepEqual(parseTextoEntradaAparelhos(relatorioConferenciaReal), []);
+
+    // Outras variantes de conferência e relatórios de sistema
+    assert.equal(ehRelatorioOuConferencia('📦 CONFERÊNCIA DE ESTOQUE finalizada com sucesso'), true);
+    assert.equal(ehRelatorioOuConferencia('Relatório de saídas do dia 09/11'), true);
+    assert.equal(ehRelatorioOuConferencia('Extrato de vendas do mês'), true);
+    assert.equal(ehRelatorioOuConferencia('Aparelhos faltantes na auditoria'), true);
+
+    // Entrada legítima deve continuar funcionando
+    assert.equal(ehRelatorioOuConferencia('Entradas: iPhone 13 128gb azul 2200'), false);
+    assert.equal(ehMensagemDeEntradaEstoque('Entradas: iPhone 13 128gb azul 2200'), true);
   });
 });

@@ -31,7 +31,7 @@ import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo
 import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
-import { ehMensagemDeEntradaEstoque } from './entradaInteligente';
+import { ehMensagemDeEntradaEstoque, ehRelatorioOuConferencia } from './entradaInteligente';
 import { formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 import {
   detectarFormularioOuPedidoVenda,
@@ -5153,6 +5153,14 @@ Digite: *!broadcast agora*`;
 
       // Funil de confiança - Nível Alto: executa / confirma
       if (geminiPlan.confianca === 'alta') {
+        if (
+          (geminiPlan.action === 'create_aparelhos_lote' || geminiPlan.action === 'create_aparelho') &&
+          ehRelatorioOuConferencia(textContent)
+        ) {
+          console.log('[IA] Mensagem identificada como relatório/conferência de estoque; ignorando tentativa indevida de cadastro em lote.');
+          return NextResponse.json({ status: 'ignored', message: 'Relatório/conferência de estoque não gera cadastro de novos aparelhos.' }, { status: 200 });
+        }
+
         const capability = obterCapability(geminiPlan.action);
 
         if (capability && lojaId) {

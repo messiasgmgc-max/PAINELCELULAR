@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, registrarEntradaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
-import { parseTextoEntradaAparelhos, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor } from '../entradaInteligente';
+import { parseTextoEntradaAparelhos, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor, ehRelatorioOuConferencia } from '../entradaInteligente';
 import { extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
@@ -249,6 +249,10 @@ export const capabilitiesEstoque: Capability[] = [
     ],
     async executar(ctx, params) {
       const textoBruto = texto(params, 'texto', 'lista', 'aparelhos', 'conteudo');
+      if (ehRelatorioOuConferencia(textoBruto)) {
+        return 'ℹ️ A mensagem compartilhada é um relatório/conferência de estoque e não uma lista de novas entradas. Nenhuma alteração foi realizada no estoque.';
+      }
+
       let itensParaCadastrar: ItemEntradaDetectado[] = [];
 
       if (Array.isArray(params.itens) && params.itens.length > 0) {

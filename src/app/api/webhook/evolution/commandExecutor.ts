@@ -174,7 +174,7 @@ FUNIL DE CONFIANÇA (confianca):
      Ex: "muda o custo da venda do iphone 13 para 1900" -> confianca: "alta", params: {"modelo": "iPhone 13", "novoCusto": 1900}
    - "create_aparelho": Precisa de modelo e preço (capacidade e cor são opcionais, IMEI é opcional).
      Ex: "cadastra um iphone 12 128gb preto por 1800" -> confianca: "alta", params: {"marca": "Apple", "modelo": "iPhone 12", "capacidade": "128gb", "cor": "preto", "preco": 1800}
-   - "create_aparelhos_lote": Quando o usuário listar múltiplos aparelhos para dar entrada ou cadastrar de uma vez (em uma linha ou várias).
+   - "create_aparelhos_lote": Quando o usuário listar múltiplos aparelhos para dar entrada ou cadastrar de uma vez (em uma linha ou várias). NUNCA acione esta ação para relatórios, conferências de estoque ("CONFERÊNCIA DE ESTOQUE", "APARELHOS FALTANTES", "Painel Phone Center", "resumo de encontrados/faltantes", extratos ou listas de saídas/perdas). Relatórios são apenas informativos!
      Ex: "Entradas: iPhone 13 128gb azul 2200, iPhone 14 128gb preto 3100" -> confianca: "alta", params: {"texto": "iPhone 13 128gb azul 2200, iPhone 14 128gb preto 3100"}
      Ex: "dar entrada 15 pro max 256 por 5500 imei 3500... e 13 128 por 2300" -> confianca: "alta", params: {"texto": "15 pro max 256 por 5500 imei 3500... e 13 128 por 2300"}
    - "update_preco": Precisa de identificador do aparelho (código, nome, modelo ou imei) e novo valor.

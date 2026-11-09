@@ -296,11 +296,34 @@ export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'semin
 }
 
 /**
+ * Detecta se uma mensagem é um relatório de sistema, conferência de estoque, lista de faltantes ou extrato,
+ * os quais NUNCA devem ser interpretados como novas entradas no estoque.
+ */
+export function ehRelatorioOuConferencia(texto?: string | null): boolean {
+  if (!texto || typeof texto !== 'string') return false;
+  const t = texto.toLowerCase();
+  return (
+    t.includes('conferência de estoque') ||
+    t.includes('conferencia de estoque') ||
+    t.includes('aparelhos faltantes') ||
+    t.includes('aparelho faltante') ||
+    t.includes('relatório gerado pelo painel') ||
+    t.includes('relatorio gerado pelo painel') ||
+    t.includes('painel phone center') ||
+    (t.includes('encontrados') && t.includes('faltantes')) ||
+    /extrato\s+de\s+(?:vendas|estoque|sa[ií]das|caixa)/i.test(t) ||
+    /relat[oó]rio\s+de\s+(?:vendas|estoque|sa[ií]das|confer[eê]ncia|perdas|extravios)/i.test(t) ||
+    /confer[eê]ncia\s+finalizada/i.test(t)
+  );
+}
+
+/**
  * Detecta se uma mensagem do WhatsApp é um pedido explícito de entrada de aparelhos.
  * Aceita marcações como "*Entrada:*", "📦 Entrada", "Entradas:", "dar entrada", etc.
  */
 export function ehMensagemDeEntradaEstoque(texto: string): boolean {
   if (!texto || typeof texto !== 'string') return false;
+  if (ehRelatorioOuConferencia(texto)) return false;
   const t = texto.trim();
   const regexGatilho = /^(?:[\p{Extended_Pictographic}*•\-_\s]*)(?:!(?:entradas?|importar)|entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou\s*hoje|chegaram\s*os\s*aparelhos)\b/iu;
   return regexGatilho.test(t);
@@ -312,6 +335,7 @@ export function ehMensagemDeEntradaEstoque(texto: string): boolean {
  */
 export function parseTextoEntradaAparelhos(texto: string): ItemEntradaDetectado[] {
   if (!texto || !texto.trim()) return [];
+  if (ehRelatorioOuConferencia(texto)) return [];
 
   // Remove o prefixo de gatilho (incluindo emojis, asteriscos de negrito, etc.)
   let limpo = texto.trim()
