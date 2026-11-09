@@ -368,7 +368,7 @@ export interface ContextoConversaNatural {
   resumoGarantiasAtivas?: string;
   historicoChat?: MensagemHistorico[];
   isGroup?: boolean;
-  modoChat?: 'teste' | 'padrao' | 'off';
+  modoChat?: 'teste' | 'padrao' | 'off' | 'vendas';
   detalhesSaidasFormatado?: string;
   detalhesEntradasRecentes?: string;
   detalhesVendasRecentes?: string;

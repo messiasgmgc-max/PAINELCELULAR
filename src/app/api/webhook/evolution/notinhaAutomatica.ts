@@ -2299,15 +2299,25 @@ export function propostaJaContemImei(
   const imeiLimpo = digitos(imei);
   if (imeiLimpo.length < 4) return false;
 
+  const matchesImei = (val?: string | null) => {
+    if (!val) return false;
+    const limpo = digitos(val);
+    if (!limpo) return false;
+    if (limpo === imeiLimpo) return true;
+    if (imeiLimpo.length >= 14 && limpo.includes(imeiLimpo)) return true;
+    if (limpo.length >= 14 && imeiLimpo.includes(limpo)) return true;
+    const partes = String(val).split(/[\s,/]+/).map((p) => digitos(p)).filter((p) => p.length >= 4);
+    return partes.some((p) => p === imeiLimpo || (imeiLimpo.length >= 14 && p.includes(imeiLimpo)));
+  };
+
   if (Array.isArray(proposta.itens) && proposta.itens.length > 0) {
-    if (proposta.itens.some((it) => it.imei && digitos(it.imei) === imeiLimpo)) {
+    if (proposta.itens.some((it) => matchesImei(it.imei))) {
       return true;
     }
   }
 
-  if (proposta.imei) {
-    const partes = proposta.imei.split('/').map((p) => digitos(p));
-    if (partes.includes(imeiLimpo)) return true;
+  if (matchesImei(proposta.imei)) {
+    return true;
   }
 
   return false;

@@ -1008,6 +1008,79 @@ Pagamento confirmado`;
   assert.equal(propostaJaContemImei(proposta, '359999999999999'), false);
 });
 
+test('!modo vendas: aceita apenas formulários, confirmações/correções de notinha e comandos de modo, ignorando conversas paralelas', () => {
+  const filtrarOperacaoModoVendas = (
+    texto: string,
+    temNotinhaPendente: boolean,
+    marcouBot: boolean = false
+  ): boolean => {
+    const lower = texto.toLowerCase().trim();
+    const ehComandoModo = lower.startsWith('!modo') || lower.startsWith('!config');
+    const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(texto));
+    const ehPossivelConfirmacao = /^(?:sim|confirmar|confirmo|emitir|gerar\s*nota|gerar\s*notinha|aprovar|ok|pode\s*emitir|n[aã]o|cancelar|cancela|cancelado|esquece|anular)$/i.test(texto.trim());
+    const ehPossivelCorrecao = Boolean(interpretarTextoCorrecaoVenda(texto));
+
+    return (
+      ehComandoModo ||
+      ehFormularioVenda ||
+      (ehPossivelConfirmacao && temNotinhaPendente) ||
+      (ehPossivelCorrecao && temNotinhaPendente) ||
+      (marcouBot && (
+        ehFormularioVenda ||
+        Boolean(detectarFormularioOuPedidoVenda(texto)) ||
+        (ehPossivelConfirmacao && temNotinhaPendente) ||
+        (ehPossivelCorrecao && temNotinhaPendente)
+      ))
+    );
+  };
+
+  // 1. Mensagens paralelas que DEVEM ser 100% ignoradas no modo vendas:
+  assert.equal(filtrarOperacaoModoVendas('Bom dia pessoal!', false), false);
+  assert.equal(filtrarOperacaoModoVendas('Quanto tá saindo o 15 Pro Max 256gb?', false), false);
+  assert.equal(filtrarOperacaoModoVendas('!estoque', false), false);
+  assert.equal(filtrarOperacaoModoVendas('!abater joao 500', false), false);
+  assert.equal(filtrarOperacaoModoVendas('Entrada iPhone 13 128gb azul 2800', false), false);
+  assert.equal(filtrarOperacaoModoVendas('Alguém tem cabo tipo c aí na loja?', false), false);
+  // "SIM" ou "CANCELAR" avulso em conversa paralela sem notinha pendente: ignorado!
+  assert.equal(filtrarOperacaoModoVendas('sim', false), false);
+  assert.equal(filtrarOperacaoModoVendas('ok', false), false);
+  assert.equal(filtrarOperacaoModoVendas('cancelar', false), false);
+
+  // 2. Comandos de modo que DEVEM ser aceitos para gerenciar o bot:
+  assert.equal(filtrarOperacaoModoVendas('!modo', false), true);
+  assert.equal(filtrarOperacaoModoVendas('!modo vendas', false), true);
+  assert.equal(filtrarOperacaoModoVendas('!modo padrao', false), true);
+  assert.equal(filtrarOperacaoModoVendas('!config', false), true);
+
+  // 3. Formulário de venda com dados do cliente e aparelho: DEVE ser aceito!
+  const formVenda = `Para finalizar seu pedido, preencha os dados abaixo 👇
+Data da compra: 09/11/2026
+👤 DADOS PESSOAIS
+• Nome completo: Luan Cássio
+• CPF: 164.144.496-79
+• Telefone: 31 99999-9999
+💳 FORMA DE PAGAMENTO
+Valor total: R$ 4.500
+Modelo:
+1 - iPhone 15 Pro 256GB`;
+  assert.equal(filtrarOperacaoModoVendas(formVenda, false), true);
+
+  // 4. Confirmação / Cancelamento com notinha pendente: DEVE ser aceito!
+  assert.equal(filtrarOperacaoModoVendas('SIM', true), true);
+  assert.equal(filtrarOperacaoModoVendas('confirmar', true), true);
+  assert.equal(filtrarOperacaoModoVendas('cancelar', true), true);
+  assert.equal(filtrarOperacaoModoVendas('ok', true), true);
+
+  // 5. Correção de dado com notinha pendente: DEVE ser aceito!
+  assert.equal(filtrarOperacaoModoVendas('o valor é 4800', true), true);
+  assert.equal(filtrarOperacaoModoVendas('troca a cor para preto', true), true);
+
+  // 6. Marcar o bot em formulário ou resposta de notinha pendente: DEVE ser aceito!
+  assert.equal(filtrarOperacaoModoVendas(formVenda, false, true), true);
+  assert.equal(filtrarOperacaoModoVendas('confirmar', true, true), true);
+});
+
+
 
 
 
