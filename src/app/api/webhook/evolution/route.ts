@@ -3289,7 +3289,7 @@ export async function POST(request: Request) {
 
     // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA COM 1 OU MAIS APARELHOS) ──
     const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
-    if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal) && lojaId) {
+    if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal || vendaDetectada.cliente?.nome) && lojaId) {
       const listaAparelhosPedido =
         Array.isArray(vendaDetectada.aparelhos) && vendaDetectada.aparelhos.length > 0
           ? vendaDetectada.aparelhos

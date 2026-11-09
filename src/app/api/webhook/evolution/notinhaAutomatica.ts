@@ -507,9 +507,30 @@ export function detectarFormularioOuPedidoVenda(texto: string): ParsedVenda | nu
     }
   }
 
-  // Se não identificou nem modelo nem valor, não é uma venda válida
+  // Se não identificou nem modelo nem valor, verifica se é um formulário preenchido de pedido
+  // (ex: vendedor enviou os dados pessoais e de entrega, e a foto/modelo vem em anexo ou na sequência)
   if (!parsed.aparelho?.modelo && !parsed.valorTotal) {
-    return null;
+    const ehFormularioPreenchido =
+      Boolean(parsed.cliente?.nome) &&
+      (Boolean(parsed.cliente?.cpf) ||
+        Boolean(parsed.cliente?.telefone) ||
+        Boolean(parsed.cliente?.email) ||
+        /formul[aá]rio|para\s+finalizar\s+seu\s+pedido|dados\s+pessoais|endere[cç]o\s+para\s+entrega/i.test(t));
+
+    if (ehFormularioPreenchido) {
+      parsed.aparelho = {
+        modelo: 'Smartphone',
+        condicao: 'seminovo',
+      };
+      parsed.aparelhos = [{ ...parsed.aparelho }];
+      if (!parsed.camposFaltantes) parsed.camposFaltantes = [];
+      if (!parsed.camposFaltantes.includes('modelo')) parsed.camposFaltantes.push('modelo');
+      if (!parsed.valorTotal && !parsed.camposFaltantes.includes('valorTotal')) {
+        parsed.camposFaltantes.push('valorTotal');
+      }
+    } else {
+      return null;
+    }
   }
 
   // Se tem modelo, limpa e normaliza (inclusive na lista de múltiplos aparelhos e trocas)

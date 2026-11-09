@@ -141,8 +141,11 @@ export function sanitizarECompletarVendaParsed(
   parsedJsonInput: Partial<ParsedVenda> | null | undefined,
   rawInputText: string
 ): ParsedVenda {
-  // Remove menções numéricas de WhatsApp/LID (ex: @5531994986029 ou @105278892703905) para nunca confundir com IMEI ou telefone
-  const trimmedText = String(rawInputText || '').replace(/(^|[\s,;(])@\d{6,22}\b/g, '$1').trim();
+  // Remove menções numéricas de WhatsApp/LID (ex: @5531994986029 ou @105278892703905) e caracteres invisíveis
+  const trimmedText = String(rawInputText || '')
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, '')
+    .replace(/(^|[\s,;(])@\d{6,22}\b/g, '$1')
+    .trim();
 
   const result: ParsedVenda = {
     cliente: parsedJsonInput?.cliente ? { ...parsedJsonInput.cliente } : {},
@@ -170,7 +173,7 @@ export function sanitizarECompletarVendaParsed(
 
   // 2. CLIENTE - Nome
   if (!result.cliente.nome) {
-    const nameMatch = trimmedText.match(/(?:Nome|Nome completo|Cliente):\s*([^\n\r•]+)/i);
+    const nameMatch = trimmedText.match(/(?:Nome|Nome completo|Cliente)\s*:\s*([^\n\r•]+)/i);
     if (nameMatch) {
       result.cliente.nome = nameMatch[1].trim();
     }
@@ -178,7 +181,7 @@ export function sanitizarECompletarVendaParsed(
 
   // 3. CLIENTE - CPF
   if (!result.cliente.cpf) {
-    const cpfMatch = trimmedText.match(/(?:CPF):\s*([0-9.-]+)/i);
+    const cpfMatch = trimmedText.match(/(?:CPF)\s*:\s*([0-9.-]+)/i);
     if (cpfMatch) {
       result.cliente.cpf = cpfMatch[1].trim();
     }
@@ -186,7 +189,7 @@ export function sanitizarECompletarVendaParsed(
 
   // 4. CLIENTE - Data de Nascimento
   if (!result.cliente.dataNascimento) {
-    const nascMatch = trimmedText.match(/(?:Data de nascimento|Nascimento|Dt Nasc):\s*([0-9/.-]+)/i);
+    const nascMatch = trimmedText.match(/(?:Data de nascimento|Nascimento|Dt Nasc)\s*:\s*([0-9/.-]+)/i);
     if (nascMatch) {
       const raw = nascMatch[1].trim();
       // Formata se for apenas 8 dígitos (ex: 22011999 -> 22/01/1999)
@@ -200,7 +203,7 @@ export function sanitizarECompletarVendaParsed(
 
   // 5. CLIENTE - Telefone
   if (!result.cliente.telefone) {
-    const telMatch = trimmedText.match(/(?:Telefone\s*\/\s*WhatsApp|Telefone|WhatsApp|Tel|Celular):\s*([0-9\s()-]+)/i);
+    const telMatch = trimmedText.match(/(?:Telefone\s*\/\s*WhatsApp|Telefone|WhatsApp|Tel|Celular)\s*:\s*([0-9\s()-]+)/i);
     if (telMatch) {
       result.cliente.telefone = telMatch[1].trim();
     }
@@ -209,14 +212,14 @@ export function sanitizarECompletarVendaParsed(
   // 6. DETECÇÃO ROBUSTA DE UPGRADE / TROCA (TRADE-IN)
   // 6.1 Checkbox marcado específico: (X) Upgrade - Modelo: ... ou [X] Upgrade: ...
   const checkboxUpgradeMatch = trimmedText.match(
-    /(?:\(\s*(?:[Xx]|✔|✓)\s*\)|\[\s*(?:[Xx]|✔|✓)\s*\])\s*(?:Upgrade|Troca)(?:\s*-\s*Modelo|\s*\/\s*Troca)?:\s*([^\n\r]+)/i
+    /(?:\(\s*(?:[Xx]|✔|✓)\s*\)|\[\s*(?:[Xx]|✔|✓)\s*\])\s*(?:Upgrade|Troca)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:\s*([^\n\r]+)/i
   );
 
   // 6.2 Linha de texto com modelo de troca
   const textoTrocaMatch =
     checkboxUpgradeMatch ||
     trimmedText.match(
-      /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo|\s*\/\s*Troca)?:\s*([^\n\r]+)/i
+      /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:\s*([^\n\r]+)/i
     );
 
   // Validação estrita se o texto capturado NÃO é apenas checkbox vazio ou negativa (ex: "( ) Outro:", "( ) Não", "-")
@@ -320,7 +323,7 @@ export function sanitizarECompletarVendaParsed(
   // Extrai valor do texto se não veio da IA
   if (!result.valorTotal || result.valorTotal <= 0) {
     const valorMatch =
-      trimmedText.match(/(?:Valor total|Total a pagar|Total|Valor):\s*R?\$?\s*([0-9.,]+)/i) ||
+      trimmedText.match(/(?:Valor total|Total a pagar|Total|Valor)\s*:\s*R?\$?\s*([0-9.,]+)/i) ||
       trimmedText.match(/R\$\s*([0-9.,]+)/i);
     if (valorMatch) {
       const clean = valorMatch[1].replace(/\./g, '').replace(',', '.');
@@ -332,7 +335,7 @@ export function sanitizarECompletarVendaParsed(
   }
 
   // Se houver menção explícita a Volta / Restante
-  const voltaMatch = trimmedText.match(/(?:Volta|Restante|Diferen[cç]a|Saldo a pagar):\s*R?\$?\s*([0-9.,]+)/i);
+  const voltaMatch = trimmedText.match(/(?:Volta|Restante|Diferen[cç]a|Saldo a pagar)\s*:\s*R?\$?\s*([0-9.,]+)/i);
   if (voltaMatch) {
     const valVolta = parseFloat(voltaMatch[1].replace(/\./g, '').replace(',', '.'));
     if (!isNaN(valVolta) && valVolta > 0) {
@@ -532,7 +535,7 @@ export function sanitizarECompletarVendaParsed(
     // Ignora linha de opção de pagamento "( ) Upgrade - Modelo:"
     if (/^\s*(?:\(\s*[xX✔✓]?\s*\)|\[\s*[xX✔✓]?\s*\])\s*(?:upgrade|troca|trade[- ]?in)/i.test(lin)) continue;
     if (/(?:upgrade|trade[- ]?in)\s*-\s*modelo\s*:/i.test(lin)) continue;
-    const m = lin.match(/^\s*[•*-]?\s*(?:Modelos?|Aparelhos?|Produtos?):\s*(.*)$/i);
+    const m = lin.match(/^\s*[•*-\s]*\b(?:Modelos?|Aparelhos?|Produtos?)\s*:\s*(.*)$/i);
     if (m) {
       idxSecaoModelo = i;
       const naMesmaLinha = m[1].trim();
@@ -708,7 +711,7 @@ export function sanitizarECompletarVendaParsed(
 
   // Linha explícita de cor no formulário (ex: "Cor: 🖤", "Cor: Desert", "Cor: Preto")
   if (!result.aparelho.cor && !extraiuMultiplosOuUpgradeSeta) {
-    const linhaCorMatch = trimmedText.match(/(?:^|\n|\r)\s*(?:Cor|Cores):\s*([^\n\r]+)/i);
+    const linhaCorMatch = trimmedText.match(/(?:^|\n|\r)\s*(?:Cor|Cores)\s*:\s*([^\n\r]+)/i);
     if (linhaCorMatch) {
       const corExtraida = extrairCorDeTexto(linhaCorMatch[1]);
       if (corExtraida) {
@@ -747,8 +750,8 @@ export function sanitizarECompletarVendaParsed(
   // IMEI geral fallback (reconhece IMEI completo de 15 dígitos ou final de 4 dígitos)
   if (!result.aparelho.imei && aparelhosExtraidos.length <= 1) {
     const imeiRotuloMatch =
-      trimmedText.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei\s*\(?\s*(?:últimos\s*)?4\s*(?:d[íi]gitos)?\s*\)?|imei|imei\s*1|n[ºo°]\s*s[eé]rie|serial):\s*#?([0-9A-Za-z]{4,18})/i) ||
-      trimmedText.match(/(?:final):\s*#?([0-9]{4,6})\b/i) ||
+      trimmedText.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei\s*\(?\s*(?:últimos\s*)?4\s*(?:d[íi]gitos)?\s*\)?|imei|imei\s*1|n[ºo°]\s*s[eé]rie|serial)\s*:\s*#?([0-9A-Za-z]{4,18})/i) ||
+      trimmedText.match(/(?:final)\s*:\s*#?([0-9]{4,6})\b/i) ||
       trimmedText.match(/\b([0-9]{14,16})\b/);
     if (imeiRotuloMatch) {
       result.aparelho.imei = imeiRotuloMatch[1].trim();
@@ -763,7 +766,7 @@ export function sanitizarECompletarVendaParsed(
   // Código / ID do aparelho fallback
   if (!result.aparelho.codigo) {
     const codMatch =
-      trimmedText.match(/(?:COD|CÓD|CODIGO|CÓDIGO|ID|ID APARELHO):\s*#?([0-9A-Za-z]{6,12})/i) ||
+      trimmedText.match(/(?:COD|CÓD|CODIGO|CÓDIGO|ID|ID APARELHO)\s*:\s*#?([0-9A-Za-z]{6,12})/i) ||
       trimmedText.match(/(?:COD|CÓD)\s+([0-9A-Za-z]{6,12})/i) ||
       trimmedText.match(/#([0-9]{6,10})/);
     if (codMatch) {
@@ -813,7 +816,7 @@ export function sanitizarECompletarVendaParsed(
 
   if (!result.dataVenda) {
     const rotuloVendaMatch = trimmedText.match(
-      /(?:Data da Venda|Data Venda|Data do Pedido|Venda realizada em|Data:\s*)(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/i
+      /(?:Data da Venda|Data Venda|Data do Pedido|Venda realizada em|Data)\s*:\s*(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/i
     );
     if (rotuloVendaMatch) {
       const rawDate = rotuloVendaMatch[1];
