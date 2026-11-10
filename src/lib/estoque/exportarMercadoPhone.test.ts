@@ -205,4 +205,44 @@ describe("Exportação para Mercado Phone (MP)", () => {
       assert.ok(!r.includes("f"));
     }
   });
+
+  it("deve gerar CSV de estoque compatível com Mercado Phone com ponto e vírgula e UTF-8 BOM", () => {
+    const { gerarCsvEstoqueMercadoPhone } = require("./exportarMercadoPhone");
+
+    const aparelhos: AparelhoExportacaoMP[] = [
+      {
+        modelo: "iPhone 15 Pro Max",
+        imei: "354892019482019",
+        capacidade: "256 GB",
+        saudeBateria: "95%",
+        cor: "Preto",
+        condicao: "seminovo",
+        preco: 5200.0,
+        custo: 4000.0,
+      },
+    ];
+
+    const csvDireto = gerarCsvEstoqueMercadoPhone(aparelhos, { separador: ";" });
+    assert.ok(csvDireto.startsWith("\uFEFF"), "Deve conter UTF-8 BOM no início");
+
+    const linhas = csvDireto.replace(/^\uFEFF/, "").split("\r\n");
+    assert.equal(linhas.length, 2, "Deve conter cabeçalho e 1 linha de aparelho");
+
+    const colunasCabecalho = linhas[0].split(";");
+    assert.equal(colunasCabecalho[0], "Tipo");
+    assert.equal(colunasCabecalho[1], "Modelo Aparelho");
+    assert.equal(colunasCabecalho[3], "Imei");
+    assert.equal(colunasCabecalho[8], "Cor");
+
+    const colunasProduto = linhas[1].split(";");
+    assert.equal(colunasProduto[0], "Celular");
+    assert.equal(colunasProduto[1], "iPhone 15 Pro Max");
+    assert.equal(colunasProduto[3], "354892019482019");
+    assert.equal(colunasProduto[7], "95");
+    assert.equal(colunasProduto[8], "PRETO");
+    assert.equal(colunasProduto[9], "SEMINOVO");
+    assert.equal(colunasProduto[13], "Disponível para venda");
+    assert.equal(colunasProduto[15], "4000,00");
+    assert.equal(colunasProduto[16], "5200,00");
+  });
 });

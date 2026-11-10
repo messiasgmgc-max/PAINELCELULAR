@@ -499,6 +499,101 @@ export async function preencherArquivoTemplateMP(
 }
 
 /**
+ * Escapa valores para CSV conforme RFC 4180.
+ * Adiciona aspas caso contenha quebras de linha, aspas ou o caractere separador.
+ */
+export function escaparCampoCsv(valor: unknown, separador: string): string {
+  const texto = String(valor ?? "");
+  return /["\r\n]/.test(texto) || texto.includes(separador)
+    ? `"${texto.replace(/"/g, '""')}"`
+    : texto;
+}
+
+export interface OpcoesExportacaoCsvMP {
+  separador?: ";" | ",";
+  incluirCabecalhoInstrucoes?: boolean;
+  incluirColunaVaziaInicial?: boolean;
+}
+
+/**
+ * Gera string CSV estruturada no padrão oficial do Mercado Phone:
+ * - 48/49 colunas idênticas à planilha oficial
+ * - 100% livre de emojis e caracteres que quebram o importador do MP
+ * - Preços formatados com vírgula (ex: 2000,00)
+ * - Datas no formato nacional DD/MM/AAAA
+ * - Codificação com UTF-8 BOM (\uFEFF) para abrir perfeitamente no Excel e em sistemas web
+ */
+export function gerarCsvEstoqueMercadoPhone(
+  aparelhos: AparelhoExportacaoMP[],
+  opcoes?: OpcoesExportacaoCsvMP
+): string {
+  const separador = opcoes?.separador || ";";
+  const incluirInstrucoes = Boolean(opcoes?.incluirCabecalhoInstrucoes);
+  const manterColVazia = Boolean(opcoes?.incluirColunaVaziaInicial);
+
+  const linhasMatriz: (string | number)[][] = [];
+
+  if (incluirInstrucoes) {
+    const matrizCompleta = montarMatrizEstoqueMercadoPhone(aparelhos);
+    for (const r of matrizCompleta) {
+      linhasMatriz.push(manterColVazia ? r : r.slice(1));
+    }
+  } else {
+    const base = gerarTemplateBaseMercadoPhone();
+    const cabecalhoColunas = base[17]; // Linha 18 com os 49 cabeçalhos
+    linhasMatriz.push(manterColVazia ? cabecalhoColunas : cabecalhoColunas.slice(1));
+
+    if (aparelhos.length === 0) {
+      const linhaVazia = new Array(49).fill("");
+      linhaVazia[14] = "Disponível para venda";
+      linhaVazia[15] = 1;
+      linhasMatriz.push(manterColVazia ? linhaVazia : linhaVazia.slice(1));
+    } else {
+      for (const ap of aparelhos) {
+        const row = converterAparelhoParaLinhaMP(ap);
+        linhasMatriz.push(manterColVazia ? row : row.slice(1));
+      }
+    }
+  }
+
+  const csvCorpo = linhasMatriz
+    .map((linha) => linha.map((val) => escaparCampoCsv(val, separador)).join(separador))
+    .join("\r\n");
+
+  return "\uFEFF" + csvCorpo;
+}
+
+/**
+ * Dispara o download nativo de um arquivo CSV no navegador.
+ */
+export function baixarCsvNoNavegador(conteudoCsv: string, nomeArquivo: string): void {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  const blob = new Blob([conteudoCsv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", nomeArquivo);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Gera e dispara o download do arquivo .csv formatado para o Mercado Phone no navegador.
+ */
+export async function exportarCsvEstoqueParaMercadoPhone(
+  aparelhos: AparelhoExportacaoMP[],
+  opcoes?: OpcoesExportacaoCsvMP & { nomeArquivo?: string }
+): Promise<string> {
+  const dataHoje = new Date().toISOString().split("T")[0];
+  const nomeArquivo = opcoes?.nomeArquivo || `estoque_mercadophone_${dataHoje}.csv`;
+  const csvTexto = gerarCsvEstoqueMercadoPhone(aparelhos, opcoes);
+  baixarCsvNoNavegador(csvTexto, nomeArquivo);
+  return nomeArquivo;
+}
+
+/**
  * Gera e dispara o download do arquivo .xlsx formatado para o Mercado Phone no navegador.
  */
 export async function exportarEstoqueParaMercadoPhone(

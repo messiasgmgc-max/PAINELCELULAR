@@ -14,7 +14,11 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModalPortal } from '@/components/ModalPortal';
-import { exportarEstoqueParaMercadoPhone, AparelhoExportacaoMP } from '@/lib/estoque/exportarMercadoPhone';
+import { 
+  exportarEstoqueParaMercadoPhone, 
+  exportarCsvEstoqueParaMercadoPhone, 
+  AparelhoExportacaoMP 
+} from '@/lib/estoque/exportarMercadoPhone';
 import toast from 'react-hot-toast';
 
 interface ExportarMercadoPhoneModalProps {
@@ -50,6 +54,25 @@ export function ExportarMercadoPhoneModal({
     } catch (err: any) {
       console.error('Erro ao exportar para Mercado Phone:', err);
       toast.error(`Falha na exportação: ${err?.message || 'Erro desconhecido'}`);
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  const handleExportarCsv = async (separador: ';' | ',' = ';') => {
+    if (totalAparelhos === 0) {
+      toast.error('Nenhum aparelho ativo em estoque para exportar.');
+      return;
+    }
+
+    setExportando(true);
+    try {
+      const nomeGerado = await exportarCsvEstoqueParaMercadoPhone(aparelhos, { separador });
+      toast.success(`Arquivo CSV "${nomeGerado}" baixado com sucesso!`);
+      onClose();
+    } catch (err: any) {
+      console.error('Erro ao exportar CSV para Mercado Phone:', err);
+      toast.error(`Falha na exportação CSV: ${err?.message || 'Erro desconhecido'}`);
     } finally {
       setExportando(false);
     }
@@ -110,12 +133,12 @@ export function ExportarMercadoPhoneModal({
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                   Exportar para o Mercado Phone
-                  <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold border border-blue-500/30">
-                    MP .xlsx
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-500/30">
+                    MP .csv / .xlsx
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Planilha oficial estruturada para importação direta de estoque no Mercado Phone
+                  Estrutura 100% compatível com a importação direta de estoque do Mercado Phone
                 </p>
               </div>
             </div>
@@ -147,10 +170,10 @@ export function ExportarMercadoPhoneModal({
             </div>
             <div className="text-[11px] text-slate-400 flex flex-col gap-0.5">
               <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Modelo oficial idêntico ao MP
+                <CheckCircle2 className="w-3.5 h-3.5" /> 48 colunas oficiais do MP e sem emojis
               </span>
               <span className="flex items-center gap-1.5 text-cyan-400 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5" /> IMEI e Seriais preservados como texto
+                <CheckCircle2 className="w-3.5 h-3.5" /> IMEI, valores (com vírgula) e datas validadas
               </span>
             </div>
           </div>
@@ -163,28 +186,49 @@ export function ExportarMercadoPhoneModal({
                   1. Exportação Direta (Recomendado)
                 </span>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Gera e baixa a planilha oficial com todos os aparelhos ativos preenchidos em 1 clique.
+                  Baixe seu estoque pronto para importar no Mercado Phone no formato de sua preferência.
                 </p>
               </div>
             </div>
 
-            <Button
-              onClick={handleExportarDireto}
-              disabled={exportando || totalAparelhos === 0}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm h-11 rounded-xl shadow-lg shadow-blue-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99]"
-            >
-              {exportando ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  Gerando Planilha...
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  Baixar Planilha Mercado Phone (.xlsx)
-                </>
-              )}
-            </Button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <Button
+                onClick={() => handleExportarCsv(';')}
+                disabled={exportando || totalAparelhos === 0}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm h-11 rounded-xl shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99]"
+              >
+                {exportando ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Gerando...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Baixar CSV Mercado Phone (.csv)
+                  </>
+                )}
+              </Button>
+
+              <Button
+                onClick={handleExportarDireto}
+                disabled={exportando || totalAparelhos === 0}
+                variant="outline"
+                className="w-full bg-slate-900/80 hover:bg-slate-800 text-blue-200 border-blue-500/30 hover:border-blue-500/50 font-bold text-xs sm:text-sm h-11 rounded-xl shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99]"
+              >
+                {exportando ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Gerando...
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="w-4 h-4 text-blue-400" />
+                    Baixar Planilha Excel (.xlsx)
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
           {/* Opção 2: Usar arquivo modelo enviado pelo usuário */}

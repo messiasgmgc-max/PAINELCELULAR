@@ -21,6 +21,7 @@ import { BarcodeScannerModal } from "@/components/BarcodeScannerModal";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
 import { ExportarMercadoPhoneModal } from "@/components/ExportarMercadoPhoneModal";
+import { exportarCsvEstoqueParaMercadoPhone } from "@/lib/estoque/exportarMercadoPhone";
 import { BackupEstoqueModal, salvarSnapshotBackup } from "@/components/BackupEstoqueModal";
 import { MarcarVendidoModal } from "@/components/MarcarVendidoModal";
 import { EditarVendaRegistroModal, VendaEditavelData } from "@/components/EditarVendaRegistroModal";
@@ -1880,9 +1881,34 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                     <div>
                       <div className="font-bold text-xs text-white flex items-center gap-1.5">
                         Exportar p/ Mercado Phone
-                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">.xlsx</span>
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">.csv / .xlsx</span>
                       </div>
-                      <div className="text-[10px] text-slate-400">Planilha oficial para importar no MP</div>
+                      <div className="text-[10px] text-slate-400">Planilha e CSV oficiais para importar no MP</div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      if (aparelhosAtivos.length === 0) {
+                        toast.error("Nenhum aparelho ativo para exportar!");
+                        return;
+                      }
+                      try {
+                        const nome = await exportarCsvEstoqueParaMercadoPhone(aparelhosAtivos);
+                        toast.success(`CSV Mercado Phone baixado: ${nome}`);
+                      } catch (err: any) {
+                        toast.error("Erro ao baixar CSV Mercado Phone");
+                      }
+                    }}
+                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+                  >
+                    <Download className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                        Baixar CSV Mercado Phone
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">.csv direto</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">Download em 1 clique do CSV compatível com MP</div>
                     </div>
                   </DropdownMenuItem>
 
