@@ -41,6 +41,7 @@ import {
   sincronizarResumoPropostaMultiItens,
   formatarMensagemPreviaNotinha,
   interpretarReacaoNotinha,
+  interpretarConfirmacaoTextoNotinha,
   interpretarTextoCorrecaoVenda,
   salvarPropostaNotinha,
   buscarPropostaNotinhaRecente,
@@ -2422,13 +2423,6 @@ export async function POST(request: Request) {
             return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
           }
 
-          // Limpa as pendências imediatamente para evitar duplo processamento
-          await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
-            `notinha:${remoteJid}:${idMensagemReagida}`,
-            `notinha:${remoteJid}:ultima`,
-            `notinha:${targetDestination}:ultima`,
-          ]);
-
           if (acaoReacao === 'confirmar') {
             const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
             const resultadoEmissao = await emitirNotinhaVenda(
@@ -2437,6 +2431,14 @@ export async function POST(request: Request) {
               propostaPendente,
               nomeUsuario || pushName || 'Equipe'
             );
+
+            if (resultadoEmissao.sucesso) {
+              await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
+                `notinha:${remoteJid}:${idMensagemReagida}`,
+                `notinha:${remoteJid}:ultima`,
+                `notinha:${targetDestination}:ultima`,
+              ]);
+            }
 
             // Disparo automático do Recibo Digital e PDF para o WhatsApp do cliente se houver telefone
             if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
@@ -2504,6 +2506,11 @@ export async function POST(request: Request) {
               message: resultadoEmissao.sucesso ? 'Notinha emitida com sucesso via reação.' : 'Falha na emissão da notinha.',
             }, { status: 200 });
           } else {
+            await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
+              `notinha:${remoteJid}:${idMensagemReagida}`,
+              `notinha:${remoteJid}:ultima`,
+              `notinha:${targetDestination}:ultima`,
+            ]);
             const msgCancelamento = `❌ *Emissão da notinha cancelada por ${pushName}.*\nPara tentar novamente, envie os dados corrigidos no grupo.`;
             await editarOuResponderMensagemWhatsApp(
               instanceName,
@@ -3006,7 +3013,7 @@ export async function POST(request: Request) {
       // 4. Marcação do bot em mensagens de formulário ou etiquetas de aparelhos
       // Qualquer mensagem paralela, conversa de grupo ou outros comandos são 100% ignorados.
       const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(textContent));
-      const ehPossivelConfirmacao = /^(?:sim|confirmar|confirmo|emitir|gerar\s*nota|gerar\s*notinha|aprovar|ok|pode\s*emitir|n[aã]o|cancelar|cancela|cancelado|esquece|anular)$/i.test(textContent.trim());
+      const ehPossivelConfirmacao = Boolean(interpretarConfirmacaoTextoNotinha(textContent));
       const ehPossivelCorrecao = Boolean(interpretarTextoCorrecaoVenda(textContent));
 
       let temNotinhaPendente = false;
@@ -3107,9 +3114,10 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / CONFIRMAR / OK / CANCELAR) ──
-    const ehConfirmacaoTexto = /^(?:sim|confirmar|confirmo|emitir|gerar\s*nota|gerar\s*notinha|aprovar|ok|pode\s*emitir)$/i.test(textContent.trim());
-    const ehCancelamentoTexto = /^(?:n[aã]o|cancelar|cancela|cancelado|esquece|anular)$/i.test(textContent.trim());
+    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / PODE VENDER / CONFIRMAR / CANCELAR) ──
+    const acaoConfirmacaoTexto = interpretarConfirmacaoTextoNotinha(textContent);
+    const ehConfirmacaoTexto = acaoConfirmacaoTexto === 'confirmar';
+    const ehCancelamentoTexto = acaoConfirmacaoTexto === 'cancelar';
 
     if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
       const chavesBusca = Array.from(new Set([
@@ -3134,8 +3142,6 @@ export async function POST(request: Request) {
           return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
         }
 
-        await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
-
         if (ehConfirmacaoTexto) {
           const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
           const resultadoEmissao = await emitirNotinhaVenda(
@@ -3144,6 +3150,10 @@ export async function POST(request: Request) {
             propostaPendente,
             nomeUsuario || pushName || 'Equipe'
           );
+
+          if (resultadoEmissao.sucesso) {
+            await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
+          }
 
           // Disparo automático do Recibo Digital e PDF para o WhatsApp do cliente se houver telefone
           if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
@@ -3203,6 +3213,7 @@ export async function POST(request: Request) {
 
           return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
         } else {
+          await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
           await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ *Emissão da notinha cancelada por ${pushName}.*`);
           return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via texto.' }, { status: 200 });
         }
@@ -3233,6 +3244,18 @@ export async function POST(request: Request) {
                 idx === proposta.itens!.length - 1
                   ? Number((proposta.valorTotal - valDiv * (proposta.itens!.length - 1)).toFixed(2))
                   : valDiv;
+            });
+          }
+          sincronizarResumoPropostaMultiItens(proposta);
+        } else if (correcaoDetectada.campo === 'custo') {
+          proposta.custo = correcaoDetectada.valor;
+          if (Array.isArray(proposta.itens) && proposta.itens.length > 0) {
+            const custoDiv = Number((Number(correcaoDetectada.valor) / proposta.itens.length).toFixed(2));
+            proposta.itens.forEach((it, idx) => {
+              it.custo =
+                idx === proposta.itens!.length - 1
+                  ? Number((Number(correcaoDetectada.valor) - custoDiv * (proposta.itens!.length - 1)).toFixed(2))
+                  : custoDiv;
             });
           }
         } else if (correcaoDetectada.campo === 'cliente') {

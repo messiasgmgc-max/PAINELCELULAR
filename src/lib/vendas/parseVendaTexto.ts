@@ -119,6 +119,7 @@ export function extrairCorDeTexto(texto?: string | null): string | undefined {
   if (/\b(?:product\s*red)\b/i.test(lower)) return 'Vermelho';
 
   // 3. Cores simples
+  if (/\b(?:bord[oô]|burgundy|vinho|wine)\b/i.test(lower)) return 'Bordô';
   if (/\b(?:preto|preta|black|dark)\b/i.test(lower)) return 'Preto';
   if (/\b(?:branco|branca|white)\b/i.test(lower)) return 'Branco';
   if (/\b(?:azul|blue)\b/i.test(lower)) return 'Azul';
@@ -129,6 +130,7 @@ export function extrairCorDeTexto(texto?: string | null): string | undefined {
   if (/\b(?:vermelho|vermelha|red)\b/i.test(lower)) return 'Vermelho';
   if (/\b(?:cinza|gray|grey|titanium|tit[aâ]nio|titanio)\b/i.test(lower)) return 'Titânio Natural';
   if (/\b(?:laranja|orange|coral)\b/i.test(lower)) return 'Laranja';
+  if (/\b(?:bronze)\b/i.test(lower)) return 'Bronze';
 
   return undefined;
 }
@@ -212,35 +214,61 @@ export function sanitizarECompletarVendaParsed(
   // 6. DETECÇÃO ROBUSTA DE UPGRADE / TROCA (TRADE-IN)
   // 6.1 Checkbox marcado específico: (X) Upgrade - Modelo: ... ou [X] Upgrade: ...
   const checkboxUpgradeMatch = trimmedText.match(
-    /(?:\(\s*(?:[Xx]|✔|✓)\s*\)|\[\s*(?:[Xx]|✔|✓)\s*\])\s*(?:Upgrade|Troca)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:\s*([^\n\r]+)/i
+    /(?:\(\s*(?:[Xx]|✔|✓)\s*\)|\[\s*(?:[Xx]|✔|✓)\s*\])\s*(?:Upgrade|Troca)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:?\s*([^\n\r]+)/i
   );
 
-  // 6.2 Linha de texto com modelo de troca
-  const textoTrocaMatch =
-    checkboxUpgradeMatch ||
-    trimmedText.match(
-      /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:\s*([^\n\r]+)/i
-    );
+  // 6.2 Linha de texto com modelo de troca (mesmo que o checkbox esteja "( )" sem X mas o usuário preencheu após "Upgrade - Modelo:")
+  const linhasParaTroca = trimmedText.split(/\r?\n/);
+  let textoTrocaMatch: RegExpMatchArray | null = checkboxUpgradeMatch;
+  let idxLinhaTroca = -1;
 
-  // Validação estrita se o texto capturado NÃO é apenas checkbox vazio ou negativa (ex: "( ) Outro:", "( ) Não", "-")
+  if (!textoTrocaMatch) {
+    for (let i = 0; i < linhasParaTroca.length; i++) {
+      const m = linhasParaTroca[i].match(
+        /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:\s*([^\n\r]+)/i
+      );
+      if (m) {
+        textoTrocaMatch = m;
+        idxLinhaTroca = i;
+        break;
+      }
+    }
+  } else {
+    idxLinhaTroca = linhasParaTroca.findIndex((l) => l.includes(checkboxUpgradeMatch[0]));
+  }
+
+  let rawConteudoTroca = textoTrocaMatch ? textoTrocaMatch[1].trim() : '';
+  if (idxLinhaTroca !== -1 && rawConteudoTroca && idxLinhaTroca + 1 < linhasParaTroca.length) {
+    const proxLinha = linhasParaTroca[idxLinhaTroca + 1].trim();
+    if (
+      proxLinha &&
+      !/^(?:\(\s*[xX✔✓]?\s*\)|\[\s*[xX✔✓]?\s*\])/.test(proxLinha) &&
+      !/(?:^|\s)(?:Modelo|Aparelho|Produto|Valor|Forma de pagamento|Entrega|Obs|Data)\s*:/i.test(proxLinha) &&
+      (/^\d{4,16}$/.test(proxLinha) || /^(?:imei|cor|bateria|bat)\b/i.test(proxLinha))
+    ) {
+      rawConteudoTroca = `${rawConteudoTroca} ${proxLinha}`.trim();
+    }
+  }
+
+  // Validação estrita se o texto capturado NÃO é apenas checkbox vazio, sublinhado ou negativa (ex: "( ) Outro:", "( ) Não", "-", "__")
   let conteudoTrocaValido = '';
-  if (textoTrocaMatch) {
-    const rawConteudo = textoTrocaMatch[1].trim();
+  if (rawConteudoTroca) {
     const ehVazioOuNegativa =
-      /^(?:\(\s*\)|\[\s*\]|\(\s*\)\s*outro:?|\(\s*\)\s*n[aã]o:?|n[aã]o|nenhum|-|nao possui|sem troca)$/i.test(rawConteudo) ||
-      rawConteudo.length < 2;
+      /^(?:\(\s*\)|\[\s*\]|\(\s*\)\s*outro:?|\(\s*\)\s*n[aã]o:?|n[aã]o|nao|nenhum|-+|_+|nao possui|n[aã]o possui|sem troca|na|n\/a)$/i.test(rawConteudoTroca) ||
+      /^R?\$?\s*[\d.,]+$/.test(rawConteudoTroca) ||
+      rawConteudoTroca.length < 2;
 
     if (!ehVazioOuNegativa) {
-      conteudoTrocaValido = rawConteudo;
+      conteudoTrocaValido = rawConteudoTroca;
     }
   }
 
   const ehTextoUpgrade =
     Boolean(checkboxUpgradeMatch) ||
-    (Boolean(conteudoTrocaValido) &&
-      /trade[- ]?in|base de troca|na troca|deu na troca|pegou na troca|aparelho de entrada|entrada de um/i.test(
-        trimmedText
-      ));
+    Boolean(conteudoTrocaValido) ||
+    /trade[- ]?in|base de troca|na troca|deu na troca|pegou na troca|aparelho de entrada|entrada de um/i.test(
+      trimmedText
+    );
 
   if (ehTextoUpgrade) {
     result.isUpgrade = true;
@@ -248,6 +276,8 @@ export function sanitizarECompletarVendaParsed(
     let modeloTrocaExtraido = '';
     let valorTroca = 0;
     let capTroca = '';
+    let corTroca = '';
+    let imeiTroca: string | null = null;
 
     if (textoTrocaMatch && conteudoTrocaValido) {
       const linhaTroca = conteudoTrocaValido;
@@ -258,18 +288,42 @@ export function sanitizarECompletarVendaParsed(
       }
 
       // Capacidade da troca
-      const capMatch = linhaTroca.match(/\b(\d+GB|\d+TB)\b/i);
+      const capMatch = linhaTroca.match(/\b(\d+\s*(?:GB|TB|G))\b/i);
       if (capMatch) {
-        capTroca = capMatch[1].toUpperCase();
+        capTroca = capMatch[1].replace(/\s+/g, '').toUpperCase().replace(/(\d+)G$/i, '$1GB');
       }
 
-      // Modelo da troca: remove capacidade e valores explícitos com R$
+      // IMEI da troca (explícito, 14-16 dígitos, ou últimos 4 dígitos ao final da linha ex: "laranja 3219")
+      const imeiMatchTroca =
+        linhaTroca.match(/(?:imei|final|serial)\s*[:=-]?\s*#?(\d{4,16})\b/i) ||
+        linhaTroca.match(/\b(\d{14,16})\b/) ||
+        linhaTroca.match(/\s(\d{4})\s*$/);
+      if (imeiMatchTroca) {
+        imeiTroca = imeiMatchTroca[1].trim();
+      }
+
+      // Cor da troca (ex: "laranja", "preto", "desert")
+      corTroca = extrairCorDeTexto(linhaTroca) || '';
+
+      // Modelo da troca: remove capacidade, cor, IMEI e valores explícitos com R$
+      const coresTrocaRemover = [
+        corTroca,
+        'desert', 'deserto', 'natural', 'titanium', 'titânio', 'titanio', 'preto', 'preta', 'branco', 'branca',
+        'azul', 'dourado', 'dourada', 'rosa', 'verde', 'roxo', 'cinza', 'grafite', 'silver', 'prata', 'gold',
+        'black', 'white', 'blue', 'laranja', 'orange', 'coral', 'vermelho', 'vermelha', 'red', 'amarelo', 'bord[oô]', 'bordo', 'vinho'
+      ].filter(Boolean).join('|');
+
       let modLimpo = linhaTroca
-        .replace(/\b(\d+GB|\d+TB)\b/gi, '')
+        .replace(/\b(\d+\s*(?:GB|TB|G))\b/gi, '')
         .replace(/R\$\s*[0-9.,]+/gi, '')
+        .replace(/(?:imei|final|serial)\s*[:=-]?\s*#?\d{4,16}\b/gi, '')
+        .replace(/\b\d{14,16}\b/g, '')
+        .replace(imeiTroca ? new RegExp(`\\b${imeiTroca}\\b`, 'g') : /(?!)/, '')
+        .replace(new RegExp(`\\b(?:${coresTrocaRemover})\\b`, 'gi'), '')
         .replace(/(?:por|de|valor|entrada)\s*[:=]?\s*/gi, '')
         .replace(/[•_]/g, ' ')
         .replace(/^\s*-\s*/, '')
+        .replace(/\s+/g, ' ')
         .trim();
 
       if (modLimpo) {
@@ -282,8 +336,8 @@ export function sanitizarECompletarVendaParsed(
         marca: inferirMarcaPorModelo(modeloTrocaExtraido, 'Apple'),
         modelo: modeloTrocaExtraido || 'Aparelho na Troca',
         capacidade: capTroca || '128GB',
-        cor: '',
-        imei: null,
+        cor: corTroca,
+        imei: imeiTroca,
         bateria: null,
         valor: valorTroca || (result.tradeIn?.valor ?? 0),
         condicao: 'seminovo',
@@ -293,6 +347,9 @@ export function sanitizarECompletarVendaParsed(
       if (modeloTrocaExtraido && (!result.tradeIn.modelo || result.tradeIn.modelo === 'Aparelho na Troca')) {
         result.tradeIn.modelo = modeloTrocaExtraido;
       }
+      if (!result.tradeIn.cor && corTroca) result.tradeIn.cor = corTroca;
+      if (!result.tradeIn.imei && imeiTroca) result.tradeIn.imei = imeiTroca;
+      if (!result.tradeIn.capacidade && capTroca) result.tradeIn.capacidade = capTroca;
       result.tradeIn.marca = inferirMarcaPorModelo(result.tradeIn.modelo, result.tradeIn.marca || 'Apple');
     }
   }
@@ -482,7 +539,8 @@ export function sanitizarECompletarVendaParsed(
       'meia\\s*noite', 'meia-noite', 'midnight', 'starlight', 'estelar', 'ultramarine', 'ultramarino', 'alpine', 'teal',
       'desert', 'deserto', 'natural', 'titanium', 'titânio', 'titanio', 'preto', 'preta', 'branco', 'branca', 'azul',
       'dourado', 'dourada', 'rosa', 'verde', 'roxo', 'cinza', 'grafite', 'silver', 'prata', 'gold', 'black', 'white',
-      'blue', 'laranja', 'orange', 'coral', 'vermelho', 'vermelha', 'red', 'amarelo', 'yellow', 'purple', 'pink', 'green'
+      'blue', 'laranja', 'orange', 'coral', 'vermelho', 'vermelha', 'red', 'amarelo', 'yellow', 'purple', 'pink', 'green',
+      'bord[oô]', 'bordo', 'burgundy', 'vinho', 'wine', 'bronze'
     ].filter(Boolean).join('|');
 
     let modNome = limpo
@@ -709,9 +767,16 @@ export function sanitizarECompletarVendaParsed(
     };
   }
 
+  // Texto sem as linhas de Upgrade / Troca para que cor, capacidade ou IMEI do aparelho de entrada
+  // nunca vazem acidentalmente para o aparelho vendido (ex: "Upgrade - Modelo: iPhone 17 pro 256gb laranja").
+  const textoSemLinhasUpgrade = trimmedText
+    .split(/\r?\n/)
+    .filter((lin) => !/(?:upgrade|trade[- ]?in|aparelho na troca|aparelho de entrada|entrada de troca)/i.test(lin))
+    .join('\n');
+
   // Linha explícita de cor no formulário (ex: "Cor: 🖤", "Cor: Desert", "Cor: Preto")
   if (!result.aparelho.cor && !extraiuMultiplosOuUpgradeSeta) {
-    const linhaCorMatch = trimmedText.match(/(?:^|\n|\r)\s*(?:Cor|Cores)\s*:\s*([^\n\r]+)/i);
+    const linhaCorMatch = textoSemLinhasUpgrade.match(/(?:^|\n|\r)\s*(?:Cor|Cores)\s*:\s*([^\n\r]+)/i);
     if (linhaCorMatch) {
       const corExtraida = extrairCorDeTexto(linhaCorMatch[1]);
       if (corExtraida) {
@@ -722,7 +787,7 @@ export function sanitizarECompletarVendaParsed(
 
   // Fallback geral de cor no texto se não identificou acima (apenas para venda simples de 1 aparelho sem seta de upgrade)
   if (!result.aparelho.cor && !extraiuMultiplosOuUpgradeSeta) {
-    const corFallback = extrairCorDeTexto(trimmedText);
+    const corFallback = extrairCorDeTexto(textoSemLinhasUpgrade);
     if (corFallback) {
       result.aparelho.cor = corFallback;
     }
@@ -741,7 +806,7 @@ export function sanitizarECompletarVendaParsed(
 
   // Capacidade geral fallback (apenas para venda simples de 1 aparelho)
   if (!result.aparelho.capacidade && !extraiuMultiplosOuUpgradeSeta) {
-    const romMatch = trimmedText.match(/\b(\d+GB|\d+TB)\b/i);
+    const romMatch = textoSemLinhasUpgrade.match(/\b(\d+GB|\d+TB)\b/i);
     if (romMatch) {
       result.aparelho.capacidade = romMatch[1].toUpperCase();
     }
@@ -750,9 +815,9 @@ export function sanitizarECompletarVendaParsed(
   // IMEI geral fallback (reconhece IMEI completo de 15 dígitos ou final de 4 dígitos)
   if (!result.aparelho.imei && aparelhosExtraidos.length <= 1) {
     const imeiRotuloMatch =
-      trimmedText.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei\s*\(?\s*(?:últimos\s*)?4\s*(?:d[íi]gitos)?\s*\)?|imei|imei\s*1|n[ºo°]\s*s[eé]rie|serial)\s*:\s*#?([0-9A-Za-z]{4,18})/i) ||
-      trimmedText.match(/(?:final)\s*:\s*#?([0-9]{4,6})\b/i) ||
-      trimmedText.match(/\b([0-9]{14,16})\b/);
+      textoSemLinhasUpgrade.match(/(?:final\s*(?:do\s*)?imei|imei\s*final|imei\s*\(?\s*(?:últimos\s*)?4\s*(?:d[íi]gitos)?\s*\)?|imei|imei\s*1|n[ºo°]\s*s[eé]rie|serial)\s*:\s*#?([0-9A-Za-z]{4,18})/i) ||
+      textoSemLinhasUpgrade.match(/(?:final)\s*:\s*#?([0-9]{4,6})\b/i) ||
+      textoSemLinhasUpgrade.match(/\b([0-9]{14,16})\b/);
     if (imeiRotuloMatch) {
       result.aparelho.imei = imeiRotuloMatch[1].trim();
     }

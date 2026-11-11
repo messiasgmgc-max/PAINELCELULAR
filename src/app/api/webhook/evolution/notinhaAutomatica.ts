@@ -705,6 +705,9 @@ export function sincronizarResumoPropostaMultiItens(proposta: PropostaNotinha): 
     proposta.statusEstoque = primeiro.statusEstoque;
     proposta.aparelhoId = primeiro.aparelhoId;
     proposta.custo = primeiro.custo || 0;
+    if (proposta.valorTotal && proposta.valorTotal > 0) {
+      primeiro.valorUnitario = Number(proposta.valorTotal);
+    }
   } else {
     proposta.modelo = itens.map((it) => it.modelo).join(' + ');
     proposta.capacidade = itens[0].capacidade;
@@ -864,7 +867,9 @@ export function construirPropostaNotinha(params: {
       statusEstoque: cruzamento.mensagem,
       aparelhoId: apEnc?.id,
       custo: Number(apEnc?.custo || ap.custo || 0),
-      valorUnitario: precoExplicito ?? (apEnc?.preco ? Number(apEnc.preco) : undefined),
+      // O preço unitário exibido ao cliente vem exclusivamente do pedido/formulário ou da confirmação do vendedor,
+      // nunca de um preço antigo/desatualizado cadastrado no banco `aparelhos`.
+      valorUnitario: precoExplicito,
       modeloTroca: modeloTrocaItem,
       capacidadeTroca: capTrocaItem,
       corTroca: corTrocaItem,
@@ -883,16 +888,24 @@ export function construirPropostaNotinha(params: {
   }
 
   if (valorTotal > 0 && itensProposta.length > 0) {
-    const todosComPrecoExplicito = tevePrecoExplicitoFormulario.every(Boolean);
-    if (!todosComPrecoExplicito) {
-      const valorPorItem = Number((valorTotal / itensProposta.length).toFixed(2));
-      itensProposta.forEach((it, idx) => {
-        if (!tevePrecoExplicitoFormulario[idx] && (!it.valorUnitario || itensProposta.length > 1)) {
-          it.valorUnitario =
-            idx === itensProposta.length - 1
-              ? Number((valorTotal - valorPorItem * (itensProposta.length - 1)).toFixed(2))
-              : valorPorItem;
-        }
+    const indicesSemPreco = itensProposta
+      .map((_, idx) => (!tevePrecoExplicitoFormulario[idx] ? idx : -1))
+      .filter((idx) => idx >= 0);
+
+    if (indicesSemPreco.length > 0) {
+      const somaExplicitos = itensProposta.reduce(
+        (acc, it, idx) => (tevePrecoExplicitoFormulario[idx] ? acc + Number(it.valorUnitario || 0) : acc),
+        0
+      );
+      const restante = Math.max(0, Number((valorTotal - somaExplicitos).toFixed(2)));
+      const baseParaDistribuir = restante > 0 ? restante : valorTotal;
+      const valorPorItem = Number((baseParaDistribuir / indicesSemPreco.length).toFixed(2));
+
+      indicesSemPreco.forEach((idxItem, pos) => {
+        itensProposta[idxItem].valorUnitario =
+          pos === indicesSemPreco.length - 1
+            ? Number((baseParaDistribuir - valorPorItem * (indicesSemPreco.length - 1)).toFixed(2))
+            : valorPorItem;
       });
     }
   }
@@ -1123,9 +1136,8 @@ export function vincularFotoEmPropostaNotinha(
     }
     if (!itemAlvo.capacidade && apEnc.capacidade) itemAlvo.capacidade = apEnc.capacidade;
     if (!itemAlvo.cor && apEnc.cor) itemAlvo.cor = extrairCorDeTexto(apEnc.cor) || apEnc.cor;
-    if ((!proposta.valorTotal || proposta.valorTotal <= 0) && itens.length === 1 && apEnc.preco) {
-      proposta.valorTotal = Number(apEnc.preco);
-      itemAlvo.valorUnitario = Number(apEnc.preco);
+    if (proposta.valorTotal && proposta.valorTotal > 0 && itens.length === 1) {
+      itemAlvo.valorUnitario = Number(proposta.valorTotal);
     }
   }
 
@@ -1271,17 +1283,49 @@ export function interpretarReacaoNotinha(emoji: string): 'confirmar' | 'cancelar
 }
 
 /**
+ * Interpreta se uma resposta em texto confirma ou cancela a emissão da notinha pendente.
+ * Aceita variações naturais como "sim", "pode vender", "pode vender ele", "sim, pode vender",
+ * "pode emitir", "vender mesmo assim", "emitir mesmo assim", "ok", "confirmo".
+ */
+export function interpretarConfirmacaoTextoNotinha(texto: string): 'confirmar' | 'cancelar' | null {
+  if (!texto || typeof texto !== 'string') return null;
+  const limpo = texto
+    .trim()
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
+    .replace(/[!.,;?]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!limpo) return null;
+
+  // Se contém números (ex: "pode vender por 7750", "imei 1234"), não trata como confirmação cega:
+  // deixa passar para correção/atualização primeiro.
+  if (/\d/.test(limpo)) return null;
+
+  const ehConfirmacao =
+    /^(?:sim|s|ok|oka|blz|beleza|confirmo|confirmar|confirmado|emitir|emite|aprovar|aprovado|fechou|manda|pode|autorizo|ta\s*certo|t[aá]\s*certo|esta\s*certo|est[aá]\s*certo)$/i.test(limpo) ||
+    /^(?:(?:sim|ok|blz|certo|pode)\s+)?(?:pode\s+)?(?:vender|emitir|gerar|mandar|faturar|lancar|lan[cç]ar|confirmar)(?:\s+(?:ele|ela|isso|a\s*nota|a\s*notinha|nota|notinha|sim|mesmo\s*assim|ai|a[ií]))*$/i.test(limpo) ||
+    /^(?:(?:sim|ok|confirmo|certo)\s+)+(?:pode\s+)?(?:vender|emitir|gerar|faturar)(?:\s+(?:ele|ela|isso|mesmo\s*assim))?$/i.test(limpo) ||
+    /^(?:vender|emitir)\s+mesmo\s+assim$/i.test(limpo);
+
+  if (ehConfirmacao) return 'confirmar';
+
+  const ehCancelamento =
+    /^(?:n[aã]o|nao|n|cancelar|cancela|cancelado|esquece|anular|n[aã]o\s+emitir|nao\s+emitir|n[aã]o\s+vender|nao\s+vender|nao\s+precisa|n[aã]o\s+precisa|cancela\s+isso)$/i.test(limpo);
+
+  if (ehCancelamento) return 'cancelar';
+
+  return null;
+}
+
+/**
  * Interpreta texto de resposta com correção de dados de uma proposta de venda.
  */
 export function interpretarTextoCorrecaoVenda(
   texto: string
-): { campo: 'valor' | 'imei' | 'cliente' | 'modelo' | 'cor'; valor: any } | null {
+): { campo: 'valor' | 'custo' | 'imei' | 'cliente' | 'modelo' | 'cor'; valor: any } | null {
   if (!texto || typeof texto !== 'string') return null;
   const t = texto.trim();
-  const norm = t
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
 
   const parseValorFlexivel = (str: string): number => {
     const s = str.trim().replace(/^[^\d]+/, '').replace(/[^\d]+$/, '');
@@ -1295,8 +1339,24 @@ export function interpretarTextoCorrecaoVenda(
     return parseFloat(s.replace(/\./g, ''));
   };
 
-  // 1. Correção de valor por número direto (ex: "5200", "4999.99", "R$ 4.500")
-  const matchNumeroPuro = t.match(/^R?\$?\s*([0-9.,]+)$/i);
+  // 0. Correção de IMEI primeiro para que dígitos de IMEI nunca sejam confundidos com valor
+  const matchImei = t.match(/\b(?:final\s*(?:do\s*)?imei|imei\s*final|imei)\s*(?:é|e|correto|certo|novo|\s)*[:=-]?\s*#?(\d{4,16})\b/i);
+  if (matchImei) {
+    return { campo: 'imei', valor: matchImei[1] };
+  }
+
+  // 0.1. Correção explícita de custo interno (ex: "custo é 6800")
+  const matchCusto = t.match(/\bcusto\b[^\d]*?([0-9.,]+)/iu);
+  if (matchCusto) {
+    const num = parseValorFlexivel(matchCusto[1]);
+    const digitosNum = matchCusto[1].replace(/\D/g, '');
+    if (!isNaN(num) && num >= 0 && num < 100000 && digitosNum.length < 10) {
+      return { campo: 'custo', valor: num };
+    }
+  }
+
+  // 1. Correção de valor por número direto (ex: "5200", "4999.99", "R$ 4.500", "7750 reais")
+  const matchNumeroPuro = t.match(/^R?\$?\s*([0-9.,]+)(?:\s*reais)?$/i);
   if (matchNumeroPuro) {
     const num = parseValorFlexivel(matchNumeroPuro[1]);
     const digitosNum = matchNumeroPuro[1].replace(/\D/g, '');
@@ -1305,11 +1365,10 @@ export function interpretarTextoCorrecaoVenda(
     }
   }
 
-  // 2. Correção de valor por frase (ex: "o valor é 5200", "valor certo 4800", "preço: 3500", "o valor e 4800")
+  // 2. Correção de valor por frase (ex: "o valor é 5200", "era 7750", "falei que era 7750", "coloca 7750", "muda pra 7750")
   const matchFraseValor =
     t.match(/(?:valor|preco|pre[cç]o|total|fica|ficou)\b[^\d]*?([0-9.,]+)/iu) ||
-    t.match(/(?:^|\b(?:[eé]|ser[aá]|por)\s+)R\$\s*([0-9.,]+)/iu) ||
-    t.match(/^(?:[eé]|ser[aá]|fica|ficou|por)\s*R?\$?\s*([0-9.,]+)$/iu);
+    t.match(/(?:^|\b(?:[eé]|era|ser[aá]|por|para|pra|muda(?:r)?\s*(?:para|pra)?|altera(?:r)?\s*(?:para|pra)?|coloca(?:r)?)\s+)R?\$?\s*([0-9.,]+)(?:\s*reais)?/iu);
 
   if (matchFraseValor) {
     const num = parseValorFlexivel(matchFraseValor[1]);
@@ -1317,12 +1376,6 @@ export function interpretarTextoCorrecaoVenda(
     if (!isNaN(num) && num > 0 && num < 100000 && digitosNum.length < 10) {
       return { campo: 'valor', valor: num };
     }
-  }
-
-  // Correção de IMEI (aceita 14 a 16 dígitos ou final de 4 dígitos)
-  const matchImei = t.match(/\b(?:final\s*(?:do\s*)?imei|imei\s*final|imei)\s*(?:é|e|correto|certo|novo|\s)*[:=-]?\s*#?(\d{4,16})\b/i);
-  if (matchImei) {
-    return { campo: 'imei', valor: matchImei[1] };
   }
 
   // Correção de cor (por nome ou emoji)
@@ -1587,10 +1640,17 @@ export async function emitirNotinhaVenda(
 
     const valorTotalNum = Number(proposta.valorTotal || 0);
     const valorDivididoPadrao = itensProposta.length > 0 ? Number((valorTotalNum / itensProposta.length).toFixed(2)) : valorTotalNum;
+    const somaUnitariosExistentes = itensProposta.reduce((acc, it) => acc + Number(it.valorUnitario || 0), 0);
+    const unitariosBatemComTotal =
+      itensProposta.length > 1 &&
+      itensProposta.every((it) => Number(it.valorUnitario || 0) > 0) &&
+      Math.abs(somaUnitariosExistentes - valorTotalNum) <= 0.05;
 
     const itensVendaPayload = itensProposta.map((it, idx) => {
       const valItem =
-        it.valorUnitario && it.valorUnitario > 0
+        itensProposta.length === 1 && valorTotalNum > 0
+          ? valorTotalNum
+          : unitariosBatemComTotal && it.valorUnitario && it.valorUnitario > 0
           ? Number(it.valorUnitario)
           : idx === itensProposta.length - 1
           ? Number((valorTotalNum - valorDivididoPadrao * (itensProposta.length - 1)).toFixed(2))
@@ -1694,6 +1754,9 @@ export async function emitirNotinhaVenda(
     const resultado = await registrarVendaAtomica(supabase, {
       venda: registroVenda,
       aparelhoIds,
+      // A emissão pelo bot só ocorre após confirmação explícita do usuário na prévia (que já avisa se o IMEI consta como vendido),
+      // portanto autorizamos a emissão mesmo para aparelhos já baixados/vendidos anteriormente.
+      permitirForaDoEstoque: aparelhoIds,
       camposAparelho,
       tradeIn: tradeInPayload,
       origem: 'whatsapp_notinha_automatica',

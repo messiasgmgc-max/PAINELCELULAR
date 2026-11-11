@@ -154,4 +154,37 @@ Final do IMEI: 4567`;
     assert.equal(final.valorTotal, 5200);
     assert.equal(final.cliente.nome, 'Guilherme Messias');
   });
+
+  it('reconhece Upgrade mesmo quando o checkbox ( ) ficou sem X mas há modelo preenchido e não mistura cor do upgrade', () => {
+    const textoSemX = `💳 FORMA DE PAGAMENTO
+Valor total: R$5200
+Forma de pagamento:
+( X ) Pix 5200,00
+( ) Cartão de crédito
+( ) Cartão de débito
+( ) Dinheiro
+( ) Upgrade - Modelo: iPhone 17 pro 256gb laranja 3219
+( ) Outro: __
+
+Modelo:iPhone 18 pro max 256gb bordo`;
+
+    const res = sanitizarECompletarVendaParsed(null, textoSemX);
+    assert.equal(res.isUpgrade, true, 'Deve reconhecer Upgrade mesmo sem X dentro de ( )');
+    assert.ok(res.tradeIn, 'Deve criar objeto tradeIn');
+    assert.equal(res.tradeIn?.modelo?.toLowerCase(), 'iphone 17 pro');
+    assert.equal(res.tradeIn?.capacidade, '256GB');
+    assert.equal(res.tradeIn?.cor, 'Laranja');
+    assert.equal(res.tradeIn?.imei, '3219');
+
+    assert.equal(res.aparelho.modelo, 'iPhone 18 pro max');
+    assert.equal(res.aparelho.capacidade, '256GB');
+    assert.equal(res.aparelho.cor, 'Bordô', 'Não deve vazar a cor Laranja do upgrade para o aparelho vendido');
+
+    // Também suporta quebra de linha antes do final do IMEI do upgrade ("laranja\n3219")
+    const textoComQuebra = textoSemX.replace('laranja 3219', 'laranja\n3219');
+    const resQuebra = sanitizarECompletarVendaParsed(null, textoComQuebra);
+    assert.equal(resQuebra.isUpgrade, true);
+    assert.equal(resQuebra.tradeIn?.imei, '3219');
+    assert.equal(resQuebra.tradeIn?.cor, 'Laranja');
+  });
 });

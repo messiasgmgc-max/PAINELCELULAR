@@ -84,8 +84,10 @@ export function obterEmojiDaCor(cor?: string | null): string {
   if (c.includes('rosa') || c.includes('pink') || c.includes('rose')) return '🩷';
   if (c.includes('verde') || c.includes('green') || c.includes('alpine') || c.includes('teal')) return '💚';
   if (c.includes('roxo') || c.includes('purple') || c.includes('violeta') || c.includes('deep purple') || c.includes('lilás') || c.includes('lilas')) return '💜';
+  if (c.includes('bordô') || c.includes('bordo') || c.includes('vinho') || c.includes('burgundy') || c.includes('wine')) return '🍷';
   if (c.includes('vermelho') || c.includes('red')) return '❤️';
   if (c.includes('laranja') || c.includes('orange') || c.includes('coral')) return '🧡';
+  if (c.includes('bronze')) return '🤎';
   if (c.includes('cinza') || c.includes('gray') || c.includes('grey')) return '🩶';
   return '📱';
 }

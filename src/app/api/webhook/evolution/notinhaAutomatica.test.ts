@@ -4,7 +4,9 @@ import {
   detectarFormularioOuPedidoVenda,
   formatarMensagemPreviaNotinha,
   interpretarReacaoNotinha,
+  interpretarConfirmacaoTextoNotinha,
   interpretarTextoCorrecaoVenda,
+  emitirNotinhaVenda,
   cruzarAparelhoComEstoque,
   construirPropostaNotinha,
   vincularFotoEmPropostaNotinha,
@@ -1078,6 +1080,148 @@ Modelo:
   // 6. Marcar o bot em formulário ou resposta de notinha pendente: DEVE ser aceito!
   assert.equal(filtrarOperacaoModoVendas(formVenda, false, true), true);
   assert.equal(filtrarOperacaoModoVendas('confirmar', true, true), true);
+});
+
+test('interpretarConfirmacaoTextoNotinha reconhece variações como "pode vender ele" e não confunde correções de valor', () => {
+  assert.equal(interpretarConfirmacaoTextoNotinha('SIM'), 'confirmar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('pode vender'), 'confirmar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('pode vender ele'), 'confirmar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('sim, pode vender ele!'), 'confirmar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('vender mesmo assim'), 'confirmar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('pode emitir ✅'), 'confirmar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('cancelar'), 'cancelar');
+  assert.equal(interpretarConfirmacaoTextoNotinha('não precisa'), 'cancelar');
+  // Frases com número devem ir para correção, não confirmação cega
+  assert.equal(interpretarConfirmacaoTextoNotinha('pode vender por 7750'), null);
+  assert.equal(interpretarConfirmacaoTextoNotinha('imei 1234'), null);
+});
+
+test('construirPropostaNotinha não herda preço antigo (300) do banco quando formulário informa 7750 ou omite o valor', () => {
+  const apAntigoId = '11111111-1111-4111-8111-111111111111';
+  const estoque = [
+    {
+      id: apAntigoId,
+      modelo: 'iPhone 17 Pro Max',
+      capacidade: '256GB',
+      cor: 'Laranja',
+      imei: '350015753668064',
+      preco: 300, // Valor antigo/cadastrado errado no estoque
+      custo: 300,
+      status: 'vendido',
+      ativo: false,
+    },
+  ];
+
+  // Caso 1: Formulário já informa Valor Total: 7750 — valorUnitario do item deve ser 7750, jamais 300
+  const vendaComValor = detectarFormularioOuPedidoVenda(`Nome: Maria Silva
+Valor total: 7.750,00
+Pix
+Modelo: iPhone 17 Pro Max 256GB imei 350015753668064`);
+  assert.ok(vendaComValor);
+
+  const propComValor = construirPropostaNotinha({
+    vendaDetectada: vendaComValor,
+    estoque,
+  });
+  assert.equal(propComValor.valorTotal, 7750);
+  assert.equal(propComValor.itens?.[0]?.valorUnitario, 7750, 'Item unitário deve usar 7750 do pedido, jamais o antigo 300');
+
+  // Caso 2: Formulário omite valor — bot não deve chutar 300 na nota, devendo ficar 0 para solicitar ao vendedor
+  const vendaSemValor = detectarFormularioOuPedidoVenda(`Nome: Maria Silva
+Valor total:
+Pix
+Modelo: iPhone 17 Pro Max 256GB imei 350015753668064`);
+  assert.ok(vendaSemValor);
+
+  const propSemValor = construirPropostaNotinha({
+    vendaDetectada: vendaSemValor,
+    estoque,
+  });
+  assert.equal(propSemValor.valorTotal, 0, 'Sem valor no formulário, não deve preencher com preço antigo 300');
+  assert.equal(propSemValor.itens?.[0]?.valorUnitario, undefined);
+});
+
+test('emitirNotinhaVenda permite vender aparelho já vendido após confirmação e garante item consistente com valorTotal (7750)', async () => {
+  const apJaVendidoId = '22222222-2222-4222-8222-222222222222';
+  const rpcCalls: Array<{ fn: string; args: Record<string, any> }> = [];
+
+  const mockSupabase: any = {
+    from(tabela: string) {
+      const chain: any = {
+        select: () => chain,
+        eq: () => chain,
+        ilike: () => chain,
+        limit: () => chain,
+        update: () => chain,
+        insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'cli-1' }, error: null }) }) }),
+        maybeSingle: async () => {
+          if (tabela === 'lojas') {
+            return {
+              data: { id: 'loja-1', nome: 'Lucas Imports', garantia_dias: 90 },
+              error: null,
+            };
+          }
+          return { data: null, error: null };
+        },
+        then: (resolve: any) => resolve({ data: [], error: null }),
+      };
+      return chain;
+    },
+    async rpc(fn: string, args: Record<string, any>) {
+      rpcCalls.push({ fn, args });
+      return {
+        data: {
+          venda: { id: '33333333-3333-4333-8333-333333333333' },
+          baixados: 0,
+          trade_in_id: null,
+          lote_id: 'lote-1',
+        },
+        error: null,
+      };
+    },
+  };
+
+  const propostaConfirmada: PropostaNotinha = {
+    id: 'prop-ja-vendido',
+    clienteNome: 'João Teste',
+    modelo: 'iPhone 17 Pro Max',
+    capacidade: '256GB',
+    cor: 'Preto',
+    imei: '350015753668064',
+    statusEstoque: '⚠️ Este IMEI (350015753668064) já consta como vendido/baixado.',
+    aparelhoId: apJaVendidoId,
+    custo: 300,
+    valorTotal: 7750,
+    formaPagamento: 'Pix',
+    isUpgrade: false,
+    itens: [
+      {
+        modelo: 'iPhone 17 Pro Max',
+        capacidade: '256GB',
+        cor: 'Preto',
+        imei: '350015753668064',
+        statusEstoque: '⚠️ Este IMEI (350015753668064) já consta como vendido/baixado.',
+        aparelhoId: apJaVendidoId,
+        custo: 300,
+        // Simula caso residual onde o item tinha valorUnitario antigo = 300 apesar do total = 7750
+        valorUnitario: 300,
+      },
+    ],
+  };
+
+  const res = await emitirNotinhaVenda(mockSupabase, 'loja-1', propostaConfirmada, 'Lucas');
+  assert.equal(res.sucesso, true, `Deveria emitir mesmo estando já vendido: ${res.mensagem}`);
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].fn, 'registrar_venda_atomica');
+  assert.deepEqual(
+    rpcCalls[0].args.p_permitir_fora_do_estoque,
+    [apJaVendidoId],
+    'Deve enviar aparelhoId em p_permitir_fora_do_estoque após confirmação explícita'
+  );
+  const itemGravado = rpcCalls[0].args.p_venda.itens[0];
+  assert.equal(itemGravado.valorExibir, 7750, 'Valor unitário exibido ao cliente deve ser 7750');
+  assert.equal(itemGravado.total, 7750, 'Total do item na nota deve ser 7750');
+  assert.equal(rpcCalls[0].args.p_venda.valor, 7750);
 });
 
 
