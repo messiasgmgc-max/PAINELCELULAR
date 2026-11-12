@@ -368,7 +368,7 @@ export interface ContextoConversaNatural {
   resumoGarantiasAtivas?: string;
   historicoChat?: MensagemHistorico[];
   isGroup?: boolean;
-  modoChat?: 'teste' | 'padrao' | 'off' | 'vendas';
+  modoChat?: 'teste' | 'padrao' | 'off' | 'vendas' | 'estoque' | 'completo';
   detalhesSaidasFormatado?: string;
   detalhesEntradasRecentes?: string;
   detalhesVendasRecentes?: string;
@@ -447,7 +447,14 @@ export async function responderConversaNaturalComGemini(
   const resumoGarantiasAtivas = contexto?.resumoGarantiasAtivas || 'Nenhuma garantia ativa registrada.';
   const detalhesSaidas = contexto?.detalhesSaidasFormatado || 'Nenhuma saída/baixa recente registrada.';
   const detalhesEntradas = contexto?.detalhesEntradasRecentes || 'Nenhuma entrada recente registrada.';
-  const modoOperacao = contexto?.modoChat === 'teste' ? 'TESTE (LIVRE & ANALÍTICO)' : 'PADRÃO (DIRETO AO PONTO)';
+  const modoOperacao =
+    contexto?.modoChat === 'estoque'
+      ? 'ESTOQUE (ENTRADAS, SAÍDAS, CONSULTAS E LISTA ATUALIZADA)'
+      : contexto?.modoChat === 'completo'
+      ? 'COMPLETO (ACESSO TOTAL A TODOS OS COMANDOS)'
+      : contexto?.modoChat === 'teste'
+      ? 'TESTE (NOVAS FUNÇÕES EM DESENVOLVIMENTO)'
+      : 'PADRÃO (DIRETO AO PONTO)';
 
   const planosDescricaoPrecos = Object.values(PLANOS_SISTEMA)
     .map((p) => `${p.nome} (R$ ${p.precos.mensal.valorMensal.toFixed(2).replace('.', ',')}/mês)`)
@@ -459,7 +466,9 @@ Modo atual do bot: *${modoOperacao}* | Chat: ${contexto?.isGroup ? 'Grupo' : 'Pr
 
 🧠 COMPORTAMENTO INTELIGENTE E CONTEXTUAL:
 - Você é o cérebro operacional da loja. Entenda o contexto de conversas naturais, perguntas abreviadas (ex: "e o 13 pro?", "saiu quando?", "quem comprou o imei 35...?", "qual valor tá o 15pm?").
-- MODO TESTE (!modo teste): Você é mais livre, inteligente, consultivo e espontâneo. Identifica quando alguém precisa de ajuda operacional, tira dúvidas de estoque, entradas, saídas, modelos e preços com maestria.
+- MODO ESTOQUE (!modo estoque): Foco exclusivo em entradas, saídas, consultas de aparelhos/IMEIs e pedidos da lista de estoque atualizada.
+- MODO COMPLETO (!modo completo): Acesso total a todos os comandos, consultas, entradas, saídas e análises da loja.
+- MODO TESTE (!modo teste): Novas funções em desenvolvimento — modo inteligente, consultivo e experimental.
 - MODO PADRÃO (!modo padrao): Seja estritamente focado no essencial, direto e silencioso. Não puxe papo.
 - NÃO SE INTROMETA ONDE NÃO FOR CHAMADO: Se a conversa for bate-papo aleatório entre pessoas ("bom dia", "bora almoçar", "kkk"), fique calado. Só responda quando for chamado diretamente ou quando a mensagem contiver uma dúvida ou pedido sobre aparelhos, preços, vendas, estoque, assistência técnica ou gestão da loja.
 

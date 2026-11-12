@@ -665,8 +665,8 @@ function telefonesConferem(telA?: string | null, telB?: string | null): boolean 
   return false;
 }
 
-// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Teste / Padrão / Off) ──
-export type ModoChat = 'teste' | 'padrao' | 'off' | 'vendas';
+// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Vendas / Estoque / Teste / Completo / Padrão / Off) ──
+export type ModoChat = 'teste' | 'padrao' | 'off' | 'vendas' | 'estoque' | 'completo';
 const cacheModosChat = new Map<string, { modo: ModoChat; exp: number }>();
 
 async function obterModoChat(remoteJid: string): Promise<ModoChat> {
@@ -687,13 +687,24 @@ async function obterModoChat(remoteJid: string): Promise<ModoChat> {
     if (data?.chave) {
       const partes = data.chave.split(':');
       const modoSalvo = partes[partes.length - 1];
-      if (modoSalvo === 'teste' || modoSalvo === 'off' || modoSalvo === 'padrao' || modoSalvo === 'vendas') {
+      if (
+        modoSalvo === 'teste' ||
+        modoSalvo === 'off' ||
+        modoSalvo === 'padrao' ||
+        modoSalvo === 'vendas' ||
+        modoSalvo === 'estoque' ||
+        modoSalvo === 'completo'
+      ) {
         cacheModosChat.set(remoteJid, { modo: modoSalvo, exp: agora + 300000 });
         return modoSalvo;
       }
       if (modoSalvo === 'venda' || modoSalvo === 'notinhas' || modoSalvo === 'notinha') {
         cacheModosChat.set(remoteJid, { modo: 'vendas', exp: agora + 300000 });
         return 'vendas';
+      }
+      if (modoSalvo === 'full' || modoSalvo === 'tudo') {
+        cacheModosChat.set(remoteJid, { modo: 'completo', exp: agora + 300000 });
+        return 'completo';
       }
       // Retrocompatibilidade com modos legados
       if (modoSalvo === 'comandos' || modoSalvo === 'normal') {
@@ -2564,6 +2575,9 @@ export async function POST(request: Request) {
       if (modoChat === 'vendas' && ehEntradaNaFoto) {
         return NextResponse.json({ status: 'ok', message: 'Entrada de estoque ignorada no modo vendas.' }, { status: 200 });
       }
+      if (modoChat === 'estoque' && vendaDetectadaNaFoto) {
+        return NextResponse.json({ status: 'ok', message: 'Formulário de venda ignorado no modo estoque.' }, { status: 200 });
+      }
 
       const ehOperacaoGrupo =
         marcacaoBot.foiMarcado ||
@@ -3050,6 +3064,51 @@ export async function POST(request: Request) {
           { status: 200 }
         );
       }
+    } else if (modoChat === 'estoque') {
+      // ── MODO ESTOQUE: Foco exclusivo em entradas, saídas, consultas e lista atualizada ──
+      if (ehComandoExplicito) {
+        const bloqueio = bloquearAtalhoForaDoPlano(lowerText, planoLoja, papelCapability);
+        if (bloqueio) {
+          await enviarMensagemWhatsApp(instanceName, targetDestination, bloqueio);
+          return NextResponse.json({ status: 'blocked', message: 'Atalho fora do plano da loja.' }, { status: 200 });
+        }
+      }
+
+      const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(textContent));
+      if (ehFormularioVenda) {
+        return NextResponse.json(
+          { status: 'ignored', message: 'Chat em modo estoque: formulário de venda ignorado (use !modo vendas).' },
+          { status: 200 }
+        );
+      }
+
+      const comandoEstoquePermitido = /^!(?:modo|config|ajuda|menu|estoque|lista|entradas?|importar|checarimei|etiquetas?|manutencao|limparestoque|conferencia|buscar|modelo)\b/i.test(
+        lowerText
+      );
+      if (ehComandoExplicito && !comandoEstoquePermitido) {
+        return NextResponse.json(
+          { status: 'ignored', message: 'Chat em modo estoque: comando fora do escopo de estoque ignorado.' },
+          { status: 200 }
+        );
+      }
+
+      const ehPedidoLista = /^(?:manda|envia|gera|passa|ver|quero)?\s*(?:a\s+)?lista(?:\s+atualizada|\s+de\s+estoque|\s+do\s+estoque)?$/i.test(
+        lowerText
+      );
+      const ehOperacaoEstoque =
+        ehComandoModo ||
+        comandoEstoquePermitido ||
+        ehMensagemDeEntradaEstoque(textContent) ||
+        ehPedidoLista ||
+        marcacaoBot.foiMarcado ||
+        !avaliarRuidoDeGrupo(textContent).ehRuido;
+
+      if (isGroup && !ehOperacaoEstoque) {
+        return NextResponse.json(
+          { status: 'ok', message: 'Chat em modo estoque: ruído de grupo ignorado.' },
+          { status: 200 }
+        );
+      }
     } else {
       // Antes, atalhos como !abater e !fiado executavam sem checar o plano: uma
       // loja do Entrada usava recursos do Intermediário só evitando a IA.
@@ -3311,7 +3370,7 @@ export async function POST(request: Request) {
     }
 
     // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA COM 1 OU MAIS APARELHOS) ──
-    const vendaDetectada = detectarFormularioOuPedidoVenda(textContent);
+    const vendaDetectada = modoChat === 'estoque' ? null : detectarFormularioOuPedidoVenda(textContent);
     if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal || vendaDetectada.cliente?.nome) && lojaId) {
       const listaAparelhosPedido =
         Array.isArray(vendaDetectada.aparelhos) && vendaDetectada.aparelhos.length > 0
@@ -4140,8 +4199,17 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       }
     }
 
-    // ── 10. COMANDO: !estoque e !estoque completo ──
-    if (lowerText.startsWith('!estoque') || lowerText === 'estoque' || lowerText === 'cardapio' || lowerText === 'tabela') {
+    // ── 10. COMANDO: !estoque, !lista e !estoque completo ──
+    const ehPedidoListaEstoque =
+      lowerText.startsWith('!estoque') ||
+      lowerText.startsWith('!lista') ||
+      lowerText === 'estoque' ||
+      lowerText === 'cardapio' ||
+      lowerText === 'tabela' ||
+      /^(?:manda|envia|gera|passa|ver|quero)?\s*(?:a\s+)?lista(?:\s+atualizada|\s+de\s+estoque|\s+do\s+estoque)?$/i.test(
+        lowerText
+      );
+    if (ehPedidoListaEstoque) {
       const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
       if (!resolvedLojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
@@ -4448,11 +4516,43 @@ Envie o modelo que deseja consultar no estoque:
 • Lê apenas formulários de vendas e pedidos enviados neste chat.
 • Processa fotos de caixas/etiquetas para vincular IMEIs diretamente aos pedidos.
 • Responde apenas à marcação do bot em notas, confirmações (*SIM* / *CONFIRMAR* / ✅), cancelamentos (*CANCELAR* / ❌) ou correções de dados.
-• 🤫 *Ignora 100% das mensagens paralelas, conversas do grupo e consultas de estoque.*
+• 🤫 *Ignora 100% das mensagens paralelas, entradas de estoque e consultas.*
 
-💡 _Para retornar ao modo padrão envie:_ *!modo padrao*`;
+💡 _Para voltar ou trocar envie:_ *!modo estoque* ou *!modo completo*`;
         await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
         return NextResponse.json({ status: 'ok', message: 'Modo vendas ativado.' }, { status: 200 });
+      }
+
+      if (subComando === 'estoque' || subComando === 'stock') {
+        await definirModoChat(remoteJid, 'estoque');
+        const msgModo = `⚙️ *Modo do Chat — Phone Center*
+
+📦 Modo atualizado com sucesso para: *MODO ESTOQUE*!
+
+🎯 *Neste modo, o bot opera exclusivamente com o estoque (separado de vendas):*
+• Registra *entradas* de aparelhos (usando o mesmo padrão do *Importar > Lista Simples*).
+• Consulta *saídas*, IMEIs, datas de entrada/saída e dúvidas sobre aparelhos.
+• Envia a *lista atualizada* de estoque (*!estoque*, *!lista* ou *"manda a lista atualizada"*).
+• 🤫 *Ignora formulários de venda (reservados ao !modo vendas) e conversas paralelas.*
+
+💡 _Para voltar ou trocar envie:_ *!modo completo* ou *!modo vendas*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
+        return NextResponse.json({ status: 'ok', message: 'Modo estoque ativado.' }, { status: 200 });
+      }
+
+      if (subComando === 'completo' || subComando === 'full' || subComando === 'tudo') {
+        await definirModoChat(remoteJid, 'completo');
+        const msgModo = `⚙️ *Modo do Chat — Phone Center*
+
+⚡ Modo atualizado com sucesso para: *MODO COMPLETO*!
+
+🚀 *Neste modo, o bot aceita todos os comandos e funções:*
+• Formulários de venda e notinhas, entradas/saídas de estoque, consultas, fiado, OS e relatórios.
+• Atende comandos com *!* e perguntas operacionais em linguagem natural.
+
+💡 _Para restringir por função envie:_ *!modo vendas* ou *!modo estoque*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
+        return NextResponse.json({ status: 'ok', message: 'Modo completo ativado.' }, { status: 200 });
       }
 
       if (subComando === 'teste' || subComando === 'test' || subComando === 'dev') {
@@ -4461,14 +4561,12 @@ Envie o modelo que deseja consultar no estoque:
 
 🧪 Modo atualizado com sucesso para: *MODO TESTE*!
 
-🚀 *Neste modo, o assistente tem inteligência avançada e acesso total ao Phone Center:*
-• Consulta livre de estoque, datas de entrada e datas de saída de qualquer aparelho.
-• Responde qual IMEI saiu, que dia vendeu e quanto tempo ficou no estoque.
-• Identifica quando alguém precisa de ajuda operacional sem se intrometer em conversas paralelas.
-• Permite dar entrada inteligente em aparelhos falando: *"Entradas: [aparelho] [valor]..."* ou *!entradas*.
+🚀 *Novas funções em desenvolvimento + acesso completo:*
+• Consulta livre de estoque, datas de entrada/saída e IMEIs.
+• Recursos experimentais e inteligência consultiva avançada.
 • Proteção de segurança: nunca vaza custos ou lucros internos em grupos.
 
-💡 _Para retornar ao modo padrão silencioso envie:_ *!modo padrao*`;
+💡 _Para trocar de modo envie:_ *!modo completo*, *!modo estoque* ou *!modo vendas*`;
         await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
         return NextResponse.json({ status: 'ok', message: 'Modo teste ativado.' }, { status: 200 });
       }
@@ -4483,7 +4581,7 @@ Envie o modelo que deseja consultar no estoque:
 • Não puxa assunto e não se intromete em conversas de grupos.
 • Atende a comandos operacionais com *!* e perguntas pontuais diretas.
 
-💡 _Para ativar o modo inteligente livre envie:_ *!modo teste*`;
+💡 _Para ver todos os modos envie:_ *!modo*`;
         await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
         return NextResponse.json({ status: 'ok', message: 'Modo padrão ativado.' }, { status: 200 });
       }
@@ -4496,7 +4594,7 @@ Envie o modelo que deseja consultar no estoque:
 
 Ele não responderá a nenhuma mensagem nem comando até você reativar.
 
-💡 _Para religar o bot envie:_ *!modo padrao* ou *!modo teste*`;
+💡 _Para religar o bot envie:_ *!modo completo*, *!modo estoque* ou *!modo vendas*`;
         await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
         return NextResponse.json({ status: 'ok', message: 'Bot desativado no chat.' }, { status: 200 });
       }
@@ -4505,12 +4603,16 @@ Ele não responderá a nenhuma mensagem nem comando até você reativar.
       const modoAtual = await obterModoChat(remoteJid);
       const modoFormatado =
         modoAtual === 'vendas'
-          ? '🧾 *MODO VENDAS* (exclusivo para formulários, etiquetas e notinhas — ignora conversas paralelas)'
+          ? '🧾 *MODO VENDAS* (lê apenas formulários, confirma e edita notinhas)'
+          : modoAtual === 'estoque'
+          ? '📦 *MODO ESTOQUE* (entradas, saídas, perguntas e pedidos da lista atualizada)'
+          : modoAtual === 'completo'
+          ? '⚡ *MODO COMPLETO* (aceita todos os comandos e tudo)'
           : modoAtual === 'teste'
-          ? '🧪 *MODO TESTE* (inteligente, livre, acesso total a entradas/saídas/IMEIs)'
+          ? '🧪 *MODO TESTE* (novas funções em desenvolvimento)'
           : modoAtual === 'off'
-          ? '🛑 *DESATIVADO* (bot silenciado no chat)'
-          : '🤖 *MODO PADRÃO* (silencioso, comandos e direto ao ponto)';
+          ? '🛑 *MODO OFF* (desativado por completo)'
+          : '🤖 *MODO PADRÃO* (silencioso, comandos e básico)';
 
       const msgStatus = `⚙️ *Modo do Chat — Phone Center*
 
@@ -4518,10 +4620,11 @@ Ele não responderá a nenhuma mensagem nem comando até você reativar.
 🎯 *Modo Atual:* ${modoFormatado}
 
 *Como alternar entre os modos:*
-• *!modo vendas* — Foco exclusivo em notinhas (ignora conversas paralelas e consultas)
-• *!modo padrao* — Modo calado que atende comandos e foca no básico
-• *!modo teste* — Modo livre e inteligente com acesso total a dados de estoque e entradas
-• *!modo off* — Desativa o bot por completo até ser religado`;
+• *!modo vendas* — Lê apenas formulários, confirma e edita notinhas
+• *!modo estoque* — Entradas, saídas, perguntas e pedidos da lista atualizada
+• *!modo teste* — Novas funções em desenvolvimento
+• *!modo completo* — Aceita todos os comandos e tudo
+• *!modo off* — Desativa completamente`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgStatus);
       return NextResponse.json({ status: 'ok', message: 'Status do modo enviado.' }, { status: 200 });
@@ -4986,7 +5089,13 @@ Digite: *!broadcast agora*`;
       // exatamente o que o plano da loja libera — e nada além disso.
       const menuAjuda =
         montarMenuAjuda(planoLoja, papelCapability) +
-        `\n\n⚙️ *Outros:* *!plano* (assinatura) · *!config* (modo do chat) · *!ajuda*`;
+        `\n\n🎛️ *Modos do Bot (!modo):*\n` +
+        `• *!modo vendas* — Lê apenas formulários, confirma e edita notinhas\n` +
+        `• *!modo estoque* — Entradas, saídas, perguntas e pedidos da lista atualizada\n` +
+        `• *!modo teste* — Novas funções em desenvolvimento\n` +
+        `• *!modo completo* — Aceita todos os comandos e tudo\n` +
+        `• *!modo off* — Desativa completamente\n` +
+        `\n⚙️ *Outros:* *!plano* (assinatura) · *!config* (modo do chat) · *!ajuda*`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
       return NextResponse.json({ status: 'ok', message: 'Menu de ajuda enviado.' }, { status: 200 });
@@ -5272,16 +5381,21 @@ Digite: *!broadcast agora*`;
         // Deixamos prosseguir para a Seção 14 (Copiloto Operacional Inteligente) para responder de forma rica e neural!
       }
 
-      // Se confiança for baixa em grupo, se não estiver em modo teste ou se for ruído, ignora silenciosamente
+      // Se confiança for baixa em grupo, se não estiver em modo que libera copiloto em grupo ou se for ruído, ignora silenciosamente
+      const modoPermiteCopilotoEmGrupo =
+        modoChat === 'teste' || modoChat === 'completo' || modoChat === 'estoque';
       if (isGroup) {
-        if (modoChat !== 'teste' || avaliarRuidoDeGrupo(textContent).ehRuido) {
+        if (!modoPermiteCopilotoEmGrupo || avaliarRuidoDeGrupo(textContent).ehRuido) {
           return NextResponse.json({ status: 'ok', message: 'Mensagem em grupo ignorada (modo padrão ou ruído).' }, { status: 200 });
         }
       }
     }
 
     // ── 14. COPILOTO OPERACIONAL INTELIGENTE DO LOJISTA ──
-    const deveResponderCopiloto = !isGroup || (modoChat === 'teste' && !avaliarRuidoDeGrupo(textContent).ehRuido);
+    const deveResponderCopiloto =
+      !isGroup ||
+      ((modoChat === 'teste' || modoChat === 'completo' || modoChat === 'estoque') &&
+        !avaliarRuidoDeGrupo(textContent).ehRuido);
     if (deveResponderCopiloto) {
       let modelosEstoque: string[] = [];
       let detalhesEstoqueFormatado = '';
