@@ -281,16 +281,31 @@ export const capabilitiesEstoque: Capability[] = [
       const registrosParaInserir: any[] = [];
 
       for (const item of itensParaCadastrar) {
-        const codigoEtiqueta = gerarCodigoEtiqueta(listaCodigos);
+        const codigoInformado =
+          item.idEtiquetaInformado &&
+          item.idEtiqueta &&
+          !listaCodigos.some((c) => String(c.codigo || '') === String(item.idEtiqueta))
+            ? item.idEtiqueta
+            : null;
+        const codigoEtiqueta = codigoInformado || gerarCodigoEtiqueta(listaCodigos);
         listaCodigos.push({ codigo: codigoEtiqueta });
 
         const norm = normalizarNomeModelo(item.modelo);
+        const obsPartes = [
+          item.observacoes ? `Obs: ${item.observacoes}` : '',
+          `ID: ${codigoEtiqueta}`,
+          item.bateria ? `Bateria: ${item.bateria}` : '',
+          item.imei ? `IMEI: ${item.imei}` : '',
+          `Entrada via WhatsApp por ${ctx.pushName}`,
+        ].filter(Boolean);
+
         registrosParaInserir.push({
           loja_id: ctx.lojaId,
           marca: norm.marca || item.marca || 'Apple',
           modelo: norm.modelo,
           capacidade: item.capacidade || null,
           cor: item.cor || null,
+          saude_bateria: item.bateria || null,
           preco: item.preco || (item.custo ? item.custo + 300 : 0),
           precoAtacado: item.precoAtacado || (item.custo ? item.custo + 150 : 0),
           custo: item.custo || 0,
@@ -300,7 +315,7 @@ export const capabilitiesEstoque: Capability[] = [
           ativo: true,
           codigo: codigoEtiqueta,
           dataCadastro: new Date().toISOString(),
-          observacoes: `Entrada em lote via WhatsApp por ${ctx.pushName}`,
+          observacoes: obsPartes.join(' | '),
         });
       }
 
@@ -327,11 +342,12 @@ export const capabilitiesEstoque: Capability[] = [
 
       const linhasConfirmacao = registrosParaInserir.map((reg, idx) => {
         const cod = reg.codigo ? ` (Cód: #${reg.codigo})` : '';
+        const batStr = reg.saude_bateria ? ` | 🔋 ${reg.saude_bateria}` : '';
         const custoStr = reg.custo > 0 ? ` | Custo: ${moeda(reg.custo)}` : '';
         const imeiStr = reg.imei ? ` | IMEI: ${reg.imei}` : '';
         const emojiCor = obterEmojiDaCor(reg.cor);
         const corTexto = reg.cor ? ` ${emojiCor} ${reg.cor}` : '';
-        return `${idx + 1}. 📱 *${reg.modelo}* ${reg.capacidade || ''}${corTexto}${custoStr}${cod}${imeiStr}`;
+        return `${idx + 1}. 📱 *${reg.modelo}* ${reg.capacidade || ''}${corTexto}${batStr}${custoStr}${cod}${imeiStr}`;
       }).join('\n');
 
       return (

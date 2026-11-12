@@ -1,11 +1,9 @@
 import { extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
+import { parseMercadoPhoneList } from '@/lib/estoque/listaSimples';
 
 /**
  * Parser e processador inteligente de entradas de aparelhos no estoque via WhatsApp.
- * Suporta múltiplas sintaxes:
- *  - "Entradas: iPhone 13 128gb azul 2200, iPhone 14 128gb preto 3100"
- *  - "Entrada:\n13 pro max 256gb verde custo 3000\n14 128gb estelar 2800"
- *  - Listas coladas de fornecedores (com emojis 📱, 🔵, 💰, etc.)
+ * Usa a mesma lógica oficial do "Importar > Lista Simples" (src/lib/estoque/listaSimples.ts).
  */
 
 export interface ItemEntradaDetectado {
@@ -18,6 +16,10 @@ export interface ItemEntradaDetectado {
   precoAtacado?: number;
   condicao: 'novo' | 'seminovo' | 'usado' | 'danificado';
   imei?: string;
+  bateria?: string;
+  observacoes?: string;
+  idEtiqueta?: string;
+  idEtiquetaInformado?: boolean;
   quantidade?: number;
 }
 
@@ -174,127 +176,74 @@ export function extrairNumeroValor(valStr: string): number {
   return isNaN(num) ? 0 : num;
 }
 
-/**
- * Analisa uma única linha de texto livre descrevendo um aparelho para entrada.
- */
-export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'seminovo' = 'seminovo'): ItemEntradaDetectado | null {
-  const l = linha.trim();
-  if (!l || l.length < 3) return null;
+function converterParaItemEntrada(
+  item: ReturnType<typeof parseMercadoPhoneList>[number],
+  linhaOriginal: string,
+  condicaoPadrao: 'novo' | 'seminovo' = 'seminovo'
+): ItemEntradaDetectado | null {
+  if (!item || !item.modelo || item.modelo === 'Eletrônico') return null;
 
-  // Ignora cabeçalhos evidentes
-  if (/^entradas?:?$/i.test(l) || /^dar entradas?:?$/i.test(l) || /novos lacrados/i.test(l) || /semi\s*novos/i.test(l)) {
-    return null;
+  let condicao: 'novo' | 'seminovo' | 'usado' | 'danificado' = item.condicao || condicaoPadrao;
+  if (condicao !== 'novo') {
+    if (/\busado\b/i.test(linhaOriginal)) condicao = 'usado';
+    else if (/\b(?:lacrado|novo)\b/i.test(linhaOriginal)) condicao = 'novo';
+    else if (condicaoPadrao === 'novo') condicao = 'novo';
   }
 
-  let condicao: 'novo' | 'seminovo' | 'usado' | 'danificado' = condicaoPadrao;
-  if (/lacrado|novo/i.test(l)) condicao = 'novo';
-  else if (/usado/i.test(l)) condicao = 'usado';
-  else if (/seminovo|semi\s*novo/i.test(l)) condicao = 'seminovo';
-
-  let linhaTrabalho = l
-    .replace(/^(?:!(?:entradas?|importar)\s*|(?:entradas?|dar entradas?|cadastrar entradas?|chegou hoje|chegaram os aparelhos)[:\s]*)/i, '')
-    .trim();
-
-  // 1. Extração prioritária de IMEI (com prefixo "imei/serial" ou sequência direta de 14 a 16 dígitos)
-  let imei: string | undefined;
-
-  // 1.1. Prefixo explícito: "imei: 356829104829102", "imei 35...", "serial: 35..."
-  const imeiPrefixoMatch = linhaTrabalho.match(/(?:imei|serial|sn)[:\s=]*([0-9\s-]{14,18})/i);
-  if (imeiPrefixoMatch) {
-    const limpo = imeiPrefixoMatch[1].replace(/\D/g, '');
-    if (limpo.length >= 14 && limpo.length <= 16) {
-      imei = limpo;
-      linhaTrabalho = linhaTrabalho.replace(imeiPrefixoMatch[0], ' ');
-    }
-  }
-
-  // 1.2. Sequência numérica direta de 14 a 16 dígitos isolados
-  if (!imei) {
-    const imeiDiretoMatch = linhaTrabalho.match(/\b(\d{14,16})\b/);
-    if (imeiDiretoMatch) {
-      imei = imeiDiretoMatch[1];
-      linhaTrabalho = linhaTrabalho.replace(imeiDiretoMatch[0], ' ');
-    }
-  }
-
-  // 2. Capacidade (32GB, 64GB, 128GB, 256GB, 512GB, 1TB, etc.)
-  let capacidade: string | undefined;
-  const capMatch = linhaTrabalho.match(REGEX_CAPACIDADE);
-  if (capMatch) {
-    capacidade = `${capMatch[1].toUpperCase()}${capMatch[2].toUpperCase()}`;
-    linhaTrabalho = linhaTrabalho.replace(capMatch[0], ' ');
-  }
-
-  // 3. Valor de custo / preço
-  // REGRA ESTRITA: O IMEI já foi removido acima, garantindo que nunca seja confundido com valor.
-  // Procura valor com R$/r$, com prefixo explícito ("custo", "valor", "preço", "por", "pago")
-  // ou número solto no final da linha (ex: listas de fornecedor "13 128gb 2200").
-  let custo = 0;
-  const matchComPrefixo = linhaTrabalho.match(/(?:r\$|custo|por|valor|pre[çc]o|pago)[:=\s]*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\b\d{3,6}\b)/i);
-  const matchComCentavos = linhaTrabalho.match(/\b(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\b/);
-  const matchNumeroSolto = linhaTrabalho.match(/(?:^|\s)(\d{3,5})(?:\s|$)/);
-
-  if (matchComPrefixo) {
-    const num = extrairNumeroValor(matchComPrefixo[1]);
-    if (num >= 50 && num !== 32 && num !== 64 && num !== 128 && num !== 256 && num !== 512 && num !== 1024) {
-      custo = num;
-      linhaTrabalho = linhaTrabalho.replace(matchComPrefixo[0], ' ');
-    }
-  } else if (matchComCentavos) {
-    const num = extrairNumeroValor(matchComCentavos[1]);
-    if (num >= 50) {
-      custo = num;
-      linhaTrabalho = linhaTrabalho.replace(matchComCentavos[0], ' ');
-    }
-  } else if (matchNumeroSolto) {
-    const num = extrairNumeroValor(matchNumeroSolto[1]);
-    if (num >= 50 && num !== 64 && num !== 128 && num !== 256 && num !== 512 && num !== 1024) {
-      custo = num;
-      linhaTrabalho = linhaTrabalho.replace(matchNumeroSolto[0], ' ');
-    }
-  }
-
-  // 4. Cor (Detecta termos compostos, palavras simples e emojis de coração/fornecedor)
-  let cor = extrairCorDeTexto(linhaTrabalho) || extrairCorDeTexto(l);
-
-  // 5. Modelo
-  let textoModelo = linhaTrabalho
-    .replace(/(?:imei|serial|sn)[:\s=]*\d*/gi, ' ')
-    .replace(/\b(?:r\$|custo|por|valor|pre[çc]o|pago|lacrado|seminovo|novo|usado)\b/gi, ' ')
-    .replace(/\b(?:desert\s*titanium|tit[aâ]nio\s*deserto?|natural\s*titanium|tit[aâ]nio\s*natural|space\s*black|space\s*gr[ae]y|meia\s*noite|meia-noite|starlight|estelar)\b/gi, ' ')
-    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
-    .replace(/[•\-\*]/g, ' ')
-    .trim();
-
-  if (cor) {
-    textoModelo = textoModelo
-      .replace(new RegExp(`\\b${cor}\\b`, 'gi'), ' ')
-      .replace(/\b(?:desert|deserto|natural|titanium|tit[aâ]nio|preto?|black|branco?|white|prata|silver|azul|blue|dourado?|gold|amarelo?|yellow|rosa|pink|roxo|purple|cinza|gr[ae]y|grafite|graphite)\b/gi, ' ');
-  }
-
-  // Remove valores numéricos restantes
-  textoModelo = textoModelo.replace(/\b\d{3,}\b/g, '').trim();
-
-  if (textoModelo.length < 2) return null;
-
-  const { marca, modelo } = normalizarNomeModelo(textoModelo);
-
-  // Calcula margem padrão para preço de venda se só tiver custo
+  const custo = item.custo || 0;
   const margem = condicao === 'novo' ? 350 : 300;
   const preco = custo > 0 ? custo + margem : 0;
   const precoAtacado = custo > 0 ? custo + 150 : 0;
 
   return {
-    marca,
-    modelo,
-    capacidade,
-    cor,
+    marca: item.marca || 'Apple',
+    modelo: item.modelo,
+    capacidade: item.capacidade || undefined,
+    cor: item.cor && item.cor !== 'Padrão' ? item.cor : extrairCorDeTexto(linhaOriginal) || 'Padrão',
     custo,
     preco,
     precoAtacado,
     condicao,
-    imei,
+    imei: item.sufixoSerial || undefined,
+    bateria: item.bateria || undefined,
+    observacoes: item.observacoes || undefined,
+    idEtiqueta: item.idEtiqueta,
+    idEtiquetaInformado: item.idEtiquetaInformado,
   };
+}
+
+function limparPrefixoEntrada(texto: string): string {
+  return texto
+    .trim()
+    .replace(
+      /^(?:!(?:entradas?|importar)\s*|(?:entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou\s*hoje|chegaram\s*os\s*aparelhos)[:\s]*)/i,
+      ''
+    )
+    .trim();
+}
+
+/**
+ * Analisa uma única linha de texto livre descrevendo um aparelho para entrada,
+ * usando a mesma lógica oficial do Importar > Lista Simples.
+ */
+export function parseLinhaEntrada(linha: string, condicaoPadrao: 'novo' | 'seminovo' = 'seminovo'): ItemEntradaDetectado | null {
+  const l = linha.trim();
+  if (!l || l.length < 3) return null;
+
+  if (/^entradas?:?$/i.test(l) || /^dar entradas?:?$/i.test(l) || /novos lacrados/i.test(l) || /semi\s*novos/i.test(l)) {
+    return null;
+  }
+
+  const linhaTrabalho = limparPrefixoEntrada(l);
+  if (!linhaTrabalho || linhaTrabalho.length < 2) return null;
+
+  const itens = parseMercadoPhoneList(linhaTrabalho, 0, {
+    aceitarPrefixoCusto: true,
+    aceitarCustoSemRS: true,
+  });
+  if (itens.length === 0) return null;
+
+  return converterParaItemEntrada(itens[0], l, condicaoPadrao);
 }
 
 /**

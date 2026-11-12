@@ -192,4 +192,49 @@ _Relatório gerado pelo Painel Phone Center_`;
     assert.equal(ehRelatorioOuConferencia('Entradas: iPhone 13 128gb azul 2200'), false);
     assert.equal(ehMensagemDeEntradaEstoque('Entradas: iPhone 13 128gb azul 2200'), true);
   });
+
+  it('usa a mesma lógica oficial do Importar > Lista Simples sem confundir IMEI após "-" com valor', () => {
+    const listaSimples = `Entradas:
+🔵 17 Pro Max 256gb Azul Lacrado - 2605
+🏜️ 16 Pro Max 256gb Desert 97% - 5177 | ID: 9410244
+🌸 15 128GB Rosa 90% MSG TELA - 8193 | ID: 9563370
+🔵 13 128gb Azul 88% R$ 2200 - 4411`;
+
+    const itens = parseTextoEntradaAparelhos(listaSimples);
+    assert.equal(itens.length, 4);
+
+    assert.equal(itens[0].modelo, 'iPhone 17 Pro Max');
+    assert.equal(itens[0].capacidade, '256GB');
+    assert.equal(itens[0].cor, 'Azul');
+    assert.equal(itens[0].condicao, 'novo');
+    assert.equal(itens[0].bateria, '100% (Lacrado)');
+    assert.equal(itens[0].imei, '2605');
+    assert.equal(itens[0].custo, 0);
+
+    assert.equal(itens[1].modelo, 'iPhone 16 Pro Max');
+    assert.equal(itens[1].capacidade, '256GB');
+    assert.equal(itens[1].cor, 'Desert');
+    assert.equal(itens[1].bateria, '97%');
+    assert.equal(itens[1].imei, '5177');
+    assert.equal(itens[1].idEtiqueta, '9410244');
+    assert.equal(itens[1].idEtiquetaInformado, true);
+    assert.equal(itens[1].custo, 0);
+
+    assert.equal(itens[2].modelo, 'iPhone 15');
+    assert.equal(itens[2].capacidade, '128GB');
+    assert.equal(itens[2].cor, 'Rosa');
+    assert.equal(itens[2].bateria, '90%');
+    assert.equal(itens[2].observacoes, 'MSG TELA');
+    assert.equal(itens[2].imei, '8193');
+    assert.equal(itens[2].idEtiqueta, '9563370');
+    assert.equal(itens[2].custo, 0);
+
+    assert.equal(itens[3].modelo, 'iPhone 13');
+    assert.equal(itens[3].capacidade, '128GB');
+    assert.equal(itens[3].cor, 'Azul');
+    assert.equal(itens[3].bateria, '88%');
+    assert.equal(itens[3].imei, '4411');
+    assert.equal(itens[3].custo, 2200);
+    assert.equal(itens[3].preco, 2500);
+  });
 });
