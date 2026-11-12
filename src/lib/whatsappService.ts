@@ -111,8 +111,10 @@ export async function enviarTextoWhatsApp({
   telefone: string;
   texto: string;
 }): Promise<{ success: boolean; error?: string }> {
-  const cleanPhone = formatarTelefoneWhatsApp(telefone);
-  if (!cleanPhone || cleanPhone.length < 10) {
+  const rawDestino = String(telefone || '').trim();
+  const isGroup = rawDestino.endsWith('@g.us');
+  const cleanPhone = isGroup ? rawDestino : formatarTelefoneWhatsApp(rawDestino);
+  if (!cleanPhone || (!isGroup && cleanPhone.length < 10)) {
     return { success: false, error: 'Telefone inválido ou não informado' };
   }
 
@@ -142,7 +144,7 @@ export async function enviarTextoWhatsApp({
     console.warn(`[Evolution API] Primeira tentativa falhou para ${cleanPhone} (${res.status}): ${errText}`);
 
     // Fallback 1: se for 13 dígitos (55 + DDD + 9 + 8 dígitos), tenta sem o 9 (12 dígitos)
-    if (cleanPhone.startsWith('55') && cleanPhone.length === 13) {
+    if (!isGroup && cleanPhone.startsWith('55') && cleanPhone.length === 13) {
       const altPhone = cleanPhone.slice(0, 4) + cleanPhone.slice(5);
       try {
         const resAlt = await fetch(endpoint, {
@@ -166,7 +168,7 @@ export async function enviarTextoWhatsApp({
     }
 
     // Fallback 2: se for 12 dígitos (55 + DDD + 8 dígitos), tenta com o 9 inserido (13 dígitos)
-    if (cleanPhone.startsWith('55') && cleanPhone.length === 12) {
+    if (!isGroup && cleanPhone.startsWith('55') && cleanPhone.length === 12) {
       const altPhone = cleanPhone.slice(0, 4) + '9' + cleanPhone.slice(4);
       try {
         const resAlt = await fetch(endpoint, {
@@ -249,4 +251,50 @@ export async function enviarDocumentoWhatsApp({
     }
   }
   return { success: false, error: ultimoErro };
+}
+
+function normalizarNomeGrupo(nome: string): string {
+  return String(nome || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Busca o JID (`...@g.us`) de um grupo do WhatsApp pelo nome exato (case-insensitive, sem acento)
+ * usando o endpoint `/group/fetchAllGroups/{instance}` da Evolution API.
+ */
+export async function buscarGrupoWhatsAppPorNome(
+  lojaId: string | null | undefined,
+  nomeGrupo: string
+): Promise<string | null> {
+  const alvo = normalizarNomeGrupo(nomeGrupo);
+  if (!alvo) return null;
+
+  const { evolutionUrl, apiKey, instanceName } = await getEvolutionConfig(lojaId);
+  const endpoint = `${evolutionUrl}/group/fetchAllGroups/${instanceName}?getParticipants=false`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: { apikey: apiKey },
+    });
+    if (!res.ok) {
+      console.warn(`[Evolution API] Falha ao listar grupos (${res.status}) na instância ${instanceName}`);
+      return null;
+    }
+
+    const payload = await res.json();
+    const grupos: any[] = Array.isArray(payload) ? payload : Array.isArray(payload?.groups) ? payload.groups : [];
+    const encontrado = grupos.find((g) => {
+      const subject = normalizarNomeGrupo(g?.subject || g?.name || '');
+      return subject === alvo && typeof g?.id === 'string' && g.id.endsWith('@g.us');
+    });
+
+    return encontrado?.id || null;
+  } catch (err: any) {
+    console.warn('[Evolution API] Erro ao buscar grupo por nome:', err?.message || err);
+    return null;
+  }
 }

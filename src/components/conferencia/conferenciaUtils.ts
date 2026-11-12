@@ -1,5 +1,6 @@
-import { ItemEscaneado, RascunhoConferencia } from './types';
+import { AcaoFaltante, ItemEscaneado, RascunhoConferencia } from './types';
 import { sortModelosCronologico, normalizarNomeModelo } from '@/lib/utils';
+import { bateriaParaLista } from '@/lib/estoque/listaWhatsapp';
 
 export function getRascunhoKey(lojaId: string | null | undefined, usuarioId: string | null | undefined): string {
   const lId = lojaId || 'default_loja';
@@ -109,45 +110,114 @@ export function exportarResumoCSV(
   document.body.removeChild(link);
 }
 
+const SEGMENTO_TECNICO_CONFERENCIA = /^(ID|IMEI|Bateria|Saúde|Saude|BAIXA_ESTOQUE)\s*:/i;
+
+export function observacaoParaConferencia(observacoes: unknown): string {
+  if (typeof observacoes !== 'string' || !observacoes.trim()) return '';
+
+  const semTagsManut = observacoes.replace(/\[MANUTENCAO:[^\]]*\]/gi, '');
+  const partes = semTagsManut
+    .split(/[\n|]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const limpas: string[] = [];
+  for (const bruto of partes) {
+    if (SEGMENTO_TECNICO_CONFERENCIA.test(bruto)) continue;
+    if (/^\d{1,3}\s*%(\s*bat[a-z]*)?$/i.test(bruto)) continue;
+    const semRotulo = bruto.replace(/^(obs|observa[cç][aã]o|observa[cç][oõ]es)\s*:\s*/i, '').trim();
+    if (semRotulo) limpas.push(semRotulo);
+  }
+
+  return limpas.join(' · ');
+}
+
+const SECOES_SAIDA: Array<{
+  acao: AcaoFaltante;
+  titulo: string;
+  resumoLabel: string;
+}> = [
+  { acao: 'vendido', titulo: '🛒 *VENDIDOS - VAREJO*', resumoLabel: 'Venda Varejo' },
+  { acao: 'atacado', titulo: '📦 *VENDIDOS - ATACADO*', resumoLabel: 'Atacado' },
+  { acao: 'manutencao', titulo: '🛠️ *ENCAMINHADOS PARA MANUTENÇÃO*', resumoLabel: 'Manutenção' },
+  { acao: 'remover', titulo: '❌ *BAIXA (EXTRAVIO / PERDA)*', resumoLabel: 'Baixa/Extravio' },
+  { acao: 'manter', titulo: '🔄 *MANTIDOS NO ESTOQUE / PENDENTES*', resumoLabel: 'Mantidos/Pendentes' },
+];
+
+function formatarLinhaItemConferencia(it: any): string {
+  const modelo = normalizarNomeModelo(it.modelo) || it.modelo || 'Aparelho';
+  const cap = it.capacidade ? ` · ${it.capacidade}` : '';
+  const cor = it.cor ? ` · ${it.cor}` : '';
+  const bateria = bateriaParaLista(it);
+  const batTxt = bateria ? ` · 🔋 ${bateria}` : '';
+  const imei = it.imei
+    ? ` · IMEI ...${String(it.imei).slice(-4)}`
+    : it.codigo
+      ? ` · Cód ${it.codigo}`
+      : '';
+  const obs = observacaoParaConferencia(it.observacoes);
+  const obsTxt = obs ? `\n    📝 _Obs: ${obs}_` : '';
+  return `  • *${modelo}*${cap}${cor}${batTxt}${imei}${obsTxt}\n`;
+}
+
 export function gerarTextoWhatsAppFaltantes(
   nomeLoja: string,
   totalEstoque: number,
   totalEncontrados: number,
-  faltantes: any[]
+  faltantes: any[],
+  acoesFaltantes?: Record<string, AcaoFaltante>
 ): string {
   const dataHoje = new Date().toLocaleDateString('pt-BR');
   const horaHoje = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
   let txt = `📦 *CONFERÊNCIA DE ESTOQUE - ${nomeLoja.toUpperCase()}*\n`;
   txt += `📅 Data: ${dataHoje} às ${horaHoje}\n`;
-  txt += `📊 Resumo: ${totalEncontrados} de ${totalEstoque} encontrados (${faltantes.length} faltantes)\n\n`;
+  txt += `📊 Resumo: ${totalEncontrados} de ${totalEstoque} encontrados (${faltantes.length} faltantes)\n`;
 
   if (faltantes.length === 0) {
-    txt += `✅ *ESTOQUE 100% CONFERIDO! NENHUM FALTANTE!*\n`;
+    txt += `\n✅ *ESTOQUE 100% CONFERIDO! NENHUM FALTANTE!*\n`;
+    txt += `\n_Relatório gerado pelo Painel Phone Center_`;
     return txt;
   }
 
-  txt += `⚠️ *APARELHOS FALTANTES (${faltantes.length}):*\n`;
+  const porAcao: Record<AcaoFaltante, any[]> = {
+    vendido: [],
+    atacado: [],
+    manutencao: [],
+    remover: [],
+    manter: [],
+  };
 
-  // Agrupa faltantes por modelo
-  const map: Record<string, any[]> = {};
-  faltantes.forEach((f) => {
-    const mod = normalizarNomeModelo(f.modelo);
-    if (!map[mod]) map[mod] = [];
-    map[mod].push(f);
-  });
+  for (const f of faltantes) {
+    const acao = acoesFaltantes?.[f.id] || 'manter';
+    (porAcao[acao] || porAcao.manter).push(f);
+  }
 
-  Object.entries(map)
-    .sort(([modA], [modB]) => sortModelosCronologico(modA, modB, 'antigo_para_novo'))
-    .forEach(([modelo, itens]) => {
-      txt += `\n🔹 *${modelo}* (${itens.length} un):\n`;
-    itens.forEach((it) => {
-      const imei = it.imei ? ` · IMEI final: ...${String(it.imei).slice(-4)}` : '';
-      const cap = it.capacidade ? ` · ${it.capacidade}` : '';
-      const cor = it.cor ? ` · ${it.cor}` : '';
-      txt += `  - ${it.modelo}${cap}${cor}${imei}\n`;
-    });
-  });
+  const resumoTipos = SECOES_SAIDA
+    .filter((s) => porAcao[s.acao].length > 0)
+    .map((s) => `${porAcao[s.acao].length} ${s.resumoLabel}`);
+
+  if (resumoTipos.length > 0) {
+    txt += `📋 Saídas: ${resumoTipos.join(' · ')}\n`;
+  }
+
+  for (const secao of SECOES_SAIDA) {
+    const itens = porAcao[secao.acao];
+    if (itens.length === 0) continue;
+
+    const ordenados = [...itens].sort((a, b) =>
+      sortModelosCronologico(
+        normalizarNomeModelo(a.modelo) || a.modelo || '',
+        normalizarNomeModelo(b.modelo) || b.modelo || '',
+        'antigo_para_novo'
+      )
+    );
+
+    txt += `\n${secao.titulo} (${itens.length}):\n`;
+    for (const it of ordenados) {
+      txt += formatarLinhaItemConferencia(it);
+    }
+  }
 
   txt += `\n_Relatório gerado pelo Painel Phone Center_`;
   return txt;

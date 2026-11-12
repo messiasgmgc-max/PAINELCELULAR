@@ -439,7 +439,13 @@ export function ConferenciaEstoqueModal({
 
   const gerarTextoSaidasGrupo = () => {
     const nomeLoja = config?.nomeLoja || 'Phone Center';
-    return gerarTextoWhatsAppFaltantes(nomeLoja, aparelhosAlvo.length, aparelhosConfirmados.length, aparelhosFaltantes);
+    return gerarTextoWhatsAppFaltantes(
+      nomeLoja,
+      aparelhosAlvo.length,
+      aparelhosConfirmados.length,
+      aparelhosFaltantes,
+      acoesFaltantes
+    );
   };
 
   const contagemAjustes = useMemo(() => {
@@ -559,6 +565,32 @@ export function ConferenciaEstoqueModal({
         toast.error(`Alguns ajustes não foram aplicados: ${falhas.join(' | ')}`);
       } else {
         toast.success(`🚀 Conferência concluída! ${alterados} aparelhos ajustados no estoque.`);
+      }
+
+      if (falhas.length === 0 || alterados > 0) {
+        try {
+          const textoRelatorio = gerarTextoSaidasGrupo();
+          const resNotif = await fetch('/api/estoque/conferencia/notificar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lojaId: contexto.lojaId,
+              textoRelatorio,
+            }),
+          });
+          if (resNotif.ok) {
+            const dadosNotif = await resNotif.json();
+            if (dadosNotif?.grupoEstoque?.success && dadosNotif?.pv?.success) {
+              toast.success('📱 Relatório enviado no seu PV e no grupo ESTOQUE!');
+            } else if (dadosNotif?.pv?.success) {
+              toast.success('📱 Relatório enviado automaticamente no seu PV!');
+            } else if (dadosNotif?.grupoEstoque?.success) {
+              toast.success('📱 Relatório enviado no grupo ESTOQUE!');
+            }
+          }
+        } catch (errNotif) {
+          console.warn('Falha ao enviar relatório automático da conferência no WhatsApp:', errNotif);
+        }
       }
 
       // Limpa rascunho após sucesso
