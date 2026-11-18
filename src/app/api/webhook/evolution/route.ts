@@ -4,7 +4,7 @@ import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConve
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
-import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL, PLANOS_SISTEMA } from '@/lib/planos-config';
+import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { autenticarWebhook, registrarMensagemComoProcessada } from './security';
 import { exigirConfirmacaoPorValor, montarDadosLojaParaPrompt } from './contextoLoja';
@@ -34,9 +34,26 @@ import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { notificarSaidaVendaGrupoEstoque } from '@/lib/whatsapp/notificarSaidaEstoque';
 import { ehMensagemDeEntradaEstoque, ehRelatorioOuConferencia } from './entradaInteligente';
 import { formatarTelefoneWhatsApp } from '@/lib/whatsappService';
+import { gerarRelatorioFechamentoDia } from './handlers/fechamentoDiaHandler';
+import {
+  detectarSaidaDiretaEstoque,
+  executarSaidaDiretaEstoque,
+  parseValorEdicaoRapida,
+  salvarVendaAtacadoRecente,
+  tentarEditarValorVendaAtacado,
+} from './handlers/estoqueSaidaRapidaHandler';
+import { gerarMensagemTabelaPlanos, gerarMensagemVencimentoPlano } from './handlers/planosHandler';
+import {
+  detectarComandoAparelhoEmprestado,
+  ehComandoListarEmprestados,
+  listarAparelhosEmprestados,
+  registrarAparelhoEmprestado,
+  registrarDevolucaoEmprestado,
+} from './handlers/aparelhosEmprestadosHandler';
 import {
   detectarFormularioOuPedidoVenda,
   detectarVendaAtacadoComFoto,
+  detectarVendaAtacadoMultiploComFoto,
   temFotoRecenteOuProcessando,
   emitirVendaAtacadoComFoto,
   cruzarAparelhoComEstoque,
@@ -669,8 +686,8 @@ function telefonesConferem(telA?: string | null, telB?: string | null): boolean 
   return false;
 }
 
-// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Vendas / Estoque / Teste / Completo / Padrão / Off) ──
-export type ModoChat = 'teste' | 'padrao' | 'off' | 'vendas' | 'estoque' | 'completo';
+// ── CACHE E PERSISTÊNCIA DE MODO DO CHAT (Vendas / Estoque / Múltiplo / Teste / Completo / Padrão / Off) ──
+export type ModoChat = 'teste' | 'padrao' | 'off' | 'vendas' | 'estoque' | 'completo' | 'multiplo';
 const cacheModosChat = new Map<string, { modo: ModoChat; exp: number }>();
 
 async function obterModoChat(remoteJid: string): Promise<ModoChat> {
@@ -697,10 +714,15 @@ async function obterModoChat(remoteJid: string): Promise<ModoChat> {
         modoSalvo === 'padrao' ||
         modoSalvo === 'vendas' ||
         modoSalvo === 'estoque' ||
-        modoSalvo === 'completo'
+        modoSalvo === 'completo' ||
+        modoSalvo === 'multiplo'
       ) {
         cacheModosChat.set(remoteJid, { modo: modoSalvo, exp: agora + 300000 });
         return modoSalvo;
+      }
+      if (modoSalvo === 'múltiplo' || modoSalvo === 'lote') {
+        cacheModosChat.set(remoteJid, { modo: 'multiplo', exp: agora + 300000 });
+        return 'multiplo';
       }
       if (modoSalvo === 'venda' || modoSalvo === 'notinhas' || modoSalvo === 'notinha') {
         cacheModosChat.set(remoteJid, { modo: 'vendas', exp: agora + 300000 });
@@ -2604,7 +2626,11 @@ export async function POST(request: Request) {
         msgData.caption ||
         '';
 
-      const vendaAtacadoNaFoto = captionText ? detectarVendaAtacadoComFoto(captionText) : null;
+      const vendaAtacadoNaFoto = captionText
+        ? modoChat === 'multiplo'
+          ? detectarVendaAtacadoMultiploComFoto(captionText)
+          : detectarVendaAtacadoComFoto(captionText)
+        : null;
       const vendaDetectadaNaFoto = !vendaAtacadoNaFoto && captionText ? detectarFormularioOuPedidoVenda(captionText) : null;
       const ehEntradaNaFoto = captionText ? ehMensagemDeEntradaEstoque(captionText) : false;
 
@@ -2872,7 +2898,31 @@ export async function POST(request: Request) {
                 usuarioNome: nomeUsuario || pushName || 'Equipe',
               });
 
-              await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoAtacado.mensagem);
+              const envioAtacado = await enviarMensagemWhatsAppComRetorno(
+                instanceName,
+                targetDestination,
+                resultadoAtacado.mensagem
+              );
+              if (resultadoAtacado.sucesso && resultadoAtacado.vendaUuid) {
+                await salvarVendaAtacadoRecente(supabase, lojaId, remoteJid, envioAtacado.messageId, {
+                  vendaUuid: resultadoAtacado.vendaUuid,
+                  vendaCodigo: resultadoAtacado.vendaId || 'OK',
+                  clienteNome: vendaAtacadoNaFoto.clienteNome,
+                  custoTotal: resultadoAtacado.custoTotal || 0,
+                  metodo: vendaAtacadoNaFoto.formaPagamento || 'pix',
+                  valorAtual: vendaAtacadoNaFoto.valor,
+                });
+                if (targetDestination !== remoteJid) {
+                  await salvarVendaAtacadoRecente(supabase, lojaId, targetDestination, envioAtacado.messageId, {
+                    vendaUuid: resultadoAtacado.vendaUuid,
+                    vendaCodigo: resultadoAtacado.vendaId || 'OK',
+                    clienteNome: vendaAtacadoNaFoto.clienteNome,
+                    custoTotal: resultadoAtacado.custoTotal || 0,
+                    metodo: vendaAtacadoNaFoto.formaPagamento || 'pix',
+                    valorAtual: vendaAtacadoNaFoto.valor,
+                  });
+                }
+              }
               await supabase.from('whatsapp_logs').insert({
                 loja_id: lojaId,
                 contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
@@ -3025,9 +3075,9 @@ export async function POST(request: Request) {
               }
             }
 
-            // No modo vendas ou em grupos no modo padrão sem comando/legenda (e sem formulário ativo),
+            // No modo vendas/multiplo ou em grupos no modo padrão sem comando/legenda (e sem formulário ativo),
             // mantém a foto salva em `whatsapp_acoes_pendentes` (por 10 min) para quando o formulário chegar, sem poluir o chat.
-            if (modoChat === 'vendas' || (modoChat === 'padrao' && isGroup && !ehOperacaoGrupo)) {
+            if (modoChat === 'vendas' || modoChat === 'multiplo' || (modoChat === 'padrao' && isGroup && !ehOperacaoGrupo)) {
               return NextResponse.json({ status: 'ok', message: 'Foto salva no buffer aguardando formulário de venda.' }, { status: 200 });
             }
 
@@ -3107,7 +3157,17 @@ export async function POST(request: Request) {
 
     // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !modo OU !config) ──
     const ehComandoModo = lowerText.startsWith('!modo') || lowerText.startsWith('!config');
-    const vendaAtacadoTexto = modoChat === 'estoque' || modoChat === 'off' ? null : detectarVendaAtacadoComFoto(textContent);
+    const ehComandoFechamento = /^!(?:fechamento|fechamentodia|resumodia)\b/i.test(lowerText);
+    const ehComandoEmprestados = ehComandoListarEmprestados(textContent);
+    const emprestimoDetectado = detectarComandoAparelhoEmprestado(textContent);
+    const saidaDiretaDetectada = detectarSaidaDiretaEstoque(textContent);
+    const valorEdicaoRapida = parseValorEdicaoRapida(textContent);
+    const vendaAtacadoTexto =
+      modoChat === 'estoque' || modoChat === 'off'
+        ? null
+        : modoChat === 'multiplo'
+          ? detectarVendaAtacadoMultiploComFoto(textContent)
+          : detectarVendaAtacadoComFoto(textContent);
     const temFotoAtivaParaAtacado = Boolean(
       vendaAtacadoTexto &&
       lojaId &&
@@ -3119,14 +3179,13 @@ export async function POST(request: Request) {
       if (!ehComandoModo) {
         return NextResponse.json({ status: 'ok', message: 'Chat desativado via !modo off.' }, { status: 200 });
       }
-    } else if (modoChat === 'vendas') {
-      // ── MODO VENDAS: Foco exclusivo na emissão e gestão de notinhas ──
+    } else if (modoChat === 'vendas' || modoChat === 'multiplo') {
+      // ── MODO VENDAS / MODO MÚLTIPLO: Foco exclusivo em vendas/notinhas/atacado ──
       // O bot atende estritamente a:
-      // 1. Comando de modo (!modo / !config) para gerenciar ou alternar o modo
-      // 2. Formulários de venda / pedidos para emitir notinha (ou venda atacado por foto + nome)
-      // 3. Confirmações, cancelamentos ou correções quando HÁ notinha pendente
+      // 1. Comando de modo (!modo / !config), !fechamento e !emprestados
+      // 2. Formulários de venda / pedidos ou venda atacado por foto + nome (e múltiplos valores no !modo multiplo)
+      // 3. Confirmações, cancelamentos ou correções quando HÁ notinha pendente ou edição de valor de atacado recente
       // 4. Marcação do bot em mensagens de formulário ou etiquetas de aparelhos
-      // Qualquer mensagem paralela, conversa de grupo ou outros comandos são 100% ignorados.
       const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(textContent));
       const ehPossivelConfirmacao = Boolean(interpretarConfirmacaoTextoNotinha(textContent));
       const ehPossivelCorrecao = Boolean(interpretarTextoCorrecaoVenda(textContent));
@@ -3147,8 +3206,11 @@ export async function POST(request: Request) {
 
       const ehOperacaoVendaValida =
         ehComandoModo ||
+        ehComandoFechamento ||
+        ehComandoEmprestados ||
         ehFormularioVenda ||
         temFotoAtivaParaAtacado ||
+        valorEdicaoRapida !== null ||
         (ehPossivelConfirmacao && temNotinhaPendente) ||
         (ehPossivelCorrecao && temNotinhaPendente) ||
         (marcacaoBot.foiMarcado && (
@@ -3162,12 +3224,12 @@ export async function POST(request: Request) {
 
       if (!ehOperacaoVendaValida) {
         return NextResponse.json(
-          { status: 'ignored', message: 'Chat em modo vendas: mensagens paralelas e outros comandos ignorados.' },
+          { status: 'ignored', message: `Chat em modo ${modoChat}: mensagens paralelas e outros comandos ignorados.` },
           { status: 200 }
         );
       }
     } else if (modoChat === 'estoque') {
-      // ── MODO ESTOQUE: Foco exclusivo em entradas, saídas, consultas e lista atualizada ──
+      // ── MODO ESTOQUE: Foco exclusivo em entradas, saídas, empréstimos, consultas e lista atualizada ──
       if (ehComandoExplicito) {
         const bloqueio = bloquearAtalhoForaDoPlano(lowerText, planoLoja, papelCapability);
         if (bloqueio) {
@@ -3177,14 +3239,14 @@ export async function POST(request: Request) {
       }
 
       const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(textContent));
-      if (ehFormularioVenda) {
+      if (ehFormularioVenda && !emprestimoDetectado && !saidaDiretaDetectada) {
         return NextResponse.json(
           { status: 'ignored', message: 'Chat em modo estoque: formulário de venda ignorado (use !modo vendas).' },
           { status: 200 }
         );
       }
 
-      const comandoEstoquePermitido = /^!(?:modo|config|ajuda|menu|estoque|lista|entradas?|importar|checarimei|etiquetas?|manutencao|limparestoque|conferencia|buscar|modelo)\b/i.test(
+      const comandoEstoquePermitido = /^!(?:modo|config|ajuda|menu|estoque|lista|entradas?|importar|checarimei|etiquetas?|manutencao|manuten[cç][aã]o|baixa|emprestados?|emprestar|devolver|devolvido|fechamento|fechamentodia|resumodia|limparestoque|conferencia|buscar|modelo)(?=\s|$)/i.test(
         lowerText
       );
       if (ehComandoExplicito && !comandoEstoquePermitido) {
@@ -3199,7 +3261,11 @@ export async function POST(request: Request) {
       );
       const ehOperacaoEstoque =
         ehComandoModo ||
+        ehComandoFechamento ||
+        ehComandoEmprestados ||
         comandoEstoquePermitido ||
+        Boolean(emprestimoDetectado) ||
+        Boolean(saidaDiretaDetectada) ||
         ehMensagemDeEntradaEstoque(textContent) ||
         ehPedidoLista ||
         marcacaoBot.foiMarcado ||
@@ -3226,14 +3292,19 @@ export async function POST(request: Request) {
         // Se for grupo no modo padrão, o bot fica calado e atende apenas a:
         // 1. Mensagens onde o bot foi marcado (@Astrogeek / reply)
         // 2. Comandos explícitos iniciados com !
-        // 3. Entradas inteligentes de estoque (ex: "Entrada iPhone 13...")
+        // 3. Entradas inteligentes de estoque, empréstimos e saídas diretas por IMEI
         // 4. Pedidos / formulários de venda para geração de notinha automática (ou atacado com foto + nome)
-        // 5. Correções de dados de notinha pendente
+        // 5. Correções de dados de notinha pendente ou valor de atacado recente
         const ehOperacaoLoja =
           marcacaoBot.foiMarcado ||
           ehComandoExplicito ||
+          ehComandoFechamento ||
+          ehComandoEmprestados ||
+          Boolean(emprestimoDetectado) ||
+          Boolean(saidaDiretaDetectada) ||
           ehMensagemDeEntradaEstoque(textContent) ||
           temFotoAtivaParaAtacado ||
+          valorEdicaoRapida !== null ||
           Boolean(detectarFormularioOuPedidoVenda(textContent)) ||
           Boolean(interpretarTextoCorrecaoVenda(textContent));
 
@@ -3273,6 +3344,23 @@ export async function POST(request: Request) {
         const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
         await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
         return NextResponse.json({ status: 'ok', message: 'Entrada de aparelhos em lote processada com sucesso.' }, { status: 200 });
+      }
+    }
+
+    // ── 3.2b. EDIÇÃO RÁPIDA DE VALOR DE ATACADO VIA REPLY DIRETO À MENSAGEM DE ATACADO ──
+    if (marcacaoBot.quotedStanzaId && valorEdicaoRapida !== null && lojaId) {
+      const edicaoReply = await tentarEditarValorVendaAtacado({
+        supabase,
+        lojaId,
+        remoteJid,
+        quotedStanzaId: marcacaoBot.quotedStanzaId,
+        texto: textContent,
+      });
+      if (edicaoReply.editado) {
+        if (edicaoReply.mensagem) {
+          await enviarMensagemWhatsApp(instanceName, targetDestination, edicaoReply.mensagem);
+        }
+        return NextResponse.json({ status: 'ok', message: 'Valor da venda de atacado atualizado via reply.' }, { status: 200 });
       }
     }
 
@@ -3412,7 +3500,24 @@ export async function POST(request: Request) {
           usuarioNome: nomeUsuario || pushName || 'Equipe',
         });
 
-        await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoAtacado.mensagem);
+        const envioAtacado = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, resultadoAtacado.mensagem);
+        if (resultadoAtacado.sucesso) {
+          await limparFotoRecente(supabase, remoteJid, authorPhone);
+          if (resultadoAtacado.vendaUuid) {
+            const payloadRecente = {
+              vendaUuid: resultadoAtacado.vendaUuid,
+              vendaCodigo: resultadoAtacado.vendaId || 'OK',
+              clienteNome: vendaAtacadoTexto.clienteNome,
+              custoTotal: resultadoAtacado.custoTotal || 0,
+              metodo: vendaAtacadoTexto.formaPagamento || 'pix',
+              valorAtual: vendaAtacadoTexto.valor,
+            };
+            await salvarVendaAtacadoRecente(supabase, lojaId, remoteJid, envioAtacado.messageId, payloadRecente);
+            if (targetDestination !== remoteJid) {
+              await salvarVendaAtacadoRecente(supabase, lojaId, targetDestination, envioAtacado.messageId, payloadRecente);
+            }
+          }
+        }
         await supabase.from('whatsapp_logs').insert({
           loja_id: lojaId,
           contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
@@ -3519,6 +3624,106 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── 3.3c. EDIÇÃO RÁPIDA DE VALOR DE ATACADO SEM REPLY (QUANDO A ÚLTIMA VENDA FICOU COM R$ 0,00) ──
+    if (!marcacaoBot.quotedStanzaId && valorEdicaoRapida !== null && lojaId) {
+      const edicaoDireta = await tentarEditarValorVendaAtacado({
+        supabase,
+        lojaId,
+        remoteJid,
+        texto: textContent,
+      });
+      if (edicaoDireta.editado) {
+        if (edicaoDireta.mensagem) {
+          await enviarMensagemWhatsApp(instanceName, targetDestination, edicaoDireta.mensagem);
+        }
+        return NextResponse.json({ status: 'ok', message: 'Valor da venda de atacado atualizado diretamente.' }, { status: 200 });
+      }
+    }
+
+    // ── 3.3d. FECHAMENTO RÁPIDO DO DIA (!fechamento / !fechamentodia / !resumodia) ──
+    if (ehComandoFechamento) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Não consegui identificar sua loja para gerar o fechamento do dia.');
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+      const permFechamento = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!permFechamento.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* O fechamento do dia é restrito à equipe autorizada da loja.');
+        return NextResponse.json({ status: 'unauthorized', message: 'Sem permissão para fechamento' }, { status: 200 });
+      }
+      const relatorioFechamento = await gerarRelatorioFechamentoDia(supabase, lojaId, nomeLoja);
+      await enviarMensagemWhatsApp(instanceName, targetDestination, relatorioFechamento);
+      return NextResponse.json({ status: 'ok', message: 'Fechamento do dia enviado.' }, { status: 200 });
+    }
+
+    // ── 3.3e. CONTROLE DE APARELHOS EMPRESTADOS (!emprestados / registro / devolução) ──
+    if (ehComandoEmprestados) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Não consegui identificar sua loja para consultar os aparelhos emprestados.');
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+      const permEmprestados = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!permEmprestados.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* A consulta de aparelhos emprestados é restrita à equipe autorizada.');
+        return NextResponse.json({ status: 'unauthorized', message: 'Sem permissão para listar emprestados' }, { status: 200 });
+      }
+      const listaEmprestados = await listarAparelhosEmprestados(supabase, lojaId, nomeLoja);
+      await enviarMensagemWhatsApp(instanceName, targetDestination, listaEmprestados);
+      return NextResponse.json({ status: 'ok', message: 'Lista de aparelhos emprestados enviada.' }, { status: 200 });
+    }
+
+    if (emprestimoDetectado) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Não consegui identificar sua loja para registrar o empréstimo.');
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+      const permEmprestimo = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!permEmprestimo.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Registrar ou encerrar empréstimos é restrito à equipe autorizada.');
+        return NextResponse.json({ status: 'unauthorized', message: 'Sem permissão para empréstimo' }, { status: 200 });
+      }
+      const respostaEmprestimo =
+        emprestimoDetectado.acao === 'emprestar'
+          ? await registrarAparelhoEmprestado(supabase, lojaId, emprestimoDetectado, nomeUsuario || pushName || 'Equipe')
+          : await registrarDevolucaoEmprestado(supabase, lojaId, emprestimoDetectado.imei, emprestimoDetectado.observacao);
+
+      await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEmprestimo);
+      await supabase.from('whatsapp_logs').insert({
+        loja_id: lojaId,
+        contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+        mensagem: `[EMPRESTADO_${emprestimoDetectado.acao.toUpperCase()}] IMEI ${emprestimoDetectado.imei}`,
+        created_at: new Date().toISOString(),
+      });
+      return NextResponse.json({ status: 'ok', message: 'Operação de aparelho emprestado registrada.' }, { status: 200 });
+    }
+
+    // ── 3.3f. SAÍDA DIRETA NO ESTOQUE POR IMEI (MANUTENÇÃO / BAIXA) ──
+    if (saidaDiretaDetectada) {
+      if (!lojaId) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '❌ Não consegui identificar sua loja para dar baixa ou enviar para manutenção.');
+        return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
+      }
+      const permSaida = await verificarPermissaoWhatsApp(lojaId, authorPhone, ['owner', 'staff']);
+      if (!permSaida.autorizado) {
+        await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* Movimentações diretas de estoque são restritas à equipe autorizada.');
+        return NextResponse.json({ status: 'unauthorized', message: 'Sem permissão para saída direta' }, { status: 200 });
+      }
+      const respostaSaida = await executarSaidaDiretaEstoque(
+        supabase,
+        lojaId,
+        saidaDiretaDetectada,
+        nomeUsuario || pushName || 'Bot WhatsApp'
+      );
+      await enviarMensagemWhatsApp(instanceName, targetDestination, respostaSaida);
+      await supabase.from('whatsapp_logs').insert({
+        loja_id: lojaId,
+        contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+        mensagem: `[SAIDA_DIRETA_${saidaDiretaDetectada.tipo.toUpperCase()}] IMEI ${saidaDiretaDetectada.imei} -> ${saidaDiretaDetectada.destinoOuMotivo}`,
+        created_at: new Date().toISOString(),
+      });
+      return NextResponse.json({ status: 'ok', message: 'Saída direta de estoque executada.' }, { status: 200 });
+    }
+
     // ── 3.4. DETECÇÃO AUTOMÁTICA DE PEDIDO / FORMULÁRIO DE VENDA (NOTINHA AUTOMÁTICA COM 1 OU MAIS APARELHOS) ──
     const vendaDetectada = modoChat === 'estoque' ? null : detectarFormularioOuPedidoVenda(textContent);
     if (vendaDetectada && (vendaDetectada.aparelho?.modelo || vendaDetectada.valorTotal || vendaDetectada.cliente?.nome) && lojaId) {
@@ -3584,53 +3789,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'ok', message: 'Prévia de notinha gerada com sucesso a partir de pedido.' }, { status: 200 });
     }
 
+    if ((modoChat === 'vendas' || modoChat === 'multiplo') && !ehComandoModo) {
+      return NextResponse.json(
+        { status: 'ignored', message: `Chat em modo ${modoChat}: mensagem sem formulário/atacado válido ignorada.` },
+        { status: 200 }
+      );
+    }
+
     // ── 4.1. CONSULTA DE PLANOS DA PLATAFORMA PHONE CENTER ──
     const ehPerguntaPlanos =
       /quais planos temos|quais s[aã]o os planos|tabela de planos|planos do sistema|valores dos planos|como funcionam os planos|planos phone center/i.test(lowerText);
 
     if (ehPerguntaPlanos) {
-      const planoAtualFormatado = (usuarioResolvido?.planoTipo || 'entrada').toUpperCase();
-      const statusFormatado = usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo');
-
-      const pEntrada = PLANOS_SISTEMA.entrada;
-      const pInter = PLANOS_SISTEMA.intermediario;
-      const pAvancado = PLANOS_SISTEMA.avancado;
-
-      const vEntradaMensal = pEntrada.precos.mensal.valorMensal.toFixed(2).replace('.', ',');
-      const vEntradaAnual = pEntrada.precos.anual.valorMensal.toFixed(2).replace('.', ',');
-      const vInterMensal = pInter.precos.mensal.valorMensal.toFixed(2).replace('.', ',');
-      const vInterAnual = pInter.precos.anual.valorMensal.toFixed(2).replace('.', ',');
-      const vAvancadoMensal = pAvancado.precos.mensal.valorMensal.toFixed(2).replace('.', ',');
-      const vAvancadoAnual = pAvancado.precos.anual.valorMensal.toFixed(2).replace('.', ',');
-
-      const msgPlanos = `📋 *Planos Phone Center — Gestão Inteligente para Lojistas*
-
-Olá, *${nomeUsuario}*! Sua loja (*${nomeLoja}*) atualmente está no:
-⭐ *Plano ${planoAtualFormatado}* (${statusFormatado})
-
-Conheça os 3 planos disponíveis na nossa plataforma:
-
-1️⃣ *Plano Entrada* — R$ ${vEntradaMensal}/mês (ou R$ ${vEntradaAnual} no anual):
-• Painel completo de estoque, vendas e produtos
-• Ordens de Serviço (OS) com garantia documentada
-• Leitor de código de barras e OCR de etiquetas com IA
-• Bot assistente no WhatsApp (!estoque, !vender, !cadastrar, !os)
-
-2️⃣ *Plano Intermediário* — R$ ${vInterMensal}/mês (ou R$ ${vInterAnual} no anual) *(Mais Escolhido)*:
-• *Tudo do Entrada* +
-• Gestão milimétrica de fiado e devedores (!abater, !saldo)
-• Bot de cobrança automática com horários programados
-• Checagem de IMEI roubado / bloqueado (!checarimei)
-• Transmissão de listas de estoque para grupos (!broadcast)
-
-3️⃣ *Plano Avançado* — R$ ${vAvancadoMensal}/mês (ou R$ ${vAvancadoAnual} no anual) *(Máxima Potência)*:
-• *Tudo do Intermediário* +
-• Escuta e busca em catálogo unificado multi-loja em grupos
-• Trilha de auditoria completa com registro de operadores
-• API REST com Token próprio para sistemas e robôs externos
-
-💡 *Deseja testar ou alterar seu plano?*
-Você pode solicitar um teste de 3 dias grátis de qualquer plano superior no menu *Meu Plano* do painel web!`;
+      const msgPlanos = gerarMensagemTabelaPlanos({
+        nomeUsuario,
+        nomeLoja,
+        planoTipo: usuarioResolvido?.planoTipo,
+        planoStatus: usuarioResolvido?.planoStatus,
+      });
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgPlanos);
       return NextResponse.json({ status: 'ok', message: 'Tabela de planos enviada.' }, { status: 200 });
@@ -3640,23 +3816,15 @@ Você pode solicitar um teste de 3 dias grátis de qualquer plano superior no me
       /(?:quando (?:meu|o)? ?plano (?:vai )?venc|quando vence|vencimento (?:do )?plano|plano (?:vai )?venc|meu plano t[aá] ativo|quantos dias de plano|dias restantes do plano|validade do plano)/i.test(lowerText);
 
     if (ehPerguntaVencimento) {
-      const isVitalicio = usuarioResolvido?.planoStatus === 'vitalicio';
-      const planoAtualFormatado = (usuarioResolvido?.planoTipo || 'entrada').toUpperCase();
-      const statusFormatado = isVitalicio ? 'Ativo (Acesso Vitalício ♾️)' : (usuarioResolvido?.planoStatus === 'ativo' ? 'Ativo' : (usuarioResolvido?.planoStatus || 'Ativo'));
-      const dataVenc = isVitalicio ? 'Permanente (Sem cobrança periódica)' : (usuarioResolvido?.dataVencimento ? formatarDataSegura(usuarioResolvido.dataVencimento) : 'Não definida');
-      const dias = usuarioResolvido?.diasRestantes !== undefined ? usuarioResolvido.diasRestantes : 0;
-      const diasTexto = isVitalicio ? '♾️ Acesso Vitalício Garantido' : (dias <= 0 ? '⚠️ Vencido hoje ou atrasado' : `${dias} dia(s) restante(s)`);
-
-      const msgVencimento = `🗓️ *Status da Assinatura — ${nomeLoja}*
-
-Olá, *${nomeUsuario}*! Seguem os detalhes da sua assinatura no Phone Center:
-• Loja: *${nomeLoja}*
-• Plano Atual: *Plano ${planoAtualFormatado}*
-• Status: *${statusFormatado}*
-• Data de Vencimento: *${dataVenc}*
-• Prazo: *${diasTexto}*
-
-${isVitalicio ? '🎉 Sua loja possui acesso vitalício permanente liberado pelo Super Admin!' : (papelUsuario === 'owner' ? '💡 *Para renovar ou pagar via PIX:* envie *!plano pagar* ou acesse o menu *Meu Plano* no site para pagar no Cartão de Crédito em até 12x.' : '💡 Entre em contato com o proprietário da sua loja para renovações ou upgrades de plano.')}`;
+      const msgVencimento = gerarMensagemVencimentoPlano({
+        nomeUsuario,
+        nomeLoja,
+        planoTipo: usuarioResolvido?.planoTipo,
+        planoStatus: usuarioResolvido?.planoStatus,
+        dataVencimentoFormatada: usuarioResolvido?.dataVencimento ? formatarDataSegura(usuarioResolvido.dataVencimento) : undefined,
+        diasRestantes: usuarioResolvido?.diasRestantes,
+        papelUsuario,
+      });
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, msgVencimento);
       return NextResponse.json({ status: 'ok', message: 'Informações de vencimento enviadas.' }, { status: 200 });
@@ -4723,6 +4891,22 @@ Envie o modelo que deseja consultar no estoque:
         return NextResponse.json({ status: 'ok', message: 'Modo teste ativado.' }, { status: 200 });
       }
 
+      if (subComando === 'multiplo' || subComando === 'múltiplo' || subComando === 'lote' || subComando === 'atacado') {
+        await definirModoChat(remoteJid, 'multiplo');
+        const msgModo = `⚙️ *Modo do Chat — Phone Center*
+
+📸 Modo atualizado com sucesso para: *MODO MÚLTIPLO (Teste de Atacado em Lote)*!
+
+🎯 *Como funciona neste modo:*
+• Envie várias fotos de caixas/etiquetas com IMEI seguidas e depois mande embaixo o nome + valores individuais.
+• Exemplos: *"João 2500 / 3100"*, *"Lucas 2400 + 2800"* ou *"Pedro\\n2500\\n3100"* (ou só *"João"* para deixar em R$ 0,00 e editar depois).
+• Também aceita notinhas normais de varejo e responde a edições rápidas de valor.
+
+💡 _Para voltar para outro modo envie:_ *!modo vendas*, *!modo estoque* ou *!modo padrao*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, msgModo);
+        return NextResponse.json({ status: 'ok', message: 'Modo múltiplo ativado.' }, { status: 200 });
+      }
+
       if (subComando === 'padrao' || subComando === 'padrão' || subComando === 'normal' || subComando === 'comandos' || subComando === 'comando') {
         await definirModoChat(remoteJid, 'padrao');
         const msgModo = `⚙️ *Modo do Chat — Phone Center*
@@ -4756,8 +4940,10 @@ Ele não responderá a nenhuma mensagem nem comando até você reativar.
       const modoFormatado =
         modoAtual === 'vendas'
           ? '🧾 *MODO VENDAS* (lê apenas formulários, confirma e edita notinhas)'
+          : modoAtual === 'multiplo'
+          ? '📸 *MODO MÚLTIPLO* (teste de atacado em lote com múltiplas fotos + valores individuais)'
           : modoAtual === 'estoque'
-          ? '📦 *MODO ESTOQUE* (entradas, saídas, perguntas e pedidos da lista atualizada)'
+          ? '📦 *MODO ESTOQUE* (entradas, saídas diretas, empréstimos, consultas e lista atualizada)'
           : modoAtual === 'completo'
           ? '⚡ *MODO COMPLETO* (aceita todos os comandos e tudo)'
           : modoAtual === 'teste'
@@ -4773,7 +4959,8 @@ Ele não responderá a nenhuma mensagem nem comando até você reativar.
 
 *Como alternar entre os modos:*
 • *!modo vendas* — Lê apenas formulários, confirma e edita notinhas
-• *!modo estoque* — Entradas, saídas, perguntas e pedidos da lista atualizada
+• *!modo multiplo* — Teste de vendas de atacado em lote (múltiplas fotos + valores individuais)
+• *!modo estoque* — Entradas, saídas diretas, *!emprestados*, *!fechamento* e lista atualizada
 • *!modo teste* — Novas funções em desenvolvimento
 • *!modo completo* — Aceita todos os comandos e tudo
 • *!modo off* — Desativa completamente`;
@@ -5243,10 +5430,12 @@ Digite: *!broadcast agora*`;
         montarMenuAjuda(planoLoja, papelCapability) +
         `\n\n🎛️ *Modos do Bot (!modo):*\n` +
         `• *!modo vendas* — Lê apenas formulários, confirma e edita notinhas\n` +
-        `• *!modo estoque* — Entradas, saídas, perguntas e pedidos da lista atualizada\n` +
+        `• *!modo multiplo* — Teste de atacado em lote (múltiplas fotos + valores individuais)\n` +
+        `• *!modo estoque* — Entradas, saídas diretas, empréstimos e lista atualizada\n` +
         `• *!modo teste* — Novas funções em desenvolvimento\n` +
         `• *!modo completo* — Aceita todos os comandos e tudo\n` +
         `• *!modo off* — Desativa completamente\n` +
+        `\n⚡ *Atalhos Rápidos:* *!fechamento* · *!emprestados* · *!devolver [IMEI]* · *IMEI [MANUTENÇÃO "Nome"]* · *IMEI [BAIXA "Motivo"]*\n` +
         `\n⚙️ *Outros:* *!plano* (assinatura) · *!config* (modo do chat) · *!ajuda*`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);
@@ -5730,7 +5919,7 @@ Digite: *!broadcast agora*`;
         resumoGarantiasAtivas,
         historicoChat,
         isGroup,
-        modoChat,
+        modoChat: modoChat === 'multiplo' ? 'vendas' : modoChat,
       });
 
       if (respostaConversaIA.sucesso && respostaConversaIA.resposta) {

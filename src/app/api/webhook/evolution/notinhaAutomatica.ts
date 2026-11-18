@@ -284,7 +284,7 @@ export function extrairMensagemMarcadaParaBot(params: {
   const ehQuotedVendaAtacadoFoto =
     Boolean(quotedImageMessage || ehQuotedResumoEtiquetaBot) &&
     Boolean(textoSemMencao) &&
-    Boolean(detectarVendaAtacadoComFoto(textoSemMencao));
+    Boolean(detectarVendaAtacadoMultiploComFoto(textoSemMencao));
 
   const ehQuotedOperacaoValida =
     Boolean(quotedImageMessage) ||
@@ -2489,6 +2489,7 @@ export interface VendaAtacadoDetectada {
   clienteNome: string;
   valor: number;
   formaPagamento?: string;
+  valoresIndividuais?: number[];
 }
 
 const STOPWORDS_ATACADO_NOME = new Set([
@@ -2507,12 +2508,35 @@ const STOPWORDS_ATACADO_NOME = new Set([
   'patrão', 'amigo', 'galera', 'pessoal', 'envia', 'passa', 'olha', 'veja',
 ]);
 
-/**
- * Detecta o padrão de venda de atacado com foto da etiqueta/IMEI:
- * nome da pessoa/lojista (na legenda da foto ou na mensagem logo abaixo) e valor opcional.
- * Se não informar valor, retorna `valor: 0`.
- */
-export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectada | null {
+function parseValorMonetarioToken(bruto: string, exigirMinimo: boolean): number | null {
+  const limpo = String(bruto || '').trim();
+  if (!limpo) return null;
+
+  const tinhaPrefixoMonetario = /R\$|reais/i.test(limpo);
+  const numStr = limpo.replace(/R\$/gi, '').replace(/reais/gi, '').trim();
+  const match = numStr.match(/^(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)$/);
+  if (!match) return null;
+
+  const raw = match[1];
+  const parsed = raw.includes(',')
+    ? parseFloat(raw.replace(/\./g, '').replace(',', '.'))
+    : /^\d+\.\d{1,2}$/.test(raw)
+      ? parseFloat(raw)
+      : parseFloat(raw.replace(/\./g, ''));
+
+  const digitosValor = raw.replace(/\D/g, '');
+  if (Number.isNaN(parsed) || parsed < 0 || parsed >= 100000 || digitosValor.length > 7) {
+    return null;
+  }
+  if (exigirMinimo && parsed !== 0 && parsed < 50 && !tinhaPrefixoMonetario) {
+    return null;
+  }
+  return parsed;
+}
+
+function prepararTextoVendaAtacado(
+  texto: string
+): { trabalho: string; formaPagamento?: string } | null {
   if (!texto || typeof texto !== 'string') return null;
 
   const limpo = limparMencoesBot(texto)
@@ -2524,9 +2548,9 @@ export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectad
     .join('\n')
     .trim();
 
-  if (!limpo || limpo.length < 2 || limpo.length > 140) return null;
-  if (limpo.split('\n').length > 4) return null;
-  if (limparPrefixoOuComando(limpo)) return null;
+  if (!limpo || limpo.length < 2 || limpo.length > 180) return null;
+  if (limpo.split('\n').length > 6) return null;
+  if (limpo.startsWith('!')) return null;
   if (/https?:\/\//i.test(limpo)) return null;
 
   if (ehMensagemDeEntradaEstoque(limpo) || ehRelatorioOuConferencia(limpo)) {
@@ -2598,40 +2622,23 @@ export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectad
     );
   }
 
-  trabalho = trabalho.replace(/[ \t]+/g, ' ').trim();
-
-  // Extrai valor opcional no final ou na segunda linha
-  let valor = 0;
-  const matchValor = trabalho.match(
-    /(?:^|[\s\n:–—-])(valor\s*[:=-]?\s*)?(?:por\s+|de\s+|a\s+)?(R\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?:\s*(reais|r\$))?\s*$/i
-  );
-
-  if (matchValor) {
-    const brutoNum = matchValor[3];
-    const parsedNum = brutoNum.includes(',')
-      ? parseFloat(brutoNum.replace(/\./g, '').replace(',', '.'))
-      : /^\d+\.\d{1,2}$/.test(brutoNum)
-        ? parseFloat(brutoNum)
-        : parseFloat(brutoNum.replace(/\./g, ''));
-
-    const tinhaPrefixoMonetario = Boolean(matchValor[1] || matchValor[2] || matchValor[4]);
-    const digitosValor = brutoNum.replace(/\D/g, '');
-
-    if (
-      !Number.isNaN(parsedNum) &&
-      parsedNum >= 0 &&
-      parsedNum < 100000 &&
-      digitosValor.length <= 7 &&
-      (parsedNum === 0 || parsedNum >= 50 || tinhaPrefixoMonetario)
-    ) {
-      valor = parsedNum;
-      const idxMatch = matchValor.index ?? trabalho.length;
-      trabalho = trabalho.slice(0, idxMatch).trim();
-    }
-  }
-
-  // Remove prefixos comuns ("Atacado João", "Vendido para João", "Cliente: João")
   trabalho = trabalho
+    .split('\n')
+    .map((l) => l.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  return trabalho ? { trabalho, formaPagamento } : null;
+}
+
+function finalizarVendaAtacado(
+  trabalhoBruto: string,
+  valor: number,
+  formaPagamento?: string,
+  valoresIndividuais?: number[]
+): VendaAtacadoDetectada | null {
+  const nome = trabalhoBruto
     .replace(
       /^(?:atacado|venda\s+atacado|vendido(?:\s+(?:para|pro|pra))?|vendi(?:\s+(?:para|pro|pra))?|cliente|comprador|lojista|para|pro|pra)\s*[:=-]?\s*/i,
       ''
@@ -2640,23 +2647,89 @@ export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectad
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (!trabalho || trabalho.length < 2 || trabalho.length > 60) return null;
-  if (!/[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(trabalho)) return null;
-  if (trabalho.split(/\s+/).length > 5) return null;
-  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ0-9\s.'&-]*$/.test(trabalho)) return null;
+  if (!nome || nome.length < 2 || nome.length > 60) return null;
+  if (!/[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(nome)) return null;
+  if (nome.split(/\s+/).length > 5) return null;
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ0-9\s.'&-]*$/.test(nome)) return null;
 
-  const lowerNome = trabalho.toLowerCase();
-  if (STOPWORDS_ATACADO_NOME.has(lowerNome)) return null;
+  if (STOPWORDS_ATACADO_NOME.has(nome.toLowerCase())) return null;
 
   return {
-    clienteNome: trabalho,
+    clienteNome: nome,
     valor,
     ...(formaPagamento ? { formaPagamento } : {}),
+    ...(valoresIndividuais && valoresIndividuais.length > 1 ? { valoresIndividuais } : {}),
   };
 }
 
-function limparPrefixoOuComando(limpo: string): boolean {
-  return limpo.startsWith('!');
+/**
+ * Detecta o padrão de venda de atacado com foto da etiqueta/IMEI:
+ * nome da pessoa/lojista (na legenda da foto ou na mensagem logo abaixo) e valor opcional.
+ * Se não informar valor, retorna `valor: 0`.
+ */
+export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectada | null {
+  const prep = prepararTextoVendaAtacado(texto);
+  if (!prep) return null;
+
+  let { trabalho, formaPagamento } = prep;
+  // Evita confundir listas de múltiplos valores ("João 2500 / 3100") fora do !modo multiplo
+  if (/(?:R\$\s*)?\d{2,5}(?:[.,]\d{1,2})?(?:\s*(?:reais|r\$))?\s*(?:\/|\+|;|\n)\s*(?:R\$\s*)?\d{2,5}/i.test(trabalho)) {
+    return null;
+  }
+
+  let valor = 0;
+
+  const matchValor = trabalho.match(
+    /(?:^|[\s\n:–—-])(valor\s*[:=-]?\s*)?(?:por\s+|de\s+|a\s+)?(R\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?:\s*(reais|r\$))?\s*$/i
+  );
+
+  if (matchValor) {
+    const tokenCompleto = `${matchValor[2] || ''}${matchValor[3]}${matchValor[4] ? ` ${matchValor[4]}` : ''}`;
+    const parsed = parseValorMonetarioToken(tokenCompleto, !matchValor[1]);
+    if (parsed !== null) {
+      valor = parsed;
+      const idxMatch = matchValor.index ?? trabalho.length;
+      trabalho = trabalho.slice(0, idxMatch).trim();
+    }
+  }
+
+  return finalizarVendaAtacado(trabalho, valor, formaPagamento);
+}
+
+/**
+ * Variante para `!modo multiplo`: além do padrão simples, aceita múltiplos valores
+ * individuais separados por `/`, `+`, `;` ou quebras de linha após o nome do comprador
+ * (ex.: `"João 2500 / 3100"`, `"Pedro\n2500\n3100"`, `"Lucas 2400 + 2800"`).
+ */
+export function detectarVendaAtacadoMultiploComFoto(texto: string): VendaAtacadoDetectada | null {
+  const prep = prepararTextoVendaAtacado(texto);
+  if (!prep) return null;
+
+  const { trabalho, formaPagamento } = prep;
+
+  const matchMultiplo = trabalho.match(
+    /(?:^|[\s\n:–—-])(?:valores?\s*[:=-]?\s*)?((?:(?:R\$\s*)?(?:\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?:\s*(?:reais|r\$))?(?:\s*(?:\/|\+|;|\n)\s*)){1,}(?:R\$\s*)?(?:\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?:\s*(?:reais|r\$))?)\s*$/i
+  );
+
+  if (matchMultiplo) {
+    const tokens = matchMultiplo[1]
+      .split(/\s*(?:\/|\+|;|\n)\s*/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (tokens.length >= 2) {
+      const valores = tokens.map((tok) => parseValorMonetarioToken(tok, true));
+      if (valores.every((v): v is number => v !== null)) {
+        const idxMatch = matchMultiplo.index ?? trabalho.length;
+        const nomeRestante = trabalho.slice(0, idxMatch).trim();
+        const soma = Number(valores.reduce((acc, v) => acc + v, 0).toFixed(2));
+        const resMultiplo = finalizarVendaAtacado(nomeRestante, soma, formaPagamento, valores);
+        if (resMultiplo) return resMultiplo;
+      }
+    }
+  }
+
+  return detectarVendaAtacadoComFoto(texto);
 }
 
 /**
@@ -2724,6 +2797,8 @@ export async function emitirVendaAtacadoComFoto(params: {
   sucesso: boolean;
   mensagem: string;
   vendaId?: string;
+  vendaUuid?: string;
+  custoTotal?: number;
   jaEstavaEmSaida?: boolean;
 }> {
   const { supabase, lojaId, vendaAtacado, fotos, estoque, usuarioNome = 'Bot WhatsApp' } = params;
@@ -2756,7 +2831,17 @@ export async function emitirVendaAtacadoComFoto(params: {
     }
 
     const agora = new Date().toISOString();
-    const valorTotalNum = Number(vendaAtacado.valor || 0);
+    const temValoresIndividuais =
+      Array.isArray(vendaAtacado.valoresIndividuais) &&
+      vendaAtacado.valoresIndividuais.length > 0;
+    const valoresIndividuais = vendaAtacado.valoresIndividuais || [];
+    const valorTotalNum = temValoresIndividuais
+      ? Number(
+          fotos
+            .reduce((acc, _, idx) => acc + Number(valoresIndividuais[idx] || 0), 0)
+            .toFixed(2)
+        )
+      : Number(vendaAtacado.valor || 0);
     const valorUnitPadrao =
       fotos.length > 0 && valorTotalNum > 0
         ? Number((valorTotalNum / fotos.length).toFixed(2))
@@ -2809,8 +2894,9 @@ export async function emitirVendaAtacadoComFoto(params: {
       const custoItem = Number(apEnc?.custo || 0);
       custoTotal += custoItem;
 
-      const valItem =
-        valorTotalNum <= 0
+      const valItem = temValoresIndividuais
+        ? Number(valoresIndividuais[idx] || 0)
+        : valorTotalNum <= 0
           ? 0
           : idx === fotos.length - 1
             ? Number((valorTotalNum - valorUnitPadrao * (fotos.length - 1)).toFixed(2))
@@ -2883,7 +2969,11 @@ export async function emitirVendaAtacadoComFoto(params: {
     const linhasItens = itensVendaPayload
       .map((it, idx) => {
         const imeiTag = it.imei ? ` (IMEI: ${it.imei})` : '';
-        return `${itensVendaPayload.length > 1 ? `   ${idx + 1}. ` : '📱 *Aparelho:* '}${it.descricao}${imeiTag} — ${statusPorItem[idx]}`;
+        const valorItemTag =
+          temValoresIndividuais && it.total > 0
+            ? ` [R$ ${Number(it.total).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}]`
+            : '';
+        return `${itensVendaPayload.length > 1 ? `   ${idx + 1}. ` : '📱 *Aparelho:* '}${it.descricao}${imeiTag}${valorItemTag} — ${statusPorItem[idx]}`;
       })
       .join('\n');
 
@@ -2891,12 +2981,14 @@ export async function emitirVendaAtacadoComFoto(params: {
       `📦 *VENDA ATACADO REGISTRADA!* (#${vendaCodigo})\n` +
       `👤 *Cliente:* ${vendaAtacado.clienteNome}\n` +
       `${linhasItens}\n` +
-      `💰 *Valor:* R$ ${valorFmt}${valorTotalNum === 0 ? ' _(não informado)_' : ''}`;
+      `💰 *Valor:* R$ ${valorFmt}${valorTotalNum === 0 ? ' _(não informado — responda com o valor se quiser atualizar)_' : ''}`;
 
     return {
       sucesso: true,
       mensagem: sanitizarTextoWhatsApp(msgSucesso),
       vendaId: vendaCodigo,
+      vendaUuid,
+      custoTotal,
       jaEstavaEmSaida,
     };
   } catch (err: any) {

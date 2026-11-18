@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   detectarFormularioOuPedidoVenda,
   detectarVendaAtacadoComFoto,
+  detectarVendaAtacadoMultiploComFoto,
   temFotoRecenteOuProcessando,
   emitirVendaAtacadoComFoto,
   formatarMensagemPreviaNotinha,
@@ -29,6 +30,20 @@ import {
   extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
 } from './notinhaAutomatica';
+import { gerarRelatorioFechamentoDia } from './handlers/fechamentoDiaHandler';
+import {
+  detectarSaidaDiretaEstoque,
+  parseValorEdicaoRapida,
+  salvarVendaAtacadoRecente,
+  tentarEditarValorVendaAtacado,
+} from './handlers/estoqueSaidaRapidaHandler';
+import {
+  detectarComandoAparelhoEmprestado,
+  ehComandoListarEmprestados,
+  listarAparelhosEmprestados,
+  registrarAparelhoEmprestado,
+  registrarDevolucaoEmprestado,
+} from './handlers/aparelhosEmprestadosHandler';
 import {
   formatarLinhaSaidaEstoqueVenda,
   foiSaidaRegistradaHoje,
@@ -1387,6 +1402,365 @@ test('temFotoRecenteOuProcessando e emitirVendaAtacadoComFoto registram venda at
   assert.equal(rpcCalls[0].args.p_venda.valor, 0);
   assert.equal(rpcCalls[0].args.p_origem, 'atacado');
 });
+
+test('detectarVendaAtacadoMultiploComFoto reconhece múltiplos valores individuais e emite lote distribuindo preços', async () => {
+  const barra = detectarVendaAtacadoMultiploComFoto('João 2500 / 3100');
+  assert.equal(barra?.clienteNome, 'João');
+  assert.equal(barra?.valor, 5600);
+  assert.deepEqual(barra?.valoresIndividuais, [2500, 3100]);
+
+  const quebra = detectarVendaAtacadoMultiploComFoto('Pedro\n2500\n3100');
+  assert.equal(quebra?.clienteNome, 'Pedro');
+  assert.equal(quebra?.valor, 5600);
+  assert.deepEqual(quebra?.valoresIndividuais, [2500, 3100]);
+
+  const soma = detectarVendaAtacadoMultiploComFoto('Lucas Silva 2400 + 2800');
+  assert.equal(soma?.clienteNome, 'Lucas Silva');
+  assert.equal(soma?.valor, 5200);
+  assert.deepEqual(soma?.valoresIndividuais, [2400, 2800]);
+
+  const semValor = detectarVendaAtacadoMultiploComFoto('João');
+  assert.equal(semValor?.clienteNome, 'João');
+  assert.equal(semValor?.valor, 0);
+
+  // Outros modos continuam usando detectarVendaAtacadoComFoto sem quebra por múltiplos valores
+  assert.equal(detectarVendaAtacadoComFoto('João 2500 / 3100'), null);
+
+  const rpcCalls: Array<{ fn: string; args: Record<string, any> }> = [];
+  const mockRpcSupabase: any = {
+    rpc: async (fn: string, args: Record<string, any>) => {
+      rpcCalls.push({ fn, args });
+      return {
+        data: {
+          venda: { id: '55555555-5555-4555-8555-555555555555', loja_id: args.p_venda.loja_id },
+          baixados: 2,
+          lote_id: 'lote-multiplo',
+        },
+        error: null,
+      };
+    },
+  };
+
+  const resMulti = await emitirVendaAtacadoComFoto({
+    supabase: mockRpcSupabase,
+    lojaId: '11111111-1111-4111-8111-111111111111',
+    vendaAtacado: barra!,
+    fotos: [
+      { imei: '350015753668064', modelo: 'iPhone 13', capacidade: '128GB', cor: 'Preto', timestamp: Date.now() },
+      { imei: '351111222233334', modelo: 'iPhone 14', capacidade: '128GB', cor: 'Azul', timestamp: Date.now() },
+    ],
+    estoque: [
+      { id: 'ap-a', modelo: 'iPhone 13', capacidade: '128GB', cor: 'Preto', imei: '350015753668064', custo: 2000, status: 'disponivel', ativo: true },
+      { id: 'ap-b', modelo: 'iPhone 14', capacidade: '128GB', cor: 'Azul', imei: '351111222233334', custo: 2500, status: 'disponivel', ativo: true },
+    ],
+    usuarioNome: 'Equipe',
+  });
+
+  assert.equal(resMulti.sucesso, true);
+  assert.equal(resMulti.vendaUuid, '55555555-5555-4555-8555-555555555555');
+  assert.equal(resMulti.custoTotal, 4500);
+  assert.equal(rpcCalls[0].args.p_venda.valor, 5600);
+  assert.equal(rpcCalls[0].args.p_venda.itens[0].total, 2500);
+  assert.equal(rpcCalls[0].args.p_venda.itens[1].total, 3100);
+});
+
+test('detectarSaidaDiretaEstoque, parseValorEdicaoRapida e tentarEditarValorVendaAtacado funcionam corretamente', async () => {
+  assert.deepEqual(detectarSaidaDiretaEstoque('350015753668064 [MANUTENÇÃO "Carlos"]'), {
+    imei: '350015753668064',
+    tipo: 'manutencao',
+    destinoOuMotivo: 'Carlos',
+  });
+  assert.deepEqual(detectarSaidaDiretaEstoque('9911 [BAIXA "Defeito"]'), {
+    imei: '9911',
+    tipo: 'baixa',
+    destinoOuMotivo: 'Defeito',
+  });
+  assert.deepEqual(detectarSaidaDiretaEstoque('!manutencao 350015753668064 Carlos'), {
+    imei: '350015753668064',
+    tipo: 'manutencao',
+    destinoOuMotivo: 'Carlos',
+  });
+  assert.deepEqual(detectarSaidaDiretaEstoque('!baixa 9911 Defeito'), {
+    imei: '9911',
+    tipo: 'baixa',
+    destinoOuMotivo: 'Defeito',
+  });
+
+  assert.equal(parseValorEdicaoRapida('2650'), 2650);
+  assert.equal(parseValorEdicaoRapida('R$ 2.650,50'), 2650.5);
+  assert.equal(parseValorEdicaoRapida('valor 3100'), 3100);
+  assert.equal(parseValorEdicaoRapida('350015753668064'), null);
+
+  const acoesStore = new Map<string, any>();
+  const vendasStore = new Map<string, any>([
+    [
+      'venda-uuid-1',
+      {
+        id: 'venda-uuid-1',
+        loja_id: 'loja-1',
+        valor: 0,
+        custo: 2000,
+        metodo: 'pix',
+        itens: [{ descricao: 'iPhone 13', valorExibir: 0, total: 0 }],
+      },
+    ],
+  ]);
+
+  const mockSupabase: any = {
+    from: (tabela: string) => {
+      if (tabela === 'whatsapp_acoes_pendentes') {
+        return {
+          upsert: async (reg: any) => {
+            acoesStore.set(reg.chave, { ...reg });
+            return { data: reg, error: null };
+          },
+          select: () => ({
+            in: (_c1: string, chaves: string[]) => ({
+              eq: (_c2: string, tipoVal: string) => ({
+                order: () => ({
+                  limit: async () => ({
+                    data: chaves
+                      .map((k) => acoesStore.get(k))
+                      .filter((r) => r && r.tipo === tipoVal),
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+            eq: (_c1: string, k: string) => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: acoesStore.get(k) || null, error: null }),
+              }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: (_c: string, id: string) => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: vendasStore.get(id) || null, error: null }),
+            }),
+          }),
+        }),
+        update: (patch: Record<string, any>) => ({
+          eq: (_c: string, id: string) => ({
+            eq: async () => {
+              const cur = vendasStore.get(id);
+              if (cur) vendasStore.set(id, { ...cur, ...patch });
+              return { error: null };
+            },
+          }),
+        }),
+      };
+    },
+  };
+
+  await salvarVendaAtacadoRecente(mockSupabase, 'loja-1', 'grupo@g.us', 'msg-atac-1', {
+    vendaUuid: 'venda-uuid-1',
+    vendaCodigo: '55555555',
+    clienteNome: 'João',
+    custoTotal: 2000,
+    metodo: 'pix',
+    valorAtual: 0,
+  });
+
+  // Edição direta sem reply quando valorAtual === 0
+  const editSemReply = await tentarEditarValorVendaAtacado({
+    supabase: mockSupabase,
+    lojaId: 'loja-1',
+    remoteJid: 'grupo@g.us',
+    texto: '2650',
+  });
+  assert.equal(editSemReply.editado, true);
+  assert.equal(vendasStore.get('venda-uuid-1').valor, 2650);
+  assert.equal(vendasStore.get('venda-uuid-1').lucro, 650);
+  assert.equal(vendasStore.get('venda-uuid-1').itens[0].total, 2650);
+
+  // Sem reply e valor já > 0 NÃO deve sobrescrever por acidente
+  const secondSemReply = await tentarEditarValorVendaAtacado({
+    supabase: mockSupabase,
+    lojaId: 'loja-1',
+    remoteJid: 'grupo@g.us',
+    texto: '2800',
+  });
+  assert.equal(secondSemReply.editado, false);
+
+  // Reply direto na mensagem do atacado PERMITE corrigir mesmo com valor > 0
+  const editViaReply = await tentarEditarValorVendaAtacado({
+    supabase: mockSupabase,
+    lojaId: 'loja-1',
+    remoteJid: 'grupo@g.us',
+    quotedStanzaId: 'msg-atac-1',
+    texto: 'valor 2800',
+  });
+  assert.equal(editViaReply.editado, true);
+  assert.equal(vendasStore.get('venda-uuid-1').valor, 2800);
+  assert.equal(vendasStore.get('venda-uuid-1').lucro, 800);
+});
+
+test('gerarRelatorioFechamentoDia consolida entradas, vendas varejo/atacado, pendentes R$ 0,00 e estoque ativo', async () => {
+  const makeChain = (rows: any[]) => {
+    const chain: any = {
+      eq: () => chain,
+      in: () => chain,
+      not: () => chain,
+      gte: () => chain,
+      order: () => Promise.resolve({ data: rows, error: null }),
+      then: (resolve: (v: any) => void) => resolve({ data: rows, error: null }),
+    };
+    return chain;
+  };
+
+  const mockSupabase: any = {
+    from: (tabela: string) => ({
+      select: () => {
+        if (tabela === 'movimentacoes_estoque') {
+          return makeChain([{ tipo: 'entrada' }, { tipo: 'entrada' }, { tipo: 'baixa' }]);
+        }
+        if (tabela === 'vendas') {
+          return makeChain([
+            { id: 'v1-abcd', clienteNome: 'Maria Varejo', valor: 3500, lucro: 700, tipoEntrega: 'Entrega', status: 'pago', itens: [] },
+            { id: 'v2-efgh', clienteNome: 'Carlos Atacado', valor: 0, lucro: -2000, tipoEntrega: 'Atacado', status: 'pago', itens: [{ descricao: 'iPhone 13', imei: '350015753668064' }] },
+            { id: 'v3-ijkl', clienteNome: 'Cancelada', valor: 9999, lucro: 5000, tipoEntrega: 'Entrega', status: 'cancelada', itens: [] },
+          ]);
+        }
+        return makeChain([
+          { id: '1', ativo: true, status: 'disponivel' },
+          { id: '2', ativo: true, status: 'manutencao' },
+          { id: '3', ativo: false, status: 'vendido' },
+        ]);
+      },
+    }),
+  };
+
+  const relatorio = await gerarRelatorioFechamentoDia(mockSupabase, 'loja-1', 'Lucas Imports');
+  assert.ok(relatorio.includes('FECHAMENTO DO DIA — LUCAS IMPORTS'));
+  assert.ok(relatorio.includes('*Entradas hoje:* 2 aparelho(s)'));
+  assert.ok(relatorio.includes('*Vendas hoje:* 2 (1 varejo · 1 atacado)'));
+  assert.ok(relatorio.includes('*Baixas avulsas:* 1 aparelho(s)'));
+  assert.ok(relatorio.includes('*Estoque ativo atual:* 2 aparelho(s)'));
+  assert.ok(relatorio.includes('Carlos Atacado'));
+  assert.ok(relatorio.includes('350015753668064'));
+});
+
+test('aparelhosEmprestadosHandler detecta linguagem natural, salva, lista com !emprestados e registra devolução', async () => {
+  assert.equal(ehComandoListarEmprestados('!emprestados'), true);
+  assert.equal(ehComandoListarEmprestados('!emprestados lista'), true);
+  assert.equal(ehComandoListarEmprestados('!emprestar 350015753668064 Lucas'), false);
+
+  assert.deepEqual(
+    detectarComandoAparelhoEmprestado('aparelho imei 350015753668064 emprestado para Lucas'),
+    { acao: 'emprestar', imei: '350015753668064', clienteNome: 'Lucas' }
+  );
+  assert.deepEqual(
+    detectarComandoAparelhoEmprestado('iphone 11 imei 9911 emprestado pro João Silva'),
+    { acao: 'emprestar', imei: '9911', clienteNome: 'João Silva', modeloInformado: 'iphone 11' }
+  );
+  assert.deepEqual(
+    detectarComandoAparelhoEmprestado('aparelho imei 350015753668064 devolvido'),
+    { acao: 'devolver', imei: '350015753668064' }
+  );
+  assert.deepEqual(
+    detectarComandoAparelhoEmprestado('!devolver 9911'),
+    { acao: 'devolver', imei: '9911' }
+  );
+  assert.equal(
+    detectarComandoAparelhoEmprestado('esse aparelho imei 1234 ta emprestado para alguem?'),
+    null
+  );
+
+  const acoesStore = new Map<string, any>();
+  const mockSupabase: any = {
+    from: (tabela: string) => {
+      if (tabela === 'aparelhos') {
+        return {
+          select: () => ({
+            eq: () => ({
+              or: (_filtro: string) => ({
+                limit: async () => ({
+                  data: _filtro.includes('350015753668064')
+                    ? [
+                        {
+                          id: 'ap-emp-1',
+                          modelo: 'iPhone XR',
+                          capacidade: '64GB',
+                          cor: 'Preto',
+                          imei: '350015753668064',
+                          saude_bateria: '88%',
+                        },
+                      ]
+                    : [],
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+
+      return {
+        upsert: async (reg: any) => {
+          acoesStore.set(reg.chave, { ...reg });
+          return { data: reg, error: null };
+        },
+        select: () => ({
+          eq: (_c1: string, lojaVal: string) => ({
+            eq: (_c2: string, actionVal: string) => {
+              const rows = Array.from(acoesStore.values()).filter(
+                (r) => r.loja_id === lojaVal && r.action === actionVal
+              );
+              const resObj: any = Promise.resolve({ data: rows, error: null });
+              resObj.order = async () => ({ data: rows, error: null });
+              return resObj;
+            },
+          }),
+        }),
+        delete: () => ({
+          eq: async (_c: string, chave: string) => {
+            acoesStore.delete(chave);
+            return { data: null, error: null };
+          },
+        }),
+      };
+    },
+  };
+
+  // Aparelho existente no estoque (enriquece modelo) e aparelho reserva não cadastrado no banco
+  const msgEmp1 = await registrarAparelhoEmprestado(
+    mockSupabase,
+    'loja-1',
+    { acao: 'emprestar', imei: '350015753668064', clienteNome: 'Lucas' },
+    'Atendente'
+  );
+  assert.ok(msgEmp1.includes('iPhone XR'));
+  assert.ok(msgEmp1.includes('Lucas'));
+
+  const msgEmp2 = await registrarAparelhoEmprestado(
+    mockSupabase,
+    'loja-1',
+    { acao: 'emprestar', imei: '9911', clienteNome: 'Maria Garantia', modeloInformado: 'iPhone 11' },
+    'Atendente'
+  );
+  assert.ok(msgEmp2.includes('iPhone 11'));
+  assert.ok(msgEmp2.includes('Maria Garantia'));
+
+  const listaMsg = await listarAparelhosEmprestados(mockSupabase, 'loja-1', 'Lucas Imports');
+  assert.ok(listaMsg.includes('*Aparelhos Emprestados — Lucas Imports* (2)'));
+  assert.ok(listaMsg.includes('350015753668064'));
+  assert.ok(listaMsg.includes('Lucas'));
+  assert.ok(listaMsg.includes('Maria Garantia'));
+
+  const devMsg = await registrarDevolucaoEmprestado(mockSupabase, 'loja-1', '350015753668064');
+  assert.ok(devMsg.includes('Devolução Registrada'));
+  assert.ok(devMsg.includes('Lucas'));
+
+  const listaAposDev = await listarAparelhosEmprestados(mockSupabase, 'loja-1', 'Lucas Imports');
+  assert.ok(listaAposDev.includes('(1)'));
+  assert.ok(!listaAposDev.includes('350015753668064'));
+  assert.ok(listaAposDev.includes('Maria Garantia'));
+});
+
 
 
 
