@@ -9,6 +9,7 @@ import { MAX_FOTOS_VENDA, type CampoDaFoto } from '@/lib/vendas/fotoVenda';
 import { reduzirImagemParaEnvio } from '@/lib/imagens/reduzirImagem';
 import { inferirMarcaPorModelo } from '@/lib/marcaUtils';
 import { montarCancelamento, vendaCancelada } from '@/lib/vendas/situacao';
+import { diagnosticarVendaPendente, isVendaAtacado } from '@/lib/vendas/pendencias';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { GlassCard } from '@/components/GlassCard';
@@ -2503,51 +2504,41 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   };
 
   // Helper robusto para identificar se a venda é do canal Atacado / Lojista
-  const isAtacadoVenda = (venda: any): boolean => {
-    if (!venda) return false;
-    const tipoEntrega = String(venda.tipoEntrega || '').toLowerCase();
-    const desc = String(venda.descricao || '').toLowerCase();
-    const canal = String(venda.canal || venda.tipo_venda || venda.tipoVenda || '').toLowerCase();
-    return tipoEntrega.includes('atacado') || desc.includes('atacado') || canal.includes('atacado');
-  };
+  const isAtacadoVenda = isVendaAtacado;
 
   // Helper robusto para identificar vendas com dados de cliente pendentes ou genéricos ("Comum", "Consumidor", etc.)
   const verificarVendaDadosPendentes = (venda: Venda, listaClientes?: Cliente[]): boolean => {
-    // Se for uma venda de atacado, NUNCA entra na aba de dados pendentes do varejo!
-    if (isAtacadoVenda(venda)) return false;
+    return diagnosticarVendaPendente(venda, listaClientes, aparelhos).isPendente;
+  };
 
-    // 1. Se foi explicitamente marcada como pendente
-    if ((venda as any).dados_cliente_pendente === true) return true;
-
-    const nome = (venda.clienteNome || '').trim();
-    if (!nome) return true;
-
-    // 3. Nomes genéricos de clientes/balcão que foram vendidos sem dados reais completos
-    const padraoGenerico = /^(comum|cliente comum|consumidor|cliente consumidor|final|cliente final|balc[aã]o|cliente balc[aã]o|pendente|n[aã]o informado|sem nome|desconhecido|an[oô]nimo)$/i;
-    if (padraoGenerico.test(nome) || /(comum|balc[aã]o|pendente|consumidor)/i.test(nome)) {
-      return true;
-    }
-
-    // 4. Se não tem clienteId vinculado, precisa de cadastro real
-    if (!venda.clienteId) {
-      return true;
-    }
-
-    // 5. Se tem cliente vinculado, verificar se o cadastro do cliente tem dados reais ou se é apenas um placeholder
-    if (listaClientes && listaClientes.length > 0) {
-      const cli = listaClientes.find((c) => c.id === venda.clienteId || c.nome?.toLowerCase() === nome.toLowerCase());
-      if (cli) {
-        if (padraoGenerico.test((cli.nome || '').trim()) || /(comum|balc[aã]o|pendente|consumidor)/i.test(cli.nome || '')) {
-          return true;
-        }
-        const tel = (cli.telefone || '').replace(/\D/g, '');
-        if (!tel || tel.length < 8) {
-          return true;
-        }
-      }
-    }
-
-    return false;
+  /** Abre o modal unificado de edição rápida (cliente, notinha, produto, custos e pagamento) */
+  const abrirModalEdicaoRapidaVenda = (venda: Venda, modoCompletar: boolean = false) => {
+    const itemPrincipal = venda.itens?.[0];
+    const apInfo = extrairAparelhoEImeiDaVenda(venda, aparelhos);
+    setVendaRegistroParaEditar({
+      id: venda.id,
+      vendaId: venda.id,
+      aparelhoId: itemPrincipal?.aparelhoId,
+      clienteId: venda.clienteId || null,
+      data: venda.dataPagamento || (venda as any).data || new Date().toISOString(),
+      dataVencimento: venda.dataVencimento,
+      comprador: venda.clienteNome || '',
+      modelo: apInfo.nomeAparelho || itemPrincipal?.descricao || venda.descricao || 'Item Venda',
+      imei: apInfo.imei || '',
+      valorVenda: venda.valor || 0,
+      custo: venda.custo || 0,
+      metodoPgto: venda.metodo || 'pix',
+      parcelas: Number(venda.pagamentos?.[0]?.parcelas || 1) || 1,
+      tipoVenda: isAtacadoVenda(venda) ? 'Atacado' : 'Varejo',
+      vendedor: venda.vendedor || '',
+      garantia: venda.garantia || '',
+      status: venda.status,
+      valorPago: venda.valorPago,
+      observacoes: itemPrincipal?.observacao || '',
+      itens: venda.itens,
+      raw: venda,
+      modoCompletar,
+    });
   };
 
   // Um intervalo de datas explícito nos Filtros Avançados tem precedência sobre
@@ -3542,9 +3533,13 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
-  const handleGerarReciboA4 = async (venda: Venda) => {
+  const handleGerarReciboA4 = async (venda: Venda, clienteOverride?: Cliente | null) => {
     try {
-      const clienteVenda = clientes.find(c => c.id === venda.clienteId);
+      const nomeVendaLower = (venda.clienteNome || '').trim().toLowerCase();
+      const clienteVenda =
+        clienteOverride ||
+        (venda.clienteId ? clientes.find((c) => c.id === venda.clienteId) : undefined) ||
+        (nomeVendaLower ? clientes.find((c) => (c.nome || '').trim().toLowerCase() === nomeVendaLower) : undefined);
       
       let storeData = {
         nomeLoja: config?.nomeLoja || 'Phone Center',
@@ -4675,7 +4670,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 <tbody>
                   {vendasFiltradas.map((venda) => {
                     const isAtacado = isAtacadoVenda(venda);
-                    const isPendente = !isAtacado && verificarVendaDadosPendentes(venda, clientes);
+                    const diagnostico = !isAtacado ? diagnosticarVendaPendente(venda, clientes, aparelhos) : null;
+                    const isPendente = Boolean(diagnostico?.isPendente);
+                    const complementaresCliente = (diagnostico?.camposComplementares || []).filter(
+                      (c) => c === 'E-mail' || c === 'CPF / CNPJ'
+                    );
 
                     return (
                     <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5", vendaCancelada(venda) && "opacity-60")}>
@@ -4708,31 +4707,34 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                           {isPendente && (
                             <button
                               type="button"
-                              onClick={() => {
-                                const itemPrincipal = venda.itens?.[0];
-                                setVendaRegistroParaEditar({
-                                  id: venda.id,
-                                  vendaId: venda.id,
-                                  aparelhoId: itemPrincipal?.aparelhoId,
-                                  data: venda.dataPagamento || (venda as any).data || new Date().toISOString(),
-                                  comprador: venda.clienteNome || '',
-                                  modelo: itemPrincipal?.descricao || venda.descricao || 'Item Venda',
-                                  valorVenda: venda.valor || 0,
-                                  custo: venda.custo || 0,
-                                  metodoPgto: venda.metodo || 'pix',
-                                  tipoVenda: (venda as any).tipoEntrega || 'Varejo',
-                                  observacoes: venda.descricao || '',
-                                  itens: venda.itens,
-                                  raw: venda,
-                                });
-                              }}
+                              onClick={() => abrirModalEdicaoRapidaVenda(venda, true)}
                               className="text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/40 cursor-pointer flex items-center gap-1 shadow-sm"
-                              title="Completar dados do cliente para emitir a notinha"
+                              title={`Completar dados faltantes: ${diagnostico?.motivosObrigatorios.join(', ')}`}
                             >
                               <Edit className="w-3 h-3" /> Completar Notinha
                             </button>
                           )}
                         </div>
+                        {isPendente && diagnostico && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {diagnostico.motivosObrigatorios.map((motivo) => (
+                              <span
+                                key={motivo}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                              >
+                                Falta: {motivo}
+                              </span>
+                            ))}
+                            {complementaresCliente.map((campo) => (
+                              <span
+                                key={campo}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-800/80 text-slate-400 border border-slate-700/80"
+                              >
+                                Sem {campo}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {/* Exibição compacta do aparelho e IMEI em telas móveis */}
                         <div className="sm:hidden mt-1 flex flex-col gap-0.5 text-[11px]">
                           {(() => {
@@ -4834,27 +4836,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56 space-y-0.5">
                               <DropdownMenuItem
-                                onClick={() => {
-                                  const itemPrincipal = venda.itens?.[0];
-                                  setVendaRegistroParaEditar({
-                                    id: venda.id,
-                                    vendaId: venda.id,
-                                    aparelhoId: itemPrincipal?.aparelhoId,
-                                    data: venda.dataPagamento || (venda as any).data || new Date().toISOString(),
-                                    comprador: venda.clienteNome || '',
-                                    modelo: itemPrincipal?.descricao || venda.descricao || 'Item Venda',
-                                    valorVenda: venda.valor || 0,
-                                    custo: venda.custo || 0,
-                                    metodoPgto: venda.metodo || 'pix',
-                                    tipoVenda: (venda as any).tipoEntrega || 'Varejo',
-                                    observacoes: venda.descricao || '',
-                                    itens: venda.itens,
-                                    raw: venda,
-                                  });
-                                }}
+                                onClick={() => abrirModalEdicaoRapidaVenda(venda, false)}
                               >
                                 <Edit className="mr-2 h-4 w-4 text-amber-400" />
-                                Editar Custos / Dados
+                                Editar Venda / Cliente / Custos
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleEdit(venda)} disabled={vendaCancelada(venda)}>
                                 <Repeat className="mr-2 h-4 w-4 text-blue-400" />
@@ -6548,9 +6533,12 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           onClose={() => setVendaRegistroParaEditar(null)}
           venda={vendaRegistroParaEditar}
           lojaId={usuario?.lojaId || null}
+          clientes={clientes}
           onSuccess={async () => {
-            await carregarVendas();
-            await fetchAparelhos();
+            await Promise.all([carregarVendas(), fetchAparelhos(), fetchClientes()]);
+          }}
+          onEmitirNotinha={(vendaAtualizada, clienteAtualizado) => {
+            void handleGerarReciboA4(vendaAtualizada, clienteAtualizado);
           }}
         />
       </ModalPortal>

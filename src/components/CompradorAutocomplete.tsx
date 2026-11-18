@@ -8,6 +8,7 @@ import { CompradorFrequente } from '@/hooks/useCompradores';
 interface CompradorAutocompleteProps {
   value: string;
   onChange: (nome: string) => void;
+  onSelectComprador?: (comprador: CompradorFrequente) => void;
   compradores: CompradorFrequente[];
   onBuscar?: (termo: string) => Promise<CompradorFrequente[]>;
   tipo?: 'lojista' | 'cliente' | 'todos';
@@ -19,6 +20,7 @@ interface CompradorAutocompleteProps {
 export function CompradorAutocomplete({
   value,
   onChange,
+  onSelectComprador,
   compradores,
   onBuscar,
   tipo = 'todos',
@@ -59,10 +61,14 @@ export function CompradorAutocomplete({
     // Com busca: primeiro os resultados remotos, depois fallback local
     if (resultadosBusca.length > 0) return resultadosBusca;
 
+    const termoDigits = termo.replace(/\D/g, '');
     const filtrados = compradores.filter(c => {
       const matchNome = c.nome.toLowerCase().includes(termo);
+      const matchTel = Boolean(c.telefone && (c.telefone.toLowerCase().includes(termo) || (termoDigits.length >= 3 && c.telefone.replace(/\D/g, '').includes(termoDigits))));
+      const matchEmail = Boolean(c.email && c.email.toLowerCase().includes(termo));
+      const matchCpf = Boolean(c.cpf && (c.cpf.toLowerCase().includes(termo) || (termoDigits.length >= 3 && c.cpf.replace(/\D/g, '').includes(termoDigits))));
       const matchTipo = tipo === 'todos' || c.tipo === tipo;
-      return matchNome && matchTipo;
+      return (matchNome || matchTel || matchEmail || matchCpf) && matchTipo;
     });
 
     return filtrados.slice(0, 10);
@@ -95,6 +101,7 @@ export function CompradorAutocomplete({
 
   const handleSelecionar = (comp: CompradorFrequente) => {
     onChange(comp.nome);
+    onSelectComprador?.(comp);
     setTermoBusca('');
     setResultadosBusca([]);
     setAberto(false);
@@ -189,8 +196,10 @@ export function CompradorAutocomplete({
                   </div>
                   <div className="min-w-0">
                     <span className="font-bold text-white truncate block">{comp.nome}</span>
-                    {comp.telefone && (
-                      <span className="text-[10px] text-slate-500">{comp.telefone}</span>
+                    {(comp.telefone || comp.email || comp.cpf) && (
+                      <span className="text-[10px] text-slate-400 truncate block">
+                        {[comp.telefone, comp.email, comp.cpf].filter(Boolean).join(' · ')}
+                      </span>
                     )}
                   </div>
                 </div>

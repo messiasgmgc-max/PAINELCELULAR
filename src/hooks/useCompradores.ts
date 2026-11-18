@@ -2,12 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 
 export interface CompradorFrequente {
   id: string;
+  clienteId?: string;
   nome: string;
   tipo: 'lojista' | 'cliente';
   telefone?: string;
+  email?: string;
+  cpf?: string;
+  endereco?: string;
   total_compras: number;
   ultimo_compra: string;
   loja_id?: string;
@@ -76,7 +81,57 @@ export function useCompradores(lojaId: string | null) {
         console.warn('lojistas_devedores não disponível:', e);
       }
 
-      // 3. Fallback localStorage
+      // 3. Busca da tabela clientes (Clientes Varejo) e enriquece registros existentes
+      if (!tipo || tipo === 'cliente') {
+        try {
+          const clientesLoja = await buscarTodasPaginas<any>((de, ate) =>
+            supabase
+              .from('clientes')
+              .select('id, nome, telefone, email, cpf, endereco, dataCadastro, ativo')
+              .eq('loja_id', lojaId)
+              .order('dataCadastro', { ascending: false })
+              .order('id')
+              .range(de, ate)
+          );
+
+          clientesLoja.forEach((cli) => {
+            const nomeLimpo = (cli.nome || '').trim();
+            const chave = nomeLimpo.toLowerCase();
+            if (!chave) return;
+
+            const emailValido = cli.email && cli.email !== 'sem@email.com' ? cli.email : '';
+            const existente = mapa.get(chave);
+            if (existente) {
+              mapa.set(chave, {
+                ...existente,
+                clienteId: existente.clienteId || cli.id,
+                telefone: existente.telefone || cli.telefone || '',
+                email: existente.email || emailValido,
+                cpf: existente.cpf || cli.cpf || '',
+                endereco: existente.endereco || cli.endereco || '',
+              });
+            } else {
+              mapa.set(chave, {
+                id: cli.id,
+                clienteId: cli.id,
+                nome: nomeLimpo,
+                tipo: 'cliente',
+                telefone: cli.telefone || '',
+                email: emailValido,
+                cpf: cli.cpf || '',
+                endereco: cli.endereco || '',
+                total_compras: 1,
+                ultimo_compra: cli.dataCadastro || new Date().toISOString(),
+                loja_id: lojaId,
+              });
+            }
+          });
+        } catch (e) {
+          console.warn('clientes não disponível:', e);
+        }
+      }
+
+      // 4. Fallback localStorage
       try {
         const key = 'painel_celular_compradores_recentes';
         const salvas: string[] = JSON.parse(localStorage.getItem(key) || '[]');
@@ -103,10 +158,15 @@ export function useCompradores(lojaId: string | null) {
   }, [lojaId]);
 
   const buscarCompradores = useCallback(async (termo: string, tipo?: 'lojista' | 'cliente'): Promise<CompradorFrequente[]> => {
-    if (!termo || termo.trim().length < 1) return compradores;
+    const base = tipo ? compradores.filter(c => c.tipo === tipo) : compradores;
+    if (!termo || termo.trim().length < 1) return base;
     const t = termo.trim().toLowerCase();
-    return compradores.filter(c =>
-      c.nome.toLowerCase().includes(t) || (c.telefone && c.telefone.includes(t))
+    const tDigits = t.replace(/\D/g, '');
+    return base.filter(c =>
+      c.nome.toLowerCase().includes(t) ||
+      (c.telefone && (c.telefone.toLowerCase().includes(t) || (tDigits.length >= 3 && c.telefone.replace(/\D/g, '').includes(tDigits)))) ||
+      (c.email && c.email.toLowerCase().includes(t)) ||
+      (c.cpf && (c.cpf.toLowerCase().includes(t) || (tDigits.length >= 3 && c.cpf.replace(/\D/g, '').includes(tDigits))))
     );
   }, [compradores]);
 
