@@ -15,8 +15,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --no-frozen-lockfile --ignore-scripts --store-dir=/pnpm/store
 
 # ── Builder ──
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
+FROM deps AS builder
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
