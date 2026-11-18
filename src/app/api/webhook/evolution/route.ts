@@ -605,6 +605,8 @@ function obterVariantesTelefone(rawPhone: string): string[] {
 }
 
 interface UsuarioResolvido {
+  id?: string;
+  usuarioId?: string;
   lojaId: string;
   lojaNome: string;
   usuarioNome: string;

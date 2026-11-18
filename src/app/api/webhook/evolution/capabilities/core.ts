@@ -22,11 +22,14 @@ export interface ParametroCapability {
 export interface ContextoCapability {
   supabase: SupabaseClient;
   lojaId: string;
-  nomeLoja: string;
-  plano: TipoPlano;
+  nomeLoja?: string;
+  plano?: TipoPlano;
+  planoLoja?: TipoPlano;
   papel: PapelUsuario;
-  telefone: string;
-  pushName: string;
+  telefone?: string;
+  pushName?: string;
+  usuarioId?: string;
+  authorPhone?: string;
   isGroup: boolean;
   /**
    * Delegates para funcionalidades que continuam vivendo no route.ts (consulta

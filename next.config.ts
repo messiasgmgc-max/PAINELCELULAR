@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  output: process.env.DOCKER_STANDALONE === "true" ? "standalone" : undefined,
   eslint: {
     ignoreDuringBuilds: true,
   },

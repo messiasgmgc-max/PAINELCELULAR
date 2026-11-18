@@ -38,7 +38,7 @@ async function obterUsuario(request: Request) {
         email,
         role: (data.user.user_metadata?.role as any) || 'operador',
         loja_id: lojaId,
-        nome: perfil?.nome || data.user.user_metadata?.nome || email.split('@')[0],
+        nome: data.user.user_metadata?.nome || email.split('@')[0],
       };
 }
 

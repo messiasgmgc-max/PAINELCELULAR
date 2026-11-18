@@ -934,8 +934,9 @@ export function construirPropostaNotinha(params: {
     }
   } else if (vendaDetectada.tradeIn?.modelo) {
     const tr = vendaDetectada.tradeIn;
+    const modeloTr = tr.modelo || '';
     trocasLista.push({
-      modelo: limparNomeModelo(tr.modelo) || tr.modelo,
+      modelo: limparNomeModelo(modeloTr) || modeloTr,
       capacidade: tr.capacidade || undefined,
       cor: tr.cor ? extrairCorDeTexto(tr.cor) || tr.cor : undefined,
       imei: tr.imei || undefined,

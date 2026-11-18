@@ -50,7 +50,7 @@ export async function POST(request: Request) {
         plano_status: 'cancelado',
         configuracoes: {
           encerrada_em: new Date().toISOString(),
-          encerrada_por: perfil.nome || perfil.email,
+          encerrada_por: perfil.nome || email,
         }
       })
       .eq('id', loja.id);
@@ -67,11 +67,11 @@ export async function POST(request: Request) {
     await registrarLog({
       loja_id: loja.id,
       usuario_id: perfil.id,
-      usuario_email: perfil.email,
+      usuario_email: email,
       usuario_nome: perfil.nome,
       tipo_evento: 'loja',
       acao: 'Encerramento de Loja',
-      detalhes: `A loja ${loja.nome} foi desativada pelo proprietário ${perfil.nome || perfil.email}.`,
+      detalhes: `A loja ${loja.nome} foi desativada pelo proprietário ${perfil.nome || email}.`,
     });
 
     return NextResponse.json({

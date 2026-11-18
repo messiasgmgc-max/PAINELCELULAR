@@ -234,7 +234,8 @@ export function sanitizarECompletarVendaParsed(
       }
     }
   } else {
-    idxLinhaTroca = linhasParaTroca.findIndex((l) => l.includes(checkboxUpgradeMatch[0]));
+    const matchTexto = textoTrocaMatch[0];
+    idxLinhaTroca = linhasParaTroca.findIndex((l) => l.includes(matchTexto));
   }
 
   let rawConteudoTroca = textoTrocaMatch ? textoTrocaMatch[1].trim() : '';

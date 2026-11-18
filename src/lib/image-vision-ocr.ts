@@ -4,7 +4,7 @@
  */
 
 export interface VisionEtiquetaResult {
-  tipo_documento: 'etiqueta_aparelho' | 'comprovante_pagamento' | 'outro';
+  tipo_documento: 'etiqueta_aparelho' | 'etiqueta_caixa' | 'comprovante_pagamento' | 'outro';
   // Campos de Aparelho / Estoque:
   imei?: string | null;
   modelo?: string | null;

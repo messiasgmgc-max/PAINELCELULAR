@@ -9,7 +9,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml* .npmrc* ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts --store-dir=/pnpm/store || \
     pnpm install --no-frozen-lockfile --ignore-scripts --store-dir=/pnpm/store
@@ -21,12 +21,15 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV DOCKER_STANDALONE=true
 
 # Fallback para build estático do Next.js caso as envs não venham no Coolify build-time
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://app.phonecenter.tech}
 
 RUN --mount=type=cache,id=nextjs,target=/app/.next/cache pnpm run build
 

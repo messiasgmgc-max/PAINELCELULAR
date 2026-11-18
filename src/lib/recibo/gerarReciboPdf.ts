@@ -182,7 +182,6 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
         try {
           doc.image(logoBuffer, x, y - 2, {
             fit: [80, 44],
-            align: 'left',
             valign: 'center',
           });
           xTextoLoja = x + 88;

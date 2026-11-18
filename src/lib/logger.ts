@@ -9,6 +9,7 @@ export type TipoEventoLog =
   | 'plano' 
   | 'cliente' 
   | 'garantia' 
+  | 'loja'
   | 'info';
 
 export interface RegistrarLogParams {
