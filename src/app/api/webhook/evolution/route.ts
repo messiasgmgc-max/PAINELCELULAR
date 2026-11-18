@@ -4,6 +4,7 @@ import { buildWhatsAppText, parseGeminiPlan, gerarPlanoComGemini, responderConve
 import { buscarFiadoConsolidadoLoja, buscarExtratoLojista } from './fiadoHelper';
 import { buscarResumoVendasLoja, ResumoVendasAgregado } from './vendasAnalyticsHelper';
 import { processImageVision, VisionEtiquetaResult } from '../../../../lib/image-vision-ocr';
+import { transcreverAudioWhatsApp } from '@/lib/audio-transcription';
 import { verificarPermissaoRecursoPlano, obterPlanoPorTipo, TipoPlano, WHATSAPP_SUPORTE_URL } from '@/lib/planos-config';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
 import { autenticarWebhook, registrarMensagemComoProcessada } from './security';
@@ -186,7 +187,7 @@ export async function GET() {
 }
 
 // ── AUXILIAR: Enviar Mensagem via Evolution API com Retorno de MessageId ──
-async function enviarMensagemWhatsAppComRetorno(
+async function despacharMensagemWhatsAppComRetorno(
   instanceName: string,
   destination: string,
   text: string
@@ -239,8 +240,8 @@ async function enviarMensagemWhatsAppComRetorno(
 }
 
 // ── AUXILIAR: Enviar Mensagem via Evolution API (Retrocompatibilidade) ──
-async function enviarMensagemWhatsApp(instanceName: string, destination: string, text: string): Promise<boolean> {
-  const res = await enviarMensagemWhatsAppComRetorno(instanceName, destination, text);
+async function despacharMensagemWhatsApp(instanceName: string, destination: string, text: string): Promise<boolean> {
+  const res = await despacharMensagemWhatsAppComRetorno(instanceName, destination, text);
   return res.ok;
 }
 
@@ -346,7 +347,7 @@ async function editarOuResponderMensagemWhatsApp(
   }
 
   // Fallback: se não for possível editar, envia mensagem no chat
-  return await enviarMensagemWhatsApp(instanceName, destination, cleanText);
+  return await despacharMensagemWhatsApp(instanceName, destination, cleanText);
 }
 
 // ── AUXILIAR: Enviar Imagem / QR Code via Evolution API ──
@@ -469,7 +470,7 @@ async function aprovarRenovacaoLoja(
       `Sua assinatura foi estendida em *+${diasAdicionar} dias*.\n\n` +
       `📅 *Novo Vencimento*: *${novoVencimentoFmt}*\n` +
       `✅ O sistema está 100% liberado. Boas vendas! 🚀`;
-    await enviarMensagemWhatsApp(instanceName || DEFAULT_INSTANCE, destination, msgAprovado);
+    await despacharMensagemWhatsApp(instanceName || DEFAULT_INSTANCE, destination, msgAprovado);
   }
 }
 
@@ -521,7 +522,7 @@ async function monitorarCicloVidaPix(params: {
   }
 
   // Avisa no WhatsApp que falta 1 minuto para expirar
-  await enviarMensagemWhatsApp(
+  await despacharMensagemWhatsApp(
     instanceName,
     targetDestination,
     `⚠️ *Aviso de Expiração do PIX*\n\nResta apenas *1 minuto* para o código PIX de *R$ ${valorFinal.toFixed(2).replace('.', ',')}* expirar!\n\nCaso já tenha efetuado o pagamento, aguarde alguns instantes pela confirmação automática. ✅`
@@ -543,7 +544,7 @@ async function monitorarCicloVidaPix(params: {
     })
     .eq('mp_payment_id', paymentId);
 
-  await enviarMensagemWhatsApp(
+  await despacharMensagemWhatsApp(
     instanceName,
     targetDestination,
     `⌛ *Código PIX Expirado*\n\nO prazo de 5 minutos encerrou e o código PIX foi cancelado para sua segurança.\n\nPara gerar um novo quando quiser, basta enviar:\n👉 *!plano pagar*`
@@ -643,6 +644,39 @@ function verificarSeModeradorOuDonoGeral(telefone?: string | null): boolean {
     clean.includes('105278892703905') ||
     clean.endsWith('31993586377') ||
     clean.endsWith('3193586377')
+  );
+}
+
+// ── AUXILIAR: Restrição de Comandos por Áudio ao Chat Privado Pessoal do Dono ──
+function verificarPermissaoAudioPrivado(params: {
+  isGroup: boolean;
+  ehModeradorMaster: boolean;
+  authorPhone: string;
+  senderPhone: string;
+  remoteJid: string;
+}): boolean {
+  if (params.isGroup) return false;
+  if (
+    params.ehModeradorMaster ||
+    verificarSeModeradorOuDonoGeral(params.senderPhone) ||
+    verificarSeModeradorOuDonoGeral(params.remoteJid)
+  ) {
+    return true;
+  }
+
+  const allowlistEnv = (process.env.WHATSAPP_AUDIO_PRIVADO_PHONES || '').trim();
+  if (!allowlistEnv) return false;
+
+  const extras = allowlistEnv
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  return extras.some(
+    (tel) =>
+      telefonesConferem(tel, params.authorPhone) ||
+      telefonesConferem(tel, params.senderPhone) ||
+      telefonesConferem(tel, params.remoteJid)
   );
 }
 
@@ -1193,7 +1227,8 @@ async function buscarMidiaBase64Evolution(
   instanceName: string,
   messageId: string,
   messageObj: any,
-  remoteJid?: string
+  remoteJid?: string,
+  defaultMimeType: string = 'image/jpeg'
 ): Promise<{ base64: string; mimetype: string } | null> {
   if (!EVOLUTION_URL || !EVOLUTION_API_KEY) return null;
   const targetInstance = instanceName || DEFAULT_INSTANCE;
@@ -1223,7 +1258,7 @@ async function buscarMidiaBase64Evolution(
       if (b64 && typeof b64 === 'string') {
         return {
           base64: b64,
-          mimetype: data.mimetype || 'image/jpeg',
+          mimetype: data.mimetype || defaultMimeType,
         };
       }
     }
@@ -1251,7 +1286,7 @@ async function buscarMidiaBase64Evolution(
       if (b64_2 && typeof b64_2 === 'string') {
         return {
           base64: b64_2,
-          mimetype: data2.mimetype || 'image/jpeg',
+          mimetype: data2.mimetype || defaultMimeType,
         };
       }
     }
@@ -2398,8 +2433,131 @@ export async function POST(request: Request) {
     const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
     const targetDestination = isGroup ? remoteJid : (normalizarTelefoneOuLid(senderPhone) || normalizarTelefoneOuLid(remoteJid));
 
+    // Garante que apenas a primeira resposta enviada de volta ao remetente receba o cabeçalho de transcrição do áudio
+    let prefixoAudioPendente: string | null = null;
+    const aplicarPrefixoAudio = (destination: string, text: string): string => {
+      if (!prefixoAudioPendente) return text;
+      if (destination === targetDestination) {
+        const prefixo = prefixoAudioPendente;
+        prefixoAudioPendente = null;
+        return `${prefixo}${text}`;
+      }
+      return text;
+    };
+    const enviarMensagemWhatsAppComRetorno = (
+      inst: string,
+      destination: string,
+      text: string
+    ) => despacharMensagemWhatsAppComRetorno(inst, destination, aplicarPrefixoAudio(destination, text));
+    const enviarMensagemWhatsApp = (
+      inst: string,
+      destination: string,
+      text: string
+    ) => despacharMensagemWhatsApp(inst, destination, aplicarPrefixoAudio(destination, text));
+
     const ehModeradorMaster = verificarSeModeradorOuDonoGeral(authorPhone) || (isGroup && verificarSeModeradorOuDonoGeral(participantPhone));
     const modoChat = await obterModoChat(remoteJid);
+
+    // ── 2.9. RECONHECIMENTO DE COMANDOS POR ÁUDIO (RESTRITO AO PRIVADO PESSOAL DO DONO) ──
+    const rawMsgEnvelope = msgData.message || {};
+    const unwrappedMsgAudio =
+      rawMsgEnvelope.ephemeralMessage?.message ||
+      rawMsgEnvelope.viewOnceMessage?.message ||
+      rawMsgEnvelope.viewOnceMessageV2?.message ||
+      rawMsgEnvelope.viewOnceMessageV2Extension?.message ||
+      rawMsgEnvelope;
+    const audioMessageObj =
+      unwrappedMsgAudio.audioMessage ||
+      msgData.audioMessage ||
+      payload.data?.audioMessage ||
+      null;
+    const hasAudioMessage = Boolean(
+      audioMessageObj ||
+      msgData.messageType === 'audioMessage' ||
+      msgData.messageType === 'pttMessage' ||
+      payload.data?.messageType === 'audioMessage' ||
+      payload.data?.messageType === 'pttMessage'
+    );
+
+    if (hasAudioMessage) {
+      const podeUsarAudioPrivado = verificarPermissaoAudioPrivado({
+        isGroup,
+        ehModeradorMaster,
+        authorPhone,
+        senderPhone,
+        remoteJid,
+      });
+
+      if (!podeUsarAudioPrivado) {
+        console.log(
+          `🔇 [Áudio Ignorado] Origem ${authorPhone || senderPhone} (${isGroup ? 'grupo ' + remoteJid : 'privado'}) sem permissão para comandos por áudio.`
+        );
+        return NextResponse.json(
+          {
+            status: 'ignored',
+            message: 'Áudio ignorado: comandos por voz habilitados apenas no chat privado pessoal do dono.',
+          },
+          { status: 200 }
+        );
+      }
+
+      console.log(`🎤 [Áudio Privado] Mensagem de voz recebida de ${pushName} (${authorPhone || senderPhone}). Baixando e transcrevendo...`);
+
+      let rawAudioBase64 =
+        msgData.base64 ||
+        msgData.message?.base64 ||
+        payload.data?.base64 ||
+        payload.data?.message?.base64 ||
+        audioMessageObj?.base64 ||
+        '';
+      let audioMimeType =
+        audioMessageObj?.mimetype ||
+        rawMsgEnvelope.audioMessage?.mimetype ||
+        'audio/ogg';
+
+      if (!rawAudioBase64 && key.id) {
+        const audioMediaResult = await buscarMidiaBase64Evolution(
+          instanceName,
+          key.id,
+          msgData,
+          remoteJid,
+          audioMimeType || 'audio/ogg'
+        );
+        if (audioMediaResult) {
+          rawAudioBase64 = audioMediaResult.base64;
+          audioMimeType = audioMediaResult.mimetype || audioMimeType;
+        }
+      }
+
+      const resultadoAudio = rawAudioBase64
+        ? await transcreverAudioWhatsApp(rawAudioBase64, audioMimeType)
+        : null;
+
+      if (!resultadoAudio || !resultadoAudio.sucesso || !resultadoAudio.comandoNormalizado) {
+        console.warn('⚠️ [Áudio Privado] Falha na transcrição:', resultadoAudio?.erro || 'Mídia vazia');
+        await despacharMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          '🎤⚠️ Não consegui entender o áudio. Pode repetir falando o comando com clareza?'
+        );
+        return NextResponse.json({ status: 'ok', message: 'Falha na transcrição do áudio.' }, { status: 200 });
+      }
+
+      console.log(
+        `🎤 [Áudio Transcrito] (${resultadoAudio.motor}/${resultadoAudio.modelo}) "${resultadoAudio.textoLimpo}" -> "${resultadoAudio.comandoNormalizado}"`
+      );
+
+      const transcricaoSanitizada = resultadoAudio.textoLimpo.replace(/[_*\r\n]+/g, ' ').trim();
+      prefixoAudioPendente = `🎤 _"${transcricaoSanitizada}"_\n\n`;
+
+      msgData.message = {
+        ...rawMsgEnvelope,
+        conversation: resultadoAudio.comandoNormalizado,
+      };
+      if (!msgData.contextInfo && audioMessageObj?.contextInfo) {
+        msgData.contextInfo = audioMessageObj.contextInfo;
+      }
+    }
 
     // ── IDENTIFICAÇÃO MULTI-LOJA DO USUÁRIO PELO NÚMERO DO WHATSAPP ──
     const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName, isGroup);

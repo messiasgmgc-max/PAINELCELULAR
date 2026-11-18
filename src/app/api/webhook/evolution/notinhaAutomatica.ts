@@ -194,12 +194,16 @@ export function extrairMensagemMarcadaParaBot(params: {
     msgData?.contextInfo ||
     messageContent?.extendedTextMessage?.contextInfo ||
     messageContent?.imageMessage?.contextInfo ||
+    messageContent?.audioMessage?.contextInfo ||
     messageContent?.conversation?.contextInfo ||
     messageContent?.ephemeralMessage?.message?.extendedTextMessage?.contextInfo ||
     messageContent?.ephemeralMessage?.message?.imageMessage?.contextInfo ||
+    messageContent?.ephemeralMessage?.message?.audioMessage?.contextInfo ||
     messageContent?.viewOnceMessage?.message?.extendedTextMessage?.contextInfo ||
+    messageContent?.viewOnceMessage?.message?.audioMessage?.contextInfo ||
     payload?.data?.contextInfo ||
     payload?.data?.message?.extendedTextMessage?.contextInfo ||
+    payload?.data?.message?.audioMessage?.contextInfo ||
     null;
 
   const mentionedJids: string[] = Array.isArray(contextInfo?.mentionedJid)
