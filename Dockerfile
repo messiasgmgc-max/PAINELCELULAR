@@ -1,19 +1,21 @@
-# ── Dockerfile Otimizado para Coolify (Next.js 15 Standalone) ──
-FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat
+# syntax=docker/dockerfile:1
+# ── Dockerfile Otimizado para Coolify (Next.js 15 Standalone + BuildKit Cache) ──
+FROM node:20-alpine AS base
 WORKDIR /app
-
-# Habilita pnpm versão compatível
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
 
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile=false
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --ignore-scripts --store-dir=/pnpm/store || \
+    pnpm install --no-frozen-lockfile --ignore-scripts --store-dir=/pnpm/store
 
 # ── Builder ──
-FROM node:20-alpine AS builder
-WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-
+FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -26,7 +28,7 @@ ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder}
 
-RUN pnpm run build
+RUN --mount=type=cache,id=nextjs,target=/app/.next/cache pnpm run build
 
 # ── Runner ──
 FROM node:20-alpine AS runner

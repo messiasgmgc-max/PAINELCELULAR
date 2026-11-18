@@ -1,10 +1,26 @@
 node_modules
 .next
 .git
+.github
+.claude
+.vercel
+.vscode
 .pnpm-store
+android
+ios
+electron
+Claude outputs
+supabase
+scripts
 *.log
 *.tsbuildinfo
+*.csv
+*.xlsx
+backup-*.json
+*.backup.tsx
+*.test.ts
 out
 build
 dist
 coverage
+.env*
