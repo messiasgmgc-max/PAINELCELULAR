@@ -3651,7 +3651,7 @@ export async function POST(request: Request) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, '⚠️ *Acesso Restrito:* O fechamento do dia é restrito à equipe autorizada da loja.');
         return NextResponse.json({ status: 'unauthorized', message: 'Sem permissão para fechamento' }, { status: 200 });
       }
-      const relatorioFechamento = await gerarRelatorioFechamentoDia(supabase, lojaId, nomeLoja);
+      const relatorioFechamento = await gerarRelatorioFechamentoDia(supabase, lojaId, nomeLoja, textContent);
       await enviarMensagemWhatsApp(instanceName, targetDestination, relatorioFechamento);
       return NextResponse.json({ status: 'ok', message: 'Fechamento do dia enviado.' }, { status: 200 });
     }
@@ -5435,7 +5435,7 @@ Digite: *!broadcast agora*`;
         `• *!modo teste* — Novas funções em desenvolvimento\n` +
         `• *!modo completo* — Aceita todos os comandos e tudo\n` +
         `• *!modo off* — Desativa completamente\n` +
-        `\n⚡ *Atalhos Rápidos:* *!fechamento* · *!emprestados* · *!devolver [IMEI]* · *IMEI [MANUTENÇÃO "Nome"]* · *IMEI [BAIXA "Motivo"]*\n` +
+        `\n⚡ *Atalhos Rápidos:* *!fechamento [data]* · *!emprestados* · *!devolver [IMEI]* · *IMEI [MANUTENÇÃO "Nome"]* · *IMEI [BAIXA "Motivo"]*\n` +
         `\n⚙️ *Outros:* *!plano* (assinatura) · *!config* (modo do chat) · *!ajuda*`;
 
       await enviarMensagemWhatsApp(instanceName, targetDestination, menuAjuda);

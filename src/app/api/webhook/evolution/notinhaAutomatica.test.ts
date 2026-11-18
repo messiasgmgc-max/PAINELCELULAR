@@ -30,7 +30,10 @@ import {
   extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
 } from './notinhaAutomatica';
-import { gerarRelatorioFechamentoDia } from './handlers/fechamentoDiaHandler';
+import {
+  gerarRelatorioFechamentoDia,
+  resolverDataFechamentoDia,
+} from './handlers/fechamentoDiaHandler';
 import {
   detectarSaidaDiretaEstoque,
   parseValorEdicaoRapida,
@@ -1606,6 +1609,7 @@ test('gerarRelatorioFechamentoDia consolida entradas, vendas varejo/atacado, pen
       in: () => chain,
       not: () => chain,
       gte: () => chain,
+      lte: () => chain,
       order: () => Promise.resolve({ data: rows, error: null }),
       then: (resolve: (v: any) => void) => resolve({ data: rows, error: null }),
     };
@@ -1642,6 +1646,36 @@ test('gerarRelatorioFechamentoDia consolida entradas, vendas varejo/atacado, pen
   assert.ok(relatorio.includes('*Estoque ativo atual:* 2 aparelho(s)'));
   assert.ok(relatorio.includes('Carlos Atacado'));
   assert.ok(relatorio.includes('350015753668064'));
+
+  const resDataCompleta = resolverDataFechamentoDia('!fechamento 15/11/2026', '2026-11-18');
+  assert.equal(resDataCompleta.valido, true);
+  assert.equal(resDataCompleta.dataIso, '2026-11-15');
+  assert.equal(resDataCompleta.dataExibicao, '15/11/2026');
+  assert.equal(resDataCompleta.ehHoje, false);
+
+  const resDataCurta = resolverDataFechamentoDia('!fechamento dia 05/11', '2026-11-18');
+  assert.equal(resDataCurta.valido, true);
+  assert.equal(resDataCurta.dataIso, '2026-11-05');
+  assert.equal(resDataCurta.dataExibicao, '05/11/2026');
+  assert.equal(resDataCurta.ehHoje, false);
+
+  const resOntem = resolverDataFechamentoDia('!fechamento ontem', '2026-11-18');
+  assert.equal(resOntem.valido, true);
+  assert.equal(resOntem.dataIso, '2026-11-17');
+  assert.equal(resOntem.ehHoje, false);
+
+  const resInvalida = resolverDataFechamentoDia('!fechamento 31/02/2026', '2026-11-18');
+  assert.equal(resInvalida.valido, false);
+
+  const relatorioDataAnterior = await gerarRelatorioFechamentoDia(
+    mockSupabase,
+    'loja-1',
+    'Lucas Imports',
+    '!fechamento 15/11/2026'
+  );
+  assert.ok(relatorioDataAnterior.includes('(15/11/2026)'));
+  assert.ok(relatorioDataAnterior.includes('*Entradas no dia:* 2 aparelho(s)'));
+  assert.ok(relatorioDataAnterior.includes('*Vendas no dia:* 2 (1 varejo · 1 atacado)'));
 });
 
 test('aparelhosEmprestadosHandler detecta linguagem natural, salva, lista com !emprestados e registra devolução', async () => {
