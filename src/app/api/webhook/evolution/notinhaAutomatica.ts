@@ -5,7 +5,7 @@ import { estaNoEstoque } from '@/lib/estoque/ciclo';
 import { registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { registrarVendaAtomica, ErroVenda } from '@/lib/vendas/vendaAtomica';
 import { sanitizarTextoWhatsApp } from '@/lib/whatsappFormatting';
-import { obterEmojiDaCor } from './entradaInteligente';
+import { ehMensagemDeEntradaEstoque, ehRelatorioOuConferencia, obterEmojiDaCor } from './entradaInteligente';
 
 export interface AparelhoEstoqueConsulta {
   id: string;
@@ -281,6 +281,11 @@ export function extrairMensagemMarcadaParaBot(params: {
     /Dados lidos da etiqueta com IA:/i.test(quotedTextRaw) &&
     /IMEI:/i.test(quotedTextRaw);
 
+  const ehQuotedVendaAtacadoFoto =
+    Boolean(quotedImageMessage || ehQuotedResumoEtiquetaBot) &&
+    Boolean(textoSemMencao) &&
+    Boolean(detectarVendaAtacadoComFoto(textoSemMencao));
+
   const ehQuotedOperacaoValida =
     Boolean(quotedImageMessage) ||
     ehQuotedResumoEtiquetaBot ||
@@ -293,6 +298,7 @@ export function extrairMensagemMarcadaParaBot(params: {
       temMencaoPorNome ||
       bateuBotPhone ||
       ehPalavraGatilhoReleitura ||
+      ehQuotedVendaAtacadoFoto ||
       (temAlgumaMencao &&
         (textoSemMencao === '' ||
           ehQuotedOperacaoValida ||
@@ -2476,6 +2482,430 @@ export async function limparFotoRecente(
     await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chaves);
   } catch (err) {
     console.warn('[Notinha Automática] Erro ao limpar foto recente do Supabase:', err);
+  }
+}
+
+export interface VendaAtacadoDetectada {
+  clienteNome: string;
+  valor: number;
+  formaPagamento?: string;
+}
+
+const STOPWORDS_ATACADO_NOME = new Set([
+  'sim', 's', 'ok', 'oka', 'blz', 'beleza', 'confirmo', 'confirmar', 'confirmado',
+  'emitir', 'emite', 'aprovar', 'aprovado', 'fechou', 'manda', 'pode', 'autorizo',
+  'nao', 'não', 'n', 'cancelar', 'cancela', 'cancelado', 'esquece', 'anular',
+  'ler', 'releia', 'reler', 'notinha', 'nota', 'pedido', 'venda', 'atacado',
+  'estoque', 'cadastrar', 'cadastra', 'entrada', 'processar', 'processa',
+  'analisa', 'analisar', 'bot', 'astrogeek', 'ajuda', 'menu', 'plano', 'assinatura',
+  'fiado', 'saldo', 'devedores', 'extrato', 'broadcast', 'pix', 'dinheiro',
+  'cartao', 'cartão', 'credito', 'crédito', 'debito', 'débito', 'valor', 'preco',
+  'preço', 'imei', 'foto', 'caixa', 'etiqueta', 'cliente', 'comprador', 'lojista',
+  'pendente', 'oi', 'ola', 'olá', 'valeu', 'vlw', 'tmj', 'show', 'top', 'massa',
+  'legal', 'perfeito', 'certo', 'verdade', 'amem', 'amém', 'boa', 'obrigado',
+  'obrigada', 'parabens', 'parabéns', 'mano', 'irmao', 'irmão', 'chefe', 'patrao',
+  'patrão', 'amigo', 'galera', 'pessoal', 'envia', 'passa', 'olha', 'veja',
+]);
+
+/**
+ * Detecta o padrão de venda de atacado com foto da etiqueta/IMEI:
+ * nome da pessoa/lojista (na legenda da foto ou na mensagem logo abaixo) e valor opcional.
+ * Se não informar valor, retorna `valor: 0`.
+ */
+export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectada | null {
+  if (!texto || typeof texto !== 'string') return null;
+
+  const limpo = limparMencoesBot(texto)
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, '')
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
+    .split(/\r?\n/)
+    .map((lin) => lin.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  if (!limpo || limpo.length < 2 || limpo.length > 140) return null;
+  if (limpo.split('\n').length > 4) return null;
+  if (limparPrefixoOuComando(limpo)) return null;
+  if (/https?:\/\//i.test(limpo)) return null;
+
+  if (ehMensagemDeEntradaEstoque(limpo) || ehRelatorioOuConferencia(limpo)) {
+    return null;
+  }
+
+  // Ignora respostas/mensagens do próprio bot
+  if (
+    /PR[ÉE]VIA DA NOTINHA|NOTINHA EMITIDA|Dados lidos da etiqueta|APARELHO N[AÃ]O ENCONTRADO|NOVO APARELHO CADASTRADO|VENDA ATACADO REGISTRADA/i.test(
+      limpo
+    )
+  ) {
+    return null;
+  }
+
+  // Rejeita formulários de varejo, especificações de aparelho, upgrades e perguntas
+  if (
+    /para\s+finalizar|dados\s+pessoais|endere[cç]o\s+para\s+entrega|forma\s+de\s+pagamento|\bcpf\b|\bcep\b|data\s+de\s+nascimento|e-?mail\s*:|\bupgrade\b|\btrade[- ]?in\b|\bnotinha\b|\bformul[aá]rio\b|\bnota\b/i.test(
+      limpo
+    ) ||
+    /[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}/.test(limpo) ||
+    /\b(?:iphone|ipad|macbook|apple\s*watch|airpods|samsung|galaxy|xiaomi|poco|redmi|motorola|realme|pro\s*max|promax|lacrado|seminovo|imei|serial|bateria|custo)\b/i.test(
+      limpo
+    ) ||
+    /\b(?:32|64|128|256|512)\s*(?:gb|g)\b|\b1\s*tb\b/i.test(limpo) ||
+    /\bcor\s*:/i.test(limpo) ||
+    /\?/.test(limpo) ||
+    /^(?:quem|algu[eé]m|algm|tem|temos|qual|quais|quanto|quantos|quantas|onde|como|procuro|preciso|tabela|lista|estoque|pre[cç]o)\b/i.test(
+      limpo
+    )
+  ) {
+    return null;
+  }
+
+  if (interpretarConfirmacaoTextoNotinha(limpo) !== null) return null;
+
+  // Rejeita correções de notinha, saudações e números longos (IMEI / telefone)
+  if (
+    /^(?:o\s+)?(?:valor|pre[cç]o)\s*(?:[eé]|certo|correto|novo|:|=)(?=\s|$|\d)/i.test(limpo) ||
+    /^(?:custo|cor|imei|era|fica|ficou|muda(?:r)?|altera(?:r)?|coloca(?:r)?|corrige|troca(?:r)?)(?=\s|$|:)/i.test(
+      limpo
+    ) ||
+    /^(?:bom\s+dia|boa\s+tarde|boa\s+noite|tudo\s+bem|deus\s+aben[cç]oe|bom\s+trabalho|kkk+|haha+|rsrs+)(?=\s|$)/i.test(
+      limpo
+    ) ||
+    /\b\d{7,}\b/.test(limpo)
+  ) {
+    return null;
+  }
+
+  let trabalho = limpo;
+
+  // Extrai forma de pagamento opcional sem poluir o nome
+  let formaPagamento: string | undefined;
+  if (/\bfiado\b|\ba\s+prazo\b/i.test(trabalho)) {
+    formaPagamento = 'fiado';
+    trabalho = trabalho.replace(/(?:^|\s)(?:(?:no|via|em|por)\s+)?(?:fiado|a\s+prazo)\b/gi, ' ');
+  } else if (/\bpix\b/i.test(trabalho)) {
+    formaPagamento = 'pix';
+    trabalho = trabalho.replace(/(?:^|\s)(?:(?:no|via|em|por)\s+)?pix\b/gi, ' ');
+  } else if (/\bdinheiro\b/i.test(trabalho)) {
+    formaPagamento = 'dinheiro';
+    trabalho = trabalho.replace(/(?:^|\s)(?:(?:no|via|em|por)\s+)?dinheiro\b/gi, ' ');
+  } else if (/\bcart[aã]o(?:\s+de\s+(?:cr[eé]dito|d[eé]bito))?\b/i.test(trabalho)) {
+    formaPagamento = /d[eé]bito/i.test(trabalho) ? 'cartao_debito' : 'cartao_credito';
+    trabalho = trabalho.replace(
+      /(?:^|\s)(?:(?:no|via|em|por)\s+)?cart[aã]o(?:\s+de\s+(?:cr[eé]dito|d[eé]bito))?\b/gi,
+      ' '
+    );
+  }
+
+  trabalho = trabalho.replace(/[ \t]+/g, ' ').trim();
+
+  // Extrai valor opcional no final ou na segunda linha
+  let valor = 0;
+  const matchValor = trabalho.match(
+    /(?:^|[\s\n:–—-])(valor\s*[:=-]?\s*)?(?:por\s+|de\s+|a\s+)?(R\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)(?:\s*(reais|r\$))?\s*$/i
+  );
+
+  if (matchValor) {
+    const brutoNum = matchValor[3];
+    const parsedNum = brutoNum.includes(',')
+      ? parseFloat(brutoNum.replace(/\./g, '').replace(',', '.'))
+      : /^\d+\.\d{1,2}$/.test(brutoNum)
+        ? parseFloat(brutoNum)
+        : parseFloat(brutoNum.replace(/\./g, ''));
+
+    const tinhaPrefixoMonetario = Boolean(matchValor[1] || matchValor[2] || matchValor[4]);
+    const digitosValor = brutoNum.replace(/\D/g, '');
+
+    if (
+      !Number.isNaN(parsedNum) &&
+      parsedNum >= 0 &&
+      parsedNum < 100000 &&
+      digitosValor.length <= 7 &&
+      (parsedNum === 0 || parsedNum >= 50 || tinhaPrefixoMonetario)
+    ) {
+      valor = parsedNum;
+      const idxMatch = matchValor.index ?? trabalho.length;
+      trabalho = trabalho.slice(0, idxMatch).trim();
+    }
+  }
+
+  // Remove prefixos comuns ("Atacado João", "Vendido para João", "Cliente: João")
+  trabalho = trabalho
+    .replace(
+      /^(?:atacado|venda\s+atacado|vendido(?:\s+(?:para|pro|pra))?|vendi(?:\s+(?:para|pro|pra))?|cliente|comprador|lojista|para|pro|pra)\s*[:=-]?\s*/i,
+      ''
+    )
+    .replace(/^[-–—:.,/*_\s]+|[-–—:.,/*_\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!trabalho || trabalho.length < 2 || trabalho.length > 60) return null;
+  if (!/[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(trabalho)) return null;
+  if (trabalho.split(/\s+/).length > 5) return null;
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ0-9\s.'&-]*$/.test(trabalho)) return null;
+
+  const lowerNome = trabalho.toLowerCase();
+  if (STOPWORDS_ATACADO_NOME.has(lowerNome)) return null;
+
+  return {
+    clienteNome: trabalho,
+    valor,
+    ...(formaPagamento ? { formaPagamento } : {}),
+  };
+}
+
+function limparPrefixoOuComando(limpo: string): boolean {
+  return limpo.startsWith('!');
+}
+
+/**
+ * Verifica rapidamente no Supabase se há foto recente (últimos minutos) ou em
+ * processamento OCR neste chat para aceitar o envio do nome do comprador abaixo da foto.
+ */
+export async function temFotoRecenteOuProcessando(
+  supabase: SupabaseClient,
+  remoteJid: string,
+  authorPhone?: string | null,
+  maxMinutos: number = 5
+): Promise<boolean> {
+  if (!remoteJid || typeof (supabase as any).from !== 'function') return false;
+
+  const chaves = Array.from(
+    new Set(
+      [
+        `foto_processando:${remoteJid}`,
+        ...(authorPhone ? [`foto_recente:${remoteJid}:${authorPhone}`] : []),
+        `foto_recente:${remoteJid}:ultima`,
+      ].filter(Boolean)
+    )
+  );
+
+  try {
+    const { data: registros } = await supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('chave, criado_em')
+      .in('chave', chaves)
+      .eq('tipo', 'faltando_dados')
+      .order('criado_em', { ascending: false })
+      .limit(5);
+
+    if (!Array.isArray(registros) || registros.length === 0) return false;
+
+    const agora = Date.now();
+    const maxMs = maxMinutos * 60 * 1000;
+
+    return registros.some((r: any) => {
+      const criado = r?.criado_em ? new Date(r.criado_em).getTime() : 0;
+      if (!criado) return false;
+      if (String(r.chave || '').startsWith('foto_processando:')) {
+        return agora - criado < 25_000;
+      }
+      return agora - criado <= maxMs;
+    });
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao verificar foto recente/processando:', err);
+    return false;
+  }
+}
+
+/**
+ * Registra uma venda de atacado a partir de foto(s) com IMEI + nome do comprador abaixo
+ * (com valor = 0 quando não informado) usando `registrarVendaAtomica`.
+ */
+export async function emitirVendaAtacadoComFoto(params: {
+  supabase: SupabaseClient;
+  lojaId: string;
+  vendaAtacado: VendaAtacadoDetectada;
+  fotos: FotoRecenteCache[];
+  estoque: AparelhoEstoqueConsulta[];
+  usuarioNome?: string;
+}): Promise<{
+  sucesso: boolean;
+  mensagem: string;
+  vendaId?: string;
+  jaEstavaEmSaida?: boolean;
+}> {
+  const { supabase, lojaId, vendaAtacado, fotos, estoque, usuarioNome = 'Bot WhatsApp' } = params;
+
+  if (!fotos || fotos.length === 0) {
+    return {
+      sucesso: false,
+      mensagem: '⚠️ Nenhuma foto com IMEI encontrada para registrar a venda de atacado.',
+    };
+  }
+
+  try {
+    const lojaIdCandidata =
+      (lojaId && lojaId !== 'loja-master' ? lojaId : null) ||
+      'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
+
+    let lojaIdFinal = lojaIdCandidata;
+    if (!lojaId || lojaId === 'loja-master') {
+      try {
+        const { data: lLucas } = await supabase
+          .from('lojas')
+          .select('id')
+          .ilike('nome', '%lucas%')
+          .limit(1)
+          .maybeSingle();
+        if (lLucas?.id) lojaIdFinal = lLucas.id;
+      } catch {
+        // usa fallback padrão
+      }
+    }
+
+    const agora = new Date().toISOString();
+    const valorTotalNum = Number(vendaAtacado.valor || 0);
+    const valorUnitPadrao =
+      fotos.length > 0 && valorTotalNum > 0
+        ? Number((valorTotalNum / fotos.length).toFixed(2))
+        : 0;
+
+    const aparelhoIdsUsados = new Set<string>();
+    const aparelhoIds: string[] = [];
+    const permitirForaDoEstoque: string[] = [];
+    const camposAparelho: Record<string, { cliente: string }> = {};
+    const statusPorItem: string[] = [];
+    let jaEstavaEmSaida = false;
+    let custoTotal = 0;
+
+    const itensVendaPayload = fotos.map((foto, idx) => {
+      const estoqueDisponivel = estoque.filter(
+        (e) => !e.id || !aparelhoIdsUsados.has(e.id) || (foto.imei && digitos(e.imei) === digitos(foto.imei))
+      );
+
+      const cruzamento = cruzarAparelhoComEstoque(estoqueDisponivel, {
+        modelo: foto.modelo,
+        capacidade: foto.capacidade,
+        cor: foto.cor,
+        imei: foto.imei,
+      });
+
+      const apEnc = cruzamento.aparelhoEncontrado;
+      if (apEnc?.id) {
+        aparelhoIdsUsados.add(apEnc.id);
+        aparelhoIds.push(apEnc.id);
+        camposAparelho[apEnc.id] = { cliente: vendaAtacado.clienteNome };
+        if (!estaNoEstoque(apEnc as any)) {
+          permitirForaDoEstoque.push(apEnc.id);
+          jaEstavaEmSaida = true;
+          statusPorItem.push(cruzamento.mensagem);
+        } else {
+          statusPorItem.push('Baixado do estoque ✅');
+        }
+      } else {
+        statusPorItem.push(cruzamento.mensagem);
+      }
+
+      const modeloFinal = limparNomeModelo(apEnc?.modelo || foto.modelo || '') || 'Smartphone';
+      const capFinal = apEnc?.capacidade || foto.capacidade || undefined;
+      const corBruta = apEnc?.cor || foto.cor || undefined;
+      const corFinal = corBruta ? extrairCorDeTexto(corBruta) || corBruta : undefined;
+      const imeiFinal =
+        foto.imei && digitos(foto.imei).length >= 14
+          ? foto.imei
+          : apEnc?.imei || foto.imei || '';
+      const custoItem = Number(apEnc?.custo || 0);
+      custoTotal += custoItem;
+
+      const valItem =
+        valorTotalNum <= 0
+          ? 0
+          : idx === fotos.length - 1
+            ? Number((valorTotalNum - valorUnitPadrao * (fotos.length - 1)).toFixed(2))
+            : valorUnitPadrao;
+
+      const descItem = [modeloFinal, capFinal, corFinal].filter(Boolean).join(' ').trim();
+
+      return {
+        id: `${Date.now()}-${idx}`,
+        aparelhoId: apEnc?.id || undefined,
+        descricao: descItem,
+        quantidade: 1,
+        valorInterno: custoItem,
+        valorExibir: valItem,
+        desconto: 0,
+        tipoDesconto: 'R$',
+        total: valItem,
+        observacao: imeiFinal ? `IMEI: ${imeiFinal} | Atacado WhatsApp` : 'Atacado WhatsApp',
+        imei: imeiFinal,
+      };
+    });
+
+    const metodo = vendaAtacado.formaPagamento || 'pix';
+    const isFiado = metodo === 'fiado';
+    const lucro = valorTotalNum > 0 ? Number((valorTotalNum - custoTotal).toFixed(2)) : 0;
+    const percentualLucro =
+      valorTotalNum > 0 && custoTotal > 0 ? Number(((lucro / custoTotal) * 100).toFixed(2)) : 0;
+
+    const resumoModelos = itensVendaPayload.map((it) => it.descricao).join(' + ');
+    const registroVenda = {
+      loja_id: lojaIdFinal,
+      clienteNome: vendaAtacado.clienteNome,
+      valor: valorTotalNum,
+      custo: custoTotal,
+      lucro,
+      percentualLucro,
+      metodo,
+      status: isFiado || valorTotalNum <= 0 ? 'pendente' : 'pago',
+      valorPago: isFiado ? 0 : valorTotalNum,
+      saldoDevedor: isFiado ? valorTotalNum : 0,
+      tipoEntrega: 'Atacado',
+      vendedor: usuarioNome,
+      dataPagamento: agora,
+      descricao: `Venda ATACADO WhatsApp - ${resumoModelos} para ${vendaAtacado.clienteNome}`,
+      itens: itensVendaPayload,
+      ativo: true,
+      taxa_cartao: 0,
+    };
+
+    const uniqueIds = Array.from(new Set(aparelhoIds));
+    const uniquePermitidos = Array.from(new Set(permitirForaDoEstoque));
+
+    const resultado = await registrarVendaAtomica(supabase, {
+      venda: registroVenda,
+      aparelhoIds: uniqueIds,
+      permitirForaDoEstoque: uniquePermitidos,
+      camposAparelho: Object.keys(camposAparelho).length > 0 ? camposAparelho : undefined,
+      origem: 'atacado',
+      usuarioNome,
+      observacao: `Venda atacado via foto WhatsApp para ${vendaAtacado.clienteNome}`,
+    });
+
+    const vendaUuid = resultado.venda?.id ? String(resultado.venda.id) : '';
+    const vendaCodigo = vendaUuid ? vendaUuid.slice(0, 8).toUpperCase() : 'OK';
+    const valorFmt = valorTotalNum.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    const linhasItens = itensVendaPayload
+      .map((it, idx) => {
+        const imeiTag = it.imei ? ` (IMEI: ${it.imei})` : '';
+        return `${itensVendaPayload.length > 1 ? `   ${idx + 1}. ` : '📱 *Aparelho:* '}${it.descricao}${imeiTag} — ${statusPorItem[idx]}`;
+      })
+      .join('\n');
+
+    const msgSucesso =
+      `📦 *VENDA ATACADO REGISTRADA!* (#${vendaCodigo})\n` +
+      `👤 *Cliente:* ${vendaAtacado.clienteNome}\n` +
+      `${linhasItens}\n` +
+      `💰 *Valor:* R$ ${valorFmt}${valorTotalNum === 0 ? ' _(não informado)_' : ''}`;
+
+    return {
+      sucesso: true,
+      mensagem: sanitizarTextoWhatsApp(msgSucesso),
+      vendaId: vendaCodigo,
+      jaEstavaEmSaida,
+    };
+  } catch (err: any) {
+    console.error('❌ Falha ao registrar venda atacado por foto:', err);
+    const msgErro = err instanceof ErroVenda ? err.message : err?.message || 'Erro ao registrar venda atacado.';
+    return {
+      sucesso: false,
+      mensagem: `⚠️ *Falha ao registrar venda atacado:*\n${msgErro}`,
+    };
   }
 }
 

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { estaNoEstoque, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
 
 /**
  * Venda atômica: venda, baixa do estoque e aparelho de troca numa transação só
@@ -148,6 +149,35 @@ export async function registrarVendaAtomica(
   supabase: Pick<SupabaseClient, 'rpc'>,
   parametros: ParametrosVendaAtomica
 ): Promise<ResultadoVendaAtomica> {
+  const idsConsulta = soUuids(parametros.aparelhoIds);
+  const lojaIdPre =
+    typeof parametros.venda?.loja_id === 'string' && UUID.test(parametros.venda.loja_id)
+      ? parametros.venda.loja_id
+      : null;
+  let aparelhosEmEstoqueAntes: Array<Record<string, unknown>> = [];
+
+  if (idsConsulta.length > 0 && typeof (supabase as Partial<SupabaseClient>).from === 'function') {
+    try {
+      const selectQuery = (supabase as SupabaseClient)
+        .from('aparelhos')
+        .select(
+          'id, loja_id, marca, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, ativo, status, condicao, data_saida, cliente'
+        ) as unknown as {
+        in?: (col: string, vals: string[]) => any;
+      };
+      if (typeof selectQuery?.in === 'function') {
+        let query = selectQuery.in('id', idsConsulta);
+        if (lojaIdPre && typeof query?.eq === 'function') query = query.eq('loja_id', lojaIdPre);
+        const { data: apsAntes } = await query;
+        if (Array.isArray(apsAntes)) {
+          aparelhosEmEstoqueAntes = apsAntes.filter((a) => estaNoEstoque(a as EstadoCicloAparelho));
+        }
+      }
+    } catch (errPre) {
+      console.warn('[Venda Atômica] Aviso ao pré-consultar aparelhos para notificação de estoque:', errPre);
+    }
+  }
+
   const { data, error } = await supabase.rpc('registrar_venda_atomica', montarArgumentosVenda(parametros));
   if (error) throw interpretarErroVenda(error);
 
@@ -155,10 +185,68 @@ export async function registrarVendaAtomica(
   if (!bruto.venda || typeof bruto.venda.id !== 'string') {
     throw new ErroVenda('falha', 'O banco não devolveu a venda gravada.');
   }
+
+  const baixados = Number(bruto.baixados || 0);
+  const loteId = String(bruto.lote_id || '');
+
+  if (aparelhosEmEstoqueAntes.length > 0 && baixados > 0) {
+    const lojaIdVenda =
+      (typeof bruto.venda.loja_id === 'string' && bruto.venda.loja_id) ||
+      (typeof parametros.venda?.loja_id === 'string' && parametros.venda.loja_id) ||
+      null;
+    const clienteNomeVenda =
+      (typeof bruto.venda.clienteNome === 'string' && bruto.venda.clienteNome) ||
+      (typeof parametros.venda?.clienteNome === 'string' && parametros.venda.clienteNome) ||
+      'Cliente';
+
+    if (typeof window !== 'undefined') {
+      void (async () => {
+        try {
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          const authClient = (
+            supabase as unknown as {
+              auth?: { getSession?: () => Promise<{ data?: { session?: { access_token?: string } } }> };
+            }
+          ).auth;
+          if (typeof authClient?.getSession === 'function') {
+            const sess = await authClient.getSession().catch(() => null);
+            const token = sess?.data?.session?.access_token;
+            if (token) headers.Authorization = `Bearer ${token}`;
+          }
+          await fetch('/api/estoque/notificar-saida-venda', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              lojaId: lojaIdVenda,
+              clienteNome: clienteNomeVenda,
+              aparelhos: aparelhosEmEstoqueAntes,
+              loteId,
+            }),
+          });
+        } catch {
+          // silencioso: não bloqueia nem falha a venda já gravada
+        }
+      })();
+    } else {
+      try {
+        const { notificarSaidaVendaGrupoEstoque } = await import('@/lib/whatsapp/notificarSaidaEstoque');
+        await notificarSaidaVendaGrupoEstoque({
+          supabase: supabase as unknown as SupabaseClient,
+          lojaId: lojaIdVenda,
+          clienteNome: clienteNomeVenda,
+          aparelhos: aparelhosEmEstoqueAntes,
+          loteId,
+        });
+      } catch (errNotif) {
+        console.warn('[Venda Atômica] Aviso ao notificar saída de venda no grupo ESTOQUE:', errNotif);
+      }
+    }
+  }
+
   return {
     venda: bruto.venda as ResultadoVendaAtomica['venda'],
-    baixados: Number(bruto.baixados || 0),
+    baixados,
     tradeInId: bruto.trade_in_id || null,
-    loteId: String(bruto.lote_id || ''),
+    loteId,
   };
 }

@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   detectarFormularioOuPedidoVenda,
+  detectarVendaAtacadoComFoto,
+  temFotoRecenteOuProcessando,
+  emitirVendaAtacadoComFoto,
   formatarMensagemPreviaNotinha,
   interpretarReacaoNotinha,
   interpretarConfirmacaoTextoNotinha,
@@ -26,6 +29,11 @@ import {
   extrairMensagemMarcadaParaBot,
   type PropostaNotinha,
 } from './notinhaAutomatica';
+import {
+  formatarLinhaSaidaEstoqueVenda,
+  foiSaidaRegistradaHoje,
+  obterDataHojeBrasilia,
+} from '@/lib/whatsapp/notificarSaidaEstoque';
 import { gerarReciboPdfBuffer } from '@/lib/recibo/gerarReciboPdf';
 
 test('detectarFormularioOuPedidoVenda identifica formulário completo da Lucas Imports', () => {
@@ -1223,6 +1231,163 @@ test('emitirNotinhaVenda permite vender aparelho já vendido após confirmação
   assert.equal(itemGravado.total, 7750, 'Total do item na nota deve ser 7750');
   assert.equal(rpcCalls[0].args.p_venda.valor, 7750);
 });
+
+test('detectarVendaAtacadoComFoto reconhece nome com e sem valor e rejeita ruído/comandos', () => {
+  // Nome sem valor -> valor = 0
+  const semValor1 = detectarVendaAtacadoComFoto('João');
+  assert.deepEqual(semValor1, { clienteNome: 'João', valor: 0 });
+
+  const semValor2 = detectarVendaAtacadoComFoto('Lucas Imports');
+  assert.deepEqual(semValor2, { clienteNome: 'Lucas Imports', valor: 0 });
+
+  // Nome com valor -> registra valor
+  const comValor1 = detectarVendaAtacadoComFoto('Pedro 2500');
+  assert.deepEqual(comValor1, { clienteNome: 'Pedro', valor: 2500 });
+
+  const comValor2 = detectarVendaAtacadoComFoto('Pedro\nR$ 3.100,00');
+  assert.deepEqual(comValor2, { clienteNome: 'Pedro', valor: 3100 });
+
+  const comPrefixo = detectarVendaAtacadoComFoto('Atacado Maria 2800');
+  assert.deepEqual(comPrefixo, { clienteNome: 'Maria', valor: 2800 });
+
+  const comForma = detectarVendaAtacadoComFoto('Vendido para Carlos 1800 no pix');
+  assert.deepEqual(comForma, { clienteNome: 'Carlos', valor: 1800, formaPagamento: 'pix' });
+
+  const comPor = detectarVendaAtacadoComFoto('Vendido para Maria por 2500');
+  assert.deepEqual(comPor, { clienteNome: 'Maria', valor: 2500 });
+
+  // Nome com número pequeno de loja não vira preço
+  const loja2 = detectarVendaAtacadoComFoto('Loja 2');
+  assert.deepEqual(loja2, { clienteNome: 'Loja 2', valor: 0 });
+
+  // Rejeições obrigatórias
+  assert.equal(detectarVendaAtacadoComFoto('!estoque'), null);
+  assert.equal(detectarVendaAtacadoComFoto('quem tem 15 pro max?'), null);
+  assert.equal(detectarVendaAtacadoComFoto('sim'), null);
+  assert.equal(detectarVendaAtacadoComFoto('bom dia'), null);
+  assert.equal(detectarVendaAtacadoComFoto('350015753668064'), null);
+  assert.equal(detectarVendaAtacadoComFoto('4800'), null);
+  assert.equal(detectarVendaAtacadoComFoto('o valor é 4800'), null);
+  assert.equal(detectarVendaAtacadoComFoto('iPhone 15 128gb preto João'), null);
+});
+
+test('formatarLinhaSaidaEstoqueVenda formata exatamente EMOJI MODELO GB COR % - IMEI [VENDIDO "Nome Cliente"]', () => {
+  const linha = formatarLinhaSaidaEstoqueVenda(
+    {
+      id: 'ap-1',
+      modelo: 'Apple iPhone 15 Pro Max',
+      capacidade: '256GB',
+      cor: 'Natural',
+      saude_bateria: '92%',
+      imei: '350015753668064',
+    },
+    'João Silva'
+  );
+  assert.equal(linha, '🔘 iPhone 15 Pro Max 256GB Natural 92% - 350015753668064 [VENDIDO "João Silva"]');
+
+  const linhaSemBateria = formatarLinhaSaidaEstoqueVenda(
+    {
+      id: 'ap-2',
+      modelo: 'iPhone 16 Pro',
+      capacidade: '128GB',
+      cor: 'Preto',
+      imei: '351111222233334',
+    },
+    'Maria'
+  );
+  assert.equal(linhaSemBateria, '⚫️ iPhone 16 Pro 128GB Preto - 351111222233334 [VENDIDO "Maria"]');
+});
+
+test('foiSaidaRegistradaHoje distingue aparelho ativo sem saída no dia de aparelho já saído ou notificado', async () => {
+  const hoje = obterDataHojeBrasilia();
+  const apNoEstoque = {
+    id: '11111111-1111-4111-8111-111111111111',
+    modelo: 'iPhone 15 Pro Max',
+    imei: '350015753668064',
+    ativo: true,
+    status: 'disponivel',
+    data_saida: null,
+  };
+  assert.equal(await foiSaidaRegistradaHoje(apNoEstoque, hoje), false);
+
+  const apJaVendido = {
+    ...apNoEstoque,
+    ativo: false,
+    status: 'vendido',
+  };
+  assert.equal(await foiSaidaRegistradaHoje(apJaVendido, hoje), true);
+
+  const apBaixado = {
+    ...apNoEstoque,
+    ativo: false,
+    status: 'baixado',
+  };
+  assert.equal(await foiSaidaRegistradaHoje(apBaixado, hoje), true);
+
+  const apSaidaHoje = {
+    ...apNoEstoque,
+    data_saida: `${hoje}T14:00:00-03:00`,
+  };
+  assert.equal(await foiSaidaRegistradaHoje(apSaidaHoje, hoje), true);
+});
+
+test('temFotoRecenteOuProcessando e emitirVendaAtacadoComFoto registram venda atacado com valor 0 ou informado', async () => {
+  const fakeSupabase = criarMockSupabaseAcoesPendentes();
+  await salvarFotoRecente(fakeSupabase, 'loja-1', 'grupo@g.us', '553199999999', {
+    imei: '350015753668064',
+    modelo: 'iPhone 15 Pro Max',
+    capacidade: '256GB',
+    cor: 'Natural',
+    timestamp: Date.now(),
+  });
+
+  const temFoto = await temFotoRecenteOuProcessando(fakeSupabase, 'grupo@g.us', '553199999999');
+  assert.equal(temFoto, true);
+
+  const rpcCalls: Array<{ fn: string; args: Record<string, any> }> = [];
+  const mockRpcSupabase: any = {
+    rpc: async (fn: string, args: Record<string, any>) => {
+      rpcCalls.push({ fn, args });
+      return {
+        data: {
+          venda: { id: '44444444-4444-4444-8444-444444444444', loja_id: args.p_venda.loja_id, clienteNome: args.p_venda.clienteNome },
+          baixados: 1,
+          trade_in_id: null,
+          lote_id: 'lote-atacado',
+        },
+        error: null,
+      };
+    },
+  };
+
+  const resSemValor = await emitirVendaAtacadoComFoto({
+    supabase: mockRpcSupabase,
+    lojaId: '11111111-1111-4111-8111-111111111111',
+    vendaAtacado: { clienteNome: 'João Atacado', valor: 0 },
+    fotos: [{ imei: '350015753668064', modelo: 'iPhone 15 Pro Max', capacidade: '256GB', cor: 'Natural', timestamp: Date.now() }],
+    estoque: [
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        modelo: 'iPhone 15 Pro Max',
+        capacidade: '256GB',
+        cor: 'Natural',
+        imei: '350015753668064',
+        custo: 5000,
+        status: 'disponivel',
+        ativo: true,
+      },
+    ],
+    usuarioNome: 'Lucas',
+  });
+
+  assert.equal(resSemValor.sucesso, true);
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].args.p_venda.tipoEntrega, 'Atacado');
+  assert.equal(rpcCalls[0].args.p_venda.clienteNome, 'João Atacado');
+  assert.equal(rpcCalls[0].args.p_venda.valor, 0);
+  assert.equal(rpcCalls[0].args.p_origem, 'atacado');
+});
+
 
 
 

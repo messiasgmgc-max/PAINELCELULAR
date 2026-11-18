@@ -31,10 +31,14 @@ import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo
 import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
+import { notificarSaidaVendaGrupoEstoque } from '@/lib/whatsapp/notificarSaidaEstoque';
 import { ehMensagemDeEntradaEstoque, ehRelatorioOuConferencia } from './entradaInteligente';
 import { formatarTelefoneWhatsApp } from '@/lib/whatsappService';
 import {
   detectarFormularioOuPedidoVenda,
+  detectarVendaAtacadoComFoto,
+  temFotoRecenteOuProcessando,
+  emitirVendaAtacadoComFoto,
   cruzarAparelhoComEstoque,
   construirPropostaNotinha,
   vincularFotoEmPropostaNotinha,
@@ -2220,6 +2224,37 @@ async function responderConsultaEstoqueNatural(
   return `${prefixo}${linhasEncontrados.join('\n')}`;
 }
 
+async function notificarPropostaNoGrupoEstoque(
+  lojaId: string,
+  proposta: PropostaNotinha,
+  apsEstoque: any[]
+): Promise<void> {
+  try {
+    const idsProposta = Array.from(
+      new Set(
+        (proposta.itens || [])
+          .map((it) => it.aparelhoId)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    if (idsProposta.length === 0) return;
+
+    const aparelhosParaNotificar = (apsEstoque || []).filter(
+      (a) => idsProposta.includes(a.id) && estaNoEstoque(a)
+    );
+    if (aparelhosParaNotificar.length === 0) return;
+
+    await notificarSaidaVendaGrupoEstoque({
+      supabase,
+      lojaId,
+      clienteNome: proposta.clienteNome,
+      aparelhos: aparelhosParaNotificar,
+    });
+  } catch (err) {
+    console.warn('[Notinha Automática] Aviso ao notificar saída no grupo ESTOQUE:', err);
+  }
+}
+
 // ── POST: Processamento Principal do Webhook ──
 export async function POST(request: Request) {
   try {
@@ -2569,7 +2604,8 @@ export async function POST(request: Request) {
         msgData.caption ||
         '';
 
-      const vendaDetectadaNaFoto = captionText ? detectarFormularioOuPedidoVenda(captionText) : null;
+      const vendaAtacadoNaFoto = captionText ? detectarVendaAtacadoComFoto(captionText) : null;
+      const vendaDetectadaNaFoto = !vendaAtacadoNaFoto && captionText ? detectarFormularioOuPedidoVenda(captionText) : null;
       const ehEntradaNaFoto = captionText ? ehMensagemDeEntradaEstoque(captionText) : false;
 
       if (modoChat === 'vendas' && ehEntradaNaFoto) {
@@ -2583,6 +2619,7 @@ export async function POST(request: Request) {
         marcacaoBot.foiMarcado ||
         captionText.trim().startsWith('!') ||
         Boolean(vendaDetectadaNaFoto) ||
+        Boolean(vendaAtacadoNaFoto) ||
         ehEntradaNaFoto;
 
       if (lojaId) {
@@ -2743,7 +2780,7 @@ export async function POST(request: Request) {
 
               const { data: apsEstoque } = await supabase
                 .from('aparelhos')
-                .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
                 .eq('loja_id', lojaId)
                 .order('ativo', { ascending: false })
                 .order('dataCadastro', { ascending: false })
@@ -2773,6 +2810,8 @@ export async function POST(request: Request) {
                 pushName,
               });
 
+              await notificarPropostaNoGrupoEstoque(lojaId, proposta, apsEstoque || []);
+
               const msgPrevia = (imeiLido ? `📸 *Foto da caixa:* IMEI \`${imeiLido}\` lido com sucesso e vinculado à notinha!\n\n` : '') + formatarMensagemPreviaNotinha(proposta);
               const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
               if (envio.messageId) {
@@ -2792,6 +2831,59 @@ export async function POST(request: Request) {
               }
 
               return NextResponse.json({ status: 'ok', message: 'Notinha gerada a partir de formulário com foto.' }, { status: 200 });
+            }
+
+            // ── CASO 1B: Foto com IMEI + nome do comprador de atacado na legenda (ou em reply à foto/etiqueta) ──
+            if (vendaAtacadoNaFoto && lojaId) {
+              await limparFotoRecente(supabase, remoteJid, authorPhone);
+
+              if (!imeiLido && !modeloLido) {
+                await enviarMensagemWhatsApp(
+                  instanceName,
+                  targetDestination,
+                  '⚠️ Não consegui identificar o IMEI na foto. Envie uma foto mais nítida da etiqueta ou informe o IMEI!'
+                );
+                return NextResponse.json({ status: 'ok', message: 'OCR sem IMEI/modelo para venda atacado.' }, { status: 200 });
+              }
+
+              const { data: apsEstoque } = await supabase
+                .from('aparelhos')
+                .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .eq('loja_id', lojaId)
+                .order('ativo', { ascending: false })
+                .order('dataCadastro', { ascending: false })
+                .limit(600);
+
+              const resultadoAtacado = await emitirVendaAtacadoComFoto({
+                supabase,
+                lojaId,
+                vendaAtacado: vendaAtacadoNaFoto,
+                fotos: [
+                  {
+                    imei: imeiLido,
+                    modelo: modeloLido,
+                    capacidade: capLida,
+                    cor: corLida,
+                    pushName,
+                    timestamp: Date.now(),
+                  },
+                ],
+                estoque: apsEstoque || [],
+                usuarioNome: nomeUsuario || pushName || 'Equipe',
+              });
+
+              await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoAtacado.mensagem);
+              await supabase.from('whatsapp_logs').insert({
+                loja_id: lojaId,
+                contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                mensagem: `[FOTO+ATACADO] ${vendaAtacadoNaFoto.clienteNome} (IMEI: ${imeiLido || '-'} | Valor: R$ ${vendaAtacadoNaFoto.valor})`,
+                created_at: new Date().toISOString(),
+              });
+
+              return NextResponse.json(
+                { status: resultadoAtacado.sucesso ? 'ok' : 'error', message: 'Venda atacado por foto processada.' },
+                { status: 200 }
+              );
             }
 
             // ── SINCRONIZAÇÃO COM FORMULÁRIO ENVIADO JUNTO OU LOGO ANTES/DEPOIS ──
@@ -2852,7 +2944,7 @@ export async function POST(request: Request) {
 
               const { data: apsEstoque } = await supabase
                 .from('aparelhos')
-                .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
                 .eq('loja_id', lojaId)
                 .order('ativo', { ascending: false })
                 .order('dataCadastro', { ascending: false })
@@ -2868,6 +2960,8 @@ export async function POST(request: Request) {
                 },
                 apsEstoque || []
               );
+
+              await notificarPropostaNoGrupoEstoque(lojaId, proposta, apsEstoque || []);
 
               const msgPreviaAtualizada =
                 `📸 *Foto da caixa associada à notinha!*\n🔢 IMEI \`${imeiLido}\` vinculado com sucesso ao pedido de *${proposta.clienteNome}*.\n\n` +
@@ -3013,6 +3107,13 @@ export async function POST(request: Request) {
 
     // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !modo OU !config) ──
     const ehComandoModo = lowerText.startsWith('!modo') || lowerText.startsWith('!config');
+    const vendaAtacadoTexto = modoChat === 'estoque' || modoChat === 'off' ? null : detectarVendaAtacadoComFoto(textContent);
+    const temFotoAtivaParaAtacado = Boolean(
+      vendaAtacadoTexto &&
+      lojaId &&
+      (await temFotoRecenteOuProcessando(supabase, remoteJid, authorPhone))
+    );
+
     if (modoChat === 'off') {
       // Se estiver desligado, só aceita comando de modo para religar
       if (!ehComandoModo) {
@@ -3022,7 +3123,7 @@ export async function POST(request: Request) {
       // ── MODO VENDAS: Foco exclusivo na emissão e gestão de notinhas ──
       // O bot atende estritamente a:
       // 1. Comando de modo (!modo / !config) para gerenciar ou alternar o modo
-      // 2. Formulários de venda / pedidos para emitir notinha
+      // 2. Formulários de venda / pedidos para emitir notinha (ou venda atacado por foto + nome)
       // 3. Confirmações, cancelamentos ou correções quando HÁ notinha pendente
       // 4. Marcação do bot em mensagens de formulário ou etiquetas de aparelhos
       // Qualquer mensagem paralela, conversa de grupo ou outros comandos são 100% ignorados.
@@ -3047,6 +3148,7 @@ export async function POST(request: Request) {
       const ehOperacaoVendaValida =
         ehComandoModo ||
         ehFormularioVenda ||
+        temFotoAtivaParaAtacado ||
         (ehPossivelConfirmacao && temNotinhaPendente) ||
         (ehPossivelCorrecao && temNotinhaPendente) ||
         (marcacaoBot.foiMarcado && (
@@ -3125,12 +3227,13 @@ export async function POST(request: Request) {
         // 1. Mensagens onde o bot foi marcado (@Astrogeek / reply)
         // 2. Comandos explícitos iniciados com !
         // 3. Entradas inteligentes de estoque (ex: "Entrada iPhone 13...")
-        // 4. Pedidos / formulários de venda para geração de notinha automática
+        // 4. Pedidos / formulários de venda para geração de notinha automática (ou atacado com foto + nome)
         // 5. Correções de dados de notinha pendente
         const ehOperacaoLoja =
           marcacaoBot.foiMarcado ||
           ehComandoExplicito ||
           ehMensagemDeEntradaEstoque(textContent) ||
+          temFotoAtivaParaAtacado ||
           Boolean(detectarFormularioOuPedidoVenda(textContent)) ||
           Boolean(interpretarTextoCorrecaoVenda(textContent));
 
@@ -3279,6 +3382,51 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── 3.3b. VENDA DE ATACADO VIA FOTO RECENTE + NOME DO COMPRADOR ABAIXO ──
+    if (temFotoAtivaParaAtacado && vendaAtacadoTexto && lojaId) {
+      const fotosAtacado = await aguardarEBuscarFotosRecentes(
+        supabase,
+        lojaId,
+        remoteJid,
+        authorPhone,
+        undefined,
+        5,
+        1500
+      );
+
+      if (fotosAtacado.length > 0) {
+        const { data: apsEstoque } = await supabase
+          .from('aparelhos')
+          .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+          .eq('loja_id', lojaId)
+          .order('ativo', { ascending: false })
+          .order('dataCadastro', { ascending: false })
+          .limit(600);
+
+        const resultadoAtacado = await emitirVendaAtacadoComFoto({
+          supabase,
+          lojaId,
+          vendaAtacado: vendaAtacadoTexto,
+          fotos: fotosAtacado,
+          estoque: apsEstoque || [],
+          usuarioNome: nomeUsuario || pushName || 'Equipe',
+        });
+
+        await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoAtacado.mensagem);
+        await supabase.from('whatsapp_logs').insert({
+          loja_id: lojaId,
+          contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+          mensagem: `[ATACADO_FOTO] ${vendaAtacadoTexto.clienteNome} (${fotosAtacado.length} foto(s) | Valor: R$ ${vendaAtacadoTexto.valor})`,
+          created_at: new Date().toISOString(),
+        });
+
+        return NextResponse.json(
+          { status: resultadoAtacado.sucesso ? 'ok' : 'error', message: 'Venda atacado registrada a partir de foto recente.' },
+          { status: 200 }
+        );
+      }
+    }
+
     // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
     const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
     if (correcaoDetectada && lojaId) {
@@ -3322,7 +3470,7 @@ export async function POST(request: Request) {
         } else if (correcaoDetectada.campo === 'imei' || correcaoDetectada.campo === 'cor') {
           const { data: apsEstoque } = await supabase
             .from('aparelhos')
-            .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+            .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
             .eq('loja_id', lojaId)
             .order('ativo', { ascending: false })
             .order('dataCadastro', { ascending: false })
@@ -3351,6 +3499,8 @@ export async function POST(request: Request) {
               sincronizarResumoPropostaMultiItens(proposta);
             }
           }
+
+          await notificarPropostaNoGrupoEstoque(lojaId, proposta, apsEstoque || []);
         }
 
         const msgIdAnterior = proposta.messageId;
@@ -3397,7 +3547,7 @@ export async function POST(request: Request) {
       // Busca estoque completo (priorizando ativos) para conferir aparelhos pelo IMEI (15 dígitos ou final de 4 dígitos) ou modelo
       const { data: apsEstoque } = await supabase
         .from('aparelhos')
-        .select('id, modelo, capacidade, cor, imei, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+        .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
         .eq('loja_id', lojaId)
         .order('ativo', { ascending: false })
         .order('dataCadastro', { ascending: false })
@@ -3412,6 +3562,8 @@ export async function POST(request: Request) {
         fotosRecentes: fotosRecentesVinculadas,
         pushName,
       });
+
+      await notificarPropostaNoGrupoEstoque(lojaId, proposta, apsEstoque || []);
 
       const imeisDaFoto = fotosRecentesVinculadas.map((f) => f.imei).filter(Boolean);
       const cabecalhoFotoAssociada =
