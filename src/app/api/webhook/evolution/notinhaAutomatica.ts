@@ -13,6 +13,8 @@ export interface AparelhoEstoqueConsulta {
   capacidade?: string | null;
   cor?: string | null;
   imei?: string | null;
+  saude_bateria?: number | string | null;
+  saudeBateria?: number | string | null;
   preco?: number | null;
   custo?: number | null;
   status?: string | null;
@@ -188,7 +190,14 @@ export function extrairMensagemMarcadaParaBot(params: {
   botPhones?: string[];
 }): ResultadoMensagemMarcadaBot {
   const { msgData, payload, botPhones = [] } = params || {};
-  const messageContent = msgData?.message || {};
+  const rawMessageRoot = msgData?.message || {};
+  const messageContent =
+    rawMessageRoot.ephemeralMessage?.message ||
+    rawMessageRoot.viewOnceMessage?.message ||
+    rawMessageRoot.viewOnceMessageV2?.message ||
+    rawMessageRoot.viewOnceMessageV2Extension?.message ||
+    rawMessageRoot.documentWithCaptionMessage?.message ||
+    rawMessageRoot;
 
   const contextInfo =
     msgData?.contextInfo ||
@@ -582,6 +591,7 @@ export function cruzarAparelhoComEstoque(
     capacidade?: string | null;
     cor?: string | null;
     imei?: string | null;
+    bateria?: number | string | null;
   }
 ): ResultadoCruzamentoEstoque {
   const imeiAlvo = digitos(dadosAparelho.imei);
@@ -674,6 +684,19 @@ export function cruzarAparelhoComEstoque(
     });
     if (porCor.length > 0) {
       candidatos = porCor;
+    }
+  }
+
+  // Se ainda houver múltiplos candidatos e a saúde da bateria foi informada, desempata pela bateria
+  if (candidatos.length > 1 && dadosAparelho.bateria) {
+    const batAlvo = digitos(dadosAparelho.bateria);
+    if (batAlvo) {
+      const porBat = candidatos.filter(
+        (a) => digitos(a.saude_bateria ?? a.saudeBateria) === batAlvo
+      );
+      if (porBat.length > 0) {
+        candidatos = porBat;
+      }
     }
   }
 
@@ -1272,20 +1295,28 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
   } else {
     linhas.push('👉 *Para emitir:* informe o valor respondendo ex: "o valor é 4800" (ou reaja com ✅ após informar o valor).');
   }
+  if (proposta.isUpgrade) {
+    linhas.push('🧾 Reaja com 🧾 (ou responda "EMITIR SEM TROCA") para emitir mantendo o Upgrade na notinha/termo, mas *sem adicionar a troca no estoque*.');
+  }
   linhas.push('❌ Reaja com ❌ ou responda "CANCELAR" para cancelar, ou informe o dado a corrigir.');
 
   return sanitizarTextoWhatsApp(linhas.join('\n'));
 }
 
+export type AcaoConfirmacaoNotinha = 'confirmar' | 'confirmar_sem_troca' | 'cancelar';
+
 /**
- * Interpreta se uma reação é de confirmação ou recusa da nota.
+ * Interpreta se uma reação é de confirmação, confirmação sem cadastrar troca no estoque (`🧾`), ou recusa da nota.
  */
-export function interpretarReacaoNotinha(emoji: string): 'confirmar' | 'cancelar' | null {
+export function interpretarReacaoNotinha(emoji: string): AcaoConfirmacaoNotinha | null {
   if (!emoji || typeof emoji !== 'string') return null;
   const e = emoji.trim();
 
   const confirmacoes = ['✅', '💚', '👍', '🟢', '✔️', '✔'];
   if (confirmacoes.includes(e)) return 'confirmar';
+
+  const confirmacoesSemTroca = ['🧾', '📄', '📝', '🔄'];
+  if (confirmacoesSemTroca.includes(e)) return 'confirmar_sem_troca';
 
   const cancelamentos = ['❌', '👎', '🔴', '✖️', '✖'];
   if (cancelamentos.includes(e)) return 'cancelar';
@@ -1294,11 +1325,10 @@ export function interpretarReacaoNotinha(emoji: string): 'confirmar' | 'cancelar
 }
 
 /**
- * Interpreta se uma resposta em texto confirma ou cancela a emissão da notinha pendente.
- * Aceita variações naturais como "sim", "pode vender", "pode vender ele", "sim, pode vender",
- * "pode emitir", "vender mesmo assim", "emitir mesmo assim", "ok", "confirmo".
+ * Interpreta se uma resposta em texto confirma (com ou sem cadastro da troca no estoque) ou cancela a emissão da notinha pendente.
+ * Aceita variações naturais como "sim", "pode vender", "emitir sem troca", "confirmar sem troca", "ok", "confirmo".
  */
-export function interpretarConfirmacaoTextoNotinha(texto: string): 'confirmar' | 'cancelar' | null {
+export function interpretarConfirmacaoTextoNotinha(texto: string): AcaoConfirmacaoNotinha | null {
   if (!texto || typeof texto !== 'string') return null;
   const limpo = texto
     .trim()
@@ -1312,6 +1342,16 @@ export function interpretarConfirmacaoTextoNotinha(texto: string): 'confirmar' |
   // Se contém números (ex: "pode vender por 7750", "imei 1234"), não trata como confirmação cega:
   // deixa passar para correção/atualização primeiro.
   if (/\d/.test(limpo)) return null;
+
+  const ehConfirmacaoSemTroca =
+    /^(?:(?:sim|ok|blz|certo|pode)\s+)*(?:emitir|emite|confirmar|confirmo|gerar|vender|faturar|sim)\s+sem\s+(?:adicionar\s+|cadastrar\s+|colocar\s+)?(?:a\s+|o\s+)?(?:troca|upgrade)(?:\s+no\s+estoque)?$/i.test(
+      limpo
+    ) ||
+    /^sem\s+(?:adicionar\s+|cadastrar\s+|colocar\s+)?(?:a\s+|o\s+)?(?:troca|upgrade)(?:\s+no\s+estoque)?$/i.test(
+      limpo
+    );
+
+  if (ehConfirmacaoSemTroca) return 'confirmar_sem_troca';
 
   const ehConfirmacao =
     /^(?:sim|s|ok|oka|blz|beleza|confirmo|confirmar|confirmado|emitir|emite|aprovar|aprovado|fechou|manda|pode|autorizo|ta\s*certo|t[aá]\s*certo|esta\s*certo|est[aá]\s*certo)$/i.test(limpo) ||
@@ -1526,7 +1566,8 @@ export async function emitirNotinhaVenda(
   supabase: SupabaseClient,
   lojaId: string,
   proposta: PropostaNotinha,
-  usuarioNome: string = 'Bot WhatsApp'
+  usuarioNome: string = 'Bot WhatsApp',
+  opcoes?: { pularCadastroTrocaEstoque?: boolean }
 ): Promise<{
   sucesso: boolean;
   mensagem: string;
@@ -1536,6 +1577,7 @@ export async function emitirNotinhaVenda(
   nomeArquivoPdf?: string;
 }> {
   try {
+    const pularTrocaEstoque = Boolean(opcoes?.pularCadastroTrocaEstoque);
     const agora = new Date().toISOString();
     const descricao = `Venda WhatsApp - ${proposta.modelo} para ${proposta.clienteNome}`;
 
@@ -1744,7 +1786,7 @@ export async function emitirNotinhaVenda(
         : [];
 
     let tradeInPayload: Record<string, unknown> | null = null;
-    if (proposta.isUpgrade && listaTrocas.length > 0) {
+    if (proposta.isUpgrade && listaTrocas.length > 0 && !pularTrocaEstoque) {
       const primeiraTroca = listaTrocas[0];
       tradeInPayload = {
         loja_id: lojaIdFinal,
@@ -1775,7 +1817,7 @@ export async function emitirNotinhaVenda(
     });
 
     // Caso a venda possua 2 ou mais aparelhos recebidos na troca (múltiplos upgrades), dá entrada dos aparelhos adicionais no estoque
-    if (proposta.isUpgrade && listaTrocas.length > 1) {
+    if (proposta.isUpgrade && listaTrocas.length > 1 && !pularTrocaEstoque) {
       for (const trocaExtra of listaTrocas.slice(1)) {
         try {
           // estoque-guard: auditado
@@ -1831,9 +1873,10 @@ export async function emitirNotinhaVenda(
           '\n'
         : `📱 *Aparelho:* ${proposta.modelo}\n`;
 
+    const sufixoSemTrocaEstoque = pularTrocaEstoque ? ' _(mantida no termo · sem entrada no estoque)_' : '';
     const resumoTrocasMsg =
       proposta.isUpgrade && listaTrocas.length > 1
-        ? `🔄 *Trocas recebidas (${listaTrocas.length}):*\n` +
+        ? `🔄 *Trocas recebidas (${listaTrocas.length}):*${sufixoSemTrocaEstoque}\n` +
           listaTrocas
             .map(
               (tr, i) =>
@@ -1842,7 +1885,7 @@ export async function emitirNotinhaVenda(
             .join('\n') +
           '\n'
         : proposta.isUpgrade && proposta.modeloTroca
-        ? `🔄 *Troca recebida:* ${proposta.modeloTroca}\n`
+        ? `🔄 *Troca recebida:* ${proposta.modeloTroca}${sufixoSemTrocaEstoque}\n`
         : '';
 
     const msgSucesso = `✅ *NOTINHA EMITIDA COM SUCESSO!* 🧾\n` +
@@ -1960,6 +2003,7 @@ export interface FotoRecenteCache {
   modelo?: string | null;
   capacidade?: string | null;
   cor?: string | null;
+  bateria?: number | string | null;
   pushName?: string;
   timestamp: number;
   historicoFotos?: FotoRecenteCache[];
@@ -2696,6 +2740,16 @@ export function detectarVendaAtacadoComFoto(texto: string): VendaAtacadoDetectad
       const idxMatch = matchValor.index ?? trabalho.length;
       trabalho = trabalho.slice(0, idxMatch).trim();
     }
+  } else {
+    // Suporta nome colado ao valor sem espaço (ex: "GM700", "Lucas2500")
+    const matchColado = trabalho.match(/^([A-Za-zÀ-ÖØ-öø-ÿ]{2,25})(\d{3,5}(?:[.,]\d{1,2})?)$/);
+    if (matchColado) {
+      const parsed = parseValorMonetarioToken(matchColado[2], true);
+      if (parsed !== null) {
+        trabalho = matchColado[1].trim();
+        valor = parsed;
+      }
+    }
   }
 
   return finalizarVendaAtacado(trabalho, valor, formaPagamento);
@@ -2735,6 +2789,180 @@ export function detectarVendaAtacadoMultiploComFoto(texto: string): VendaAtacado
   }
 
   return detectarVendaAtacadoComFoto(texto);
+}
+
+export interface VendaAtacadoDiretaDetectada {
+  vendaAtacado: VendaAtacadoDetectada;
+  fotoVirtual: FotoRecenteCache;
+}
+
+/**
+ * Detecta comando ou áudio de venda de atacado que já informa o aparelho e/ou IMEI na mesma frase
+ * (sem depender de foto enviada antes), ex.:
+ * - "venda atacado para GM iPhone 11 64 GB preto 62% IMEI 7896"
+ * - "venda de atacado para GM iPhone 11 64GB preto 62% imei 7896 por 1500"
+ * - "vendi no atacado pro João iPhone 13 128GB azul imei 350015753668064 2500"
+ */
+export function detectarVendaAtacadoPorTextoOuAudio(
+  texto: string
+): VendaAtacadoDiretaDetectada | null {
+  if (!texto || typeof texto !== 'string') return null;
+
+  const limpo = limparMencoesBot(texto)
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?;,]+$/g, '')
+    .trim();
+
+  if (limpo.length < 10 || limpo.length > 260 || limpo.startsWith('!')) return null;
+  if (/\?/.test(limpo)) return null;
+
+  const temGatilhoAtacado =
+    /\b(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+)?atacado|vendi\s+(?:no\s+|em\s+)?atacado)\b/i.test(
+      limpo
+    ) || /^(?:registrar?\s+)?atacado\b/i.test(limpo);
+
+  if (!temGatilhoAtacado) return null;
+
+  let trabalho = limpo;
+
+  // 1. Extrai IMEI (ex: "IMEI 7896", "IMEI: 350015753668064" ou 15 dígitos isolados)
+  let imei: string | null = null;
+  const matchImeiExplicito = trabalho.match(
+    /\b(?:final\s+(?:do\s+)?imei|imei\s+final|imei)\s*[:=#-]?\s*(\d{4,16})\b/i
+  );
+  if (matchImeiExplicito) {
+    imei = matchImeiExplicito[1];
+    trabalho = trabalho.replace(matchImeiExplicito[0], ' ');
+  } else {
+    const matchImei15 = trabalho.match(/\b(\d{15})\b/);
+    if (matchImei15) {
+      imei = matchImei15[1];
+      trabalho = trabalho.replace(matchImei15[0], ' ');
+    }
+  }
+
+  // 2. Extrai saúde da bateria (ex: "62%", "bateria 62%")
+  let bateria: number | null = null;
+  const matchBateria = trabalho.match(
+    /(?:\b(?:sa[uú]de\s+(?:da\s+)?)?(?:bateria|bat)\s*[:=-]?\s*(\d{2,3})\s*%?|\b(\d{2,3})\s*%)/i
+  );
+  if (matchBateria) {
+    const batNum = Number(matchBateria[1] || matchBateria[2]);
+    if (batNum >= 10 && batNum <= 100) {
+      bateria = batNum;
+      trabalho = trabalho.replace(matchBateria[0], ' ');
+    }
+  }
+
+  // 3. Extrai capacidade (ex: "64 GB", "128GB", "256 gigas", "1TB")
+  let capacidade: string | null = null;
+  const matchCap = trabalho.match(
+    /\b(32|64|128|256|512)\s*(?:GB|G|GIGAS?)\b|\b(1|2)\s*(?:TB|TERAS?)\b/i
+  );
+  if (matchCap) {
+    capacidade = matchCap[1] ? `${matchCap[1]}GB` : `${matchCap[2]}TB`;
+    trabalho = trabalho.replace(matchCap[0], ' ');
+  }
+
+  // 4. Extrai forma de pagamento opcional
+  let formaPagamento: string | undefined;
+  if (/\bfiado\b|\ba\s+prazo\b/i.test(trabalho)) {
+    formaPagamento = 'fiado';
+    trabalho = trabalho.replace(/(?:^|\s)(?:(?:no|via|em|por)\s+)?(?:fiado|a\s+prazo)\b/gi, ' ');
+  } else if (/\bpix\b/i.test(trabalho)) {
+    formaPagamento = 'pix';
+    trabalho = trabalho.replace(/(?:^|\s)(?:(?:no|via|em|por)\s+)?pix\b/gi, ' ');
+  } else if (/\bdinheiro\b/i.test(trabalho)) {
+    formaPagamento = 'dinheiro';
+    trabalho = trabalho.replace(/(?:^|\s)(?:(?:no|via|em|por)\s+)?dinheiro\b/gi, ' ');
+  } else if (/\bcart[aã]o(?:\s+de\s+(?:cr[eé]dito|d[eé]bito))?\b/i.test(trabalho)) {
+    formaPagamento = /d[eé]bito/i.test(trabalho) ? 'cartao_debito' : 'cartao_credito';
+    trabalho = trabalho.replace(
+      /(?:^|\s)(?:(?:no|via|em|por)\s+)?cart[aã]o(?:\s+de\s+(?:cr[eé]dito|d[eé]bito))?\b/gi,
+      ' '
+    );
+  }
+
+  // 5. Extrai valor opcional (ex: "por 1500", "valor 1500", "R$ 1.500" ou número final >= 100)
+  let valor = 0;
+  const matchValorExp = trabalho.match(
+    /(?:\b(?:por|valor\s*[:=-]?|pre[cç]o\s*[:=-]?)\s*(?:R\$\s*)?|R\$\s*)(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{3,5}(?:[.,]\d{1,2})?)(?:\s*reais)?\b/i
+  );
+  if (matchValorExp) {
+    const parsed = parseValorMonetarioToken(matchValorExp[1], true);
+    if (parsed !== null) {
+      valor = parsed;
+      trabalho = trabalho.replace(matchValorExp[0], ' ');
+    }
+  } else {
+    const matchValorFim = trabalho.match(
+      /(?:^|\s)(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{3,5}(?:[.,]\d{1,2})?)(?:\s*reais)?\s*$/i
+    );
+    if (matchValorFim) {
+      const parsed = parseValorMonetarioToken(matchValorFim[1], true);
+      if (parsed !== null) {
+        valor = parsed;
+        trabalho = trabalho.slice(0, matchValorFim.index ?? trabalho.length).trim();
+      }
+    }
+  }
+
+  // 6. Remove gatilho inicial de venda atacado
+  trabalho = trabalho
+    .replace(
+      /^(?:registrar?\s+|fazer?\s+|lan[cç]ar?\s+)?(?:uma\s+)?(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+)?atacado|vendi\s+(?:no\s+|em\s+)?atacado|atacado)\b[\s,:=-]*/i,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const regexInicioAparelho =
+    /\b(?:iphone|ipad|galaxy|samsung|xiaomi|redmi|poco|motorola|moto|realme|(?:1[1-7]|xr|xs)\s*(?:pro\s*max|promax|pro|plus|mini))\b/i;
+
+  let trechoCliente = '';
+  let trechoAparelho = '';
+
+  const matchAparelho = trabalho.match(regexInicioAparelho);
+  if (matchAparelho && matchAparelho.index !== undefined) {
+    const idx = matchAparelho.index;
+    if (idx > 0) {
+      trechoCliente = trabalho.slice(0, idx).trim();
+      trechoAparelho = trabalho.slice(idx).trim();
+    } else {
+      const matchClienteFinal = trabalho.match(
+        /\b(?:para|pro|pra|cliente|comprador|lojista)\s*[:=-]?\s*([A-Za-zÀ-ÖØ-öø-ÿ0-9.'&-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9.'&-]+){0,4})\s*$/i
+      );
+      if (matchClienteFinal && matchClienteFinal.index !== undefined) {
+        trechoCliente = matchClienteFinal[1].trim();
+        trechoAparelho = trabalho.slice(0, matchClienteFinal.index).trim();
+      }
+    }
+  } else if (imei) {
+    // Caso só tenha informado cliente + IMEI ("venda atacado para GM imei 7896")
+    trechoCliente = trabalho;
+  }
+
+  const vendaAtacado = finalizarVendaAtacado(trechoCliente, valor, formaPagamento);
+  if (!vendaAtacado) return null;
+
+  const cor = trechoAparelho ? extrairCorDeTexto(trechoAparelho) || null : null;
+  const modeloLimpo = trechoAparelho ? limparNomeModelo(trechoAparelho) || null : null;
+
+  if (!imei && !modeloLimpo) return null;
+
+  return {
+    vendaAtacado,
+    fotoVirtual: {
+      imei,
+      modelo: modeloLimpo,
+      capacidade,
+      cor,
+      bateria,
+      timestamp: Date.now(),
+    },
+  };
 }
 
 /**
@@ -2870,9 +3098,12 @@ export async function emitirVendaAtacadoComFoto(params: {
         capacidade: foto.capacidade,
         cor: foto.cor,
         imei: foto.imei,
+        bateria: foto.bateria,
       });
 
-      const apEnc = cruzamento.aparelhoEncontrado;
+      const apEnc =
+        cruzamento.aparelhoEncontrado ||
+        (cruzamento.status === 'ambiguo' ? cruzamento.candidatos?.[0] : undefined);
       if (apEnc?.id) {
         aparelhoIdsUsados.add(apEnc.id);
         aparelhoIds.push(apEnc.id);

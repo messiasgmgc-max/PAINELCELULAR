@@ -4,6 +4,7 @@ import {
   detectarFormularioOuPedidoVenda,
   detectarVendaAtacadoComFoto,
   detectarVendaAtacadoMultiploComFoto,
+  detectarVendaAtacadoPorTextoOuAudio,
   temFotoRecenteOuProcessando,
   emitirVendaAtacadoComFoto,
   formatarMensagemPreviaNotinha,
@@ -1794,6 +1795,142 @@ test('aparelhosEmprestadosHandler detecta linguagem natural, salva, lista com !e
   assert.ok(!listaAposDev.includes('350015753668064'));
   assert.ok(listaAposDev.includes('Maria Garantia'));
 });
+
+test('reação 🧾 emite notinha mantendo Upgrade no termo mas sem adicionar a troca ao estoque', async () => {
+  assert.equal(interpretarReacaoNotinha('🧾'), 'confirmar_sem_troca');
+  assert.equal(interpretarReacaoNotinha('📄'), 'confirmar_sem_troca');
+  assert.equal(interpretarConfirmacaoTextoNotinha('emitir sem troca'), 'confirmar_sem_troca');
+  assert.equal(interpretarConfirmacaoTextoNotinha('confirmar sem troca no estoque'), 'confirmar_sem_troca');
+
+  const propostaComUpgrade: PropostaNotinha = {
+    id: 'prop-upg-1',
+    lojaId: '11111111-1111-4111-8111-111111111111',
+    clienteNome: 'Cliente Upgrade',
+    modelo: 'iPhone 15 Pro',
+    capacidade: '128GB',
+    cor: 'Preto',
+    imei: '350015753668064',
+    statusEstoque: 'Aparelho confirmado no estoque ✅',
+    aparelhoId: '22222222-2222-4222-8222-222222222222',
+    valorTotal: 4500,
+    custo: 3800,
+    formaPagamento: 'Pix',
+    isUpgrade: true,
+    modeloTroca: 'iPhone 11 64GB Preto',
+    valorTroca: 1200,
+    trocas: [{ modelo: 'iPhone 11', capacidade: '64GB', cor: 'Preto', valor: 1200 }],
+  };
+
+  const msgPrevia = formatarMensagemPreviaNotinha(propostaComUpgrade);
+  assert.ok(msgPrevia.includes('Reaja com 🧾'));
+  assert.ok(msgPrevia.includes('sem adicionar a troca no estoque'));
+
+  const rpcCalls: Array<{ fn: string; args: Record<string, any> }> = [];
+  const mockSupabase: any = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { id: '11111111-1111-4111-8111-111111111111', nome: 'Lucas Imports' }, error: null }),
+          ilike: () => ({
+            limit: async () => ({ data: [], error: null }),
+          }),
+        }),
+      }),
+      insert: () => ({
+        select: () => ({
+          single: async () => ({ data: { id: 'cli-1' }, error: null }),
+        }),
+      }),
+    }),
+    rpc: async (fn: string, args: Record<string, any>) => {
+      rpcCalls.push({ fn, args });
+      return {
+        data: {
+          venda: { id: '77777777-7777-4777-8777-777777777777', loja_id: args.p_venda.loja_id },
+          baixados: 1,
+          trade_in_id: null,
+          lote_id: 'lote-1',
+        },
+        error: null,
+      };
+    },
+  };
+
+  const resultado = await emitirNotinhaVenda(
+    mockSupabase,
+    '11111111-1111-4111-8111-111111111111',
+    propostaComUpgrade,
+    'Lucas',
+    { pularCadastroTrocaEstoque: true }
+  );
+
+  assert.equal(resultado.sucesso, true);
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].args.p_trade_in, null, 'Não deve enviar tradeIn para inserção na tabela aparelhos');
+  assert.ok(resultado.mensagem.includes('Troca recebida:'));
+  assert.ok(resultado.mensagem.includes('sem entrada no estoque'));
+  assert.ok(resultado.pdfBase64, 'PDF do termo/recibo deve ser gerado normalmente');
+});
+
+test('detectarVendaAtacadoComFoto reconhece GM700 colado e detectarVendaAtacadoPorTextoOuAudio cruza áudio com estoque pelo final do IMEI', async () => {
+  assert.deepEqual(detectarVendaAtacadoComFoto('GM 700'), { clienteNome: 'GM', valor: 700 });
+  assert.deepEqual(detectarVendaAtacadoComFoto('GM700'), { clienteNome: 'GM', valor: 700 });
+
+  const direto = detectarVendaAtacadoPorTextoOuAudio(
+    'venda atacado para GM iPhone 11 64 GB preto 62% IMEI 7896'
+  );
+  assert.ok(direto);
+  assert.equal(direto?.vendaAtacado.clienteNome, 'GM');
+  assert.equal(direto?.vendaAtacado.valor, 0);
+  assert.equal(direto?.fotoVirtual.modelo, 'iPhone 11');
+  assert.equal(direto?.fotoVirtual.capacidade, '64GB');
+  assert.equal(direto?.fotoVirtual.cor, 'Preto');
+  assert.equal(direto?.fotoVirtual.bateria, 62);
+  assert.equal(direto?.fotoVirtual.imei, '7896');
+
+  const rpcCalls: Array<{ fn: string; args: Record<string, any> }> = [];
+  const mockRpcSupabase: any = {
+    rpc: async (fn: string, args: Record<string, any>) => {
+      rpcCalls.push({ fn, args });
+      return {
+        data: {
+          venda: { id: '88888888-8888-4888-8888-888888888888', loja_id: args.p_venda.loja_id },
+          baixados: 1,
+          lote_id: 'lote-atac-audio',
+        },
+        error: null,
+      };
+    },
+  };
+
+  const resEmissao = await emitirVendaAtacadoComFoto({
+    supabase: mockRpcSupabase,
+    lojaId: '11111111-1111-4111-8111-111111111111',
+    vendaAtacado: direto!.vendaAtacado,
+    fotos: [direto!.fotoVirtual],
+    estoque: [
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        modelo: 'iPhone 11',
+        capacidade: '64GB',
+        cor: 'Preto',
+        imei: '359999888877896',
+        saude_bateria: '62%',
+        custo: 600,
+        status: 'disponivel',
+        ativo: true,
+      },
+    ],
+    usuarioNome: 'Lucas',
+  });
+
+  assert.equal(resEmissao.sucesso, true);
+  assert.equal(rpcCalls.length, 1);
+  assert.deepEqual(rpcCalls[0].args.p_aparelho_ids, ['33333333-3333-4333-8333-333333333333']);
+  assert.equal(rpcCalls[0].args.p_venda.clienteNome, 'GM');
+  assert.equal(rpcCalls[0].args.p_venda.itens[0].imei, '359999888877896');
+});
+
 
 
 

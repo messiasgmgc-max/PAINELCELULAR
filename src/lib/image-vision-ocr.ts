@@ -14,6 +14,7 @@ export interface VisionEtiquetaResult {
   preco?: number | null;
   codigo_etiqueta?: string | null;
   condicao?: 'novo' | 'seminovo' | 'usado' | null;
+  texto_venda_visivel?: string | null;
   // Campos de Comprovante de Pagamento:
   amount?: number | null;
   modality?: string | null;
@@ -59,11 +60,12 @@ A imagem pode ser:
   "modelo": "Nome do modelo EXATAMENTE como escrito na etiqueta (se só estiver escrito 'iPhone' sem número da geração, retorne 'iPhone'; se não houver modelo legível, retorne null. NUNCA adivinhe ou invente a geração do aparelho)",
   "capacidade": "Capacidade de armazenamento (ex: 128GB, 256GB, 64GB) ou null",
   "cor": "Cor do aparelho (ex: Azul, Preto, Branco, Estelar, Dourado) ou null",
-  "imei": "Número do IMEI com 15 dígitos numéricos (apenas dígitos) ou os dígitos legíveis",
+  "imei": "Número do IMEI com 15 dígitos numéricos (apenas dígitos) ou o final de 4 a 6 dígitos caso a etiqueta mostre apenas os últimos dígitos (ex: '7896')",
   "saude_bateria": "Porcentagem da bateria se houver (número inteiro ex: 88 ou null)",
   "preco": "Valor numérico do preço se constar na etiqueta (ex: 2800.00 ou null)",
   "codigo_etiqueta": "Código interno, ID ou número do código de barras (ex: 8665041 ou null)",
-  "condicao": "seminovo, novo ou usado se especificado"
+  "condicao": "seminovo, novo ou usado se especificado",
+  "texto_venda_visivel": "Se a imagem for um print/captura de tela mostrando mensagem, legenda do WhatsApp ou anotação fora da etiqueta física com nome de comprador/lojista e/ou valor de venda (ex: 'GM 700', 'GM700', 'João 2500'), transcreva esse texto exato aqui; se for apenas a foto da etiqueta/aparelho sem texto de comprador externo, retorne null"
 }
 
 2. Um COMPROVANTE DE PAGAMENTO bancário (Pix, TED, Cartão de Crédito/Débito, Maquininha, etc.). Extraia:

@@ -55,6 +55,7 @@ import {
   detectarFormularioOuPedidoVenda,
   detectarVendaAtacadoComFoto,
   detectarVendaAtacadoMultiploComFoto,
+  detectarVendaAtacadoPorTextoOuAudio,
   temFotoRecenteOuProcessando,
   emitirVendaAtacadoComFoto,
   cruzarAparelhoComEstoque,
@@ -1917,6 +1918,16 @@ async function responderConsultaEstoqueNatural(
     return null;
   }
 
+  // 1.1. Ignora comandos operacionais e frases de venda/atacado/estoque (mesmo no privado),
+  // evitando que um áudio/texto como "venda atacado para GM iPhone 11..." seja confundido com cliente consultando disponibilidade.
+  if (
+    /\b(?:venda|vendido|vendi|atacado|notinha|nota|faturar|lan[cç]ar|cadastrar|entrada|baixa|manuten[cç][aã]o|emprestad[oa]|devolvid[oa]|devolver)\b/i.test(
+      textoParaAnalise
+    )
+  ) {
+    return null;
+  }
+
   // 2. FILTRO DE VENDEDORES ANUNCIANDO OU RESPOSTAS (Apenas em Grupos)
   if (isGroup) {
     const isPergunta = textoParaAnalise.includes('?') || /\b(quem\s+tem|algu[eé]m|tem\s+a[ií]|tem\s+aqui|preciso|procuro)\b/i.test(textoParaAnalise);
@@ -2587,16 +2598,27 @@ export async function POST(request: Request) {
     // ── O BOT NÃO RESPONDE CLIENTES EM CHAT PRIVADO ──
     // Clientes que enviarem mensagens privadas sem formulário/operação são ignorados em silêncio.
     // Mas pedidos/notinhas, entradas de estoque e comandos sempre são atendidos no privado para teste ou uso da equipe!
+    const rawMessageRoot = msgData.message || {};
+    const messageContent =
+      rawMessageRoot.ephemeralMessage?.message ||
+      rawMessageRoot.viewOnceMessage?.message ||
+      rawMessageRoot.viewOnceMessageV2?.message ||
+      rawMessageRoot.viewOnceMessageV2Extension?.message ||
+      rawMessageRoot.documentWithCaptionMessage?.message ||
+      rawMessageRoot;
+
     const rawPreviewText =
       marcacaoBot.textoEfetivo ||
-      msgData.message?.conversation ||
-      msgData.message?.extendedTextMessage?.text ||
-      msgData.message?.imageMessage?.caption ||
+      messageContent.conversation ||
+      messageContent.extendedTextMessage?.text ||
+      messageContent.imageMessage?.caption ||
+      msgData.caption ||
       '';
     const ehOperacaoEquipePreview =
       marcacaoBot.foiMarcado ||
       rawPreviewText.trim().startsWith('!') ||
       ehMensagemDeEntradaEstoque(rawPreviewText) ||
+      Boolean(detectarVendaAtacadoPorTextoOuAudio(rawPreviewText)) ||
       Boolean(detectarFormularioOuPedidoVenda(rawPreviewText)) ||
       Boolean(interpretarTextoCorrecaoVenda(rawPreviewText));
 
@@ -2611,8 +2633,6 @@ export async function POST(request: Request) {
     if (!lojaId && (ehModeradorMaster || ehOperacaoEquipePreview)) {
       lojaId = 'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
     }
-
-    const messageContent = msgData.message || {};
 
     // ── 3.0. TRATAMENTO DE REAÇÕES (EMISSÃO OU CANCELAMENTO DA NOTINHA COM ✅ / ❌) ──
     const reactionMessage =
@@ -2641,7 +2661,9 @@ export async function POST(request: Request) {
         const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesReacao, null, 30);
 
         if (propostaPendente) {
-          if (acaoReacao === 'confirmar' && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
+          const ehReacaoConfirmar = acaoReacao === 'confirmar' || acaoReacao === 'confirmar_sem_troca';
+
+          if (ehReacaoConfirmar && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
             await editarOuResponderMensagemWhatsApp(
               instanceName,
               targetDestination,
@@ -2651,13 +2673,14 @@ export async function POST(request: Request) {
             return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
           }
 
-          if (acaoReacao === 'confirmar') {
+          if (ehReacaoConfirmar) {
             const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
             const resultadoEmissao = await emitirNotinhaVenda(
               supabase,
               lojaEfetivaId,
               propostaPendente,
-              nomeUsuario || pushName || 'Equipe'
+              nomeUsuario || pushName || 'Equipe',
+              { pularCadastroTrocaEstoque: acaoReacao === 'confirmar_sem_troca' }
             );
 
             if (resultadoEmissao.sucesso) {
@@ -2783,10 +2806,13 @@ export async function POST(request: Request) {
         (marcacaoBot.usouMensagemCitada ? marcacaoBot.textoEfetivo : '') ||
         messageContent.imageMessage?.caption ||
         msgData.message?.imageMessage?.caption ||
+        msgData.imageMessage?.caption ||
+        payload.data?.message?.imageMessage?.caption ||
         msgData.caption ||
+        payload.data?.caption ||
         '';
 
-      const vendaAtacadoNaFoto = captionText
+      let vendaAtacadoNaFoto = captionText
         ? modoChat === 'multiplo'
           ? detectarVendaAtacadoMultiploComFoto(captionText)
           : detectarVendaAtacadoComFoto(captionText)
@@ -2903,6 +2929,16 @@ export async function POST(request: Request) {
             let modeloLido = visionData.modelo ? String(visionData.modelo).trim() : null;
             let capLida = visionData.capacidade ? String(visionData.capacidade).trim() : null;
             let corLida = visionData.cor ? String(visionData.cor).trim() : null;
+            const bateriaLida = visionData.saude_bateria ? Number(visionData.saude_bateria) : null;
+
+            // Se a foto é um print contendo texto de comprador/valor visível (ex: "GM 700") e não veio legenda separada
+            if (!vendaAtacadoNaFoto && !vendaDetectadaNaFoto && visionData.texto_venda_visivel && modoChat !== 'estoque') {
+              const textoVisivel = String(visionData.texto_venda_visivel).trim();
+              vendaAtacadoNaFoto =
+                modoChat === 'multiplo'
+                  ? detectarVendaAtacadoMultiploComFoto(textoVisivel)
+                  : detectarVendaAtacadoComFoto(textoVisivel);
+            }
 
             // Enriquecimento com a tabela 'aparelhos' pelo IMEI completo (15 dígitos) ou pelos 4 últimos dígitos
             if (lojaId && imeiLido && imeiLido.length >= 4) {
@@ -2953,6 +2989,7 @@ export async function POST(request: Request) {
                 modelo: modeloLido,
                 capacidade: capLida,
                 cor: corLida,
+                bateria: bateriaLida,
                 pushName,
                 timestamp: Date.now(),
               });
@@ -3050,6 +3087,7 @@ export async function POST(request: Request) {
                     modelo: modeloLido,
                     capacidade: capLida,
                     cor: corLida,
+                    bateria: bateriaLida,
                     pushName,
                     timestamp: Date.now(),
                   },
@@ -3328,6 +3366,10 @@ export async function POST(request: Request) {
         : modoChat === 'multiplo'
           ? detectarVendaAtacadoMultiploComFoto(textContent)
           : detectarVendaAtacadoComFoto(textContent);
+    const vendaAtacadoDireta =
+      modoChat === 'estoque' || modoChat === 'off'
+        ? null
+        : detectarVendaAtacadoPorTextoOuAudio(textContent);
     const temFotoAtivaParaAtacado = Boolean(
       vendaAtacadoTexto &&
       lojaId &&
@@ -3369,6 +3411,7 @@ export async function POST(request: Request) {
         ehComandoFechamento ||
         ehComandoEmprestados ||
         ehFormularioVenda ||
+        Boolean(vendaAtacadoDireta) ||
         temFotoAtivaParaAtacado ||
         valorEdicaoRapida !== null ||
         (ehPossivelConfirmacao && temNotinhaPendente) ||
@@ -3463,6 +3506,7 @@ export async function POST(request: Request) {
           Boolean(emprestimoDetectado) ||
           Boolean(saidaDiretaDetectada) ||
           ehMensagemDeEntradaEstoque(textContent) ||
+          Boolean(vendaAtacadoDireta) ||
           temFotoAtivaParaAtacado ||
           valorEdicaoRapida !== null ||
           Boolean(detectarFormularioOuPedidoVenda(textContent)) ||
@@ -3524,9 +3568,10 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / PODE VENDER / CONFIRMAR / CANCELAR) ──
+    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / PODE VENDER / EMITIR SEM TROCA / CANCELAR) ──
     const acaoConfirmacaoTexto = interpretarConfirmacaoTextoNotinha(textContent);
-    const ehConfirmacaoTexto = acaoConfirmacaoTexto === 'confirmar';
+    const ehConfirmacaoTexto =
+      acaoConfirmacaoTexto === 'confirmar' || acaoConfirmacaoTexto === 'confirmar_sem_troca';
     const ehCancelamentoTexto = acaoConfirmacaoTexto === 'cancelar';
 
     if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
@@ -3558,7 +3603,8 @@ export async function POST(request: Request) {
             supabase,
             lojaEfetivaId,
             propostaPendente,
-            nomeUsuario || pushName || 'Equipe'
+            nomeUsuario || pushName || 'Equipe',
+            { pularCadastroTrocaEstoque: acaoConfirmacaoTexto === 'confirmar_sem_troca' }
           );
 
           if (resultadoEmissao.sucesso) {
@@ -3690,6 +3736,57 @@ export async function POST(request: Request) {
           { status: 200 }
         );
       }
+    }
+
+    // ── 3.3b-2. VENDA DE ATACADO DIRETA POR TEXTO OU ÁUDIO (APARELHO + IMEI + COMPRADOR NA MESMA FRASE) ──
+    if (vendaAtacadoDireta && lojaId) {
+      const { data: apsEstoque } = await supabase
+        .from('aparelhos')
+        .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+        .eq('loja_id', lojaId)
+        .order('ativo', { ascending: false })
+        .order('dataCadastro', { ascending: false })
+        .limit(600);
+
+      const resultadoAtacado = await emitirVendaAtacadoComFoto({
+        supabase,
+        lojaId,
+        vendaAtacado: vendaAtacadoDireta.vendaAtacado,
+        fotos: [vendaAtacadoDireta.fotoVirtual],
+        estoque: apsEstoque || [],
+        usuarioNome: nomeUsuario || pushName || 'Equipe',
+      });
+
+      const envioAtacado = await enviarMensagemWhatsAppComRetorno(
+        instanceName,
+        targetDestination,
+        resultadoAtacado.mensagem
+      );
+      if (resultadoAtacado.sucesso && resultadoAtacado.vendaUuid) {
+        const payloadRecente = {
+          vendaUuid: resultadoAtacado.vendaUuid,
+          vendaCodigo: resultadoAtacado.vendaId || 'OK',
+          clienteNome: vendaAtacadoDireta.vendaAtacado.clienteNome,
+          custoTotal: resultadoAtacado.custoTotal || 0,
+          metodo: vendaAtacadoDireta.vendaAtacado.formaPagamento || 'pix',
+          valorAtual: vendaAtacadoDireta.vendaAtacado.valor,
+        };
+        await salvarVendaAtacadoRecente(supabase, lojaId, remoteJid, envioAtacado.messageId, payloadRecente);
+        if (targetDestination !== remoteJid) {
+          await salvarVendaAtacadoRecente(supabase, lojaId, targetDestination, envioAtacado.messageId, payloadRecente);
+        }
+      }
+      await supabase.from('whatsapp_logs').insert({
+        loja_id: lojaId,
+        contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+        mensagem: `[ATACADO_DIRETO] ${vendaAtacadoDireta.vendaAtacado.clienteNome} (IMEI: ${vendaAtacadoDireta.fotoVirtual.imei || '-'} | Valor: R$ ${vendaAtacadoDireta.vendaAtacado.valor})`,
+        created_at: new Date().toISOString(),
+      });
+
+      return NextResponse.json(
+        { status: resultadoAtacado.sucesso ? 'ok' : 'error', message: 'Venda atacado direta por texto/áudio registrada.' },
+        { status: 200 }
+      );
     }
 
     // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
