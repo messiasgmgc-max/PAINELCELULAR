@@ -1,4 +1,4 @@
-import { extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
+import { extrairCorDeTexto, extrairDataFormularioTexto, parseDataFlexivelBr } from '@/lib/vendas/parseVendaTexto';
 import { parseMercadoPhoneList } from '@/lib/estoque/listaSimples';
 
 /**
@@ -21,6 +21,7 @@ export interface ItemEntradaDetectado {
   idEtiqueta?: string;
   idEtiquetaInformado?: boolean;
   quantidade?: number;
+  dataEntrada?: string;
 }
 
 const REGEX_CAPACIDADE = /\b(32|64|128|256|512|1024)\s*(gb|tb)\b/i;
@@ -280,23 +281,66 @@ export function ehMensagemDeEntradaEstoque(texto: string): boolean {
   return regexGatilho.test(t);
 }
 
+const REGEX_LINHA_SOMENTE_DATA =
+  /^(?:[\p{Extended_Pictographic}\uFE0F\u200D•*_\-\s]*)(?:(?:data\s+(?:d[aeo]\s+)?(?:entrada|compra|chegada)|data\s*entrada|data)\s*[:=-]?\s*)?(?:do\s+dia\s+|dia\s+)?(\d{4}-\d{2}-\d{2}|\d{1,2}\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*(?:\d{4}|\d{2}))?)\s*[:*_-]*$/iu;
+
+/**
+ * Extrai a data de entrada informada em mensagens/listas de entrada de estoque.
+ * Aceita cabeçalhos ("Entradas 15/11:", "Entrada do dia 15/11/26:") e linhas
+ * dedicadas ("Data de entrada: 15/11/2026", "Data: 15/11").
+ */
+export function extrairDataEntradaEstoque(texto: string, hojeBrPadrao?: string): string | null {
+  if (!texto || typeof texto !== 'string') return null;
+
+  const dataRotulo = extrairDataFormularioTexto(texto, hojeBrPadrao);
+  if (dataRotulo) return dataRotulo;
+
+  const primeiraLinha = texto.trim().split(/\r?\n/)[0] || '';
+  const matchCabecalho = primeiraLinha.match(
+    /^(?:[\p{Extended_Pictographic}\uFE0F\u200D•*_\-\s]*)(?:!(?:entradas?|importar)|entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou|chegaram(?:\s+os\s+aparelhos)?)\s*(?:do\s+dia|no\s+dia|dia|em|de)?\s*[:=-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*(?:\d{4}|\d{2}))?)\b/iu
+  );
+  if (matchCabecalho?.[1]) {
+    const iso = parseDataFlexivelBr(matchCabecalho[1], hojeBrPadrao);
+    if (iso) return iso;
+  }
+
+  for (const linha of texto.split(/\r?\n/)) {
+    const m = linha.trim().match(REGEX_LINHA_SOMENTE_DATA);
+    if (m?.[1]) {
+      const iso = parseDataFlexivelBr(m[1], hojeBrPadrao);
+      if (iso) return iso;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Processa um bloco de texto completo (múltiplas linhas ou itens separados por vírgula)
  * e retorna todos os aparelhos identificados.
  */
-export function parseTextoEntradaAparelhos(texto: string): ItemEntradaDetectado[] {
+export function parseTextoEntradaAparelhos(texto: string, hojeBrPadrao?: string): ItemEntradaDetectado[] {
   if (!texto || !texto.trim()) return [];
   if (ehRelatorioOuConferencia(texto)) return [];
 
-  // Remove o prefixo de gatilho (incluindo emojis, asteriscos de negrito, etc.)
-  let limpo = texto.trim()
-    .replace(/^(?:[\p{Extended_Pictographic}*•\-_\s]*)(?:!(?:entradas?|importar)|entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou\s*hoje|chegaram\s*os\s*aparelhos)[:\s*]*/iu, '')
+  const dataEntradaExtraida = extrairDataEntradaEstoque(texto, hojeBrPadrao) || undefined;
+
+  // Remove o prefixo de gatilho (incluindo emojis, asteriscos de negrito e data opcional no cabeçalho, ex.: "Entradas 15/11:")
+  let limpo = texto
+    .trim()
+    .replace(
+      /^(?:[\p{Extended_Pictographic}*•\-_\s]*)(?:!(?:entradas?|importar)|entradas?|dar\s*entradas?|cadastrar\s*entradas?|entrada\s*dos\s*aparelhos|chegou\s*hoje|chegaram\s*os\s*aparelhos)(?:\s*(?:do\s+dia|no\s+dia|dia|em|de)?\s*[:=-]?\s*(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*(?:\d{4}|\d{2}))?))?[:\s*]*/iu,
+      ''
+    )
     .trim();
 
   const resultados: ItemEntradaDetectado[] = [];
 
   // 1. Tenta dividir por quebras de linha
-  const linhas = limpo.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const linhas = limpo
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => Boolean(l) && !REGEX_LINHA_SOMENTE_DATA.test(l));
 
   if (linhas.length > 1) {
     let condicaoSecao: 'novo' | 'seminovo' = 'seminovo';
@@ -312,7 +356,7 @@ export function parseTextoEntradaAparelhos(texto: string): ItemEntradaDetectado[
 
       const item = parseLinhaEntrada(linha, condicaoSecao);
       if (item && item.modelo) {
-        resultados.push(item);
+        resultados.push(dataEntradaExtraida ? { ...item, dataEntrada: dataEntradaExtraida } : item);
       }
     }
   } else if (linhas.length === 1) {
@@ -322,13 +366,13 @@ export function parseTextoEntradaAparelhos(texto: string): ItemEntradaDetectado[
       for (const p of pedacos) {
         const item = parseLinhaEntrada(p);
         if (item && item.modelo) {
-          resultados.push(item);
+          resultados.push(dataEntradaExtraida ? { ...item, dataEntrada: dataEntradaExtraida } : item);
         }
       }
     } else {
       const item = parseLinhaEntrada(linhas[0]);
       if (item && item.modelo) {
-        resultados.push(item);
+        resultados.push(dataEntradaExtraida ? { ...item, dataEntrada: dataEntradaExtraida } : item);
       }
     }
   }

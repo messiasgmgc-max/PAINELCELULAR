@@ -187,4 +187,40 @@ Modelo:iPhone 18 pro max 256gb bordo`;
     assert.equal(resQuebra.tradeIn?.imei, '3219');
     assert.equal(resQuebra.tradeIn?.cor, 'Laranja');
   });
+
+  it('lê data do formulário nos formatos DD/MM, DD/MM/AA e DD/MM/AAAA sem confundir com nascimento ou upgrade', async () => {
+    const { parseDataFlexivelBr, extrairDataFormularioTexto } = await import('./parseVendaTexto');
+
+    assert.equal(parseDataFlexivelBr('06/11', '2026-11-19'), '2026-11-06');
+    assert.equal(parseDataFlexivelBr('6/11', '2026-11-19'), '2026-11-06');
+    assert.equal(parseDataFlexivelBr('06/11/26', '2026-11-19'), '2026-11-06');
+    assert.equal(parseDataFlexivelBr('06/11/2026', '2026-11-19'), '2026-11-06');
+    assert.equal(parseDataFlexivelBr('28/12', '2026-01-05'), '2025-12-28');
+    assert.equal(parseDataFlexivelBr('31/02/2026', '2026-11-19'), null);
+
+    const formDDMM = `Para finalizar seu pedido, preencha os dados abaixo 👇
+Data de entrada: 05/11
+• Nome completo: João Carlos
+• Data de nascimento: 14/03/1995
+• Telefone: 31 998887766
+Valor total: 3.200,00
+(X) Pix
+Modelo: iPhone 15 128gb preto`;
+
+    assert.equal(extrairDataFormularioTexto(formDDMM, '2026-11-19'), '2026-11-05');
+    const parsedDDMM = sanitizarECompletarVendaParsed(null, formDDMM);
+    assert.equal(parsedDDMM.dataVendaInformada, true);
+    assert.match(String(parsedDDMM.dataVenda), /^\d{4}-11-05$/);
+    assert.equal(parsedDDMM.isUpgrade, false, 'Data de entrada não pode ativar Upgrade/Troca');
+
+    const formDDMMAA = formDDMM.replace('Data de entrada: 05/11', 'Data da compra: 07/11/26');
+    const parsedDDMMAA = sanitizarECompletarVendaParsed(null, formDDMMAA);
+    assert.equal(parsedDDMMAA.dataVenda, '2026-11-07');
+    assert.equal(parsedDDMMAA.dataVendaInformada, true);
+
+    const formDDMMAAAA = formDDMM.replace('Data de entrada: 05/11', 'Data da compra: 08/11/2026');
+    const parsedDDMMAAAA = sanitizarECompletarVendaParsed(null, formDDMMAAAA);
+    assert.equal(parsedDDMMAAAA.dataVenda, '2026-11-08');
+    assert.equal(parsedDDMMAAAA.dataVendaInformada, true);
+  });
 });

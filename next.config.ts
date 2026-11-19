@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: process.env.DOCKER_STANDALONE === "true" ? "standalone" : undefined,
+  serverExternalPackages: ["pdfkit"],
+  outputFileTracingIncludes: {
+    "/api/webhook/evolution": [
+      "./node_modules/.pnpm/pdfkit@*/node_modules/pdfkit/js/**/*",
+    ],
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },

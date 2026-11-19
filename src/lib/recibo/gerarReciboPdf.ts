@@ -1,4 +1,9 @@
 import PDFDocument from 'pdfkit';
+import { sanitizarVendedorPublico } from './publico';
+
+const CACHE_IMAGENS_PDF = new Map<string, { buffer: Buffer | null; expiraEm: number }>();
+const TTL_CACHE_IMAGEM_PDF_MS = 10 * 60 * 1000;
+const TIMEOUT_FETCH_IMAGEM_PDF_MS = 4000;
 
 export interface DadosReciboPdf {
   vendaId: string;
@@ -83,6 +88,7 @@ export function limparTextoPdf(texto?: string | null): string {
 
 /**
  * Converte data URI (base64) ou URL pública em Buffer de imagem (PNG/JPEG) para o PDFKit.
+ * Usa cache em memória (10 min) e timeout de 4s para nunca travar a geração do recibo.
  */
 async function carregarBufferImagem(src?: string | null): Promise<Buffer | null> {
   if (!src || typeof src !== 'string') return null;
@@ -96,10 +102,27 @@ async function carregarBufferImagem(src?: string | null): Promise<Buffer | null>
     }
 
     if (limpo.startsWith('http://') || limpo.startsWith('https://')) {
-      const resp = await fetch(limpo);
-      if (!resp.ok) return null;
+      const agora = Date.now();
+      const cached = CACHE_IMAGENS_PDF.get(limpo);
+      if (cached && agora < cached.expiraEm) {
+        return cached.buffer;
+      }
+
+      const resp = await fetch(limpo, {
+        signal: AbortSignal.timeout(TIMEOUT_FETCH_IMAGEM_PDF_MS),
+      });
+      if (!resp.ok) {
+        CACHE_IMAGENS_PDF.set(limpo, { buffer: null, expiraEm: agora + 60_000 });
+        return null;
+      }
       const arr = await resp.arrayBuffer();
-      return Buffer.from(arr);
+      const buf = Buffer.from(arr);
+      if (CACHE_IMAGENS_PDF.size >= 50) {
+        const primeiraChave = CACHE_IMAGENS_PDF.keys().next().value;
+        if (primeiraChave) CACHE_IMAGENS_PDF.delete(primeiraChave);
+      }
+      CACHE_IMAGENS_PDF.set(limpo, { buffer: buf, expiraEm: agora + TTL_CACHE_IMAGEM_PDF_MS });
+      return buf;
     }
   } catch (err) {
     console.warn('[gerarReciboPdfBuffer] Aviso ao decodificar imagem da loja:', err);
@@ -208,9 +231,10 @@ export async function gerarReciboPdfBuffer(dados: DadosReciboPdf): Promise<Buffe
 
       // Lado direito: Data, Vendedor e Código
       const dataHoraFmt = limparTextoPdf(dados.dataEmissao || new Date().toLocaleString('pt-BR'));
+      const vendedorLimpo = sanitizarVendedorPublico(dados.vendedor);
       doc.fontSize(8).font('Helvetica');
       doc.text(`Data: ${dataHoraFmt}`, x + 330, y + 4, { align: 'right', width: 205 });
-      doc.text(`VENDEDOR: ${limparTextoPdf(dados.vendedor || 'Não informado')}`, x + 330, y + 16, { align: 'right', width: 205 });
+      doc.text(`VENDEDOR: ${limparTextoPdf(vendedorLimpo || 'Atendimento')}`, x + 330, y + 16, { align: 'right', width: 205 });
       doc.fontSize(9).font('Helvetica-Bold');
       doc.text(`RECIBO DA VENDA: #${codigoVenda}`, x + 330, y + 28, { align: 'right', width: 205 });
 

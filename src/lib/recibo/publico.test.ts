@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { idReciboValido, mascararCpf, mascararEmail, mascararTelefone, montarReciboPublico } from './publico';
+import {
+  idReciboValido,
+  mascararCpf,
+  mascararEmail,
+  mascararTelefone,
+  montarReciboPublico,
+  sanitizarVendedorPublico,
+} from './publico';
 
 describe('Recibo público', () => {
   it('só aceita o id completo da venda', () => {
@@ -73,5 +80,22 @@ describe('Recibo público', () => {
     assert.equal(mascararTelefone('00000000000'), '');
     assert.equal(mascararTelefone('+55 31 99876-5432'), '(31) *****-5432');
     assert.equal(mascararEmail('sem@email.com'), '');
+  });
+
+  it('remove rótulos internos como (Moderador Master) do vendedor no recibo público', () => {
+    assert.equal(sanitizarVendedorPublico('Lucas (Moderador Master)'), 'Lucas');
+    assert.equal(sanitizarVendedorPublico('Lucas (Moderador Máximo)'), 'Lucas');
+    assert.equal(sanitizarVendedorPublico('Lucas (Super Admin)'), 'Lucas');
+    assert.equal(sanitizarVendedorPublico('WhatsApp (Lucas)'), 'Lucas');
+    assert.equal(sanitizarVendedorPublico('Lojista (Grupo)'), '');
+    assert.equal(sanitizarVendedorPublico('Lucas Oliveira'), 'Lucas Oliveira');
+
+    const recibo = montarReciboPublico(
+      { id: 'v1', vendedor: 'Lucas (Moderador Master)' },
+      null,
+      null
+    );
+    assert.equal(recibo.venda.vendedor, 'Lucas');
+    assert.equal(JSON.stringify(recibo).toLowerCase().includes('moderador'), false);
   });
 });

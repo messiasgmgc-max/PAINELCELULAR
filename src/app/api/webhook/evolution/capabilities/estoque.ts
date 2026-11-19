@@ -2,7 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, registrarEntradaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
-import { parseTextoEntradaAparelhos, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor, ehRelatorioOuConferencia } from '../entradaInteligente';
+import { parseTextoEntradaAparelhos, extrairDataEntradaEstoque, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor, ehRelatorioOuConferencia } from '../entradaInteligente';
+import { obterDataAtualBrasiliaIso } from '@/lib/vendas/parseVendaTexto';
 import { extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
 import { melhorOuAmbiguo, ranquear } from '../matching';
 import {
@@ -279,6 +280,9 @@ export const capabilitiesEstoque: Capability[] = [
 
       const loteId = gerarLoteId();
       const registrosParaInserir: any[] = [];
+      const hojeBr = obterDataAtualBrasiliaIso();
+      const agoraIso = new Date().toISOString();
+      const dataEntradaTexto = textoBruto ? extrairDataEntradaEstoque(textoBruto, hojeBr) : null;
 
       for (const item of itensParaCadastrar) {
         const codigoInformado =
@@ -299,6 +303,12 @@ export const capabilitiesEstoque: Capability[] = [
           `Entrada via WhatsApp por ${ctx.pushName}`,
         ].filter(Boolean);
 
+        const dataItemIso = item.dataEntrada || dataEntradaTexto;
+        const dataCadastroRegistro =
+          dataItemIso && dataItemIso !== hojeBr
+            ? new Date(`${dataItemIso}T12:00:00.000-03:00`).toISOString()
+            : agoraIso;
+
         registrosParaInserir.push({
           loja_id: ctx.lojaId,
           marca: norm.marca || item.marca || 'Apple',
@@ -314,7 +324,7 @@ export const capabilitiesEstoque: Capability[] = [
           status: 'disponivel',
           ativo: true,
           codigo: codigoEtiqueta,
-          dataCadastro: new Date().toISOString(),
+          dataCadastro: dataCadastroRegistro,
           observacoes: obsPartes.join(' | '),
         });
       }
@@ -350,8 +360,14 @@ export const capabilitiesEstoque: Capability[] = [
         return `${idx + 1}. 📱 *${reg.modelo}* ${reg.capacidade || ''}${corTexto}${batStr}${custoStr}${cod}${imeiStr}`;
       }).join('\n');
 
+      const dataEntradaUsada = itensParaCadastrar[0]?.dataEntrada || dataEntradaTexto;
+      const linhaDataEntrada = dataEntradaUsada
+        ? `📅 *Data de entrada:* ${dataEntradaUsada.slice(8, 10)}/${dataEntradaUsada.slice(5, 7)}/${dataEntradaUsada.slice(0, 4)}\n`
+        : '';
+
       return (
         `📦 *Entrada no estoque realizada com sucesso!*\n\n` +
+        linhaDataEntrada +
         `Total: *${registrosParaInserir.length} aparelho(s)* cadastrado(s):\n\n` +
         linhasConfirmacao +
         `\n\n⚡ _Códigos de etiqueta gerados e estoque atualizado no sistema._`

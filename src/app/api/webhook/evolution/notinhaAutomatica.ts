@@ -1,6 +1,14 @@
 import { gerarReciboPdfBuffer } from '@/lib/recibo/gerarReciboPdf';
+import { sanitizarVendedorPublico } from '@/lib/recibo/publico';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { sanitizarECompletarVendaParsed, normalizarNomeModelo, ParsedVenda, extrairCorDeTexto } from '@/lib/vendas/parseVendaTexto';
+import {
+  sanitizarECompletarVendaParsed,
+  normalizarNomeModelo,
+  ParsedVenda,
+  extrairCorDeTexto,
+  obterDataAtualBrasiliaIso,
+  parseDataFlexivelBr,
+} from '@/lib/vendas/parseVendaTexto';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
 import { registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { registrarVendaAtomica, ErroVenda } from '@/lib/vendas/vendaAtomica';
@@ -86,8 +94,55 @@ export interface PropostaNotinha {
   valorTroca?: number;
   trocas?: TrocaPropostaNotinha[];
   vendedor?: string;
+  dataVenda?: string;
+  dataVendaInformada?: boolean;
   observacoes?: string;
   criadoEm?: number;
+}
+
+function formatarIsoParaBrCurto(dataIso: string): string {
+  return `${dataIso.slice(8, 10)}/${dataIso.slice(5, 7)}/${dataIso.slice(0, 4)}`;
+}
+
+/**
+ * Resolve o timestamp ISO de `dataPagamento` e o rótulo de emissão do PDF a partir da data
+ * informada no formulário (YYYY-MM-DD ou DD/MM[/AA[AA]]).
+ * Se for a data de hoje (Brasília), preserva o horário exato atual; se for outra data,
+ * grava ao meio-dia de Brasília (15:00Z) para cair no dia exato em qualquer fuso.
+ */
+export function resolverDataPagamentoProposta(
+  dataVendaRaw?: string | null,
+  referencia: Date = new Date()
+): { dataPagamentoIso: string; dataEmissaoPdf: string; dataBr: string; ehDataCustomizada: boolean } {
+  const hojeBr = obterDataAtualBrasiliaIso(referencia);
+  const dataIso = parseDataFlexivelBr(dataVendaRaw, hojeBr);
+
+  if (dataIso && dataIso !== hojeBr) {
+    const dataBr = formatarIsoParaBrCurto(dataIso);
+    return {
+      dataPagamentoIso: new Date(`${dataIso}T12:00:00.000-03:00`).toISOString(),
+      dataEmissaoPdf: dataBr,
+      dataBr,
+      ehDataCustomizada: true,
+    };
+  }
+
+  const dataBr = formatarIsoParaBrCurto(hojeBr);
+  const dataEmissaoPdf = referencia.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  return {
+    dataPagamentoIso: referencia.toISOString(),
+    dataEmissaoPdf,
+    dataBr,
+    ehDataCustomizada: false,
+  };
 }
 
 const digitos = (val: unknown) => String(val ?? '').replace(/\D/g, '');
@@ -1024,7 +1079,9 @@ export function construirPropostaNotinha(params: {
         : vendaDetectada.tradeIn?.imei || undefined,
     valorTroca: valorTrocaTotal,
     trocas: trocasLista.length > 0 ? trocasLista : undefined,
-    vendedor: vendaDetectada.vendedor || pushName || 'WhatsApp',
+    vendedor: sanitizarVendedorPublico(vendaDetectada.vendedor || pushName) || 'Atendimento',
+    dataVenda: vendaDetectada.dataVenda || undefined,
+    dataVendaInformada: Boolean(vendaDetectada.dataVendaInformada),
     observacoes: vendaDetectada.observacoes || undefined,
   };
 
@@ -1192,6 +1249,14 @@ export function formatarMensagemPreviaNotinha(proposta: PropostaNotinha): string
     '──────────────────────────',
     `👤 *Cliente:* ${proposta.clienteNome || 'Cliente Não Informado'}${proposta.cpf ? ` (CPF: ${proposta.cpf})` : ''}`,
   ];
+
+  if (proposta.dataVenda) {
+    const dataIsoNorm = parseDataFlexivelBr(proposta.dataVenda);
+    const hojeBr = obterDataAtualBrasiliaIso();
+    if (dataIsoNorm && (proposta.dataVendaInformada || dataIsoNorm !== hojeBr)) {
+      linhas.push(`📅 *Data da Compra:* ${formatarIsoParaBrCurto(dataIsoNorm)}`);
+    }
+  }
 
   const itens = Array.isArray(proposta.itens) && proposta.itens.length > 0 ? proposta.itens : null;
 
@@ -1374,7 +1439,7 @@ export function interpretarConfirmacaoTextoNotinha(texto: string): AcaoConfirmac
  */
 export function interpretarTextoCorrecaoVenda(
   texto: string
-): { campo: 'valor' | 'custo' | 'imei' | 'cliente' | 'modelo' | 'cor'; valor: any } | null {
+): { campo: 'valor' | 'custo' | 'imei' | 'cliente' | 'modelo' | 'cor' | 'data'; valor: any } | null {
   if (!texto || typeof texto !== 'string') return null;
   const t = texto.trim();
 
@@ -1390,7 +1455,18 @@ export function interpretarTextoCorrecaoVenda(
     return parseFloat(s.replace(/\./g, ''));
   };
 
-  // 0. Correção de IMEI primeiro para que dígitos de IMEI nunca sejam confundidos com valor
+  // 0. Correção explícita de data da compra / venda / entrada (DD/MM, DD/MM/AA, DD/MM/AAAA)
+  const matchData = t.match(
+    /^\s*(?:data(?:\s+(?:d[aeo]\s+)?(?:compra|venda|entrada|pedido))?|dia)\s*(?:[eé]|correta|certa|nova)?\s*[:=-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*(?:\d{4}|\d{2}))?)\s*$/i
+  );
+  if (matchData?.[1]) {
+    const dataIso = parseDataFlexivelBr(matchData[1]);
+    if (dataIso) {
+      return { campo: 'data', valor: dataIso };
+    }
+  }
+
+  // 0.1. Correção de IMEI primeiro para que dígitos de IMEI nunca sejam confundidos com valor
   const matchImei = t.match(/\b(?:final\s*(?:do\s*)?imei|imei\s*final|imei)\s*(?:é|e|correto|certo|novo|\s)*[:=-]?\s*#?(\d{4,16})\b/i);
   if (matchImei) {
     return { campo: 'imei', valor: matchImei[1] };
@@ -1575,10 +1651,18 @@ export async function emitirNotinhaVenda(
   linkRecibo?: string;
   pdfBase64?: string;
   nomeArquivoPdf?: string;
+  nomeLoja?: string;
+  erroPdf?: string;
 }> {
   try {
     const pularTrocaEstoque = Boolean(opcoes?.pularCadastroTrocaEstoque);
     const agora = new Date().toISOString();
+    const dataVendaResolvida = resolverDataPagamentoProposta(proposta.dataVenda);
+    const dataPagamentoIso = dataVendaResolvida.dataPagamentoIso;
+    const vendedorLimpo =
+      sanitizarVendedorPublico(usuarioNome) ||
+      sanitizarVendedorPublico(proposta.vendedor) ||
+      'Atendimento';
     const descricao = `Venda WhatsApp - ${proposta.modelo} para ${proposta.clienteNome}`;
 
     // 0. Carrega os dados oficiais da loja (nome, CNPJ, telefone, endereço, logo, assinatura e dias de garantia)
@@ -1614,6 +1698,7 @@ export async function emitirNotinhaVenda(
 
     const lojaIdFinal = dadosLoja?.id || lojaIdCandidata;
     const diasGarantiaLoja = Number(dadosLoja?.garantia_dias || dadosLoja?.dias_garantia || 90);
+    const nomeLojaResolvido = (dadosLoja?.nome || 'Lucas Imports').trim();
 
     // 1. Cadastra ou atualiza o cliente na base de dados da loja
     let clienteId: string | undefined = undefined;
@@ -1751,8 +1836,8 @@ export async function emitirNotinhaVenda(
       valorPago: valorTotalNum,
       saldoDevedor: 0,
       tipoEntrega: 'Varejo',
-      vendedor: usuarioNome,
-      dataPagamento: agora,
+      vendedor: vendedorLimpo,
+      dataPagamento: dataPagamentoIso,
       garantia: `${diasGarantiaLoja} dias`,
       descricao,
       itens: itensVendaPayload,
@@ -1800,6 +1885,7 @@ export async function emitirNotinhaVenda(
         ativo: true,
         status: 'disponivel',
         origem: 'upgrade_venda',
+        dataCadastro: dataPagamentoIso,
         observacoes: `Entrada via Upgrade (Venda WhatsApp - Cliente: ${proposta.clienteNome})`,
       };
     }
@@ -1813,7 +1899,7 @@ export async function emitirNotinhaVenda(
       camposAparelho,
       tradeIn: tradeInPayload,
       origem: 'whatsapp_notinha_automatica',
-      usuarioNome,
+      usuarioNome: vendedorLimpo,
     });
 
     // Caso a venda possua 2 ou mais aparelhos recebidos na troca (múltiplos upgrades), dá entrada dos aparelhos adicionais no estoque
@@ -1835,7 +1921,7 @@ export async function emitirNotinhaVenda(
               quantidade: 1,
               ativo: true,
               status: 'disponivel',
-              dataCadastro: agora,
+              dataCadastro: dataPagamentoIso,
               observacoes: `Entrada via Upgrade (2º Aparelho - Venda WhatsApp - Cliente: ${proposta.clienteNome})`,
             })
             .select('*')
@@ -1846,7 +1932,7 @@ export async function emitirNotinhaVenda(
               aparelhos: [apTrocaInserido as any],
               origem: 'whatsapp_notinha_automatica' as any,
               lojaId: lojaIdFinal,
-              usuarioNome,
+              usuarioNome: vendedorLimpo,
               observacao: `Recebido como troca adicional na venda #${resultado.venda?.id ? String(resultado.venda.id).slice(-6).toUpperCase() : 'OK'}`,
             });
           }
@@ -1888,9 +1974,15 @@ export async function emitirNotinhaVenda(
         ? `🔄 *Troca recebida:* ${proposta.modeloTroca}${sufixoSemTrocaEstoque}\n`
         : '';
 
+    const linhaDataMsg =
+      dataVendaResolvida.ehDataCustomizada || proposta.dataVendaInformada
+        ? `📅 *Data da Compra:* ${dataVendaResolvida.dataBr}\n`
+        : '';
+
     const msgSucesso = `✅ *NOTINHA EMITIDA COM SUCESSO!* 🧾\n` +
       `──────────────────────────\n` +
       `📄 *Venda:* #${vendaId}\n` +
+      linhaDataMsg +
       `👤 *Cliente:* ${proposta.clienteNome}\n` +
       resumoAparelhosMsg +
       `💰 *Valor:* R$ ${Number(proposta.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
@@ -1902,14 +1994,15 @@ export async function emitirNotinhaVenda(
 
     let pdfBase64: string | undefined = undefined;
     let nomeArquivoPdf: string | undefined = undefined;
+    let erroPdf: string | undefined = undefined;
 
     try {
       const pdfBuffer = await gerarReciboPdfBuffer({
         vendaId: vendaUuid,
         codigoVenda: vendaId,
-        dataEmissao: new Date().toLocaleString('pt-BR'),
+        dataEmissao: dataVendaResolvida.dataEmissaoPdf,
         loja: {
-          nome: (dadosLoja?.nome || 'Lucas Imports').trim(),
+          nome: nomeLojaResolvido,
           cnpj: dadosLoja?.cnpj || null,
           telefone: dadosLoja?.telefone || dadosLoja?.dono_whatsapp || null,
           endereco: dadosLoja?.endereco || null,
@@ -1962,14 +2055,15 @@ export async function emitirNotinhaVenda(
           valorFinal: Number(proposta.valorTotal || 0) - (proposta.valorTroca || 0),
         },
         diasGarantia: diasGarantiaLoja,
-        vendedor: usuarioNome,
+        vendedor: vendedorLimpo,
         linkRecibo,
       });
 
       pdfBase64 = pdfBuffer.toString('base64');
       nomeArquivoPdf = `Recibo-${vendaId}.pdf`;
-    } catch (errPdf) {
-      console.warn('Erro ao gerar PDF do recibo:', errPdf);
+    } catch (errPdf: any) {
+      erroPdf = errPdf?.message || String(errPdf);
+      console.error('❌ [Notinha Automática] Erro ao gerar PDF do recibo:', errPdf);
     }
 
     return {
@@ -1979,6 +2073,8 @@ export async function emitirNotinhaVenda(
       linkRecibo,
       pdfBase64,
       nomeArquivoPdf,
+      nomeLoja: nomeLojaResolvido,
+      erroPdf,
     };
   } catch (err: any) {
     console.error('❌ Falha ao emitir notinha automática:', err);
@@ -2351,7 +2447,7 @@ export async function aguardarEBuscarFotosRecentes(
 
       // Se já coletamos fotos, mas o pedido tem múltiplos aparelhos e ainda há outra foto sendo processada pelo OCR, aguarda
       if (fotosColetadas.length > 0 && fotosColetadas.length < qtdAlvo && temFotoProcessandoAtiva) {
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, 300));
         continue;
       }
 
@@ -2381,12 +2477,12 @@ export async function aguardarEBuscarFotosRecentes(
       }
 
       if (temFotoProcessandoAtiva) {
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, 300));
         continue;
       }
 
       if (esperaNovaFotoMs > 0 && Date.now() - inicio < esperaNovaFotoMs) {
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, 300));
         continue;
       }
 
@@ -2506,8 +2602,8 @@ export async function aguardarOuVerificarFotoConsumida(
       // silencioso
     }
 
-    if (Date.now() - inicio + 600 > esperaMs) break;
-    await new Promise((r) => setTimeout(r, 600));
+    if (Date.now() - inicio + 300 > esperaMs) break;
+    await new Promise((r) => setTimeout(r, 300));
   }
 
   return false;
@@ -3162,6 +3258,7 @@ export async function emitirVendaAtacadoComFoto(params: {
       valorTotalNum > 0 && custoTotal > 0 ? Number(((lucro / custoTotal) * 100).toFixed(2)) : 0;
 
     const resumoModelos = itensVendaPayload.map((it) => it.descricao).join(' + ');
+    const vendedorLimpo = sanitizarVendedorPublico(usuarioNome) || 'Atendimento';
     const registroVenda = {
       loja_id: lojaIdFinal,
       clienteNome: vendaAtacado.clienteNome,
@@ -3174,7 +3271,7 @@ export async function emitirVendaAtacadoComFoto(params: {
       valorPago: isFiado ? 0 : valorTotalNum,
       saldoDevedor: isFiado ? valorTotalNum : 0,
       tipoEntrega: 'Atacado',
-      vendedor: usuarioNome,
+      vendedor: vendedorLimpo,
       dataPagamento: agora,
       descricao: `Venda ATACADO WhatsApp - ${resumoModelos} para ${vendaAtacado.clienteNome}`,
       itens: itensVendaPayload,
@@ -3191,7 +3288,7 @@ export async function emitirVendaAtacadoComFoto(params: {
       permitirForaDoEstoque: uniquePermitidos,
       camposAparelho: Object.keys(camposAparelho).length > 0 ? camposAparelho : undefined,
       origem: 'atacado',
-      usuarioNome,
+      usuarioNome: vendedorLimpo,
       observacao: `Venda atacado via foto WhatsApp para ${vendaAtacado.clienteNome}`,
     });
 

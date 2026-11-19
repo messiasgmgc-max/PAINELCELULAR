@@ -237,4 +237,28 @@ _Relatório gerado pelo Painel Phone Center_`;
     assert.equal(itens[3].custo, 2200);
     assert.equal(itens[3].preco, 2500);
   });
+
+  it('lê data de entrada em DD/MM, DD/MM/AA e DD/MM/AAAA sem criar aparelho fantasma', () => {
+    const listaComCabecalho = `Entradas 15/11:
+🔵 17 Pro Max 256gb Azul Lacrado - 2605
+🏜️ 16 Pro Max 256gb Desert 97% - 5177`;
+    const itens1 = parseTextoEntradaAparelhos(listaComCabecalho, '2026-11-19');
+    assert.equal(itens1.length, 2);
+    assert.equal(itens1[0].dataEntrada, '2026-11-15');
+    assert.equal(itens1[1].dataEntrada, '2026-11-15');
+
+    const listaComLinhaData = `Entradas:
+Data de entrada: 12/11/26
+iPhone 13 128gb azul 2200`;
+    const itens2 = parseTextoEntradaAparelhos(listaComLinhaData, '2026-11-19');
+    assert.equal(itens2.length, 1);
+    assert.equal(itens2[0].modelo, 'iPhone 13');
+    assert.equal(itens2[0].dataEntrada, '2026-11-12');
+
+    const listaComAnoCompleto = `Entradas 08/11/2026:
+iPhone 14 128gb preto 2800`;
+    const itens3 = parseTextoEntradaAparelhos(listaComAnoCompleto, '2026-11-19');
+    assert.equal(itens3.length, 1);
+    assert.equal(itens3[0].dataEntrada, '2026-11-08');
+  });
 });

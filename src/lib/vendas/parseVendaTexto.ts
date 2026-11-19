@@ -55,8 +55,109 @@ export interface ParsedVenda {
   valorEntradaTroca?: number | null;
   valorVolta?: number | null;
   dataVenda?: string | null;
+  dataVendaInformada?: boolean;
   observacoes?: string | null;
   camposFaltantes?: string[];
+}
+
+/**
+ * Retorna a data de hoje no fuso oficial de Brasília (America/Sao_Paulo) no formato YYYY-MM-DD.
+ */
+export function obterDataAtualBrasiliaIso(referencia: Date = new Date()): string {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(referencia);
+
+  const ano = partes.find((p) => p.type === 'year')?.value || String(referencia.getUTCFullYear());
+  const mes = partes.find((p) => p.type === 'month')?.value || String(referencia.getUTCMonth() + 1).padStart(2, '0');
+  const dia = partes.find((p) => p.type === 'day')?.value || String(referencia.getUTCDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function criarDataIsoValida(ano: number, mes: number, dia: number): string | null {
+  if (!Number.isInteger(ano) || !Number.isInteger(mes) || !Number.isInteger(dia)) return null;
+  if (ano < 2020 || ano > 2100 || mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+
+  const dt = new Date(Date.UTC(ano, mes - 1, dia));
+  if (dt.getUTCFullYear() !== ano || dt.getUTCMonth() + 1 !== mes || dt.getUTCDate() !== dia) {
+    return null;
+  }
+
+  return `${String(ano).padStart(4, '0')}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+}
+
+/**
+ * Converte datas flexíveis do padrão brasileiro (DD/MM, DD/MM/AA, DD/MM/AAAA) ou ISO (YYYY-MM-DD)
+ * para YYYY-MM-DD validado. Para DD/MM sem ano, usa o ano atual em Brasília (recuando 1 ano se a
+ * data cair mais de 60 dias no futuro, ex.: lançar 28/12 no início de janeiro).
+ */
+export function parseDataFlexivelBr(raw?: string | null, hojeBrPadrao?: string): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const limpo = raw.trim().replace(/\s*([/.-])\s*/g, '$1');
+  if (!limpo) return null;
+
+  const hojeBr = hojeBrPadrao || obterDataAtualBrasiliaIso();
+
+  const matchIso = limpo.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (matchIso) {
+    return criarDataIsoValida(Number(matchIso[1]), Number(matchIso[2]), Number(matchIso[3]));
+  }
+
+  const matchBr = limpo.match(/^(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2}|\d{4}))?$/);
+  if (!matchBr) return null;
+
+  const dia = Number(matchBr[1]);
+  const mes = Number(matchBr[2]);
+  const anoBruto = matchBr[3];
+
+  let ano: number;
+  if (!anoBruto) {
+    const anoAtual = Number(hojeBr.slice(0, 4));
+    ano = anoAtual;
+    const candidata = criarDataIsoValida(ano, mes, dia);
+    if (!candidata) return null;
+
+    const diffDias =
+      (new Date(`${candidata}T12:00:00Z`).getTime() - new Date(`${hojeBr}T12:00:00Z`).getTime()) /
+      (1000 * 60 * 60 * 24);
+    if (diffDias > 60) {
+      return criarDataIsoValida(anoAtual - 1, mes, dia);
+    }
+    return candidata;
+  }
+
+  ano = anoBruto.length === 2 ? 2000 + Number(anoBruto) : Number(anoBruto);
+  return criarDataIsoValida(ano, mes, dia);
+}
+
+/**
+ * Extrai a data explícita do formulário (Data da compra, Data de entrada, Data da venda, Data do pedido, Data: ...)
+ * aceitando DD/MM, DD/MM/AA, DD/MM/AAAA e YYYY-MM-DD, sem jamais confundir com Data de nascimento.
+ */
+export function extrairDataFormularioTexto(texto: string, hojeBrPadrao?: string): string | null {
+  if (!texto || typeof texto !== 'string') return null;
+
+  const linhas = texto.split(/\r?\n/);
+  const regexRotuloData =
+    /^(?:[\p{Extended_Pictographic}\uFE0F\u200D•*_\-\s]*)(?:data\s+(?:d[aeo]\s+)?(?:compra|venda|entrada|pedido|entrega)|data\s*(?:compra|venda|entrada|pedido)|(?:venda|compra|entrada)\s+realizada\s+em|entrada\s+em|data)\s*[:=-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\s*[/.-]\s*\d{1,2}(?:\s*[/.-]\s*(?:\d{4}|\d{2}))?)\b/iu;
+
+  for (const linha of linhas) {
+    const semInvisiveis = linha.replace(/[\u200B-\u200D\uFEFF\u2060]/g, '').trim();
+    if (!semInvisiveis) continue;
+    // Nunca confunde data de nascimento com data da venda/entrada
+    if (/\b(?:nascimento|dt\.?\s*nasc|anivers[aá]rio)\b/i.test(semInvisiveis)) continue;
+
+    const match = semInvisiveis.match(regexRotuloData);
+    if (match?.[1]) {
+      const iso = parseDataFlexivelBr(match[1], hojeBrPadrao);
+      if (iso) return iso;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -224,6 +325,9 @@ export function sanitizarECompletarVendaParsed(
 
   if (!textoTrocaMatch) {
     for (let i = 0; i < linhasParaTroca.length; i++) {
+      if (/^\s*[\p{Extended_Pictographic}\uFE0F\u200D•*_\-\s]*data\s+(?:d[aeo]\s+)?entrada\s*:/iu.test(linhasParaTroca[i])) {
+        continue;
+      }
       const m = linhasParaTroca[i].match(
         /(?:Trade[- ]?in|Upgrade|Troca|Aparelho na troca|Aparelho de entrada|Entrada de troca|Entrada)(?:\s*-\s*Modelo|\s*\/\s*Troca)?\s*:\s*([^\n\r]+)/i
       );
@@ -865,36 +969,28 @@ export function sanitizarECompletarVendaParsed(
     result.aparelhos = [];
   }
 
-  // Sanitização de Data da Venda (evitando data de nascimento ou anos remotos)
+  // Sanitização de Data da Venda / Compra / Entrada (evitando data de nascimento ou anos remotos)
   const nascNorm = (result.cliente?.dataNascimento || '').replace(/\D/g, '');
-  if (result.dataVenda) {
+  const dataExplicitaFormulario = extrairDataFormularioTexto(trimmedText);
+
+  if (dataExplicitaFormulario) {
+    result.dataVenda = dataExplicitaFormulario;
+    result.dataVendaInformada = true;
+  } else if (result.dataVenda) {
     const dataVendaLimpa = String(result.dataVenda).replace(/\D/g, '');
-    let anoVenda = 0;
-    if (result.dataVenda.includes('-')) {
-      anoVenda = parseInt(result.dataVenda.split('-')[0], 10);
-    } else if (result.dataVenda.includes('/')) {
-      anoVenda = parseInt(result.dataVenda.split('/')[2], 10);
-    }
-    if ((nascNorm && dataVendaLimpa === nascNorm) || (anoVenda > 0 && anoVenda < 2020)) {
+    const normalizada = parseDataFlexivelBr(result.dataVenda);
+    if (!normalizada || (nascNorm && dataVendaLimpa === nascNorm)) {
       result.dataVenda = null;
+      result.dataVendaInformada = false;
+    } else {
+      result.dataVenda = normalizada;
+      result.dataVendaInformada = true;
     }
   }
 
   if (!result.dataVenda) {
-    const rotuloVendaMatch = trimmedText.match(
-      /(?:Data da Venda|Data Venda|Data do Pedido|Venda realizada em|Data)\s*:\s*(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/i
-    );
-    if (rotuloVendaMatch) {
-      const rawDate = rotuloVendaMatch[1];
-      if (rawDate.includes('/')) {
-        const [d, m, y] = rawDate.split('/');
-        result.dataVenda = `${y}-${m}-${d}`;
-      } else {
-        result.dataVenda = rawDate;
-      }
-    } else {
-      result.dataVenda = new Date().toISOString().split('T')[0];
-    }
+    result.dataVenda = obterDataAtualBrasiliaIso();
+    result.dataVendaInformada = false;
   }
 
   return result;

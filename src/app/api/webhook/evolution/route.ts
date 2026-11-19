@@ -187,6 +187,30 @@ export async function GET() {
   );
 }
 
+// ── AUXILIAR: Gravação não-bloqueante em whatsapp_logs ──
+function registrarLogWhatsappAsync(registro: {
+  loja_id: string;
+  contato: string;
+  mensagem: string;
+  created_at?: string;
+}) {
+  const tarefa = async () => {
+    try {
+      await supabase.from('whatsapp_logs').insert({
+        ...registro,
+        created_at: registro.created_at || new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('[whatsapp_logs] Falha silenciosa ao gravar log:', err);
+    }
+  };
+  try {
+    after(tarefa);
+  } catch {
+    void tarefa();
+  }
+}
+
 // ── AUXILIAR: Enviar Mensagem via Evolution API com Retorno de MessageId ──
 async function despacharMensagemWhatsAppComRetorno(
   instanceName: string,
@@ -210,6 +234,7 @@ async function despacharMensagemWhatsAppComRetorno(
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: {
         'Content-Type': 'application/json',
         apikey: EVOLUTION_API_KEY,
@@ -217,10 +242,6 @@ async function despacharMensagemWhatsAppComRetorno(
       body: JSON.stringify({
         number: cleanDestination,
         text: cleanText,
-        options: {
-          delay: 800,
-          presence: 'composing',
-        },
       }),
     });
 
@@ -246,7 +267,7 @@ async function despacharMensagemWhatsApp(instanceName: string, destination: stri
   return res.ok;
 }
 
-// ── AUXILIAR: Enviar Documento/PDF via Evolution API ──
+// ── AUXILIAR: Enviar Documento/PDF via Evolution API (com retry 12/13 dígitos e timeout) ──
 async function enviarDocumentoWhatsAppDestino(
   instanceName: string,
   destination: string,
@@ -264,39 +285,63 @@ async function enviarDocumentoWhatsAppDestino(
   const cleanDestination = isGroup ? destination : normDest.replace(/\D/g, '');
   if (!cleanDestination) return { ok: false, error: 'Destino inválido' };
 
+  const mediaLimpa = String(base64 || '')
+    .trim()
+    .replace(/^data:application\/pdf;base64,/i, '')
+    .replace(/\s+/g, '');
+  if (!mediaLimpa) return { ok: false, error: 'PDF vazio' };
+
   const targetInstance = instanceName || DEFAULT_INSTANCE;
   const endpoint = `${EVOLUTION_URL}/message/sendMedia/${targetInstance}`;
+  const captionLimpa = caption ? sanitizarTextoWhatsApp(caption) : '';
+  const nomeArqFinal = fileName || 'Recibo.pdf';
 
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: EVOLUTION_API_KEY,
-      },
-      body: JSON.stringify({
-        number: cleanDestination,
-        mediatype: 'document',
-        mimetype: 'application/pdf',
-        fileName: fileName || 'Recibo.pdf',
-        caption: caption ? sanitizarTextoWhatsApp(caption) : '',
-        media: base64,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.warn(`[Evolution API] Falha ao enviar documento para ${cleanDestination}:`, errText);
-      return { ok: false, error: errText };
-    }
-
-    console.log(`✅ Documento PDF "${fileName}" enviado com sucesso para ${cleanDestination} via "${targetInstance}"`);
-    return { ok: true };
-  } catch (err: any) {
-    console.error('❌ Falha ao enviar documento via Evolution API:', err?.message || err);
-    return { ok: false, error: err?.message };
+  const destinos = [cleanDestination];
+  if (!isGroup && cleanDestination.startsWith('55') && cleanDestination.length === 13) {
+    destinos.push(cleanDestination.slice(0, 4) + cleanDestination.slice(5));
+  } else if (!isGroup && cleanDestination.startsWith('55') && cleanDestination.length === 12) {
+    destinos.push(cleanDestination.slice(0, 4) + '9' + cleanDestination.slice(4));
   }
+
+  let ultimoErro = '';
+  for (const numeroDestino of destinos) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        signal: AbortSignal.timeout(25000),
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: EVOLUTION_API_KEY,
+        },
+        body: JSON.stringify({
+          number: numeroDestino,
+          mediatype: 'document',
+          mimetype: 'application/pdf',
+          fileName: nomeArqFinal,
+          caption: captionLimpa,
+          media: mediaLimpa,
+        }),
+      });
+
+      if (response.ok) {
+        console.log(`✅ Documento PDF "${nomeArqFinal}" enviado com sucesso para ${numeroDestino} via "${targetInstance}"`);
+        return { ok: true };
+      }
+
+      const errText = await response.text();
+      ultimoErro = `Evolution API (${response.status}): ${errText.slice(0, 200)}`;
+      console.warn(`[Evolution API] Falha ao enviar documento para ${numeroDestino}:`, ultimoErro);
+    } catch (err: any) {
+      ultimoErro = err?.message || 'Erro de conexão com Evolution API';
+      console.error('❌ Falha ao enviar documento via Evolution API:', ultimoErro);
+    }
+  }
+
+  return { ok: false, error: ultimoErro || 'Falha ao enviar documento' };
 }
+
+// Cache de suporte a edição de mensagem por instância (evita 2 roundtrips falhos a cada confirmação)
+const cacheSuporteEdicaoEvolution = new Map<string, { endpoint: string | null; exp: number }>();
 
 // ── AUXILIAR: Editar Mensagem Original ou Enviar como Resposta ──
 async function editarOuResponderMensagemWhatsApp(
@@ -314,15 +359,23 @@ async function editarOuResponderMensagemWhatsApp(
   const cleanDestination = isGroup ? destination : normDest.replace(/\D/g, '');
 
   if (messageId) {
-    const editEndpoints = [
-      `${EVOLUTION_URL}/chat/updateMessage/${targetInstance}`,
-      `${EVOLUTION_URL}/message/updateMessage/${targetInstance}`,
-    ];
+    const agora = Date.now();
+    const cached = cacheSuporteEdicaoEvolution.get(targetInstance);
+    const endpointsParaTestar =
+      cached && agora < cached.exp
+        ? cached.endpoint
+          ? [cached.endpoint]
+          : []
+        : [
+            `${EVOLUTION_URL}/chat/updateMessage/${targetInstance}`,
+            `${EVOLUTION_URL}/message/updateMessage/${targetInstance}`,
+          ];
 
-    for (const ep of editEndpoints) {
+    for (const ep of endpointsParaTestar) {
       try {
         const res = await fetch(ep, {
           method: 'POST',
+          signal: AbortSignal.timeout(3500),
           headers: {
             'Content-Type': 'application/json',
             apikey: EVOLUTION_API_KEY,
@@ -338,12 +391,17 @@ async function editarOuResponderMensagemWhatsApp(
         });
 
         if (res.ok) {
+          cacheSuporteEdicaoEvolution.set(targetInstance, { endpoint: ep, exp: agora + 300_000 });
           console.log(`✅ Mensagem ${messageId} editada com sucesso no chat ${cleanDestination}`);
           return true;
         }
       } catch {
         // Tenta o próximo ou cai no fallback
       }
+    }
+
+    if (endpointsParaTestar.length > 0) {
+      cacheSuporteEdicaoEvolution.set(targetInstance, { endpoint: null, exp: agora + 300_000 });
     }
   }
 
@@ -805,18 +863,44 @@ async function definirModoChat(remoteJid: string, modo: ModoChat): Promise<boole
   }
 }
 
+// ── CACHES DE CURTO PRAZO PARA REDUZIR LATÊNCIA DE CONSULTAS REPETIDAS NO SUPABASE ──
+const cacheLojaIdPorInstancia = new Map<string, { lojaId: string | null; exp: number }>();
+const cacheUsuarioResolvido = new Map<string, { usuario: UsuarioResolvido | null; exp: number }>();
+const cachePlanoLoja = new Map<string, { plano: TipoPlano; exp: number }>();
+const TTL_CACHE_LOJA_MS = 2 * 60 * 1000; // 2 minutos
+const TTL_CACHE_USUARIO_MS = 60 * 1000; // 1 minuto
+
 // ── AUXILIAR: Resolver Loja e Usuário a partir do Telefone de Quem Enviou ──
 async function resolverLojaEUsuarioPorTelefone(
   authorPhone: string,
   instanceName?: string,
-  isGroup: boolean = false
+  isGroup: boolean = false,
+  lojaIdConhecida?: string | null
 ): Promise<UsuarioResolvido | null> {
   const normPhone = normalizarTelefoneOuLid(authorPhone);
   const variants = obterVariantesTelefone(normPhone);
   if (variants.length === 0) return null;
 
-  // Resolve loja vinculada à instância da Evolution API (ex: lucasimports)
-  const lojaIdInstancia = instanceName ? await resolverLojaId(instanceName) : null;
+  const chaveCache = `${normPhone}|${instanceName || ''}|${isGroup ? 'g' : 'p'}|${lojaIdConhecida || ''}`;
+  const agoraCache = Date.now();
+  const cachedUser = cacheUsuarioResolvido.get(chaveCache);
+  if (cachedUser && agoraCache < cachedUser.exp) {
+    return cachedUser.usuario;
+  }
+
+  const salvarECachear = (res: UsuarioResolvido | null): UsuarioResolvido | null => {
+    if (cacheUsuarioResolvido.size > 300) cacheUsuarioResolvido.clear();
+    cacheUsuarioResolvido.set(chaveCache, { usuario: res, exp: Date.now() + TTL_CACHE_USUARIO_MS });
+    return res;
+  };
+
+  // Resolve loja vinculada à instância da Evolution API (reaproveita se já resolvida antes)
+  const lojaIdInstancia =
+    lojaIdConhecida !== undefined
+      ? lojaIdConhecida
+      : instanceName
+        ? await resolverLojaId(instanceName)
+        : null;
 
   // 0. Caso seja o Moderador Master / Dono do Bot (Lucas), concede acesso irrestrito
   if (verificarSeModeradorOuDonoGeral(normPhone)) {
@@ -834,156 +918,160 @@ async function resolverLojaEUsuarioPorTelefone(
       lojaAlvo = lAtiva;
     }
 
-    return {
+    return salvarECachear({
       lojaId: lojaAlvo?.id || 'loja-master',
       lojaNome: lojaAlvo?.nome || 'Lucas Imports',
-      usuarioNome: 'Lucas (Moderador Master)',
+      usuarioNome: 'Lucas',
       papel: 'owner',
       planoTipo: 'pro',
       planoStatus: 'vitalicio',
       dataVencimento: undefined,
       diasRestantes: 9999,
-    };
+    });
   }
 
-  // 1. Busca prioritária na tabela 'tecnicos' (Vendedores, Gerentes e Equipe cadastrados no sistema)
+  // 1-3. Busca em paralelo nas tabelas tecnicos, whatsapp_permissoes e perfis (filtrando pela loja da instância primeiro quando disponível)
   try {
-    const { data: tecs, error: errTecs } = await supabase
-      .from('tecnicos')
-      .select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo');
+    const qTecs = supabase.from('tecnicos').select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo');
+    const qPerms = supabase.from('whatsapp_permissoes').select('loja_id, telefone, nome, papel, ativo').eq('ativo', true);
+    const qPerfis = supabase.from('perfis').select('id, nome, telefone, loja_id, role');
 
-    if (!errTecs && tecs && tecs.length > 0) {
-      const matchingTecs = tecs.filter((t) => {
+    const [resTecs, resPerms, resPerfis] = await Promise.all([
+      lojaIdInstancia ? qTecs.eq('loja_id', lojaIdInstancia) : qTecs,
+      lojaIdInstancia ? qPerms.eq('loja_id', lojaIdInstancia) : qPerms,
+      lojaIdInstancia ? qPerfis.eq('loja_id', lojaIdInstancia) : qPerfis,
+    ]);
+
+    let tecs = resTecs.data || [];
+    let perms = resPerms.data || [];
+    let perfis = resPerfis.data || [];
+
+    const acharTec = (lista: typeof tecs) => {
+      const matchingTecs = lista.filter((t) => {
         if (t.ativo === false) return false;
         return telefonesConferem(t.whatsapp, normPhone) || telefonesConferem(t.telefone, normPhone);
       });
+      return (lojaIdInstancia ? matchingTecs.find((t) => t.loja_id === lojaIdInstancia) : null) || matchingTecs[0];
+    };
 
-      // Prioriza a loja da instância se houver mais de um registro
-      const matchTec = (lojaIdInstancia ? matchingTecs.find((t) => t.loja_id === lojaIdInstancia) : null) || matchingTecs[0];
+    const acharPerm = (lista: typeof perms) => {
+      const matchingPerms = lista.filter((p) => telefonesConferem(p.telefone, normPhone));
+      return (lojaIdInstancia ? matchingPerms.find((x) => x.loja_id === lojaIdInstancia) : null) || matchingPerms[0];
+    };
 
-      if (matchTec && matchTec.loja_id) {
-        const { data: loja } = await supabase
-          .from('lojas')
-          .select('id, nome, plano_status, data_vencimento')
-          .eq('id', matchTec.loja_id)
-          .maybeSingle();
+    let matchTec = acharTec(tecs);
+    let matchPerm = !matchTec ? acharPerm(perms) : undefined;
+    let matchPerfil = !matchTec && !matchPerm ? perfis.find((p) => telefonesConferem(p.telefone, normPhone)) : undefined;
 
-        if (loja) {
-          let diasRestantes = 0;
-          if (loja.data_vencimento) {
-            const vDate = new Date(loja.data_vencimento);
-            const agora = new Date();
-            diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
-          }
+    // Se estava filtrado por lojaIdInstancia e não achou no privado (ex.: multi-loja), faz fallback global em paralelo
+    if (lojaIdInstancia && !isGroup && !matchTec && !matchPerm && !matchPerfil) {
+      const [gTecs, gPerms, gPerfis] = await Promise.all([
+        supabase.from('tecnicos').select('id, nome, telefone, whatsapp, cargo, tipo, loja_id, ativo'),
+        supabase.from('whatsapp_permissoes').select('loja_id, telefone, nome, papel, ativo').eq('ativo', true),
+        supabase.from('perfis').select('id, nome, telefone, loja_id, role'),
+      ]);
+      tecs = gTecs.data || [];
+      perms = gPerms.data || [];
+      perfis = gPerfis.data || [];
+      matchTec = acharTec(tecs);
+      matchPerm = !matchTec ? acharPerm(perms) : undefined;
+      matchPerfil = !matchTec && !matchPerm ? perfis.find((p) => telefonesConferem(p.telefone, normPhone)) : undefined;
+    }
 
-          const cargoStr = String(matchTec.cargo || matchTec.tipo || '').toLowerCase();
-          const papel: 'owner' | 'staff' | 'motoboy' =
-            ['owner', 'dono', 'admin', 'gerente', 'administrador', 'proprietario'].some((c) => cargoStr.includes(c))
-              ? 'owner'
-              : ['motoboy', 'entregador'].some((c) => cargoStr.includes(c))
-              ? 'motoboy'
-              : 'staff';
+    if (matchTec && matchTec.loja_id) {
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('id, nome, plano_status, data_vencimento')
+        .eq('id', matchTec.loja_id)
+        .maybeSingle();
 
-          return {
-            lojaId: loja.id,
-            lojaNome: loja.nome || 'Phone Center',
-            usuarioNome: matchTec.nome || 'Vendedor',
-            usuarioId: matchTec.id,
-            papel,
-            planoTipo: 'pro',
-            planoStatus: loja.plano_status || 'ativo',
-            dataVencimento: loja.data_vencimento || undefined,
-            diasRestantes,
-          };
+      if (loja) {
+        let diasRestantes = 0;
+        if (loja.data_vencimento) {
+          const vDate = new Date(loja.data_vencimento);
+          diasRestantes = Math.ceil((vDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
         }
+
+        const cargoStr = String(matchTec.cargo || matchTec.tipo || '').toLowerCase();
+        const papel: 'owner' | 'staff' | 'motoboy' =
+          ['owner', 'dono', 'admin', 'gerente', 'administrador', 'proprietario'].some((c) => cargoStr.includes(c))
+            ? 'owner'
+            : ['motoboy', 'entregador'].some((c) => cargoStr.includes(c))
+            ? 'motoboy'
+            : 'staff';
+
+        return salvarECachear({
+          lojaId: loja.id,
+          lojaNome: loja.nome || 'Phone Center',
+          usuarioNome: matchTec.nome || 'Vendedor',
+          usuarioId: matchTec.id,
+          papel,
+          planoTipo: 'pro',
+          planoStatus: loja.plano_status || 'ativo',
+          dataVencimento: loja.data_vencimento || undefined,
+          diasRestantes,
+        });
+      }
+    }
+
+    if (matchPerm) {
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('id, nome, plano_status, data_vencimento')
+        .eq('id', matchPerm.loja_id)
+        .maybeSingle();
+
+      if (loja) {
+        let diasRestantes = 0;
+        if (loja.data_vencimento) {
+          const vDate = new Date(loja.data_vencimento);
+          diasRestantes = Math.ceil((vDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        }
+
+        return salvarECachear({
+          lojaId: loja.id,
+          lojaNome: loja.nome || 'Phone Center',
+          usuarioNome: matchPerm.nome || 'Colaborador',
+          papel: (matchPerm.papel as any) || 'staff',
+          planoTipo: 'pro',
+          planoStatus: loja.plano_status || 'ativo',
+          dataVencimento: loja.data_vencimento || undefined,
+          diasRestantes,
+        });
+      }
+    }
+
+    if (matchPerfil && matchPerfil.loja_id) {
+      const { data: loja } = await supabase
+        .from('lojas')
+        .select('id, nome, plano_status, data_vencimento')
+        .eq('id', matchPerfil.loja_id)
+        .maybeSingle();
+
+      if (loja) {
+        return salvarECachear({
+          lojaId: loja.id,
+          lojaNome: loja.nome || 'Phone Center',
+          usuarioNome: matchPerfil.nome || 'Equipe',
+          usuarioId: matchPerfil.id,
+          papel: matchPerfil.role === 'admin' || matchPerfil.role === 'super_admin' ? 'owner' : 'staff',
+          planoTipo: 'pro',
+          planoStatus: loja.plano_status || 'ativo',
+          dataVencimento: loja.data_vencimento || undefined,
+        });
       }
     }
   } catch (err) {
-    console.warn('Erro ao consultar tecnicos:', err);
-  }
-
-  // 2. Busca na tabela whatsapp_permissoes
-  try {
-    const { data: perms } = await supabase
-      .from('whatsapp_permissoes')
-      .select('loja_id, telefone, nome, papel, ativo')
-      .eq('ativo', true);
-
-    if (perms && perms.length > 0) {
-      const matchingPerms = perms.filter((p) => telefonesConferem(p.telefone, normPhone));
-      const p = (lojaIdInstancia ? matchingPerms.find((x) => x.loja_id === lojaIdInstancia) : null) || matchingPerms[0];
-
-      if (p) {
-        const { data: loja } = await supabase
-          .from('lojas')
-          .select('id, nome, plano_status, data_vencimento')
-          .eq('id', p.loja_id)
-          .maybeSingle();
-
-        if (loja) {
-          let diasRestantes = 0;
-          if (loja.data_vencimento) {
-            const vDate = new Date(loja.data_vencimento);
-            const agora = new Date();
-            diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
-          }
-
-          return {
-            lojaId: loja.id,
-            lojaNome: loja.nome || 'Phone Center',
-            usuarioNome: p.nome || 'Colaborador',
-            papel: (p.papel as any) || 'staff',
-            planoTipo: 'pro',
-            planoStatus: loja.plano_status || 'ativo',
-            dataVencimento: loja.data_vencimento || undefined,
-            diasRestantes,
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Erro ao consultar whatsapp_permissoes:', err);
-  }
-
-  // 3. Busca na tabela perfis (usuários cadastrados no painel web)
-  try {
-    const { data: perfis } = await supabase
-      .from('perfis')
-      .select('id, nome, telefone, loja_id, role');
-
-    if (perfis && perfis.length > 0) {
-      const matchPerfil = perfis.find((p) => telefonesConferem(p.telefone, normPhone));
-      if (matchPerfil && matchPerfil.loja_id) {
-        const { data: loja } = await supabase
-          .from('lojas')
-          .select('id, nome, plano_status, data_vencimento')
-          .eq('id', matchPerfil.loja_id)
-          .maybeSingle();
-
-        if (loja) {
-          return {
-            lojaId: loja.id,
-            lojaNome: loja.nome || 'Phone Center',
-            usuarioNome: matchPerfil.nome || 'Equipe',
-            usuarioId: matchPerfil.id,
-            papel: matchPerfil.role === 'admin' || matchPerfil.role === 'super_admin' ? 'owner' : 'staff',
-            planoTipo: 'pro',
-            planoStatus: loja.plano_status || 'ativo',
-            dataVencimento: loja.data_vencimento || undefined,
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Erro ao consultar perfis:', err);
+    console.warn('Erro ao consultar equipe/permissoes/perfis:', err);
   }
 
   // 4. Busca na tabela lojas (dono da loja)
   try {
-    const { data: lojas } = await supabase
+    const qLojas = supabase
       .from('lojas')
       .select('id, nome, telefone, dono_whatsapp, plano_status, data_vencimento')
       .eq('ativo', true);
+    const { data: lojas } = lojaIdInstancia && isGroup ? await qLojas.eq('id', lojaIdInstancia) : await qLojas;
 
     if (lojas && lojas.length > 0) {
       const lojasFiltradas = (lojaIdInstancia ? lojas.filter((l) => l.id === lojaIdInstancia) : lojas);
@@ -995,11 +1083,10 @@ async function resolverLojaEUsuarioPorTelefone(
         let diasRestantes = 0;
         if (matchLoja.data_vencimento) {
           const vDate = new Date(matchLoja.data_vencimento);
-          const agora = new Date();
-          diasRestantes = Math.ceil((vDate.getTime() - agora.getTime()) / (1000 * 60 * 60 * 24));
+          diasRestantes = Math.ceil((vDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
         }
 
-        return {
+        return salvarECachear({
           lojaId: matchLoja.id,
           lojaNome: matchLoja.nome || 'Phone Center',
           usuarioNome: 'Proprietário',
@@ -1008,7 +1095,7 @@ async function resolverLojaEUsuarioPorTelefone(
           planoStatus: matchLoja.plano_status || 'ativo',
           dataVencimento: matchLoja.data_vencimento || undefined,
           diasRestantes,
-        };
+        });
       }
     }
   } catch (err) {
@@ -1017,7 +1104,7 @@ async function resolverLojaEUsuarioPorTelefone(
 
   // 5. Fallback por instância (EXCLUSIVO PARA GRUPOS @g.us)
   if (isGroup && instanceName) {
-    const lojaIdFallback = await resolverLojaId(instanceName);
+    const lojaIdFallback = lojaIdInstancia || (await resolverLojaId(instanceName));
     if (lojaIdFallback) {
       const { data: loja } = await supabase
         .from('lojas')
@@ -1026,28 +1113,37 @@ async function resolverLojaEUsuarioPorTelefone(
         .maybeSingle();
 
       if (loja) {
-        return {
+        return salvarECachear({
           lojaId: loja.id,
           lojaNome: loja.nome || 'Phone Center',
-          usuarioNome: 'Lojista (Grupo)',
+          usuarioNome: 'Atendimento',
           papel: 'staff',
           planoTipo: 'pro',
           planoStatus: loja.plano_status || 'ativo',
           dataVencimento: loja.data_vencimento || undefined,
-        };
+        });
       }
     }
   }
 
-  return null;
+  return salvarECachear(null);
 }
 
 async function resolverLojaId(instanceName?: string): Promise<string | null> {
   if (!instanceName) return null;
 
+  const agora = Date.now();
+  const cached = cacheLojaIdPorInstancia.get(instanceName);
+  if (cached && agora < cached.exp) {
+    return cached.lojaId;
+  }
+
   if (instanceName.startsWith('loja-')) {
     const extractedId = instanceName.replace('loja-', '').trim();
-    if (extractedId.length >= 30) return extractedId;
+    if (extractedId.length >= 30) {
+      cacheLojaIdPorInstancia.set(instanceName, { lojaId: extractedId, exp: agora + TTL_CACHE_LOJA_MS });
+      return extractedId;
+    }
   }
 
   // Busca na tabela whatsapp_sessions pelo session_name
@@ -1058,7 +1154,10 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
       .eq('session_name', instanceName)
       .maybeSingle();
 
-    if (session?.loja_id) return session.loja_id;
+    if (session?.loja_id) {
+      cacheLojaIdPorInstancia.set(instanceName, { lojaId: session.loja_id, exp: agora + TTL_CACHE_LOJA_MS });
+      return session.loja_id;
+    }
   } catch (eSess) {
     console.warn('Aviso busca session por instanceName:', eSess);
   }
@@ -1072,12 +1171,16 @@ async function resolverLojaId(instanceName?: string): Promise<string | null> {
         const cleanNome = (l.nome || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         return cleanNome.includes(cleanInst) || cleanInst.includes(cleanNome);
       });
-      if (lojaMatch) return lojaMatch.id;
+      if (lojaMatch) {
+        cacheLojaIdPorInstancia.set(instanceName, { lojaId: lojaMatch.id, exp: agora + TTL_CACHE_LOJA_MS });
+        return lojaMatch.id;
+      }
     }
   } catch (eLoja) {
     console.warn('Aviso busca lojas por nome:', eLoja);
   }
 
+  cacheLojaIdPorInstancia.set(instanceName, { lojaId: null, exp: agora + 30_000 });
   return null;
 }
 
@@ -1223,6 +1326,9 @@ async function verificarSeLojaLucasImports(lojaId: string | null, instanceName: 
   return false;
 }
 
+// Cache do endpoint de mídia funcional por instância (evita 1 chamada 404 a cada foto/áudio)
+const cacheEndpointMidiaEvolution = new Map<string, 'find' | 'get'>();
+
 // ── AUXILIAR: Buscar Base64 de Mídia na Evolution API caso não venha no webhook ──
 async function buscarMidiaBase64Evolution(
   instanceName: string,
@@ -1234,68 +1340,80 @@ async function buscarMidiaBase64Evolution(
   if (!EVOLUTION_URL || !EVOLUTION_API_KEY) return null;
   const targetInstance = instanceName || DEFAULT_INSTANCE;
 
-  // 1. Tenta POST /chat/findMediaBase64/${targetInstance}
-  try {
-    const res = await fetch(`${EVOLUTION_URL}/chat/findMediaBase64/${targetInstance}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: EVOLUTION_API_KEY,
-      },
-      body: JSON.stringify({
-        message: {
-          key: {
-            id: messageId,
-            ...(remoteJid ? { remoteJid } : {}),
-          },
+  const tentarFind = async () => {
+    try {
+      const res = await fetch(`${EVOLUTION_URL}/chat/findMediaBase64/${targetInstance}`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(12000),
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: EVOLUTION_API_KEY,
         },
-        convertToMp4: false,
-      }),
-    });
+        body: JSON.stringify({
+          message: {
+            key: {
+              id: messageId,
+              ...(remoteJid ? { remoteJid } : {}),
+            },
+          },
+          convertToMp4: false,
+        }),
+      });
 
-    if (res.ok) {
-      const data = await res.json();
-      const b64 = data.base64 || data.data?.base64 || data.media;
-      if (b64 && typeof b64 === 'string') {
-        return {
-          base64: b64,
-          mimetype: data.mimetype || defaultMimeType,
-        };
+      if (res.ok) {
+        const data = await res.json();
+        const b64 = data.base64 || data.data?.base64 || data.media;
+        if (b64 && typeof b64 === 'string') {
+          cacheEndpointMidiaEvolution.set(targetInstance, 'find');
+          return {
+            base64: b64,
+            mimetype: data.mimetype || defaultMimeType,
+          };
+        }
       }
+    } catch (err) {
+      console.warn('⚠️ Falha ao buscar media via /chat/findMediaBase64:', err);
     }
-  } catch (err) {
-    console.warn('⚠️ Falha ao buscar media via /chat/findMediaBase64:', err);
-  }
+    return null;
+  };
 
-  // 2. Tenta POST /chat/getBase64FromMediaMessage/${targetInstance}
-  try {
-    const res2 = await fetch(`${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${targetInstance}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: EVOLUTION_API_KEY,
-      },
-      body: JSON.stringify({
-        message: messageObj,
-        convertToMp4: false,
-      }),
-    });
+  const tentarGet = async () => {
+    try {
+      const res2 = await fetch(`${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${targetInstance}`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(12000),
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: EVOLUTION_API_KEY,
+        },
+        body: JSON.stringify({
+          message: messageObj,
+          convertToMp4: false,
+        }),
+      });
 
-    if (res2.ok) {
-      const data2 = await res2.json();
-      const b64_2 = data2.base64 || data2.data?.base64 || data2.media;
-      if (b64_2 && typeof b64_2 === 'string') {
-        return {
-          base64: b64_2,
-          mimetype: data2.mimetype || defaultMimeType,
-        };
+      if (res2.ok) {
+        const data2 = await res2.json();
+        const b64_2 = data2.base64 || data2.data?.base64 || data2.media;
+        if (b64_2 && typeof b64_2 === 'string') {
+          cacheEndpointMidiaEvolution.set(targetInstance, 'get');
+          return {
+            base64: b64_2,
+            mimetype: data2.mimetype || defaultMimeType,
+          };
+        }
       }
+    } catch (err2) {
+      console.warn('⚠️ Falha ao buscar media via /chat/getBase64FromMediaMessage:', err2);
     }
-  } catch (err2) {
-    console.warn('⚠️ Falha ao buscar media via /chat/getBase64FromMediaMessage:', err2);
-  }
+    return null;
+  };
 
-  return null;
+  const preferido = cacheEndpointMidiaEvolution.get(targetInstance);
+  if (preferido === 'get') {
+    return (await tentarGet()) || (await tentarFind());
+  }
+  return (await tentarFind()) || (await tentarGet());
 }
 
 // ── AUXILIAR: Checagem de IMEI Roubado / Bloqueio de Segurança ──
@@ -1754,8 +1872,13 @@ async function obterAntiFloodTimestamp(chave: string): Promise<number | null> {
   return null;
 }
 
-// ── AUXILIAR: Obter tipo do plano da loja ──
+// ── AUXILIAR: Obter tipo do plano da loja (com cache curto de 2 min) ──
 async function obterPlanoLoja(lojaId: string): Promise<TipoPlano> {
+  const agora = Date.now();
+  const cached = cachePlanoLoja.get(lojaId);
+  if (cached && agora < cached.exp) {
+    return cached.plano;
+  }
   try {
     const { data: loja } = await supabase
       .from('lojas')
@@ -1763,10 +1886,12 @@ async function obterPlanoLoja(lojaId: string): Promise<TipoPlano> {
       .eq('id', lojaId)
       .maybeSingle();
     const tipo = String((loja as any)?.plano_tipo || '').toLowerCase();
-    if (tipo === 'avancado' || tipo === 'intermediario' || tipo === 'entrada') {
-      return tipo as TipoPlano;
-    }
-    return 'entrada';
+    const plano: TipoPlano =
+      tipo === 'avancado' || tipo === 'intermediario' || tipo === 'entrada'
+        ? (tipo as TipoPlano)
+        : 'entrada';
+    cachePlanoLoja.set(lojaId, { plano, exp: agora + TTL_CACHE_LOJA_MS });
+    return plano;
   } catch {
     return 'entrada';
   }
@@ -2325,6 +2450,150 @@ async function notificarPropostaNoGrupoEstoque(
   }
 }
 
+// ── AUXILIAR: Despacho paralelo de confirmação, link digital e PDF após emissão da notinha ──
+async function despacharPosEmissaoNotinha(params: {
+  instanceName: string;
+  targetDestination: string;
+  lojaEfetivaId: string;
+  nomeLojaFallback: string;
+  proposta: PropostaNotinha;
+  resultadoEmissao: Awaited<ReturnType<typeof emitirNotinhaVenda>>;
+  chavesLimpar: string[];
+  idMensagemEditar?: string;
+  enviarTexto: (inst: string, dest: string, text: string) => Promise<boolean>;
+}) {
+  const {
+    instanceName,
+    targetDestination,
+    lojaEfetivaId,
+    nomeLojaFallback,
+    proposta,
+    resultadoEmissao,
+    chavesLimpar,
+    idMensagemEditar,
+    enviarTexto,
+  } = params;
+
+  const nomeDaLoja = resultadoEmissao.nomeLoja || nomeLojaFallback || 'Nossa Loja';
+  const nomeArquivo = resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId || 'OK'}.pdf`;
+
+  if (!resultadoEmissao.sucesso) {
+    if (idMensagemEditar) {
+      await editarOuResponderMensagemWhatsApp(instanceName, targetDestination, idMensagemEditar, resultadoEmissao.mensagem);
+    } else {
+      await enviarTexto(instanceName, targetDestination, resultadoEmissao.mensagem);
+    }
+    return;
+  }
+
+  const tarefas: Promise<any>[] = [
+    Promise.resolve(supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesLimpar)).catch(() => null),
+  ];
+
+  // 1. Verifica se há telefone válido do cliente para disparo do Recibo Digital e PDF em paralelo
+  const telLimpo = proposta.telefone ? formatarTelefoneWhatsApp(proposta.telefone) : '';
+  const temWhatsCliente = Boolean(resultadoEmissao.linkRecibo && telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000'));
+
+  let pdfEnviadoCliente = false;
+  let linkEnviadoCliente = false;
+
+  if (temWhatsCliente) {
+    const destinoCliente = `${telLimpo}@s.whatsapp.net`;
+    const primeiroNomeCli = (proposta.clienteNome || 'Cliente').trim().split(/\s+/)[0];
+    const avisoAnexo = resultadoEmissao.pdfBase64
+      ? '\n\n_Segue em anexo o arquivo PDF oficial do seu recibo e termo de garantia!_ 📱✨'
+      : '\n\n_Guarde este link, ele é o comprovante oficial da sua garantia!_ 📱✨';
+    const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}${avisoAnexo}`;
+
+    tarefas.push(
+      (async () => {
+        try {
+          const [resTextoCli, resPdfCli] = await Promise.all([
+            enviarTexto(instanceName, destinoCliente, msgReciboCliente),
+            resultadoEmissao.pdfBase64
+              ? enviarDocumentoWhatsAppDestino(
+                  instanceName,
+                  destinoCliente,
+                  resultadoEmissao.pdfBase64,
+                  nomeArquivo,
+                  `📄 Recibo de Compra e Termo de Garantia - ${nomeDaLoja}`
+                )
+              : Promise.resolve({ ok: false, error: resultadoEmissao.erroPdf || 'PDF não gerado' }),
+          ]);
+
+          linkEnviadoCliente = Boolean(resTextoCli);
+          pdfEnviadoCliente = Boolean(resPdfCli?.ok);
+
+          if (!resPdfCli?.ok) {
+            console.error(
+              `❌ [PDF Cliente] Falha ao enviar PDF da venda #${resultadoEmissao.vendaId} para ${telLimpo}:`,
+              resPdfCli?.error || resultadoEmissao.erroPdf
+            );
+          }
+
+          if (lojaEfetivaId) {
+            registrarLogWhatsappAsync({
+              loja_id: lojaEfetivaId,
+              contato: `${proposta.clienteNome} (${proposta.telefone})`,
+              mensagem: `[RECIBO_WHATSAPP] Link: ${linkEnviadoCliente ? 'OK' : 'FALHA'} | PDF: ${pdfEnviadoCliente ? 'OK' : 'FALHA'} | ${resultadoEmissao.linkRecibo}`,
+            });
+          }
+        } catch (errZapCli) {
+          console.warn('Erro ao disparar recibo para o WhatsApp do cliente:', errZapCli);
+        }
+      })()
+    );
+  }
+
+  // 2. Envia o PDF imediatamente no grupo/chat da equipe em paralelo (não precisa esperar o cliente!)
+  let pdfEnviadoEquipe = false;
+  if (resultadoEmissao.pdfBase64) {
+    tarefas.push(
+      enviarDocumentoWhatsAppDestino(
+        instanceName,
+        targetDestination,
+        resultadoEmissao.pdfBase64,
+        nomeArquivo,
+        `🖨️ *PDF da Compra #${resultadoEmissao.vendaId} gerado com sucesso!* Pronto para impressão na loja.`
+      ).then((resEquipe) => {
+        pdfEnviadoEquipe = resEquipe.ok;
+        if (!resEquipe.ok) {
+          console.error(
+            `❌ [PDF Equipe] Falha ao enviar PDF da venda #${resultadoEmissao.vendaId} para ${targetDestination}:`,
+            resEquipe.error
+          );
+        }
+      })
+    );
+  } else {
+    console.error(
+      `❌ [PDF Equipe] PDF da venda #${resultadoEmissao.vendaId} não foi gerado:`,
+      resultadoEmissao.erroPdf || 'motivo desconhecido'
+    );
+  }
+
+  // Aguarda os envios paralelos concluírem para reportar status real na confirmação da equipe
+  await Promise.all(tarefas);
+
+  let mensagemFinalEquipe = resultadoEmissao.mensagem;
+  if (temWhatsCliente) {
+    if (linkEnviadoCliente && pdfEnviadoCliente) {
+      mensagemFinalEquipe += `\n\n📲 *Recibo Digital e PDF enviados para o WhatsApp do cliente!* (${proposta.telefone})`;
+    } else if (linkEnviadoCliente) {
+      mensagemFinalEquipe += `\n\n📲 *Recibo Digital enviado para o WhatsApp do cliente!* (${proposta.telefone})\n⚠️ _O anexo PDF não pôde ser entregue ao cliente no momento._`;
+    }
+  }
+  if (!resultadoEmissao.pdfBase64 || !pdfEnviadoEquipe) {
+    mensagemFinalEquipe += `\n⚠️ _Aviso: não foi possível enviar o arquivo PDF neste chat. Use o link do Recibo Digital acima para imprimir._`;
+  }
+
+  if (idMensagemEditar) {
+    await editarOuResponderMensagemWhatsApp(instanceName, targetDestination, idMensagemEditar, mensagemFinalEquipe);
+  } else {
+    await enviarTexto(instanceName, targetDestination, mensagemFinalEquipe);
+  }
+}
+
 // ── POST: Processamento Principal do Webhook ──
 export async function POST(request: Request) {
   try {
@@ -2346,25 +2615,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'JSON inválido no corpo da requisição.' }, { status: 400 });
     }
 
-    console.log('📡 [Evolution Webhook Event]:', payload.event || payload.type || 'Evento sem nome');
-
-    // 1. Extração da instância
+    // 1. Extração da instância e tipo de evento
     const instanceName =
       payload.instance ||
       payload.instanceName ||
       payload.data?.instance ||
       DEFAULT_INSTANCE;
 
-    let lojaId = await resolverLojaId(instanceName);
-
-    // 2. Trata eventos de Conexão / Status / QR Code
     const eventName = String(payload.event || payload.type || '').toLowerCase();
 
+    // 2. Trata eventos de Conexão / Status / QR Code
     if (eventName.includes('qrcode') || eventName.includes('connection')) {
+      const lojaIdConexao = await resolverLojaId(instanceName);
       const qrCodeBase64 = payload.data?.qrcode?.base64 || payload.data?.qrcode || payload.qrcode;
       const connectionState = payload.data?.state || payload.data?.status || payload.state || payload.status;
 
-      if (lojaId && (qrCodeBase64 || connectionState)) {
+      if (lojaIdConexao && (qrCodeBase64 || connectionState)) {
         let statusBanco = 'disconnected';
         if (['open', 'connected', 'isLogged', 'inChat'].includes(connectionState)) {
           statusBanco = 'connected';
@@ -2374,7 +2640,7 @@ export async function POST(request: Request) {
 
         await supabase.from('whatsapp_sessions').upsert(
           {
-            loja_id: lojaId,
+            loja_id: lojaIdConexao,
             status: statusBanco,
             qr_code: statusBanco === 'connected' ? null : qrCodeBase64 || null,
             session_name: instanceName,
@@ -2397,7 +2663,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'ok', message: 'Evento ignorado.' }, { status: 200 });
     }
 
-    // Extrai dados da mensagem
+    // Extrai dados da mensagem ANTES de consultar o banco (evita DB hits em mensagens próprias/status)
     const msgData = payload.data?.message ? payload.data : payload;
     const key = msgData.key || {};
     const remoteJid = String(key.remoteJid || '');
@@ -2406,6 +2672,10 @@ export async function POST(request: Request) {
     if (key.fromMe || remoteJid.includes('status@broadcast')) {
       return NextResponse.json({ status: 'ok', message: 'Mensagem própria ou broadcast ignorada.' }, { status: 200 });
     }
+
+    console.log('📡 [Evolution Webhook Event]:', payload.event || payload.type || 'Evento sem nome');
+
+    let lojaId = await resolverLojaId(instanceName);
 
     // ── IDEMPOTÊNCIA: a Evolution reentrega o webhook em timeout/erro ──
     // Sem esta trava um retry registra a mesma venda duas vezes.
@@ -2571,7 +2841,7 @@ export async function POST(request: Request) {
     }
 
     // ── IDENTIFICAÇÃO MULTI-LOJA DO USUÁRIO PELO NÚMERO DO WHATSAPP ──
-    const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName, isGroup);
+    const usuarioResolvido = await resolverLojaEUsuarioPorTelefone(authorPhone, instanceName, isGroup, lojaId);
     if (usuarioResolvido?.lojaId) {
       lojaId = usuarioResolvido.lojaId;
     }
@@ -2649,7 +2919,6 @@ export async function POST(request: Request) {
       if (acaoReacao) {
         console.log(`👍 [Reação Notinha] Emoji "${emojiReacao}" -> Ação: ${acaoReacao} para mensagem ${idMensagemReagida} em ${remoteJid}`);
 
-        let chaveEncontrada = `notinha:${remoteJid}:${idMensagemReagida}`;
         const chavesReacao = [
           `notinha:${remoteJid}:${idMensagemReagida}`,
           `notinha:${targetDestination}:${idMensagemReagida}`,
@@ -2683,74 +2952,21 @@ export async function POST(request: Request) {
               { pularCadastroTrocaEstoque: acaoReacao === 'confirmar_sem_troca' }
             );
 
-            if (resultadoEmissao.sucesso) {
-              await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
+            await despacharPosEmissaoNotinha({
+              instanceName,
+              targetDestination,
+              lojaEfetivaId,
+              nomeLojaFallback: nomeLoja,
+              proposta: propostaPendente,
+              resultadoEmissao,
+              chavesLimpar: [
                 `notinha:${remoteJid}:${idMensagemReagida}`,
                 `notinha:${remoteJid}:ultima`,
                 `notinha:${targetDestination}:ultima`,
-              ]);
-            }
-
-            // Disparo automático do Recibo Digital e PDF para o WhatsApp do cliente se houver telefone
-            if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
-              const telLimpo = formatarTelefoneWhatsApp(propostaPendente.telefone);
-              if (telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000')) {
-                const destinoCliente = `${telLimpo}@s.whatsapp.net`;
-                const primeiroNomeCli = (propostaPendente.clienteNome || 'Cliente').trim().split(/\s+/)[0];
-
-                let nomeDaLoja = 'Nossa Loja';
-                if (lojaEfetivaId) {
-                  const { data: lojaDb } = await supabase.from('lojas').select('nome').eq('id', lojaEfetivaId).maybeSingle();
-                  if (lojaDb?.nome) nomeDaLoja = lojaDb.nome;
-                }
-
-                const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Segue em anexo o arquivo PDF oficial do seu recibo e termo de garantia!_ 📱✨`;
-
-                try {
-                  await enviarMensagemWhatsApp(instanceName, destinoCliente, msgReciboCliente);
-
-                  // Envia PDF em anexo para o cliente
-                  if (resultadoEmissao.pdfBase64) {
-                    await enviarDocumentoWhatsAppDestino(
-                      instanceName,
-                      destinoCliente,
-                      resultadoEmissao.pdfBase64,
-                      resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
-                      `📄 Recibo de Compra e Termo de Garantia - ${nomeDaLoja}`
-                    );
-                  }
-
-                  resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital e PDF enviados para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
-
-                  await supabase.from('whatsapp_logs').insert({
-                    loja_id: lojaEfetivaId,
-                    contato: `${propostaPendente.clienteNome} (${propostaPendente.telefone})`,
-                    mensagem: `[RECIBO_WHATSAPP] Recibo e PDF enviados para o cliente: ${resultadoEmissao.linkRecibo}`,
-                    created_at: new Date().toISOString(),
-                  });
-                } catch (errZapCli) {
-                  console.warn('Erro ao disparar recibo para o WhatsApp do cliente:', errZapCli);
-                }
-              }
-            }
-
-            await editarOuResponderMensagemWhatsApp(
-              instanceName,
-              targetDestination,
-              idMensagemReagida,
-              resultadoEmissao.mensagem
-            );
-
-            // Envia o PDF da compra diretamente para o chat/grupo para impressão imediata da equipe
-            if (resultadoEmissao.sucesso && resultadoEmissao.pdfBase64) {
-              await enviarDocumentoWhatsAppDestino(
-                instanceName,
-                targetDestination,
-                resultadoEmissao.pdfBase64,
-                resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
-                `🖨️ *PDF da Compra #${resultadoEmissao.vendaId} gerado com sucesso!* Pronto para impressão na loja.`
-              );
-            }
+              ],
+              idMensagemEditar: idMensagemReagida,
+              enviarTexto: enviarMensagemWhatsApp,
+            });
 
             return NextResponse.json({
               status: resultadoEmissao.sucesso ? 'ok' : 'error',
@@ -3331,20 +3547,24 @@ export async function POST(request: Request) {
 
     console.log(`📩 Mensagem recebida de ${pushName} (${isGroup ? 'Grupo ' + remoteJid : senderPhone}): "${textContent.slice(0, 60)}..."`);
 
-    // 4. Salva log no Supabase (`whatsapp_logs`)
+    // 4. Salva log no Supabase (`whatsapp_logs`) em segundo plano sem travar a resposta
     if (lojaId) {
-      await supabase.from('whatsapp_logs').insert({
+      registrarLogWhatsappAsync({
         loja_id: lojaId,
         contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
         mensagem: textContent,
-        created_at: new Date().toISOString(),
       });
     }
 
     const lowerText = textContent.toLowerCase().trim();
     const ehComandoExplicito = textContent.trim().startsWith('!');
+    const ehComandoModo = lowerText.startsWith('!modo') || lowerText.startsWith('!config');
 
-    // Plano e papel resolvidos uma única vez: valem tanto para os atalhos
+    if (modoChat === 'off' && !ehComandoModo) {
+      return NextResponse.json({ status: 'ok', message: 'Chat desativado via !modo off.' }, { status: 200 });
+    }
+
+    // Plano e papel resolvidos uma única vez (com cache de 2 min): valem tanto para os atalhos
     // !comando quanto para as ações que a IA executa.
     const planoLoja: TipoPlano = ehModeradorMaster
       ? 'avancado'
@@ -3354,7 +3574,6 @@ export async function POST(request: Request) {
     const papelCapability: PapelUsuario = (papelUsuario as PapelUsuario) || 'staff';
 
     // ── VERIFICAÇÃO DO MODO DO CHAT (CONFIGURÁVEL VIA !modo OU !config) ──
-    const ehComandoModo = lowerText.startsWith('!modo') || lowerText.startsWith('!config');
     const ehComandoFechamento = /^!(?:fechamento|fechamentodia|resumodia)\b/i.test(lowerText);
     const ehComandoEmprestados = ehComandoListarEmprestados(textContent);
     const emprestimoDetectado = detectarComandoAparelhoEmprestado(textContent);
@@ -3607,65 +3826,16 @@ export async function POST(request: Request) {
             { pularCadastroTrocaEstoque: acaoConfirmacaoTexto === 'confirmar_sem_troca' }
           );
 
-          if (resultadoEmissao.sucesso) {
-            await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
-          }
-
-          // Disparo automático do Recibo Digital e PDF para o WhatsApp do cliente se houver telefone
-          if (resultadoEmissao.sucesso && resultadoEmissao.linkRecibo && propostaPendente.telefone) {
-            const telLimpo = formatarTelefoneWhatsApp(propostaPendente.telefone);
-            if (telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000')) {
-              const destinoCliente = `${telLimpo}@s.whatsapp.net`;
-              const primeiroNomeCli = (propostaPendente.clienteNome || 'Cliente').trim().split(/\s+/)[0];
-
-              let nomeDaLoja = 'Nossa Loja';
-              if (lojaEfetivaId) {
-                const { data: lojaDb } = await supabase.from('lojas').select('nome').eq('id', lojaEfetivaId).maybeSingle();
-                if (lojaDb?.nome) nomeDaLoja = lojaDb.nome;
-              }
-
-              const msgReciboCliente = `Olá, *${primeiroNomeCli}*! 🎉\nAgradecemos pela preferência na *${nomeDaLoja}*!\n\nAqui está o seu *Recibo Digital* com os detalhes da compra e o *Termo de Garantia*:\n🔗 ${resultadoEmissao.linkRecibo}\n\n_Segue em anexo o arquivo PDF oficial do seu recibo e termo de garantia!_ 📱✨`;
-
-              try {
-                await enviarMensagemWhatsApp(instanceName, destinoCliente, msgReciboCliente);
-
-                // Envia PDF em anexo para o cliente
-                if (resultadoEmissao.pdfBase64) {
-                  await enviarDocumentoWhatsAppDestino(
-                    instanceName,
-                    destinoCliente,
-                    resultadoEmissao.pdfBase64,
-                    resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
-                    `📄 Recibo de Compra e Termo de Garantia - ${nomeDaLoja}`
-                  );
-                }
-
-                resultadoEmissao.mensagem += `\n\n📲 *Recibo Digital e PDF enviados para o WhatsApp do cliente!* (${propostaPendente.telefone})`;
-
-                await supabase.from('whatsapp_logs').insert({
-                  loja_id: lojaEfetivaId,
-                  contato: `${propostaPendente.clienteNome} (${propostaPendente.telefone})`,
-                  mensagem: `[RECIBO_WHATSAPP] Recibo e PDF enviados para o cliente: ${resultadoEmissao.linkRecibo}`,
-                  created_at: new Date().toISOString(),
-                });
-              } catch (errZapCli) {
-                console.warn('Erro ao disparar recibo para o WhatsApp do cliente:', errZapCli);
-              }
-            }
-          }
-
-          await enviarMensagemWhatsApp(instanceName, targetDestination, resultadoEmissao.mensagem);
-
-          // Envia o PDF da compra diretamente para o chat/grupo para impressão imediata da equipe
-          if (resultadoEmissao.sucesso && resultadoEmissao.pdfBase64) {
-            await enviarDocumentoWhatsAppDestino(
-              instanceName,
-              targetDestination,
-              resultadoEmissao.pdfBase64,
-              resultadoEmissao.nomeArquivoPdf || `Recibo-${resultadoEmissao.vendaId}.pdf`,
-              `🖨️ *PDF da Compra #${resultadoEmissao.vendaId} gerado com sucesso!* Pronto para impressão na loja.`
-            );
-          }
+          await despacharPosEmissaoNotinha({
+            instanceName,
+            targetDestination,
+            lojaEfetivaId,
+            nomeLojaFallback: nomeLoja,
+            proposta: propostaPendente,
+            resultadoEmissao,
+            chavesLimpar: chavesBusca,
+            enviarTexto: enviarMensagemWhatsApp,
+          });
 
           return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
         } else {
@@ -3829,6 +3999,9 @@ export async function POST(request: Request) {
           }
         } else if (correcaoDetectada.campo === 'cliente') {
           proposta.clienteNome = correcaoDetectada.valor;
+        } else if (correcaoDetectada.campo === 'data') {
+          proposta.dataVenda = correcaoDetectada.valor;
+          proposta.dataVendaInformada = true;
         } else if (correcaoDetectada.campo === 'imei' || correcaoDetectada.campo === 'cor') {
           const { data: apsEstoque } = await supabase
             .from('aparelhos')
@@ -3990,30 +4163,30 @@ export async function POST(request: Request) {
           : [vendaDetectada.aparelho];
 
       const algumSemImei = listaAparelhosPedido.some((ap) => !ap?.imei);
-      let fotosRecentesVinculadas: FotoRecenteCache[] = [];
+      const esperaNovaFotoMs = marcacaoBot.foiMarcado ? 2400 : 700;
+      const modelosAlvo = listaAparelhosPedido.map((ap) => ap?.modelo);
 
-      if (algumSemImei) {
-        const esperaNovaFotoMs = marcacaoBot.foiMarcado ? 3600 : 1200;
-        const modelosAlvo = listaAparelhosPedido.map((ap) => ap?.modelo);
-        fotosRecentesVinculadas = await aguardarEBuscarFotosRecentes(
-          supabase,
-          lojaId,
-          remoteJid,
-          authorPhone,
-          modelosAlvo,
-          10,
-          esperaNovaFotoMs
-        );
-      }
-
-      // Busca estoque completo (priorizando ativos) para conferir aparelhos pelo IMEI (15 dígitos ou final de 4 dígitos) ou modelo
-      const { data: apsEstoque } = await supabase
-        .from('aparelhos')
-        .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
-        .eq('loja_id', lojaId)
-        .order('ativo', { ascending: false })
-        .order('dataCadastro', { ascending: false })
-        .limit(600);
+      // Busca fotos recentes (se necessário) e estoque completo EM PARALELO para reduzir latência
+      const [fotosRecentesVinculadas, { data: apsEstoque }] = await Promise.all([
+        algumSemImei
+          ? aguardarEBuscarFotosRecentes(
+              supabase,
+              lojaId,
+              remoteJid,
+              authorPhone,
+              modelosAlvo,
+              10,
+              esperaNovaFotoMs
+            )
+          : Promise.resolve([] as FotoRecenteCache[]),
+        supabase
+          .from('aparelhos')
+          .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+          .eq('loja_id', lojaId)
+          .order('ativo', { ascending: false })
+          .order('dataCadastro', { ascending: false })
+          .limit(600),
+      ]);
 
       const proposta = construirPropostaNotinha({
         id: `notinha-${Date.now()}`,
@@ -6008,19 +6181,99 @@ Digite: *!broadcast agora*`;
       let resumoAgendamentosHoje = '';
       let resumoGarantiasAtivas = '';
 
-      if (lojaId) {
-        // 1. Busca aparelhos detalhados do estoque com imei, codigo, custo, precos e data de entrada
-        const { data: apsBrutos } = await supabase
-          .from('aparelhos')
-          .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saude_bateria, status, condicao, dataCadastro')
-          .eq('loja_id', lojaId)
-          .eq('ativo', true)
-          .not('status', 'in', '(vendido,baixado)')
-          .limit(80);
-        // estaNoEstoque também descarta o legado com condicao='vendido'.
-        const aps = (apsBrutos || []).filter(estaNoEstoque);
+      const chaveSessao = `${remoteJid}:${authorPhone || senderPhone}`;
+      let historicoChat: MensagemHistorico[] = [];
 
-        if (aps && aps.length > 0) {
+      if (lojaId) {
+        const hojeIso = new Date().toISOString().split('T')[0];
+
+        // Executa todas as consultas de contexto do Copiloto IA EM PARALELO
+        const [
+          resApsBrutos,
+          resApsSaidos,
+          fiadoConsolidado,
+          analiticaRes,
+          resOs,
+          resAg,
+          resGar,
+          histRes,
+        ] = await Promise.all([
+          Promise.resolve(
+            supabase
+              .from('aparelhos')
+              .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, saude_bateria, status, condicao, dataCadastro')
+              .eq('loja_id', lojaId)
+              .eq('ativo', true)
+              .not('status', 'in', '(vendido,baixado)')
+              .limit(80)
+          ).catch(() => ({ data: null })),
+          Promise.resolve(
+            supabase
+              .from('aparelhos')
+              .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, cliente, data_saida, dataCadastro, motivo_saida, status')
+              .eq('loja_id', lojaId)
+              .or('status.in.(vendido,baixado),ativo.eq.false')
+              .order('data_saida', { ascending: false, nullsFirst: false })
+              .limit(30)
+          ).catch((saidaErr) => {
+            console.warn('[Copiloto IA] Erro ao carregar aparelhos saídos:', saidaErr);
+            return { data: null };
+          }),
+          buscarFiadoConsolidadoLoja(supabase, lojaId).catch(() => ({
+            totalFiadoEmAberto: 0,
+            detalhesDevedoresFormatado: '',
+          })),
+          buscarResumoVendasLoja(supabase, lojaId).catch((eErr) => {
+            console.error('[Copiloto IA] Erro ao carregar analítica de vendas:', eErr);
+            return null;
+          }),
+          Promise.resolve(
+            supabase
+              .from('ordens_servico')
+              .select('numeroOS, clienteNome, aparelhoModelo, defeito, status')
+              .eq('loja_id', lojaId)
+              .eq('ativo', true)
+              .neq('status', 'entregue')
+              .neq('status', 'cancelado')
+              .order('dataEntrada', { ascending: false })
+              .limit(10)
+          ).catch((osErr) => {
+            console.warn('[Copiloto IA] Erro ao carregar resumo de OS:', osErr);
+            return { data: null };
+          }),
+          Promise.resolve(
+            supabase
+              .from('agendamentos')
+              .select('clienteNome, hora, tipoServico, aparelhoModelo, status')
+              .eq('loja_id', lojaId)
+              .eq('ativo', true)
+              .eq('data', hojeIso)
+              .order('hora', { ascending: true })
+              .limit(10)
+          ).catch((agErr) => {
+            console.warn('[Copiloto IA] Erro ao carregar resumo de Agendamentos:', agErr);
+            return { data: null };
+          }),
+          Promise.resolve(
+            supabase
+              .from('garantias')
+              .select('clienteNome, aparelhoModelo, dataFim, status')
+              .eq('loja_id', lojaId)
+              .eq('ativo', true)
+              .eq('status', 'ativa')
+              .order('dataFim', { ascending: true })
+              .limit(10)
+          ).catch((garErr) => {
+            console.warn('[Copiloto IA] Erro ao carregar resumo de Garantias:', garErr);
+            return { data: null };
+          }),
+          obterHistoricoConversaRecente(chaveSessao),
+        ]);
+
+        historicoChat = histRes;
+
+        const aps = (resApsBrutos.data || []).filter(estaNoEstoque);
+        if (aps.length > 0) {
           totalEstoque = aps.length;
           const setModelos = new Set(aps.map((a) => [a.modelo, a.capacidade].filter(Boolean).join(' ')));
           modelosEstoque = Array.from(setModelos);
@@ -6035,7 +6288,6 @@ Digite: *!broadcast agora*`;
             return `• ${a.modelo} ${a.capacidade || ''} ${a.cor || ''}${bat}${dataCad}${preco}${custo}${imeiStr}${codStr}`;
           }).join('\n');
 
-          // Entradas recentes no estoque
           const apsOrdenadosPorEntrada = [...aps]
             .sort((a, b) => new Date(b.dataCadastro || 0).getTime() - new Date(a.dataCadastro || 0).getTime())
             .slice(0, 20);
@@ -6046,106 +6298,44 @@ Digite: *!broadcast agora*`;
           }).join('\n');
         }
 
-        // 1.1. Busca histórico de aparelhos que saíram/foram vendidos recentemente
-        try {
-          const { data: apsSaidos } = await supabase
-            .from('aparelhos')
-            .select('codigo, imei, modelo, capacidade, cor, preco, precoAtacado, custo, cliente, data_saida, dataCadastro, motivo_saida, status')
-            .eq('loja_id', lojaId)
-            .or('status.in.(vendido,baixado),ativo.eq.false')
-            .order('data_saida', { ascending: false, nullsFirst: false })
-            .limit(30);
-
-          if (apsSaidos && apsSaidos.length > 0) {
-            detalhesSaidasFormatado = apsSaidos.map((s: any) => {
-              const dataSaidaStr = s.data_saida ? formatarDataSegura(s.data_saida) : 'Data n/d';
-              const dataEntradaStr = s.dataCadastro ? ` (Entrada: ${formatarDataSegura(s.dataCadastro)})` : '';
-              const quem = s.cliente ? ` | Para: ${s.cliente}` : (s.motivo_saida ? ` | Motivo: ${s.motivo_saida}` : '');
-              const imeiStr = s.imei ? ` | IMEI: ${s.imei}` : '';
-              const codStr = s.codigo ? ` | Cód: ${s.codigo}` : '';
-              const val = s.preco || s.precoAtacado ? ` | R$ ${(s.preco || s.precoAtacado).toLocaleString('pt-BR')}` : '';
-              return `• ${s.modelo} ${s.capacidade || ''} ${s.cor || ''} [Saída: ${dataSaidaStr}]${dataEntradaStr}${quem}${imeiStr}${codStr}${val}`;
-            }).join('\n');
-          }
-        } catch (saidaErr) {
-          console.warn('[Copiloto IA] Erro ao carregar aparelhos saídos:', saidaErr);
+        const apsSaidos = resApsSaidos.data || [];
+        if (apsSaidos.length > 0) {
+          detalhesSaidasFormatado = apsSaidos.map((s: any) => {
+            const dataSaidaStr = s.data_saida ? formatarDataSegura(s.data_saida) : 'Data n/d';
+            const dataEntradaStr = s.dataCadastro ? ` (Entrada: ${formatarDataSegura(s.dataCadastro)})` : '';
+            const quem = s.cliente ? ` | Para: ${s.cliente}` : (s.motivo_saida ? ` | Motivo: ${s.motivo_saida}` : '');
+            const imeiStr = s.imei ? ` | IMEI: ${s.imei}` : '';
+            const codStr = s.codigo ? ` | Cód: ${s.codigo}` : '';
+            const val = s.preco || s.precoAtacado ? ` | R$ ${(s.preco || s.precoAtacado).toLocaleString('pt-BR')}` : '';
+            return `• ${s.modelo} ${s.capacidade || ''} ${s.cor || ''} [Saída: ${dataSaidaStr}]${dataEntradaStr}${quem}${imeiStr}${codStr}${val}`;
+          }).join('\n');
         }
 
-        // 2. Busca total de fiado em aberto e detalhamento dos devedores (consolidando cadastrados + vendas pendentes)
-        const fiadoConsolidado = await buscarFiadoConsolidadoLoja(supabase, lojaId);
         totalFiadoEmAberto = fiadoConsolidado.totalFiadoEmAberto;
         detalhesDevedoresFormatado = fiadoConsolidado.detalhesDevedoresFormatado;
 
-        // 3. Busca analítica de vendas abrangente (Hoje, Semana, Mês, Atacado vs Varejo, Lucro e Histórico)
-        try {
-          analiticaVendas = await buscarResumoVendasLoja(supabase, lojaId);
-          if (analiticaVendas) {
-            totalVendasHoje = analiticaVendas.hoje.total;
-          }
-        } catch (eErr) {
-          console.error('[Copiloto IA] Erro ao carregar analítica de vendas:', eErr);
+        if (analiticaRes) {
+          analiticaVendas = analiticaRes;
+          totalVendasHoje = analiticaVendas.hoje.total;
         }
 
-        // 4. Busca Ordens de Serviço (OS) em aberto
-        try {
-          const { data: osRows } = await supabase
-            .from('ordens_servico')
-            .select('numeroOS, clienteNome, aparelhoModelo, defeito, status')
-            .eq('loja_id', lojaId)
-            .eq('ativo', true)
-            .neq('status', 'entregue')
-            .neq('status', 'cancelado')
-            .order('dataEntrada', { ascending: false })
-            .limit(10);
-
-          if (osRows && osRows.length > 0) {
-            resumoOSAbertas = osRows.map((o: any) => `• OS #${o.numeroOS || '?'}: ${o.clienteNome || 'Cliente'} (${o.aparelhoModelo || 'Aparelho'}) - Defeito: ${o.defeito || '-'} [Status: ${o.status}]`).join('\n');
-          }
-        } catch (osErr) {
-          console.warn('[Copiloto IA] Erro ao carregar resumo de OS:', osErr);
+        const osRows = resOs.data || [];
+        if (osRows.length > 0) {
+          resumoOSAbertas = osRows.map((o: any) => `• OS #${o.numeroOS || '?'}: ${o.clienteNome || 'Cliente'} (${o.aparelhoModelo || 'Aparelho'}) - Defeito: ${o.defeito || '-'} [Status: ${o.status}]`).join('\n');
         }
 
-        // 5. Busca Agendamentos de Hoje
-        try {
-          const hojeIso = new Date().toISOString().split('T')[0];
-          const { data: agRows } = await supabase
-            .from('agendamentos')
-            .select('clienteNome, hora, tipoServico, aparelhoModelo, status')
-            .eq('loja_id', lojaId)
-            .eq('ativo', true)
-            .eq('data', hojeIso)
-            .order('hora', { ascending: true })
-            .limit(10);
-
-          if (agRows && agRows.length > 0) {
-            resumoAgendamentosHoje = agRows.map((a: any) => `• ${a.hora ? `${a.hora} - ` : ''}${a.clienteNome || 'Cliente'}: ${a.tipoServico || 'Serviço'} (${a.aparelhoModelo || '-'})`).join('\n');
-          }
-        } catch (agErr) {
-          console.warn('[Copiloto IA] Erro ao carregar resumo de Agendamentos:', agErr);
+        const agRows = resAg.data || [];
+        if (agRows.length > 0) {
+          resumoAgendamentosHoje = agRows.map((a: any) => `• ${a.hora ? `${a.hora} - ` : ''}${a.clienteNome || 'Cliente'}: ${a.tipoServico || 'Serviço'} (${a.aparelhoModelo || '-'})`).join('\n');
         }
 
-        // 6. Busca Garantias Ativas
-        try {
-          const { data: garRows } = await supabase
-            .from('garantias')
-            .select('clienteNome, aparelhoModelo, dataFim, status')
-            .eq('loja_id', lojaId)
-            .eq('ativo', true)
-            .eq('status', 'ativa')
-            .order('dataFim', { ascending: true })
-            .limit(10);
-
-          if (garRows && garRows.length > 0) {
-            resumoGarantiasAtivas = garRows.map((g: any) => `• ${g.clienteNome || 'Cliente'} - ${g.aparelhoModelo || 'Aparelho'} (Válida até: ${g.dataFim || '-'})`).join('\n');
-          }
-        } catch (garErr) {
-          console.warn('[Copiloto IA] Erro ao carregar resumo de Garantias:', garErr);
+        const garRows = resGar.data || [];
+        if (garRows.length > 0) {
+          resumoGarantiasAtivas = garRows.map((g: any) => `• ${g.clienteNome || 'Cliente'} - ${g.aparelhoModelo || 'Aparelho'} (Válida até: ${g.dataFim || '-'})`).join('\n');
         }
+      } else {
+        historicoChat = await obterHistoricoConversaRecente(chaveSessao);
       }
-
-      // Recupera histórico recente de até 3 minutos do usuário no chat privado
-      const chaveSessao = `${remoteJid}:${authorPhone || senderPhone}`;
-      const historicoChat = await obterHistoricoConversaRecente(chaveSessao);
 
       const respostaConversaIA = await responderConversaNaturalComGemini(textContent, {
         nomeLoja,

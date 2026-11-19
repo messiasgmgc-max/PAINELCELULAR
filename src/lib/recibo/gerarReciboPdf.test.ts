@@ -102,3 +102,18 @@ test('gerarReciboPdfBuffer inclui logoUrl e assinaturaUrl em base64 da loja', as
   assert.ok(buffer.length > 1200);
   assert.equal(buffer.slice(0, 4).toString(), '%PDF');
 });
+
+test('gerarReciboPdfBuffer remove rótulo interno (Moderador Master) do vendedor', async () => {
+  const buffer = await gerarReciboPdfBuffer({
+    vendaId: '99999999-b19d-4289-a4a2-bac8955d06e7',
+    codigoVenda: '888888',
+    loja: { nome: 'Lucas Imports' },
+    cliente: { nome: 'Teste Cliente' },
+    aparelho: { modelo: 'iPhone 16', valor: 4200 },
+    pagamento: { forma: 'pix', valorTotal: 4200, valorFinal: 4200 },
+    vendedor: 'Lucas (Moderador Master)',
+  });
+
+  assert.equal(buffer.slice(0, 4).toString(), '%PDF');
+  assert.equal(buffer.toString('latin1').toLowerCase().includes('moderador'), false);
+});

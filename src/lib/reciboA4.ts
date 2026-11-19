@@ -1,3 +1,5 @@
+import { sanitizarVendedorPublico } from './recibo/publico';
+
 export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForEmail: boolean = false) {
   const safeDataPagamento = (() => {
     if (!venda?.dataPagamento) return new Date();
@@ -195,7 +197,7 @@ export function generateReciboA4Html(venda: any, loja: any, cliente: any, isForE
             </td>
             <td style="text-align: right; vertical-align: top; font-size: 11px;">
               Data: ${dataAtual} às ${horaAtual}<br>
-              VENDEDOR: ${venda.vendedor || 'Não informado'}<br>
+              VENDEDOR: ${sanitizarVendedorPublico(venda.vendedor) || 'Atendimento'}<br>
               <b>RECIBO DA VENDA: #${(venda.id || '').slice(-6).toUpperCase()}</b>
             </td>
           </tr>

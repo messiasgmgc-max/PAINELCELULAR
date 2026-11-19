@@ -102,6 +102,36 @@ export function mascararEmail(valor: unknown): string {
   return `${usuario.charAt(0)}***@${dominio}`;
 }
 
+const TAGS_INTERNAS_VENDEDOR =
+  /\s*\(\s*(?:moderador(?:\s+(?:master|m[aá]ximo|geral))?|super\s*admin|admin(?:istrador)?|owner|dono|propriet[aá]rio|master|bot|ia|voc[eê]|grupo|equipe)\s*\)\s*/gi;
+
+/**
+ * Remove rótulos internos/administrativos do nome do vendedor exibido ao cliente
+ * (ex.: "Lucas (Moderador Master)" -> "Lucas", "WhatsApp (Lucas)" -> "Lucas").
+ */
+export function sanitizarVendedorPublico(valor: unknown): string {
+  if (typeof valor !== 'string') return '';
+  let nome = valor.trim();
+  if (!nome) return '';
+
+  const matchWhatsapp = nome.match(/^whatsapp\s*\(([^)]+)\)$/i);
+  if (matchWhatsapp?.[1]) {
+    nome = matchWhatsapp[1].trim();
+  }
+
+  nome = nome
+    .replace(TAGS_INTERNAS_VENDEDOR, ' ')
+    .replace(/\s*[-–—|]\s*(?:moderador(?:\s+(?:master|m[aá]ximo|geral))?|super\s*admin|owner|dono\s+do\s+bot)\s*$/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!nome || /^(?:lojista|bot(?:\s+whatsapp)?|whatsapp|sistema)$/i.test(nome)) {
+    return '';
+  }
+
+  return nome;
+}
+
 export interface ReciboPublico {
   venda: Registro;
   loja: Registro | null;
@@ -114,9 +144,14 @@ export function montarReciboPublico(
   cliente: Registro | null | undefined
 ): ReciboPublico {
   const itens = Array.isArray(venda.itens) ? (venda.itens as Registro[]) : [];
+  const vendaPublica = escolher(venda, CAMPOS_VENDA_RECIBO);
+  if ('vendedor' in vendaPublica) {
+    const vendedorLimpo = sanitizarVendedorPublico(vendaPublica.vendedor);
+    vendaPublica.vendedor = vendedorLimpo || null;
+  }
   return {
     venda: {
-      ...escolher(venda, CAMPOS_VENDA_RECIBO),
+      ...vendaPublica,
       itens: itens.map((item) => escolher(item, CAMPOS_ITEM_RECIBO)),
     },
     loja: loja ? escolher(loja, CAMPOS_LOJA_RECIBO) : null,

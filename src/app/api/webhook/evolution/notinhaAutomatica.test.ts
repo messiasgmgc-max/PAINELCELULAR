@@ -1931,6 +1931,116 @@ test('detectarVendaAtacadoComFoto reconhece GM700 colado e detectarVendaAtacadoP
   assert.equal(rpcCalls[0].args.p_venda.itens[0].imei, '359999888877896');
 });
 
+test('emitirNotinhaVenda respeita data do formulário (DD/MM, DD/MM/AA, DD/MM/AAAA), limpa Moderador Master e gera PDF', async () => {
+  const textoForm = `Para finalizar seu pedido, preencha os dados abaixo 👇
+
+Data de entrada: 06/11/26
+
+👤 DADOS PESSOAIS
+• Nome completo: Mariana Souza
+• CPF: 12345678901
+• Telefone / WhatsApp: 31 998877665
+
+💳 FORMA DE PAGAMENTO
+Valor total: 4.500,00
+(X) Pix
+
+Modelo: iPhone 15 Pro 256gb preto imei 350015753668064`;
+
+  const parsed = detectarFormularioOuPedidoVenda(textoForm);
+  assert.ok(parsed);
+  assert.equal(parsed.dataVenda, '2026-11-06');
+  assert.equal(parsed.dataVendaInformada, true);
+  assert.equal(parsed.isUpgrade, false);
+
+  const proposta = construirPropostaNotinha({
+    id: 'notinha-data-teste',
+    lojaId: '11111111-1111-4111-8111-111111111111',
+    remoteJid: '5531999999999@s.whatsapp.net',
+    vendaDetectada: parsed,
+    estoque: [
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        modelo: 'iPhone 15 Pro',
+        capacidade: '256GB',
+        cor: 'Preto',
+        imei: '350015753668064',
+        custo: 3500,
+        status: 'disponivel',
+        ativo: true,
+      },
+    ],
+    pushName: 'Lucas',
+  });
+
+  assert.equal(proposta.dataVenda, '2026-11-06');
+  const previa = formatarMensagemPreviaNotinha(proposta);
+  assert.ok(previa.includes('06/11/2026'), 'Prévia deve exibir a data lida do formulário');
+
+  const correcaoData = interpretarTextoCorrecaoVenda('data 05/11/2026');
+  assert.deepEqual(correcaoData, { campo: 'data', valor: '2026-11-05' });
+
+  const rpcCalls: any[] = [];
+  const mockSupabase: any = {
+    from(table: string) {
+      const chain: any = {
+        select() { return chain; },
+        eq() { return chain; },
+        ilike() { return chain; },
+        limit() { return Promise.resolve({ data: [], error: null }); },
+        maybeSingle() {
+          if (table === 'lojas') {
+            return Promise.resolve({
+              data: { id: '11111111-1111-4111-8111-111111111111', nome: 'Lucas Imports', garantia_dias: 90 },
+              error: null,
+            });
+          }
+          return Promise.resolve({ data: null, error: null });
+        },
+        insert() {
+          return {
+            select() {
+              return {
+                single() {
+                  return Promise.resolve({ data: { id: 'cli-1' }, error: null });
+                },
+              };
+            },
+          };
+        },
+        update() { return chain; },
+      };
+      return chain;
+    },
+    async rpc(fn: string, args: any) {
+      rpcCalls.push({ fn, args });
+      return {
+        data: { venda: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', ...args.p_venda } },
+        error: null,
+      };
+    },
+  };
+
+  const emissao = await emitirNotinhaVenda(
+    mockSupabase,
+    '11111111-1111-4111-8111-111111111111',
+    proposta,
+    'Lucas (Moderador Master)'
+  );
+
+  assert.equal(emissao.sucesso, true);
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].args.p_venda.vendedor, 'Lucas');
+  assert.ok(
+    String(rpcCalls[0].args.p_venda.dataPagamento).startsWith('2026-11-06T'),
+    `dataPagamento deveria ser em 2026-11-06, recebeu: ${rpcCalls[0].args.p_venda.dataPagamento}`
+  );
+  assert.ok(emissao.pdfBase64 && emissao.pdfBase64.length > 500, 'PDF em base64 deve ser gerado');
+  assert.equal(Buffer.from(emissao.pdfBase64, 'base64').slice(0, 4).toString(), '%PDF');
+  assert.equal(emissao.nomeLoja, 'Lucas Imports');
+  assert.ok(emissao.mensagem.includes('06/11/2026'));
+});
+
 
 
 

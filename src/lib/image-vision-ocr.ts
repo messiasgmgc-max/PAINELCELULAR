@@ -119,6 +119,7 @@ export async function analyzeImageWithGroq(
 
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
+      signal: AbortSignal.timeout(12000),
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
@@ -215,6 +216,7 @@ export async function analyzeImageWithGemini(
         `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
+          signal: AbortSignal.timeout(12000),
           headers: {
             'Content-Type': 'application/json',
           },
