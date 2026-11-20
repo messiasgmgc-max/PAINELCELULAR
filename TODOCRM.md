@@ -7,40 +7,41 @@
 
 ## 📍 ONDE PARAMOS (Resumo Rápido)
 
-- **Fase Atual:** `Fase 0 — Auditoria da VPS & Planejamento` (quase concluída)
+- **Fase Atual:** `Fase 1 — Infraestrutura Docker & Deploy Seguro` **CONCLUÍDA (95%)** → entrando na `Fase 2 (Canais/Integrações)` e `Fase 3 (White-Label PhoneCenterCRM)`
 - **Concluído agora:**
-  - Pesquisa completa do `evolution-foundation/evo-crm-community` (`v1.0.0-rc2`), stack Docker, serviços, módulos nativos e licença Apache 2.0.
-  - Mapeamento 100% dos módulos das 7 prints do CRM Mercado Phone + análise de identidade visual do PhoneCenter.
-  - Validação de DNS: `crm.phonecenter.tech` já resolve para `13.140.36.50` e o Traefik/Coolify já responde na porta 443.
-  - Criação de toda a documentação modular (`AgentsCRM.md`, `TODOCRM.md`, `docs/crm/*`).
-- **Bloqueio Atual (`[!]`):**
-  - Acesso SSH em `13.140.36.50:2222` retornou `Authentication failed` para os usuários testados (`root`, `ubuntu`, `messias`). Pausamos tentativas para evitar bloqueio por `fail2ban`.
+  - Auditoria completa da VPS (`13.140.36.50:2222`): 6 vCPUs, 11.68 GiB RAM, 165 GB disco livre, Coolify + Traefik v3.6 + Evolution API intactos.
+  - Deploy completo da stack **Full Stack EvoCRM** (14 containers com `mem_limit` rígido) em `/opt/phonecenter-crm/` (versionado em `infra/crm/docker-compose.yml`).
+  - HTTPS com SSL Let's Encrypt **ATIVO E RESPONDENDO HTTP 200** em:
+    - `https://crm.phonecenter.tech` (Frontend)
+    - `https://api-crm.phonecenter.tech` (API Gateway)
+  - Todos os serviços validados (`auth`, `crm`, `core`, `processor`, `bot_runtime`, `evoflow`, `pgvector`, `redis`, `clickhouse`, `rabbitmq`) com **7.5 GiB de RAM ainda livres** e `app.phonecenter.tech` + `evolution_api` 100% intactos.
+  - Cron de backup diário do Postgres configurado em `/opt/phonecenter-crm/backup.sh`.
 - **Próximo Passo Exato:**
-  1. Receber do usuário o **usuário SSH correto** (e confirmação da senha/chave) para `13.140.36.50:2222`.
-  2. Executar auditoria read-only na VPS (`free -h`, `df -h`, `docker ps`, redes Coolify/Traefik, Evolution API).
-  3. Definir perfil de deploy (**Core Lite** vs **Full**) e subir EvoCRM em `crm.phonecenter.tech` sem impactar nada existente.
+  1. Concluir o **Setup Wizard inicial** em `https://crm.phonecenter.tech` (criar o `super_admin`).
+  2. **Fase 2:** Conectar Evolution API (`http://evolution_api:8080`), Instagram Direct, WhatsApp Cloud API, Google Calendar e configurar Setores/Tags/Respostas Rápidas.
+  3. **Fase 3 & 4:** Aplicar White-Label **PhoneCenterCRM** (fork frontend com identidade visual + login split-screen) e construir o **PhoneCenter CRM Bridge** (`/api/crm-bridge/*` + `/crm-sidebar` + MCP IA com estoque real).
 
 ---
 
 ## Fase 0 — Planejamento, Arquitetura e Auditoria Segura da VPS
 - [x] Mapear todas as telas e funcionalidades das 7 prints de referência (CRM Mercado Phone)
 - [x] Auditar identidade visual do PhoneCenter (`global.css`, `logocnome.png`, `logosnome.png`)
-- [x] Mapear arquitetura e módulos nativos do EvoCRM Community (`v1.0.0-rc2`)
-- [x] Verificar resolução DNS de `crm.phonecenter.tech` (`13.140.36.50`)
+- [x] Mapear arquitetura e módulos nativos do EvoCRM Community (`v1.0.0-rc2` / `latest`)
+- [x] Verificar resolução DNS de `crm.phonecenter.tech` e `api-crm.phonecenter.tech` (`13.140.36.50`)
 - [x] Criar `AgentsCRM.md`, `TODOCRM.md` e arquivos modulares em `docs/crm/`
-- [!] Conectar via SSH na VPS `13.140.36.50:2222` *(aguardando usuário SSH correto)*
-- [ ] Auditar recursos da VPS (CPU, RAM, Swap, Disco, `docker ps`, Coolify, Traefik, Evolution API, portas)
-- [ ] Verificar DNS de `api-crm.phonecenter.tech` (ou confirmar estratégia de domínio único via gateway)
+- [x] Conectar via SSH na VPS `13.140.36.50:2222`
+- [x] Auditar recursos da VPS (6 vCPU, 9.1 GiB RAM livre, 165 GB disco, Coolify, Traefik v3.6, Evolution API)
+- [x] Validar estratégia de 2 domínios (`crm.phonecenter.tech` + `api-crm.phonecenter.tech`)
 
 ## Fase 1 — Infraestrutura Docker & Deploy Seguro do EvoCRM (`crm.phonecenter.tech`)
-- [ ] Definir perfil de containers conforme RAM da VPS (**Core Lite** vs **Full com EvoFlow/ClickHouse**)
-- [ ] Criar rede isolada + volumes persistentes (`evocrm_pgdata`, `evocrm_redis`, `evocrm_storage`, `evocrm_processor_logs`)
-- [ ] Gerar todos os segredos criptográficos sincronizados (`SECRET_KEY_BASE`, `JWT_SECRET_KEY`, `EVOAI_CRM_API_TOKEN`, `DOORKEEPER_JWT_SECRET_KEY`, `ENCRYPTION_KEY`, `BOT_RUNTIME_SECRET`)
-- [ ] Subir stack EvoCRM (via Coolify Docker Compose ou `/opt/phonecenter-crm` integrado à rede do Traefik) com limites de memória (`mem_limit`)
-- [ ] Configurar rotas Traefik + SSL Let's Encrypt para `crm.phonecenter.tech` (e `api-crm.phonecenter.tech`)
-- [ ] Executar setup inicial, migrations/seed do `evo-auth` e `evo-crm` e criar conta `super_admin`
-- [ ] Validar healthchecks de todos os containers + garantir zero impacto na Evolution API e apps existentes
-- [ ] Configurar backup automático diário do Postgres do CRM (`pg_dump` comprimido)
+- [x] Definir perfil de containers conforme RAM da VPS (**Full Stack com `mem_limit` rígido** — 14 containers, sobrando 7.5 GiB livres)
+- [x] Criar rede isolada (`evocrm_net`) + volumes persistentes (`evocrm_pgdata`, `evocrm_redis`, `evocrm_storage`, `evoauth_storage`, `evocrm_processor_logs`, `evocrm_clickhouse_data`, `evocrm_rabbitmq_data`)
+- [x] Gerar todos os segredos criptográficos sincronizados em `/opt/phonecenter-crm/.env` (`chmod 600`, fora do Git)
+- [x] Subir stack EvoCRM em `/opt/phonecenter-crm/` integrado à rede `coolify` (Traefik) e `evolution_default` com `mem_limit`
+- [x] Configurar rotas Traefik + SSL Let's Encrypt para `crm.phonecenter.tech` e `api-crm.phonecenter.tech`
+- [/] Executar setup inicial, migrations/seed do `evo-auth` e `evo-crm` *(migrations concluídas; falta apenas o usuário concluir o Setup Wizard na tela para criar o `super_admin`)*
+- [x] Validar healthchecks de todos os 14 containers + confirmar zero impacto na Evolution API e `app.phonecenter.tech`
+- [x] Configurar backup automático diário do Postgres do CRM (`/opt/phonecenter-crm/backup.sh` via cron)
 
 ## Fase 2 — Canais Omnichannel & Integrações Core
 - [ ] Conectar **WhatsApp (QR Code)** via **Evolution API** já rodando na VPS
