@@ -27,6 +27,11 @@ import {
   limparFotoRecente,
   salvarPropostaNotinha,
   buscarPropostaNotinhaRecente,
+  listarPropostasNotinhaPendentes,
+  resolverPropostaAlvoNotinha,
+  removerPropostaNotinhaPendente,
+  limparTodasPropostasNotinhaPendentes,
+  formatarListaPropostasPendentes,
   limparMencoesBot,
   extrairMensagemMarcadaParaBot,
   extrairVendaDeMensagemReagidaComRecibo,
@@ -2213,6 +2218,215 @@ test('salvarSnapshotMensagemWebhook / buscarSnapshotMensagemWebhook e origemReac
   assert.ok(buscadaPv);
   assert.equal(buscadaPv.origemReacao?.messageId, 'MSG-OLD-99');
   assert.equal(buscadaPv.origemReacao?.remoteJid, '1203630001@g.us');
+});
+
+test('lote de várias notinhas no PV: não expira por tempo, edita/confirma/cancela uma por uma sem atropelar as outras e protege mensagem solta', async () => {
+  const store = new Map<string, any>();
+
+  const criarQueryMock = () => {
+    const filtros: Array<(r: any) => boolean> = [];
+    const aplicar = () =>
+      Array.from(store.values())
+        .filter((r) => filtros.every((f) => f(r)))
+        .sort((a, b) => new Date(b.criado_em || 0).getTime() - new Date(a.criado_em || 0).getTime());
+
+    const builder: any = {
+      eq(col: string, val: any) {
+        filtros.push((r) => r[col] === val);
+        return builder;
+      },
+      in(col: string, vals: any[]) {
+        filtros.push((r) => vals.includes(r[col]));
+        return builder;
+      },
+      order() {
+        return builder;
+      },
+      limit(n: number) {
+        return Promise.resolve({ data: aplicar().slice(0, n), error: null });
+      },
+      then(resolve: any, reject: any) {
+        return Promise.resolve({ data: aplicar(), error: null }).then(resolve, reject);
+      },
+    };
+    return builder;
+  };
+
+  const mockSupabase: any = {
+    from: () => ({
+      upsert: async (reg: any) => {
+        store.set(reg.chave, { ...reg, params: structuredClone(reg.params) });
+        return { data: reg, error: null };
+      },
+      select: () => criarQueryMock(),
+      delete: () => ({
+        in: async (_col: string, chaves: string[]) => {
+          chaves.forEach((c) => store.delete(c));
+          return { error: null };
+        },
+      }),
+    }),
+  };
+
+  const pvJid = '5531993586377@s.whatsapp.net';
+  const jidsUsuario = [pvJid, '5531993586377', '105278892703905@lid'];
+
+  const propA: PropostaNotinha = {
+    id: 'prop-lote-A',
+    lojaId: 'loja-1',
+    clienteNome: 'Ana Clara',
+    modelo: 'iPhone 15 Pro',
+    capacidade: '256GB',
+    cor: 'Natural',
+    statusEstoque: 'OK',
+    valorTotal: 5100,
+    formaPagamento: 'pix',
+    isUpgrade: false,
+    criadoEm: Date.now() - 4 * 60 * 60 * 1000, // 4 horas atrás!
+    semExpiracao: true,
+  };
+  const propB: PropostaNotinha = {
+    id: 'prop-lote-B',
+    lojaId: 'loja-1',
+    clienteNome: 'Bruno Lima',
+    modelo: 'iPhone 16e',
+    capacidade: '128GB',
+    cor: 'Preto',
+    statusEstoque: 'OK',
+    valorTotal: 3900,
+    formaPagamento: 'pix',
+    isUpgrade: false,
+    criadoEm: Date.now() - 3 * 60 * 60 * 1000,
+    semExpiracao: true,
+  };
+  const propC: PropostaNotinha = {
+    id: 'prop-lote-C',
+    lojaId: 'loja-1',
+    clienteNome: 'Carla Souza',
+    modelo: 'iPhone 18 Pro',
+    capacidade: '256GB',
+    cor: 'Preto',
+    statusEstoque: 'OK',
+    valorTotal: 8900,
+    formaPagamento: 'cartao',
+    isUpgrade: false,
+    criadoEm: Date.now() - 2 * 60 * 60 * 1000,
+    semExpiracao: true,
+  };
+
+  await salvarPropostaNotinha(mockSupabase, 'loja-1', pvJid, 'PV-MSG-A', propA, {
+    semExpiracao: true,
+    jidsAdicionais: ['5531993586377', '105278892703905@lid'],
+  });
+  await salvarPropostaNotinha(mockSupabase, 'loja-1', pvJid, 'PV-MSG-B', propB, {
+    semExpiracao: true,
+    jidsAdicionais: ['5531993586377', '105278892703905@lid'],
+  });
+  await salvarPropostaNotinha(mockSupabase, 'loja-1', pvJid, 'PV-MSG-C', propC, {
+    semExpiracao: true,
+    jidsAdicionais: ['5531993586377', '105278892703905@lid'],
+  });
+
+  // Simula 4 horas passadas no banco (criado_em antigo) -> nenhuma das 3 pode expirar!
+  const quatroHorasAtrasIso = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  for (const [k, v] of store.entries()) {
+    store.set(k, { ...v, criado_em: quatroHorasAtrasIso });
+  }
+
+  // 1. Todas as 3 continuam vivas na fila na ordem original (A, B, C)
+  const fila = await listarPropostasNotinhaPendentes(mockSupabase, jidsUsuario, 'loja-1');
+  assert.deepEqual(
+    fila.map((p) => p.id),
+    ['prop-lote-A', 'prop-lote-B', 'prop-lote-C']
+  );
+
+  // 2. Mensagem solta (sem reply) com 3 pendentes NÃO chuta -> retorna 'multiplas'
+  const solta = await resolverPropostaAlvoNotinha({
+    supabase: mockSupabase,
+    jids: jidsUsuario,
+    lojaId: 'loja-1',
+  });
+  assert.equal(solta.status, 'multiplas');
+  if (solta.status === 'multiplas') {
+    assert.equal(solta.propostas.length, 3);
+  }
+
+  // 3. Reply/reação na prévia A (mais antiga!) retorna EXATAMENTE A (nunca atropelada por C/:ultima)
+  const alvoA = await resolverPropostaAlvoNotinha({
+    supabase: mockSupabase,
+    jids: jidsUsuario,
+    lojaId: 'loja-1',
+    quotedStanzaId: 'PV-MSG-A',
+  });
+  assert.equal(alvoA.status, 'encontrada');
+  if (alvoA.status === 'encontrada') {
+    assert.equal(alvoA.proposta.id, 'prop-lote-A');
+    assert.equal(alvoA.proposta.clienteNome, 'Ana Clara');
+
+    // 4. Edita valor da notinha A e envia nova prévia PV-MSG-A2 -> ambas PV-MSG-A e PV-MSG-A2 ficam com o novo valor
+    alvoA.proposta.valorTotal = 4950;
+    await salvarPropostaNotinha(mockSupabase, 'loja-1', pvJid, 'PV-MSG-A2', alvoA.proposta, {
+      semExpiracao: true,
+      jidsAdicionais: ['5531993586377', '105278892703905@lid'],
+    });
+  }
+
+  const checkMsgAntigaA = await resolverPropostaAlvoNotinha({
+    supabase: mockSupabase,
+    jids: jidsUsuario,
+    lojaId: 'loja-1',
+    quotedStanzaId: 'PV-MSG-A',
+  });
+  assert.equal(checkMsgAntigaA.status, 'encontrada');
+  if (checkMsgAntigaA.status === 'encontrada') {
+    assert.equal(checkMsgAntigaA.proposta.valorTotal, 4950);
+  }
+
+  // 5. Confirmar/remover A remove PV-MSG-A e PV-MSG-A2, mas deixa B e C intactas (restantes = 2)
+  const restantesAposA = await removerPropostaNotinhaPendente(
+    mockSupabase,
+    checkMsgAntigaA.status === 'encontrada' ? checkMsgAntigaA.proposta : propA,
+    jidsUsuario,
+    'loja-1'
+  );
+  assert.equal(restantesAposA, 2);
+
+  // Reagir de novo na PV-MSG-A já emitida retorna 'nao_encontrada' (nunca cai em B ou C!)
+  const reacaoAntigaA = await resolverPropostaAlvoNotinha({
+    supabase: mockSupabase,
+    jids: jidsUsuario,
+    lojaId: 'loja-1',
+    quotedStanzaId: 'PV-MSG-A',
+  });
+  assert.equal(reacaoAntigaA.status, 'nao_encontrada');
+
+  // 6. !pendentes mostra B e C certinho
+  const filaBC = await listarPropostasNotinhaPendentes(mockSupabase, jidsUsuario, 'loja-1');
+  assert.deepEqual(filaBC.map((p) => p.id), ['prop-lote-B', 'prop-lote-C']);
+  const textoPendentes = formatarListaPropostasPendentes(filaBC);
+  assert.match(textoPendentes, /NOTINHAS PENDENTES \(2 notinhas pendentes\)/);
+  assert.match(textoPendentes, /Bruno Lima/);
+  assert.match(textoPendentes, /Carla Souza/);
+
+  // 7. Cancela B -> resta apenas C (1 pendente), e agora mensagem solta "sim" resolve C!
+  const restantesAposB = await removerPropostaNotinhaPendente(mockSupabase, propB, jidsUsuario, 'loja-1');
+  assert.equal(restantesAposB, 1);
+
+  const soltaComUma = await resolverPropostaAlvoNotinha({
+    supabase: mockSupabase,
+    jids: jidsUsuario,
+    lojaId: 'loja-1',
+  });
+  assert.equal(soltaComUma.status, 'encontrada');
+  if (soltaComUma.status === 'encontrada') {
+    assert.equal(soltaComUma.proposta.id, 'prop-lote-C');
+  }
+
+  // 8. !cancelar todas limpa o restante da fila
+  const limpas = await limparTodasPropostasNotinhaPendentes(mockSupabase, jidsUsuario, 'loja-1');
+  assert.equal(limpas, 1);
+  const filaFinal = await listarPropostasNotinhaPendentes(mockSupabase, jidsUsuario, 'loja-1');
+  assert.equal(filaFinal.length, 0);
 });
 
 

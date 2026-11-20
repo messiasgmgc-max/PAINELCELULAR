@@ -69,6 +69,11 @@ import {
   interpretarTextoCorrecaoVenda,
   salvarPropostaNotinha,
   buscarPropostaNotinhaRecente,
+  listarPropostasNotinhaPendentes,
+  resolverPropostaAlvoNotinha,
+  removerPropostaNotinhaPendente,
+  limparTodasPropostasNotinhaPendentes,
+  formatarListaPropostasPendentes,
   emitirNotinhaVenda,
   limparNomeModelo,
   registrarFotoProcessando,
@@ -2634,6 +2639,50 @@ async function notificarPropostaNoGrupoEstoque(
   }
 }
 
+// ── AUXILIAR: JIDs equivalentes de um chat/usuário para busca e limpeza de propostas pendentes ──
+function montarJidsPropostaChat(params: {
+  remoteJid?: string | null;
+  targetDestination?: string | null;
+  isGroup?: boolean;
+  authorPhone?: string | null;
+  senderPhone?: string | null;
+  ehModeradorMaster?: boolean;
+}): string[] {
+  const { remoteJid, targetDestination, isGroup, authorPhone, senderPhone, ehModeradorMaster } = params;
+  const lista: Array<string | null | undefined> = [remoteJid, targetDestination];
+
+  if (!isGroup) {
+    if (targetDestination && !targetDestination.includes('@')) {
+      lista.push(`${targetDestination}@s.whatsapp.net`);
+    }
+    if (authorPhone) {
+      lista.push(authorPhone);
+      if (!authorPhone.includes('@')) lista.push(`${authorPhone}@s.whatsapp.net`);
+    }
+    if (senderPhone) {
+      lista.push(senderPhone);
+      if (!senderPhone.includes('@')) lista.push(`${senderPhone}@s.whatsapp.net`);
+    }
+    if (ehModeradorMaster) {
+      lista.push('105278892703905@lid');
+    }
+  } else {
+    if (authorPhone) lista.push(authorPhone);
+    if (senderPhone) lista.push(senderPhone);
+    if (ehModeradorMaster) lista.push('105278892703905@lid');
+  }
+
+  return Array.from(new Set(lista.filter((j): j is string => Boolean(j && String(j).trim()))));
+}
+
+function mensagemAvisoMultiplasNotinhas(quantidade: number): string {
+  return (
+    `📌 Você tem *${quantidade} notinhas pendentes* neste chat.\n` +
+    `Para evitar confirmar, editar ou cancelar a notinha errada, *responda (dando reply)* ou *reaja com ✅ / ❌* direto na prévia que deseja alterar.\n\n` +
+    `💡 _Envie *!pendentes* para ver a fila ou *!cancelar todas* para limpar todas._`
+  );
+}
+
 // ── AUXILIAR: Despacho paralelo de confirmação, link digital e PDF após emissão da notinha ──
 async function despacharPosEmissaoNotinha(params: {
   instanceName: string;
@@ -2642,7 +2691,8 @@ async function despacharPosEmissaoNotinha(params: {
   nomeLojaFallback: string;
   proposta: PropostaNotinha;
   resultadoEmissao: Awaited<ReturnType<typeof emitirNotinhaVenda>>;
-  chavesLimpar: string[];
+  jidsLimpar: string[];
+  chavesLimpar?: string[];
   idMensagemEditar?: string;
   enviarTexto: (inst: string, dest: string, text: string) => Promise<boolean>;
 }) {
@@ -2653,7 +2703,8 @@ async function despacharPosEmissaoNotinha(params: {
     nomeLojaFallback,
     proposta,
     resultadoEmissao,
-    chavesLimpar,
+    jidsLimpar,
+    chavesLimpar = [],
     idMensagemEditar,
     enviarTexto,
   } = params;
@@ -2670,8 +2721,13 @@ async function despacharPosEmissaoNotinha(params: {
     return;
   }
 
+  let restantesPendentes = 0;
   const tarefas: Promise<any>[] = [
-    Promise.resolve(supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesLimpar)).catch(() => null),
+    removerPropostaNotinhaPendente(supabase, proposta, jidsLimpar, lojaEfetivaId, chavesLimpar)
+      .then((qtd) => {
+        restantesPendentes = qtd;
+      })
+      .catch(() => null),
   ];
 
   if (proposta.origemReacao?.messageId && proposta.origemReacao?.remoteJid) {
@@ -2777,6 +2833,9 @@ async function despacharPosEmissaoNotinha(params: {
   }
   if (!resultadoEmissao.pdfBase64 || !pdfEnviadoEquipe) {
     mensagemFinalEquipe += `\n⚠️ _Aviso: não foi possível enviar o arquivo PDF neste chat. Use o link do Recibo Digital acima para imprimir._`;
+  }
+  if (restantesPendentes > 0) {
+    mensagemFinalEquipe += `\n\n📌 _Ainda ${restantesPendentes === 1 ? 'resta *1 notinha pendente*' : `restam *${restantesPendentes} notinhas pendentes*`} neste chat._`;
   }
 
   if (idMensagemEditar) {
@@ -3129,37 +3188,26 @@ export async function POST(request: Request) {
       if (acaoReacao) {
         console.log(`👍 [Reação Notinha] Emoji "${emojiReacao}" -> Ação: ${acaoReacao} para mensagem ${idMensagemReagida} em ${remoteJid}`);
 
-        const chavesExatas = Array.from(
-          new Set(
-            [
-              `notinha:${remoteJid}:${idMensagemReagida}`,
-              `notinha:${targetDestination}:${idMensagemReagida}`,
-              (!isGroup && targetDestination && !targetDestination.includes('@'))
-                ? `notinha:${targetDestination}@s.whatsapp.net:${idMensagemReagida}`
-                : null,
-              authorPhone ? `notinha:${authorPhone}:${idMensagemReagida}` : null,
-              ehModeradorMaster ? `notinha:105278892703905@lid:${idMensagemReagida}` : null,
-            ].filter(Boolean) as string[]
-          )
-        );
-        const chavesLimpezaReacao = Array.from(
-          new Set(
-            [
-              ...chavesExatas,
-              `notinha:${remoteJid}:ultima`,
-              `notinha:${targetDestination}:ultima`,
-              (!isGroup && targetDestination && !targetDestination.includes('@'))
-                ? `notinha:${targetDestination}@s.whatsapp.net:ultima`
-                : null,
-              authorPhone ? `notinha:${authorPhone}:ultima` : null,
-              ehModeradorMaster ? 'notinha:105278892703905@lid:ultima' : null,
-            ].filter(Boolean) as string[]
-          )
-        );
-        const chavesReacao = emojiReacao === '🧾' ? chavesExatas : chavesLimpezaReacao;
+        const jidsReacao = montarJidsPropostaChat({
+          remoteJid,
+          targetDestination,
+          isGroup,
+          authorPhone,
+          senderPhone,
+          ehModeradorMaster,
+        });
+        const lojaReacaoId = lojaId || usuarioResolvido?.lojaId || null;
 
-        // Busca proposta exata pelo ID da mensagem (e :ultima apenas fora de 🧾 avulso)
-        const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesReacao, null, 30);
+        // Busca ESTRITAMENTE pelo ID exato da mensagem reagida (nunca faz fallback para :ultima,
+        // garantindo que reagir numa prévia antiga/já finalizada jamais mexa em outra notinha do lote).
+        const resolucaoReacao = await resolverPropostaAlvoNotinha({
+          supabase,
+          jids: jidsReacao,
+          lojaId: lojaReacaoId,
+          quotedStanzaId: idMensagemReagida,
+          maxMinutosLegado: 30,
+        });
+        const propostaPendente = resolucaoReacao.status === 'encontrada' ? resolucaoReacao.proposta : null;
 
         if (propostaPendente) {
           const ehReacaoConfirmar = acaoReacao === 'confirmar' || acaoReacao === 'confirmar_sem_troca';
@@ -3169,7 +3217,7 @@ export async function POST(request: Request) {
               instanceName,
               targetDestination,
               idMensagemReagida,
-              '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
+              '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo (dando reply nesta prévia) ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
             );
             return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
           }
@@ -3191,7 +3239,7 @@ export async function POST(request: Request) {
               nomeLojaFallback: nomeLoja,
               proposta: propostaPendente,
               resultadoEmissao,
-              chavesLimpar: chavesLimpezaReacao,
+              jidsLimpar: jidsReacao,
               idMensagemEditar: idMensagemReagida,
               enviarTexto: enviarMensagemWhatsApp,
             });
@@ -3201,8 +3249,20 @@ export async function POST(request: Request) {
               message: resultadoEmissao.sucesso ? 'Notinha emitida com sucesso via reação.' : 'Falha na emissão da notinha.',
             }, { status: 200 });
           } else {
-            await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesLimpezaReacao);
-            const msgCancelamento = `❌ *Emissão da notinha cancelada por ${pushName}.*\nPara tentar novamente, envie os dados corrigidos no grupo.`;
+            const restantes = await removerPropostaNotinhaPendente(
+              supabase,
+              propostaPendente,
+              jidsReacao,
+              lojaReacaoId
+            );
+            const avisoRestantes =
+              restantes > 0
+                ? `\n\n📌 _Ainda ${restantes === 1 ? 'resta *1 notinha pendente*' : `restam *${restantes} notinhas pendentes*`} neste chat._`
+                : '';
+            const msgCancelamento =
+              `❌ *Emissão da notinha cancelada por ${pushName}.*\n` +
+              `Para tentar novamente, envie os dados corrigidos ou reaja com 🧾 novamente.` +
+              avisoRestantes;
             await editarOuResponderMensagemWhatsApp(
               instanceName,
               targetDestination,
@@ -3232,6 +3292,36 @@ export async function POST(request: Request) {
             console.log(`🔇 [Reação 🧾] Reator ${telefoneReator} não autorizado na loja ${lojaEfetivaId}.`);
             return NextResponse.json(
               { status: 'ignored', message: 'Reação 🧾 ignorada: usuário não autorizado.' },
+              { status: 200 }
+            );
+          }
+
+          const pvJidPadraoReator = `${telefoneReator}@s.whatsapp.net`;
+          const jidsDestinoPv = Array.from(
+            new Set(
+              [
+                pvJidPadraoReator,
+                telefoneReator,
+                verificarSeModeradorOuDonoGeral(telefoneReator) ? '105278892703905@lid' : null,
+              ].filter((j): j is string => Boolean(j))
+            )
+          );
+
+          // Evita duplicar caso reaja 🧾 duas vezes na mesma mensagem enquanto ainda está pendente no PV
+          const pendentesAtuaisPv = await listarPropostasNotinhaPendentes(supabase, jidsDestinoPv, lojaEfetivaId);
+          const jaPendente = pendentesAtuaisPv.find(
+            (p) =>
+              p.origemReacao?.messageId === idMensagemReagida &&
+              p.origemReacao?.remoteJid === remoteJidOriginal
+          );
+          if (jaPendente) {
+            await despacharMensagemWhatsApp(
+              instanceName,
+              telefoneReator,
+              `ℹ️ A notinha de *${jaPendente.clienteNome}* (${jaPendente.modelo}) já está na sua fila de pendentes!\nResponda (dando reply) ou reaja com ✅ / ❌ direto na prévia dela.`
+            );
+            return NextResponse.json(
+              { status: 'ok', message: 'Prévia já está pendente no privado do reator.' },
               { status: 200 }
             );
           }
@@ -3399,8 +3489,9 @@ export async function POST(request: Request) {
             ...(participantOrigem ? { participant: participantOrigem } : {}),
           };
 
+          const propostaIdUnico = `notinha-reac-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const proposta = construirPropostaNotinha({
-            id: `notinha-reac-${Date.now()}`,
+            id: propostaIdUnico,
             lojaId: lojaEfetivaId,
             remoteJid: remoteJidOriginal,
             origemReacao,
@@ -3409,6 +3500,7 @@ export async function POST(request: Request) {
             fotosRecentes: fotosParaProposta,
             pushName: pushNameOrigem,
           });
+          proposta.semExpiracao = true;
 
           const msgPv =
             `📥 *Notinha capturada via reação 🧾*\n` +
@@ -3419,13 +3511,11 @@ export async function POST(request: Request) {
           const envioPv = await despacharMensagemWhatsAppComRetorno(instanceName, destinoPrivado, msgPv);
 
           if (envioPv.ok) {
-            const refMsgPv = envioPv.messageId || `notinha-reac-${Date.now()}`;
-            const pvJidPadrao = `${destinoPrivado}@s.whatsapp.net`;
-            await salvarPropostaNotinha(supabase, lojaEfetivaId, pvJidPadrao, refMsgPv, proposta);
-            await salvarPropostaNotinha(supabase, lojaEfetivaId, destinoPrivado, refMsgPv, proposta);
-            if (verificarSeModeradorOuDonoGeral(destinoPrivado)) {
-              await salvarPropostaNotinha(supabase, lojaEfetivaId, '105278892703905@lid', refMsgPv, proposta);
-            }
+            const refMsgPv = envioPv.messageId || propostaIdUnico;
+            await salvarPropostaNotinha(supabase, lojaEfetivaId, pvJidPadraoReator, refMsgPv, proposta, {
+              semExpiracao: true,
+              jidsAdicionais: jidsDestinoPv.filter((j) => j !== pvJidPadraoReator),
+            });
           }
 
           if (lojaEfetivaId) {
@@ -3735,10 +3825,18 @@ export async function POST(request: Request) {
               const msgPrevia = (imeiLido ? `📸 *Foto da caixa:* IMEI \`${imeiLido}\` lido com sucesso e vinculado à notinha!\n\n` : '') + formatarMensagemPreviaNotinha(proposta);
               const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
               if (envio.messageId) {
-                await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta);
-                if (targetDestination !== remoteJid) {
-                  await salvarPropostaNotinha(supabase, lojaId, targetDestination, envio.messageId, proposta);
-                }
+                const jidsSalvarFotoForm = montarJidsPropostaChat({
+                  remoteJid,
+                  targetDestination,
+                  isGroup,
+                  authorPhone,
+                  senderPhone,
+                  ehModeradorMaster,
+                });
+                await salvarPropostaNotinha(supabase, lojaId, remoteJid, envio.messageId, proposta, {
+                  semExpiracao: !isGroup,
+                  jidsAdicionais: jidsSalvarFotoForm.filter((j) => j !== remoteJid),
+                });
               }
 
               if (lojaId) {
@@ -3831,21 +3929,26 @@ export async function POST(request: Request) {
               );
             }
 
-            // ── SINCRONIZAÇÃO COM FORMULÁRIO ENVIADO JUNTO OU LOGO ANTES/DEPOIS ──
-            const chavesBuscaPend = Array.from(new Set([
-              `notinha:${remoteJid}:ultima`,
-              `notinha:${targetDestination}:ultima`,
-              authorPhone ? `notinha:${authorPhone}:ultima` : null,
-              senderPhone ? `notinha:${senderPhone}:ultima` : null,
-            ].filter(Boolean))) as string[];
+            // ── SINCRONIZAÇÃO COM FORMULÁRIO ENVIADO JUNTO OU LOGO ANTES/DEPOIS (OU REPLY EM PRÉVIA) ──
+            const jidsBuscaFoto = montarJidsPropostaChat({
+              remoteJid,
+              targetDestination,
+              isGroup,
+              authorPhone,
+              senderPhone,
+              ehModeradorMaster,
+            });
 
-            // 1. Verifica se o formulário já havia criado uma proposta antes do OCR terminar
-            let proposta = await buscarPropostaNotinhaRecente(
+            // 1. Se o usuário deu reply numa prévia específica com a foto, vincula EXATAMENTE àquela prévia
+            let resolucaoFoto = await resolverPropostaAlvoNotinha({
               supabase,
-              chavesBuscaPend,
-              modeloLido,
-              20
-            );
+              jids: jidsBuscaFoto,
+              lojaId,
+              quotedStanzaId: marcacaoBot.quotedStanzaId,
+              modeloDesejado: marcacaoBot.quotedStanzaId ? null : modeloLido,
+              maxMinutosLegado: 20,
+            });
+            let proposta = resolucaoFoto.status === 'encontrada' ? resolucaoFoto.proposta : null;
 
             // Se a proposta encontrada já contém este exato IMEI (porque o webhook do formulário já consumiu esta foto e enviou a prévia),
             // ignora para não enviar uma segunda mensagem repetida!
@@ -3854,9 +3957,8 @@ export async function POST(request: Request) {
               return NextResponse.json({ status: 'ok', message: 'Foto já incluída na prévia da notinha.' }, { status: 200 });
             }
 
-            // 2. Se ainda não há proposta pronta, aguarda até 2.4s (ou 4.8s quando marcou o bot) para verificar se um formulário simultâneo
-            // que estava aguardando o término do OCR acabou de consumir a foto_recente!
-            if (!proposta && lojaId && (imeiLido || modeloLido)) {
+            // 2. Se ainda não há proposta pronta (e não era reply específico), aguarda janela de consumo simultâneo
+            if (!proposta && resolucaoFoto.status !== 'multiplas' && !marcacaoBot.quotedStanzaId && lojaId && (imeiLido || modeloLido)) {
               const esperaConsumoMs = marcacaoBot.foiMarcado ? 4800 : 2400;
               const foiConsumida = await aguardarOuVerificarFotoConsumida(supabase, remoteJid, esperaConsumoMs, imeiLido);
               if (foiConsumida) {
@@ -3865,12 +3967,14 @@ export async function POST(request: Request) {
               }
 
               // Verifica novamente se uma proposta foi criada durante a janela de espera
-              proposta = await buscarPropostaNotinhaRecente(
+              resolucaoFoto = await resolverPropostaAlvoNotinha({
                 supabase,
-                chavesBuscaPend,
-                modeloLido,
-                20
-              );
+                jids: jidsBuscaFoto,
+                lojaId,
+                modeloDesejado: modeloLido,
+                maxMinutosLegado: 20,
+              });
+              proposta = resolucaoFoto.status === 'encontrada' ? resolucaoFoto.proposta : null;
 
               if (proposta && imeiLido && propostaJaContemImei(proposta, imeiLido)) {
                 console.log(`✅ [FOTO+FORMULÁRIO] IMEI ${imeiLido} já consta na proposta criada durante a espera; evitando envio duplicado.`);
@@ -3915,13 +4019,10 @@ export async function POST(request: Request) {
               const msgIdAnterior = proposta.messageId;
               const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
               const refMsgId = envio.messageId || msgIdAnterior || `notinha-prev-${Date.now()}`;
-              await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
-              if (msgIdAnterior && msgIdAnterior !== refMsgId) {
-                await salvarPropostaNotinha(supabase, lojaId, remoteJid, msgIdAnterior, proposta);
-              }
-              if (targetDestination !== remoteJid) {
-                await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
-              }
+              await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta, {
+                semExpiracao: Boolean(proposta.semExpiracao || !isGroup),
+                jidsAdicionais: jidsBuscaFoto.filter((j) => j !== remoteJid),
+              });
 
               if (lojaId) {
                 await supabase.from('whatsapp_logs').insert({
@@ -4107,27 +4208,35 @@ export async function POST(request: Request) {
       // 3. Confirmações, cancelamentos ou correções quando HÁ notinha pendente ou edição de valor de atacado recente
       // 4. Marcação do bot em mensagens de formulário ou etiquetas de aparelhos
       const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(textContent));
+      const ehComandoPendentes = /^!\s*(?:pendentes|cancelar\s+todas|limpar\s+pendentes)\b/i.test(lowerText);
       const ehPossivelConfirmacao = Boolean(interpretarConfirmacaoTextoNotinha(textContent));
       const ehPossivelCorrecao = Boolean(interpretarTextoCorrecaoVenda(textContent));
 
       let temNotinhaPendente = false;
       if (lojaId && (ehPossivelConfirmacao || ehPossivelCorrecao)) {
-        const chavesBuscaPend = Array.from(new Set([
-          marcacaoBot.quotedStanzaId ? `notinha:${remoteJid}:${marcacaoBot.quotedStanzaId}` : null,
-          marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
-          `notinha:${remoteJid}:ultima`,
-          `notinha:${targetDestination}:ultima`,
-          authorPhone ? `notinha:${authorPhone}:ultima` : null,
-          senderPhone ? `notinha:${senderPhone}:ultima` : null,
-        ].filter(Boolean))) as string[];
-        const prop = await buscarPropostaNotinhaRecente(supabase, chavesBuscaPend, null, 30);
-        temNotinhaPendente = Boolean(prop);
+        const jidsModoVenda = montarJidsPropostaChat({
+          remoteJid,
+          targetDestination,
+          isGroup,
+          authorPhone,
+          senderPhone,
+          ehModeradorMaster,
+        });
+        const resolucaoModo = await resolverPropostaAlvoNotinha({
+          supabase,
+          jids: jidsModoVenda,
+          lojaId,
+          quotedStanzaId: marcacaoBot.quotedStanzaId,
+          maxMinutosLegado: 30,
+        });
+        temNotinhaPendente = resolucaoModo.status !== 'nao_encontrada';
       }
 
       const ehOperacaoVendaValida =
         ehComandoModo ||
         ehComandoFechamento ||
         ehComandoEmprestados ||
+        ehComandoPendentes ||
         ehFormularioVenda ||
         Boolean(vendaAtacadoDireta) ||
         temFotoAtivaParaAtacado ||
@@ -4286,6 +4395,39 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── 3.2c. COMANDOS DA FILA DE NOTINHAS PENDENTES (!pendentes / !cancelar todas) ──
+    if (/^!\s*pendentes\b/i.test(lowerText) && lojaId) {
+      const jidsFila = montarJidsPropostaChat({
+        remoteJid,
+        targetDestination,
+        isGroup,
+        authorPhone,
+        senderPhone,
+        ehModeradorMaster,
+      });
+      const pendentes = await listarPropostasNotinhaPendentes(supabase, jidsFila, lojaId);
+      await enviarMensagemWhatsApp(instanceName, targetDestination, formatarListaPropostasPendentes(pendentes));
+      return NextResponse.json({ status: 'ok', message: `Lista de notinhas pendentes enviada (${pendentes.length}).` }, { status: 200 });
+    }
+
+    if (/^!\s*(?:cancelar\s+todas|limpar\s+pendentes)\b/i.test(lowerText) && lojaId) {
+      const jidsFila = montarJidsPropostaChat({
+        remoteJid,
+        targetDestination,
+        isGroup,
+        authorPhone,
+        senderPhone,
+        ehModeradorMaster,
+      });
+      const removidas = await limparTodasPropostasNotinhaPendentes(supabase, jidsFila, lojaId);
+      const msgLimpeza =
+        removidas > 0
+          ? `🗑️ *${removidas} ${removidas === 1 ? 'notinha pendente cancelada' : 'notinhas pendentes canceladas'}!* Fila limpa.`
+          : '✅ Não havia nenhuma notinha pendente na fila.';
+      await enviarMensagemWhatsApp(instanceName, targetDestination, msgLimpeza);
+      return NextResponse.json({ status: 'ok', message: `Fila de pendentes limpa (${removidas}).` }, { status: 200 });
+    }
+
     // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / PODE VENDER / EMITIR SEM TROCA / CANCELAR) ──
     const acaoConfirmacaoTexto = interpretarConfirmacaoTextoNotinha(textContent);
     const ehConfirmacaoTexto =
@@ -4293,26 +4435,40 @@ export async function POST(request: Request) {
     const ehCancelamentoTexto = acaoConfirmacaoTexto === 'cancelar';
 
     if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
-      const chavesBusca = Array.from(new Set([
-        marcacaoBot.quotedStanzaId ? `notinha:${remoteJid}:${marcacaoBot.quotedStanzaId}` : null,
-        marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
-        `notinha:${remoteJid}:ultima`,
-        `notinha:${targetDestination}:ultima`,
-        (!isGroup && targetDestination && !targetDestination.includes('@')) ? `notinha:${targetDestination}@s.whatsapp.net:ultima` : null,
-        authorPhone ? `notinha:${authorPhone}:ultima` : null,
-        senderPhone ? `notinha:${senderPhone}:ultima` : null,
-        ehModeradorMaster ? 'notinha:105278892703905@lid:ultima' : null,
-      ].filter(Boolean))) as string[];
+      const jidsTexto = montarJidsPropostaChat({
+        remoteJid,
+        targetDestination,
+        isGroup,
+        authorPhone,
+        senderPhone,
+        ehModeradorMaster,
+      });
 
-      const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesBusca, null, 30);
+      const resolucaoTexto = await resolverPropostaAlvoNotinha({
+        supabase,
+        jids: jidsTexto,
+        lojaId,
+        quotedStanzaId: marcacaoBot.quotedStanzaId,
+        maxMinutosLegado: 30,
+      });
+
+      if (resolucaoTexto.status === 'multiplas') {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          mensagemAvisoMultiplasNotinhas(resolucaoTexto.propostas.length)
+        );
+        return NextResponse.json({ status: 'warning', message: 'Múltiplas notinhas pendentes; aguardando reply ou reação específica.' }, { status: 200 });
+      }
+
+      const propostaPendente = resolucaoTexto.status === 'encontrada' ? resolucaoTexto.proposta : null;
 
       if (propostaPendente) {
-
         if (ehConfirmacaoTexto && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
           await enviarMensagemWhatsApp(
             instanceName,
             targetDestination,
-            '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
+            '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo (dando reply na prévia) ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
           );
           return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
         }
@@ -4334,14 +4490,27 @@ export async function POST(request: Request) {
             nomeLojaFallback: nomeLoja,
             proposta: propostaPendente,
             resultadoEmissao,
-            chavesLimpar: chavesBusca,
+            jidsLimpar: jidsTexto,
             enviarTexto: enviarMensagemWhatsApp,
           });
 
           return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
         } else {
-          await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesBusca);
-          await enviarMensagemWhatsApp(instanceName, targetDestination, `❌ *Emissão da notinha cancelada por ${pushName}.*`);
+          const restantes = await removerPropostaNotinhaPendente(
+            supabase,
+            propostaPendente,
+            jidsTexto,
+            lojaId
+          );
+          const avisoRestantes =
+            restantes > 0
+              ? `\n\n📌 _Ainda ${restantes === 1 ? 'resta *1 notinha pendente*' : `restam *${restantes} notinhas pendentes*`} neste chat._`
+              : '';
+          await enviarMensagemWhatsApp(
+            instanceName,
+            targetDestination,
+            `❌ *Emissão da notinha de ${propostaPendente.clienteNome} cancelada por ${pushName}.*${avisoRestantes}`
+          );
           return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via texto.' }, { status: 200 });
         }
       }
@@ -4463,18 +4632,33 @@ export async function POST(request: Request) {
     // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
     const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
     if (correcaoDetectada && lojaId) {
-      const chavesBusca = Array.from(new Set([
-        marcacaoBot.quotedStanzaId ? `notinha:${remoteJid}:${marcacaoBot.quotedStanzaId}` : null,
-        marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
-        `notinha:${remoteJid}:ultima`,
-        `notinha:${targetDestination}:ultima`,
-        (!isGroup && targetDestination && !targetDestination.includes('@')) ? `notinha:${targetDestination}@s.whatsapp.net:ultima` : null,
-        authorPhone ? `notinha:${authorPhone}:ultima` : null,
-        senderPhone ? `notinha:${senderPhone}:ultima` : null,
-        ehModeradorMaster ? 'notinha:105278892703905@lid:ultima' : null,
-      ].filter(Boolean))) as string[];
+      const jidsCorrecao = montarJidsPropostaChat({
+        remoteJid,
+        targetDestination,
+        isGroup,
+        authorPhone,
+        senderPhone,
+        ehModeradorMaster,
+      });
 
-      const proposta = await buscarPropostaNotinhaRecente(supabase, chavesBusca, null, 30);
+      const resolucaoCorrecao = await resolverPropostaAlvoNotinha({
+        supabase,
+        jids: jidsCorrecao,
+        lojaId,
+        quotedStanzaId: marcacaoBot.quotedStanzaId,
+        maxMinutosLegado: 30,
+      });
+
+      if (resolucaoCorrecao.status === 'multiplas') {
+        await enviarMensagemWhatsApp(
+          instanceName,
+          targetDestination,
+          mensagemAvisoMultiplasNotinhas(resolucaoCorrecao.propostas.length)
+        );
+        return NextResponse.json({ status: 'warning', message: 'Múltiplas notinhas pendentes; aguardando reply na prévia específica.' }, { status: 200 });
+      }
+
+      const proposta = resolucaoCorrecao.status === 'encontrada' ? resolucaoCorrecao.proposta : null;
 
       if (proposta) {
         if (correcaoDetectada.campo === 'valor') {
@@ -4545,13 +4729,10 @@ export async function POST(request: Request) {
         const msgPreviaAtualizada = `✏️ *Dado atualizado com sucesso!*\n\n` + formatarMensagemPreviaNotinha(proposta);
         const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPreviaAtualizada);
         const refMsgId = envio.messageId || msgIdAnterior || `notinha-prev-${Date.now()}`;
-        await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
-        if (msgIdAnterior && msgIdAnterior !== refMsgId) {
-          await salvarPropostaNotinha(supabase, lojaId, remoteJid, msgIdAnterior, proposta);
-        }
-        if (targetDestination !== remoteJid) {
-          await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
-        }
+        await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta, {
+          semExpiracao: Boolean(proposta.semExpiracao || !isGroup),
+          jidsAdicionais: jidsCorrecao.filter((j) => j !== remoteJid),
+        });
 
         return NextResponse.json({ status: 'ok', message: 'Notinha corrigida e reenviada para confirmação.' }, { status: 200 });
       }
@@ -4692,7 +4873,7 @@ export async function POST(request: Request) {
       ]);
 
       const proposta = construirPropostaNotinha({
-        id: `notinha-${Date.now()}`,
+        id: `notinha-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         lojaId,
         remoteJid,
         vendaDetectada,
@@ -4714,10 +4895,18 @@ export async function POST(request: Request) {
       const msgPrevia = cabecalhoFotoAssociada + formatarMensagemPreviaNotinha(proposta);
       const envio = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgPrevia);
       const refMsgId = envio.messageId || `notinha-prev-${Date.now()}`;
-      await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta);
-      if (targetDestination !== remoteJid) {
-        await salvarPropostaNotinha(supabase, lojaId, targetDestination, refMsgId, proposta);
-      }
+      const jidsForm = montarJidsPropostaChat({
+        remoteJid,
+        targetDestination,
+        isGroup,
+        authorPhone,
+        senderPhone,
+        ehModeradorMaster,
+      });
+      await salvarPropostaNotinha(supabase, lojaId, remoteJid, refMsgId, proposta, {
+        semExpiracao: !isGroup,
+        jidsAdicionais: jidsForm.filter((j) => j !== remoteJid),
+      });
 
       return NextResponse.json({ status: 'ok', message: 'Prévia de notinha gerada com sucesso a partir de pedido.' }, { status: 200 });
     }

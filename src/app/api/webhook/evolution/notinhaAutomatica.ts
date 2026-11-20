@@ -106,6 +106,10 @@ export interface PropostaNotinha {
   dataVendaInformada?: boolean;
   observacoes?: string;
   criadoEm?: number;
+  /** Quando true, a prévia não expira por tempo — só sai da fila ao confirmar ou cancelar. */
+  semExpiracao?: boolean;
+  /** Todos os messageIds das prévias (inicial e edições) vinculadas a esta mesma proposta. */
+  mensagensVinculadas?: string[];
 }
 
 function formatarIsoParaBrCurto(dataIso: string): string {
@@ -1537,33 +1541,69 @@ export function interpretarTextoCorrecaoVenda(
   return null;
 }
 
+export interface OpcoesSalvarPropostaNotinha {
+  /** Se true, a prévia não expira por tempo (só sai ao confirmar ou cancelar). */
+  semExpiracao?: boolean;
+  /** Se false, não sobrescreve a chave `:ultima`. Padrão: true. */
+  atualizarUltima?: boolean;
+  /** JIDs extras do mesmo chat/usuário (ex: número, @s.whatsapp.net, @lid) para espelhar as chaves. */
+  jidsAdicionais?: string[];
+}
+
 /**
  * Salva uma proposta de notinha diretamente no banco Supabase para aguardar reação ou confirmação.
+ * Quando editada, atualiza também as chaves das mensagens anteriores vinculadas à mesma proposta.
  */
 export async function salvarPropostaNotinha(
   supabase: SupabaseClient,
   lojaId: string,
   remoteJid: string,
   messageId: string,
-  proposta: PropostaNotinha
+  proposta: PropostaNotinha,
+  opcoes: OpcoesSalvarPropostaNotinha = {}
 ): Promise<void> {
   const agora = Date.now();
   if (lojaId) proposta.lojaId = lojaId;
   proposta.messageId = messageId;
   proposta.remoteJid = remoteJid;
-  proposta.criadoEm = agora;
+  if (!proposta.criadoEm) proposta.criadoEm = agora;
 
-  const chaves = [
-    `notinha:${remoteJid}:${messageId}`,
-    `notinha:${remoteJid}:ultima`,
-  ];
+  const semExpiracao = Boolean(opcoes.semExpiracao ?? proposta.semExpiracao);
+  if (semExpiracao) {
+    proposta.semExpiracao = true;
+  }
+
+  const mensagensSet = new Set<string>(
+    [...(proposta.mensagensVinculadas || []), messageId].filter((id): id is string => Boolean(id && id.trim()))
+  );
+  proposta.mensagensVinculadas = Array.from(mensagensSet);
+
+  const jids = Array.from(
+    new Set(
+      [remoteJid, ...(opcoes.jidsAdicionais || [])].filter((j): j is string => Boolean(j && j.trim()))
+    )
+  );
+
+  const chavesSet = new Set<string>();
+  for (const jid of jids) {
+    for (const msgId of proposta.mensagensVinculadas) {
+      chavesSet.add(`notinha:${jid}:${msgId}`);
+    }
+    if (opcoes.atualizarUltima !== false) {
+      chavesSet.add(`notinha:${jid}:ultima`);
+    }
+  }
+  const chaves = Array.from(chavesSet);
 
   try {
     const payload = {
       loja_id: lojaId,
       tipo: 'confirmacao' as const,
       action: 'emitir_notinha',
-      params: { ...proposta, expiraEm: agora + 30 * 60 * 1000 } as any,
+      params: {
+        ...proposta,
+        expiraEm: semExpiracao ? null : agora + 30 * 60 * 1000,
+      } as any,
       resumo: `Notinha ${proposta.modelo} para ${proposta.clienteNome}`,
       criado_em: new Date(agora).toISOString(),
     };
@@ -1581,17 +1621,53 @@ export async function salvarPropostaNotinha(
   }
 }
 
+function propostaCompativelComModelo(
+  prop: PropostaNotinha,
+  modeloDesejado: string,
+  idadeMs: number
+): boolean {
+  const modelosDaProposta =
+    Array.isArray(prop.itens) && prop.itens.length > 0
+      ? prop.itens.map((it) => it.modelo)
+      : [prop.modelo];
+
+  // Se a proposta de notinha foi criada nos últimos 3 minutos no mesmo chat,
+  // aceita vincular mesmo que o OCR da etiqueta tenha alucinado outra geração da mesma marca
+  if (idadeMs < 180_000) {
+    const conflitaComTodos = modelosDaProposta.every((m) =>
+      marcasConflitantes(modeloDesejado, m)
+    );
+    return !conflitaComTodos;
+  }
+
+  return modelosDaProposta.some((m) => modelosSaoCompativeis(modeloDesejado, m));
+}
+
+function propostaEstaExpirada(
+  prop: PropostaNotinha,
+  criadoEmIso: string | null | undefined,
+  maxMinutos: number | null,
+  agora: number
+): boolean {
+  if (prop.semExpiracao) return false;
+  if (maxMinutos === null || maxMinutos <= 0) return false;
+  const criado = criadoEmIso ? new Date(criadoEmIso).getTime() : (prop.criadoEm || 0);
+  if (!criado) return false;
+  return agora - criado > maxMinutos * 60 * 1000;
+}
+
 /**
- * Busca proposta de notinha pendente recente diretamente no Supabase (whatsapp_acoes_pendentes).
+ * Busca proposta de notinha pendente diretamente no Supabase (whatsapp_acoes_pendentes).
+ * Propostas marcadas com `semExpiracao: true` nunca expiram por tempo.
  */
 export async function buscarPropostaNotinhaRecente(
   supabase: SupabaseClient,
   chaves: string[],
   modeloDesejado?: string | null,
-  maxMinutos: number = 20
+  maxMinutos: number | null = 20
 ): Promise<PropostaNotinha | null> {
+  if (!chaves || chaves.length === 0) return null;
   const agora = Date.now();
-  const maxMs = maxMinutos * 60 * 1000;
 
   try {
     const { data: pendentes } = await supabase
@@ -1600,40 +1676,20 @@ export async function buscarPropostaNotinhaRecente(
       .in('chave', chaves)
       .eq('tipo', 'confirmacao')
       .order('criado_em', { ascending: false })
-      .limit(5);
+      .limit(10);
 
     if (pendentes && pendentes.length > 0) {
       for (const item of pendentes) {
-        const criado = item.criado_em ? new Date(item.criado_em).getTime() : 0;
-        const idadeMs = agora - criado;
-        if (idadeMs > maxMs) continue;
-
         const prop = item.params as PropostaNotinha;
         if (!prop) continue;
 
-        if (modeloDesejado) {
-          const modelosDaProposta =
-            Array.isArray(prop.itens) && prop.itens.length > 0
-              ? prop.itens.map((it) => it.modelo)
-              : [prop.modelo];
+        if (propostaEstaExpirada(prop, item.criado_em, maxMinutos, agora)) continue;
 
-          // Se a proposta de notinha foi criada nos últimos 3 minutos no mesmo chat,
-          // aceita vincular mesmo que o OCR da etiqueta tenha alucinado outra geração da mesma marca
-          if (idadeMs < 180_000) {
-            const conflitaComTodos = modelosDaProposta.every((m) =>
-              marcasConflitantes(modeloDesejado, m)
-            );
-            if (conflitaComTodos) {
-              continue;
-            }
-          } else {
-            const compativelComAlgum = modelosDaProposta.some((m) =>
-              modelosSaoCompativeis(modeloDesejado, m)
-            );
-            if (!compativelComAlgum) {
-              continue;
-            }
-          }
+        const criado = item.criado_em ? new Date(item.criado_em).getTime() : (prop.criadoEm || agora);
+        const idadeMs = Math.max(0, agora - criado);
+
+        if (modeloDesejado && !propostaCompativelComModelo(prop, modeloDesejado, idadeMs)) {
+          continue;
         }
 
         return prop;
@@ -1644,6 +1700,292 @@ export async function buscarPropostaNotinhaRecente(
   }
 
   return null;
+}
+
+/**
+ * Lista todas as propostas de notinha pendentes (únicas por `proposta.id`) de um conjunto de JIDs
+ * (ex: privado de um usuário em número, @s.whatsapp.net e @lid).
+ */
+export async function listarPropostasNotinhaPendentes(
+  supabase: SupabaseClient,
+  jids: string[],
+  lojaId?: string | null,
+  maxMinutosLegado: number = 30
+): Promise<PropostaNotinha[]> {
+  const jidsLimpos = Array.from(new Set(jids.filter((j): j is string => Boolean(j && j.trim()))));
+  if (jidsLimpos.length === 0) return [];
+
+  const prefixos = jidsLimpos.map((j) => `notinha:${j}:`);
+  const agora = Date.now();
+
+  try {
+    let query = supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('chave, params, criado_em')
+      .eq('tipo', 'confirmacao')
+      .eq('action', 'emitir_notinha');
+
+    if (lojaId) {
+      query = query.eq('loja_id', lojaId);
+    }
+
+    const { data: rows } = await query;
+    if (!rows || rows.length === 0) return [];
+
+    const porId = new Map<string, { prop: PropostaNotinha; atualizadoEm: number }>();
+
+    for (const row of rows as Array<{ chave?: string; params?: PropostaNotinha; criado_em?: string }>) {
+      const chave = String(row.chave || '');
+      if (!chave || chave.endsWith(':ultima')) continue;
+      if (!prefixos.some((pref) => chave.startsWith(pref))) continue;
+
+      const prop = row.params;
+      if (!prop || !prop.id) continue;
+      if (propostaEstaExpirada(prop, row.criado_em, maxMinutosLegado, agora)) continue;
+
+      const atualizadoEm = row.criado_em ? new Date(row.criado_em).getTime() : (prop.criadoEm || 0);
+      const existente = porId.get(prop.id);
+      if (!existente || atualizadoEm >= existente.atualizadoEm) {
+        porId.set(prop.id, { prop, atualizadoEm });
+      }
+    }
+
+    return Array.from(porId.values())
+      .map((entry) => entry.prop)
+      .sort((a, b) => (a.criadoEm || 0) - (b.criadoEm || 0));
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao listar propostas pendentes:', err);
+    return [];
+  }
+}
+
+export type ResultadoResolucaoPropostaAlvo =
+  | { status: 'encontrada'; proposta: PropostaNotinha }
+  | { status: 'multiplas'; propostas: PropostaNotinha[] }
+  | { status: 'nao_encontrada' };
+
+/**
+ * Resolve de forma segura qual proposta de notinha deve ser confirmada, editada ou cancelada:
+ * - Quando há `quotedStanzaId` (reply ou reação em uma prévia específica), busca EXCLUSIVAMENTE
+ *   pelo ID daquela mensagem — nunca cai em `:ultima` nem atropela outra notinha do lote.
+ * - Sem `quotedStanzaId`, se houver 1 pendente na fila, retorna ela; se houver 2+, retorna
+ *   `multiplas` para pedir que o usuário dê reply ou reaja na prévia desejada.
+ */
+export async function resolverPropostaAlvoNotinha(params: {
+  supabase: SupabaseClient;
+  jids: string[];
+  lojaId?: string | null;
+  quotedStanzaId?: string | null;
+  modeloDesejado?: string | null;
+  maxMinutosLegado?: number;
+}): Promise<ResultadoResolucaoPropostaAlvo> {
+  const {
+    supabase,
+    jids,
+    lojaId,
+    quotedStanzaId,
+    modeloDesejado = null,
+    maxMinutosLegado = 30,
+  } = params;
+
+  const jidsLimpos = Array.from(new Set(jids.filter((j): j is string => Boolean(j && j.trim()))));
+  if (jidsLimpos.length === 0) return { status: 'nao_encontrada' };
+
+  // 1. Reply ou reação numa prévia específica -> busca estrita pelo ID exato (sem fallback :ultima)
+  if (quotedStanzaId) {
+    const chavesExatas = jidsLimpos.map((j) => `notinha:${j}:${quotedStanzaId}`);
+    const exata = await buscarPropostaNotinhaRecente(supabase, chavesExatas, null, maxMinutosLegado);
+    if (exata) {
+      return { status: 'encontrada', proposta: exata };
+    }
+    return { status: 'nao_encontrada' };
+  }
+
+  // 2. Mensagem solta (sem reply) -> consulta todas as pendentes da fila deste chat/usuário
+  let pendentes = await listarPropostasNotinhaPendentes(supabase, jidsLimpos, lojaId, maxMinutosLegado);
+
+  if (modeloDesejado && pendentes.length > 0) {
+    const agora = Date.now();
+    const compativeis = pendentes.filter((prop) =>
+      propostaCompativelComModelo(prop, modeloDesejado, Math.max(0, agora - (prop.criadoEm || agora)))
+    );
+    if (compativeis.length > 0) {
+      pendentes = compativeis;
+    } else {
+      return { status: 'nao_encontrada' };
+    }
+  }
+
+  if (pendentes.length === 1) {
+    return { status: 'encontrada', proposta: pendentes[0] };
+  }
+
+  if (pendentes.length > 1) {
+    return { status: 'multiplas', propostas: pendentes };
+  }
+
+  // Fallback legado (caso só exista `:ultima` gravada antes desta versão)
+  const chavesUltima = jidsLimpos.map((j) => `notinha:${j}:ultima`);
+  const ultima = await buscarPropostaNotinhaRecente(supabase, chavesUltima, modeloDesejado, maxMinutosLegado);
+  if (ultima) {
+    return { status: 'encontrada', proposta: ultima };
+  }
+
+  return { status: 'nao_encontrada' };
+}
+
+/**
+ * Remove do banco APENAS as chaves pertencentes à proposta especificada (incluindo edições
+ * anteriores dela e `:ultima` somente se apontar para esta mesma proposta), preservando
+ * todas as demais notinhas pendentes do lote. Retorna quantas ainda restam pendentes.
+ */
+export async function removerPropostaNotinhaPendente(
+  supabase: SupabaseClient,
+  proposta: PropostaNotinha,
+  jids: string[],
+  lojaId?: string | null,
+  chavesExtras: string[] = []
+): Promise<number> {
+  const jidsLimpos = Array.from(
+    new Set(
+      [...jids, proposta.remoteJid].filter((j): j is string => Boolean(j && j.trim()))
+    )
+  );
+  const prefixos = jidsLimpos.map((j) => `notinha:${j}:`);
+
+  const chavesRemover = new Set<string>(
+    chavesExtras.filter((c) => Boolean(c) && !c.endsWith(':ultima'))
+  );
+
+  const msgIds = Array.from(
+    new Set(
+      [proposta.messageId, ...(proposta.mensagensVinculadas || [])].filter(
+        (id): id is string => Boolean(id && id.trim())
+      )
+    )
+  );
+  for (const jid of jidsLimpos) {
+    for (const msgId of msgIds) {
+      chavesRemover.add(`notinha:${jid}:${msgId}`);
+    }
+  }
+
+  const restantesIds = new Set<string>();
+
+  try {
+    let query = supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('chave, params, criado_em')
+      .eq('tipo', 'confirmacao')
+      .eq('action', 'emitir_notinha');
+
+    if (lojaId || proposta.lojaId) {
+      query = query.eq('loja_id', lojaId || proposta.lojaId);
+    }
+
+    const { data: rows } = await query;
+    const agora = Date.now();
+
+    for (const row of (rows || []) as Array<{ chave?: string; params?: PropostaNotinha; criado_em?: string }>) {
+      const chave = String(row.chave || '');
+      const propRow = row.params;
+      if (!chave || !propRow) continue;
+
+      if (propRow.id && proposta.id && propRow.id === proposta.id) {
+        chavesRemover.add(chave);
+      } else if (
+        !chave.endsWith(':ultima') &&
+        prefixos.some((pref) => chave.startsWith(pref)) &&
+        propRow.id &&
+        !propostaEstaExpirada(propRow, row.criado_em, 30, agora)
+      ) {
+        restantesIds.add(propRow.id);
+      }
+    }
+
+    const listaChaves = Array.from(chavesRemover);
+    if (listaChaves.length > 0) {
+      await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', listaChaves);
+    }
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao remover proposta pendente:', err);
+  }
+
+  return restantesIds.size;
+}
+
+/**
+ * Cancela e remove todas as propostas de notinha pendentes do usuário/chat.
+ */
+export async function limparTodasPropostasNotinhaPendentes(
+  supabase: SupabaseClient,
+  jids: string[],
+  lojaId?: string | null
+): Promise<number> {
+  const jidsLimpos = Array.from(new Set(jids.filter((j): j is string => Boolean(j && j.trim()))));
+  if (jidsLimpos.length === 0) return 0;
+
+  const prefixos = jidsLimpos.map((j) => `notinha:${j}:`);
+  const chavesRemover = new Set<string>(jidsLimpos.map((j) => `notinha:${j}:ultima`));
+  const idsCancelados = new Set<string>();
+
+  try {
+    let query = supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('chave, params')
+      .eq('tipo', 'confirmacao')
+      .eq('action', 'emitir_notinha');
+
+    if (lojaId) {
+      query = query.eq('loja_id', lojaId);
+    }
+
+    const { data: rows } = await query;
+    for (const row of (rows || []) as Array<{ chave?: string; params?: PropostaNotinha }>) {
+      const chave = String(row.chave || '');
+      if (!chave || !prefixos.some((pref) => chave.startsWith(pref))) continue;
+      chavesRemover.add(chave);
+      if (!chave.endsWith(':ultima') && row.params?.id) {
+        idsCancelados.add(row.params.id);
+      }
+    }
+
+    const listaChaves = Array.from(chavesRemover);
+    if (listaChaves.length > 0) {
+      await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', listaChaves);
+    }
+  } catch (err) {
+    console.warn('[Notinha Automática] Erro ao limpar todas as propostas pendentes:', err);
+  }
+
+  return idsCancelados.size;
+}
+
+/**
+ * Formata a lista de notinhas pendentes no privado para o comando `!pendentes`.
+ */
+export function formatarListaPropostasPendentes(propostas: PropostaNotinha[]): string {
+  if (!propostas || propostas.length === 0) {
+    return '✅ Você não tem nenhuma notinha pendente no momento!';
+  }
+
+  const linhas = propostas.map((p, idx) => {
+    const valorFmt =
+      p.valorTotal && p.valorTotal > 0
+        ? `R$ ${Number(p.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : '⚠️ sem valor';
+    const dataFmt = p.dataVenda ? ` | 📅 ${p.dataVenda}` : '';
+    const modeloResumo = [p.modelo, p.capacidade, p.cor].filter(Boolean).join(' ').trim();
+    return `${idx + 1}. *${p.clienteNome || 'Cliente'}* — ${modeloResumo || 'Aparelho'} — *${valorFmt}*${dataFmt}`;
+  });
+
+  const plural = propostas.length === 1 ? 'notinha pendente' : 'notinhas pendentes';
+  return (
+    `📋 *NOTINHAS PENDENTES (${propostas.length} ${plural}):*\n\n` +
+    linhas.join('\n') +
+    `\n\n💡 _Para confirmar, editar ou cancelar uma específica, *responda (reply)* ou *reaja com ✅ / ❌* direto na prévia dela._\n` +
+    `🗑️ _Para limpar todas de uma vez, envie:_ *!cancelar todas*`
+  );
 }
 
 /**
