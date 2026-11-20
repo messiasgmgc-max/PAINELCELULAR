@@ -30,6 +30,7 @@ import {
 } from './capabilities';
 import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
 import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
+import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { notificarSaidaVendaGrupoEstoque } from '@/lib/whatsapp/notificarSaidaEstoque';
@@ -4951,8 +4952,8 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
     // ── 10. COMANDO: !estoque, !lista e !estoque completo ──
     const ehPedidoListaEstoque =
-      lowerText.startsWith('!estoque') ||
-      lowerText.startsWith('!lista') ||
+      /^!\s*estoque\b/i.test(lowerText) ||
+      /^!\s*lista\b/i.test(lowerText) ||
       lowerText === 'estoque' ||
       lowerText === 'cardapio' ||
       lowerText === 'tabela' ||
@@ -4987,14 +4988,18 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         }
       }
 
-      // Consulta estritamente os aparelhos DESTA LOJA (zero fallbacks para outras lojas!)
-      const { data: aparelhosBrutos } = await supabase
-        .from('aparelhos')
-        .select('*')
-        .eq('loja_id', resolvedLojaId)
-        .eq('ativo', true)
-        .not('status', 'in', '(vendido,baixado)');
-      // estaNoEstoque também descarta o legado com condicao='vendido'.
+      // Consulta paginada de todos os aparelhos não-inativos da loja (inclui status/ativo NULL
+      // que .eq('ativo', true) e .not('status', 'in', ...) descartavam no PostgreSQL).
+      const aparelhosBrutos = await buscarTodasPaginas<any>((de, ate) =>
+        supabase
+          .from('aparelhos')
+          .select('*')
+          .eq('loja_id', resolvedLojaId)
+          .or('ativo.is.null,ativo.eq.true')
+          .order('id')
+          .range(de, ate)
+      );
+      // estaNoEstoque descarta vendido, baixado, cliente e o legado com condicao='vendido'.
       const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
       if (!aparelhos || aparelhos.length === 0) {
@@ -5018,7 +5023,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
     }
 
     // ── 10.1. COMANDO: !buscar [modelo / termo] ──
-    if (lowerText.startsWith('!buscar') || lowerText.startsWith('!busca')) {
+    if (/^!\s*busc(?:ar|a)\b/i.test(lowerText)) {
       const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
       if (!resolvedLojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
@@ -5034,7 +5039,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       const nomeLojaExibicao = (loja?.nome || 'PHONE CENTER').trim().toUpperCase();
 
       // Extrai o termo pesquisado após "!buscar" ou "!busca"
-      const termoBusca = textContent.replace(/^!(?:buscar|busca)\s*/i, '').trim();
+      const termoBusca = textContent.replace(/^!\s*(?:buscar|busca)\s*/i, '').trim();
 
       if (!termoBusca || termoBusca.toLowerCase() === 'ajuda') {
         const msgAjudaBusca = `🔍 *Busca Rápida de Aparelhos — ${nomeLojaExibicao}*
@@ -5052,13 +5057,22 @@ Envie o modelo que deseja consultar no estoque:
         return NextResponse.json({ status: 'ok', message: 'Ajuda de busca enviada.' }, { status: 200 });
       }
 
-      // Consulta estoque ativo da loja
-      const { data: aparelhosBrutos, error: errEstoque } = await supabase
-        .from('aparelhos')
-        .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao')
-        .eq('loja_id', resolvedLojaId)
-        .eq('ativo', true)
-        .not('status', 'in', '(vendido,baixado)');
+      // Consulta estoque ativo da loja (paginado e sem perder status/ativo NULL)
+      let aparelhosBrutos: any[] = [];
+      let errEstoque: unknown = null;
+      try {
+        aparelhosBrutos = await buscarTodasPaginas<any>((de, ate) =>
+          supabase
+            .from('aparelhos')
+            .select('id, marca, modelo, capacidade, cor, preco, preco_atacado, precoAtacado, saude_bateria, imei, codigo, status, condicao, ativo')
+            .eq('loja_id', resolvedLojaId)
+            .or('ativo.is.null,ativo.eq.true')
+            .order('id')
+            .range(de, ate)
+        );
+      } catch (err) {
+        errEstoque = err;
+      }
       // estaNoEstoque também descarta o legado com condicao='vendido'.
       const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
@@ -5072,7 +5086,7 @@ Envie o modelo que deseja consultar no estoque:
       }
 
       // Parser inteligente de modelo de iPhone
-      const IPHONE_REGEX = /(?:iphone\s*|ip\s*)?(1[1-7]|xr|xs|se|16e)\s*(pro\s*max|promax|pmax|pmx|p\s*max|pm|pro\b|p\b|plus|\+|mini)?/i;
+      const IPHONE_REGEX = /(?:iphone\s*|ip\s*)?(16e|17e|18e|20|1[1-9]|xr|xs|se)\s*(pro\s*max|promax|pmax|pmx|p\s*max|pm|pro\b|p\b|plus|\+|air|mini)?/i;
       const modeloMatch = termoBusca.match(IPHONE_REGEX);
 
       let aparelhosFiltrados: any[] = [];
@@ -5082,7 +5096,7 @@ Envie o modelo que deseja consultar no estoque:
         const termoNumero = modeloMatch[1].toUpperCase();
         const sufRaw = (modeloMatch[2] || '').toLowerCase().replace(/\s+/g, '');
 
-        let variante: 'PRO_MAX' | 'PRO' | 'PLUS' | 'MINI' | 'BASE_ONLY' | 'QUALQUER' = 'QUALQUER';
+        let variante: 'PRO_MAX' | 'PRO' | 'PLUS' | 'AIR' | 'MINI' | 'BASE_ONLY' | 'QUALQUER' = 'QUALQUER';
 
         if (['pm', 'promax', 'pmax', 'pmx'].includes(sufRaw)) {
           variante = 'PRO_MAX';
@@ -5093,12 +5107,15 @@ Envie o modelo que deseja consultar no estoque:
         } else if (['plus', '+', 'pl'].includes(sufRaw)) {
           variante = 'PLUS';
           modeloIdentificado = `iPhone ${termoNumero} Plus`;
+        } else if (sufRaw === 'air') {
+          variante = 'AIR';
+          modeloIdentificado = `iPhone ${termoNumero} Air`;
         } else if (sufRaw === 'mini') {
           variante = 'MINI';
           modeloIdentificado = `iPhone ${termoNumero} Mini`;
         } else if (!sufRaw) {
           variante = 'BASE_ONLY';
-          modeloIdentificado = termoNumero === '16E' ? 'iPhone 16e' : `iPhone ${termoNumero}`;
+          modeloIdentificado = /^\d+E$/.test(termoNumero) ? `iPhone ${termoNumero.toLowerCase()}` : `iPhone ${termoNumero}`;
         }
 
         const numLower = termoNumero.toLowerCase();
@@ -5122,6 +5139,11 @@ Envie o modelo que deseja consultar no estoque:
             const mod = String(a.modelo || '').toLowerCase();
             return mod.includes('plus') || mod.includes('+');
           });
+        } else if (variante === 'AIR') {
+          aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
+            const mod = String(a.modelo || '').toLowerCase();
+            return mod.includes('air');
+          });
         } else if (variante === 'MINI') {
           aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
             const mod = String(a.modelo || '').toLowerCase();
@@ -5130,7 +5152,7 @@ Envie o modelo que deseja consultar no estoque:
         } else if (variante === 'BASE_ONLY') {
           aparelhosFiltrados = aparelhosDaGeracao.filter((a) => {
             const mod = String(a.modelo || '').toLowerCase();
-            return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('mini');
+            return !mod.includes('pro') && !mod.includes('max') && !mod.includes('plus') && !mod.includes('air') && !mod.includes('mini');
           });
         } else {
           aparelhosFiltrados = aparelhosDaGeracao;
