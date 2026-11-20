@@ -52,6 +52,7 @@ Para evitar queimar contexto/tokens relendo todo o projeto a cada sessão, siga 
 | [docs/crm/FEATURES-GAP.md](docs/crm/FEATURES-GAP.md) | Implementação de features / paridade | Matriz Mercado Phone CRM vs EvoCRM nativo vs Extensões PhoneCenter |
 | [docs/crm/BRANDING.md](docs/crm/BRANDING.md) | Customização visual / White-label | Paleta PhoneCenter, logos, tela de login, sidebar PT-BR |
 | [docs/crm/INTEGRATIONS.md](docs/crm/INTEGRATIONS.md) | Integrações ERP, IA, Meta, Google, Pix | Specs de Evolution API, Supabase ERP Bridge, MCP IA, CTWA, Calendar |
+| [docs/crm/OAUTH-SETUP.md](docs/crm/OAUTH-SETUP.md) | Configurar Coolify, Meta, Google, Pix e Multi-Loja | Passo a passo exato de envs no Coolify, Callback URLs oficiais e template multi-loja |
 
 ---
 

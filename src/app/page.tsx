@@ -314,6 +314,18 @@ export default function Home() {
                 )}
               </button>
 
+              {/* Botão PhoneCenterCRM */}
+              <a
+                href="https://crm.phonecenter.tech"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-[#0066FF]/50 bg-[#0066FF]/15 hover:bg-[#0066FF]/30 text-blue-200 font-semibold transition-all shrink-0"
+                title="Abrir PhoneCenterCRM (Atendimento & Vendas)"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="hidden sm:inline">CRM</span>
+              </a>
+
               {/* Botão Meu Plano */}
               <Button
                 variant="outline"

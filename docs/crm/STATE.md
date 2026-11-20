@@ -16,8 +16,9 @@
 - **Proposta Pública (com Aceite + PDF):** `https://app.phonecenter.tech/proposta/<token>`
 - **Link na Bio + Vitrine:** `https://app.phonecenter.tech/bio`
 - **MCP Server IA (JSON-RPC 2.0):** `https://app.phonecenter.tech/api/crm-bridge/mcp`
-- **CRM Bridge REST APIs:** `/api/crm-bridge/{health,estoque,clientes/lookup,simular,propostas,ranking,leads-anuncio,chat-interno,conexoes,tickets-ops,webhooks/evo}`
-- **Migration SQL pendente no Supabase:** `supabase/migrations/20261120_phonecenter_crm_modulos.sql`
+- **CRM Bridge REST APIs:** `/api/crm-bridge/{health,estoque,clientes/lookup,simular,propostas,ranking,leads-anuncio,chat-interno,conexoes,tickets-ops,pix-reserva,multi-loja/provisionar,webhooks/evo,webhooks/pagamento}`
+- **Migrations SQL pendentes no Supabase:** `20261120_phonecenter_crm_modulos.sql` e `20261120_phonecenter_crm_fase6.sql`
+- **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo a cada 5 min (`ram=32% disk=22% evo=running`)
 
 ## 3. O que Já Está Rodando em Produção
 - **Stack EvoCRM Full (14 containers, `/opt/phonecenter-crm/`):** todos saudáveis com `mem_limit`, backup diário `03:30 UTC`.

@@ -7,20 +7,18 @@
 
 ## 📍 ONDE PARAMOS (Resumo Rápido)
 
-- **Fase Atual:** `Fases 0, 1, 3A (White-Label), 4 (Ponte ERP + MCP IA) e 5 (Módulos Exclusivos)` **CONCLUÍDAS!** → Pronto para ativação final das credenciais no Coolify/Supabase e Fase 2 (canais Meta/Google) + Fase 6 (Escala Multi-Loja & Pix).
-- **Concluído agora (Rodada Final Fase 5):**
-  - Migration SQL criada: `supabase/migrations/20261120_phonecenter_crm_modulos.sql` (`crm_propostas`, `crm_leads_anuncio`, `crm_chat_interno`).
-  - **Propostas Comerciais com Link Público & Aceite:** `/api/crm-bridge/propostas`, `/api/publico/proposta/[token]` e página pública `/proposta/[token]` (com logo PhoneCenter, troca, parcelamento 1x–18x, aceite com 1 clique e impressão PDF).
-  - **Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS):** captura automática no webhook `/api/crm-bridge/webhooks/evo`, dashboard `/api/crm-bridge/leads-anuncio` e disparo server-side Meta Conversions API (`Purchase`).
-  - **Chat Interno da Equipe:** `/api/crm-bridge/chat-interno` com 5 canais (`#geral`, `#vendas`, `#trocas`, `#assistencia`, `#gerencia`).
-  - **Gestão Avançada de Conexões & Tickets (Print 2):** `/api/crm-bridge/tickets-ops` (migrar tickets entre conexões, fechar inativos por filtro, fechar todos) + `/api/crm-bridge/conexoes` (reiniciar/desconectar Evolution API).
-  - **Dashboard App Lateral (`/crm-sidebar`) turbinado:** agora com **5 abas** (*Estoque*, *Cliente*, *Troca + Link Oficial de Proposta*, *Ranking*, *Ops [Ads CTWA / Chat Equipe / Conexões & Tickets]*).
-  - `pnpm typecheck` zerado e 9/9 testes unitários do CRM Bridge passando!
-- **Próximo Passo Exato:**
-  1. Rodar `supabase/migrations/20261120_phonecenter_crm_modulos.sql` no SQL Editor do Supabase (para criar as 3 novas tabelas).
-  2. Configurar no Coolify do `PAINELCELULAR`: `CRM_BRIDGE_SECRET` (obrigatório), `CRM_EVO_ACCESS_TOKEN` (para migrar/fechar tickets em massa), e opcionalmente `META_PIXEL_ID` + `META_CAPI_ACCESS_TOKEN`.
-  3. No `https://crm.phonecenter.tech`: conectar WhatsApp QR (Evolution API já ativa!), cadastrar Dashboard App `/crm-sidebar?token=...`, MCP Server `/api/crm-bridge/mcp` e Webhook `/api/crm-bridge/webhooks/evo?token=...`.
-  4. **Próxima etapa sob demanda:** Fase 2 (Instagram Direct, WhatsApp Cloud API Oficial, Google Calendar OAuth) e Fase 6 (Multi-Loja SaaS via Coolify API + Pix/Asaas no chat).
+- **Fase Atual:** `Fases 0, 1, 3A, 4, 5 e 6` **CONCLUÍDAS NO CÓDIGO E NA INFRA!** 🎉
+- **Concluído agora (Fase 6 + Setup OAuth):**
+  - **Botão `CRM` nativo no cabeçalho do `PAINELCELULAR`** (`app.phonecenter.tech` → abre `https://crm.phonecenter.tech` em 1 clique).
+  - **Cobrança Pix / Sinal de Reserva no Chat:** `crm_reservas_pix` + `/api/crm-bridge/pix-reserva` (BR Code EMV BACEN com CRC16-CCITT real + suporte nativo a **Mercado Pago** e **Asaas**) + webhook `/api/crm-bridge/webhooks/pagamento` + sub-aba **Pix** no `/crm-sidebar`.
+  - **Escala Multi-Loja SaaS:** `crm_tenants` + `/api/crm-bridge/multi-loja/provisionar` + template isolado `infra/crm/docker-compose.tenant.yml`.
+  - **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo via cron a cada 5 min (`OK ram=32% disk=22% evo=running`).
+  - **Guia de OAuth & Coolify:** `docs/crm/OAUTH-SETUP.md` com URLs reais de Callback/Webhook do EvoCRM para Google Calendar, Instagram Direct e WhatsApp Cloud API.
+  - `pnpm typecheck` zerado e **11/11 testes unitários** do CRM Bridge passando!
+- **Ações finais do usuário (5 min para 100% operacional):**
+  1. Configurar `CRM_BRIDGE_SECRET` (+ opcionais `CRM_PIX_KEY`, `CRM_EVO_ACCESS_TOKEN`, etc.) no Coolify do `PAINELCELULAR` (ver `docs/crm/OAUTH-SETUP.md`).
+  2. Rodar as 2 migrations SQL no Supabase (`20261120_phonecenter_crm_modulos.sql` e `20261120_phonecenter_crm_fase6.sql`).
+  3. Cadastrar o Dashboard App `/crm-sidebar?token=...`, o MCP Server `/api/crm-bridge/mcp`, o Webhook `/api/crm-bridge/webhooks/evo?token=...` e conectar o WhatsApp QR no `https://crm.phonecenter.tech`.
 
 ---
 
@@ -81,10 +79,9 @@
 - [ ] **Rodízio Inteligente avançado + Kanban Grupos + CRM Academy + Financeiro (Fase 5B/6)**
 
 ## Fase 6 — Escala Multi-Loja (SaaS PhoneCenter) & Governança
-- [ ] Definir modelo Multi-Loja definitivo:
-  - *Opção A:* Provisionamento automatizado de instâncias isoladas por loja via Coolify API (`<slug>.crm.phonecenter.tech`)
-  - *Opção B:* Isolamento lógico multi-tenant no fork do CRM + SSO unificado com login do PhoneCenter
-- [ ] Integrar **SSO / Link direto** dentro do painel principal `PAINELCELULAR` (botão "Abrir CRM")
-- [ ] Integrar **Asaas / Mercado Pago / Pix** para cobrança de sinal/reserva dentro do chat
-- [ ] Monitoramento (Uptime Kuma / alertas WhatsApp para queda de instância ou RAM > 85%)
-- [ ] Testes E2E completos e documentação final de operação
+- [x] Definir modelo Multi-Loja definitivo + criar template isolado `infra/crm/docker-compose.tenant.yml` e API `/api/crm-bridge/multi-loja/provisionar` (`crm_tenants`)
+- [x] Integrar link direto **CRM** no cabeçalho do painel principal `PAINELCELULAR` (`src/app/page.tsx`)
+- [x] Integrar **Pix EMV BACEN / Asaas / Mercado Pago** para cobrança de sinal/reserva dentro do chat (`/api/crm-bridge/pix-reserva` + `/api/crm-bridge/webhooks/pagamento` + sub-aba Pix)
+- [x] Monitoramento automático da VPS (`/opt/phonecenter-crm/health-monitor.sh` via cron a cada 5 min — `ram=32% disk=22%`)
+- [x] Documentar URLs oficiais de OAuth/Webhook Meta & Google + envs Coolify em `docs/crm/OAUTH-SETUP.md`
+- [ ] Executar teste E2E ao vivo pós-configuração das envs no Coolify e migrations no Supabase

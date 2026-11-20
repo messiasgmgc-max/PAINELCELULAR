@@ -11,6 +11,9 @@ import {
   XCircle,
   ArrowRightLeft,
   AlertTriangle,
+  QrCode,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 interface Props {
@@ -19,7 +22,7 @@ interface Props {
   agenteNome?: string;
 }
 
-type SubAba = 'ads' | 'chat' | 'ops';
+type SubAba = 'ads' | 'chat' | 'pix' | 'ops';
 
 const formatBRL = (v: number) =>
   (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -67,6 +70,20 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
   const [diasInativo, setDiasInativo] = useState('7');
   const [statusOps, setStatusOps] = useState<string | null>(null);
   const [loadingOps, setLoadingOps] = useState(false);
+
+  // Pix / Sinal Reserva
+  const [pixModelo, setPixModelo] = useState('');
+  const [pixValor, setPixValor] = useState('200');
+  const [pixChave, setPixChave] = useState('');
+  const [pixCliente, setPixCliente] = useState('');
+  const [pixGerado, setPixGerado] = useState<{
+    protocolo: string;
+    provedor: string;
+    pixCopiaCola: string;
+    textoWhatsapp: string;
+  } | null>(null);
+  const [pixCopiado, setPixCopiado] = useState(false);
+  const [pixLoading, setPixLoading] = useState(false);
 
   const carregarAds = useCallback(async () => {
     if (!token) return;
@@ -203,12 +220,13 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
   return (
     <div className="space-y-2.5">
       {/* Sub-navegação */}
-      <div className="grid grid-cols-3 gap-1 bg-[#0f172a] p-1 rounded-xl border border-white/10">
+      <div className="grid grid-cols-4 gap-1 bg-[#0f172a] p-1 rounded-xl border border-white/10">
         {(
           [
-            { id: 'ads', label: 'Ads / CTWA', icon: Megaphone },
-            { id: 'chat', label: 'Chat Equipe', icon: MessageSquare },
-            { id: 'ops', label: 'Conexões/Ops', icon: Plug },
+            { id: 'ads', label: 'Ads', icon: Megaphone },
+            { id: 'pix', label: 'Pix', icon: QrCode },
+            { id: 'chat', label: 'Chat', icon: MessageSquare },
+            { id: 'ops', label: 'Ops', icon: Plug },
           ] as const
         ).map((item) => {
           const Icon = item.icon;
@@ -400,6 +418,118 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
               <Send className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ==================== PIX / SINAL DE RESERVA ==================== */}
+      {sub === 'pix' && (
+        <div className="space-y-2.5">
+          <div className="p-2.5 rounded-xl bg-[#0f172a] border border-white/10 space-y-2">
+            <div className="font-semibold text-white text-[12px] flex items-center gap-1.5">
+              <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+              Gerar Sinal Pix / Reserva de Aparelho
+            </div>
+            <input
+              value={pixModelo}
+              onChange={(e) => setPixModelo(e.target.value)}
+              placeholder="Aparelho (ex: iPhone 16 Pro 256GB Natural)"
+              className="w-full px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+            />
+            <div className="grid grid-cols-2 gap-1.5">
+              <input
+                type="number"
+                value={pixValor}
+                onChange={(e) => setPixValor(e.target.value)}
+                placeholder="Sinal R$"
+                className="px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+              />
+              <input
+                value={pixCliente}
+                onChange={(e) => setPixCliente(e.target.value)}
+                placeholder="Nome do cliente"
+                className="px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+              />
+            </div>
+            <input
+              value={pixChave}
+              onChange={(e) => setPixChave(e.target.value)}
+              placeholder="Chave Pix da loja (opcional se CRM_PIX_KEY estiver no Coolify)"
+              className="w-full px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+            />
+            <button
+              disabled={pixLoading || !pixModelo || !pixValor}
+              onClick={async () => {
+                setPixLoading(true);
+                setStatusOps(null);
+                try {
+                  const res = await fetch('/api/crm-bridge/pix-reserva', {
+                    method: 'POST',
+                    headers: headersBridge,
+                    body: JSON.stringify({
+                      aparelhoModelo: pixModelo,
+                      valorSinal: Number(pixValor.replace(',', '.')) || 0,
+                      clienteNome: pixCliente || 'Cliente',
+                      chavePix: pixChave || undefined,
+                    }),
+                  });
+                  const data = await res.json();
+                  if (res.ok && data.ok) {
+                    setPixGerado({
+                      protocolo: data.protocolo,
+                      provedor: data.provedor,
+                      pixCopiaCola: data.pixCopiaCola,
+                      textoWhatsapp: data.textoWhatsapp,
+                    });
+                  } else {
+                    setStatusOps(data.error || 'Erro ao gerar Pix.');
+                  }
+                } finally {
+                  setPixLoading(false);
+                }
+              }}
+              className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold"
+            >
+              {pixLoading ? 'Gerando Pix...' : 'Gerar Pix Copia e Cola'}
+            </button>
+            {statusOps && (
+              <div className="text-[11px] text-amber-300 bg-amber-500/10 p-2 rounded-lg">
+                {statusOps}
+              </div>
+            )}
+          </div>
+
+          {pixGerado && (
+            <div className="p-2.5 rounded-xl bg-[#0f172a] border border-emerald-500/40 space-y-2">
+              <div className="flex justify-between text-[11px]">
+                <span className="text-emerald-300 font-bold">#{pixGerado.protocolo}</span>
+                <span className="text-slate-400 uppercase text-[10px]">{pixGerado.provedor}</span>
+              </div>
+              <textarea
+                readOnly
+                rows={3}
+                value={pixGerado.pixCopiaCola}
+                className="w-full p-2 rounded-lg bg-[#090d16] border border-white/10 text-[10px] font-mono text-slate-300"
+              />
+              <button
+                onClick={async () => {
+                  await navigator.clipboard.writeText(pixGerado.textoWhatsapp);
+                  setPixCopiado(true);
+                  setTimeout(() => setPixCopiado(false), 1800);
+                }}
+                className="w-full py-1.5 rounded-lg bg-[#0066FF] hover:bg-[#0052CC] text-white font-semibold flex items-center justify-center gap-1.5"
+              >
+                {pixCopiado ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" /> Mensagem + Pix Copiados!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" /> Copiar Mensagem + Pix pro WhatsApp
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
