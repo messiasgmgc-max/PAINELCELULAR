@@ -1,329 +1,84 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { lerDescontoLoja, type DescontoLoja } from '@/lib/planos/desconto';
-import { supabase } from '@/lib/supabaseClient';
-import { useAuth } from '@/hooks/useAuth';
-import { TipoPlano, PeriodoFaturamento, obterPlanoPorTipo } from '@/lib/planos-config';
-import { lerAssinatura, type AcaoAssinatura, type EstadoAssinatura } from '@/lib/planos/assinatura';
+import { useEffect, useCallback } from 'react';
+import {
+  useStoreContext,
+  DEFAULT_PLAN,
+  type StorePlanData,
+} from '@/contexts/StoreContext';
+import type { TipoPlano, PeriodoFaturamento } from '@/lib/planos-config';
+import type { AcaoAssinatura } from '@/lib/planos/assinatura';
 
-export interface StorePlanData {
-  lojaId: string | null;
-  nomeLoja: string;
-  planoTipo: TipoPlano;
-  periodoFaturamento: PeriodoFaturamento;
-  planoStatus: 'ativo' | 'vitalicio' | 'pendente' | 'vencido' | 'bloqueado';
-  valorMensalidade: number;
-  dataVencimento: string | null;
-  planoTrialAte: string | null;
-  isTrialAtivo: boolean;
-  trialPlanosUsados: string[];
-  apiKey: string | null;
-  chavePixCobranca: string;
-  comprovanteUrl: string | null;
-  solicitacaoStatus: 'nenhuma' | 'pendente_aprovacao' | 'aprovado' | 'rejeitado';
-  solicitacaoAt: string | null;
-  observacaoPlano: string | null;
-  diasParaVencer: number;
-  isBloqueado: boolean;
-  isVitalicio: boolean;
-  /** Cancelamento pelo painel: a loja segue liberada até o vencimento já pago. */
-  assinatura: EstadoAssinatura;
-  /** Desconto em vigor dado pelo administrador (já aplicado no PIX e no cartão). */
-  desconto: DescontoLoja | null;
+export type { StorePlanData };
+
+interface UseStorePlanOptions {
+  /** Carrega histórico de pagamentos automaticamente (usar apenas onde o histórico é exibido). */
+  autoLoadHistorico?: boolean;
 }
 
-const DEFAULT_PLAN: StorePlanData = {
-  lojaId: null,
-  nomeLoja: 'Phone Center',
-  planoTipo: 'entrada',
-  periodoFaturamento: 'mensal',
-  planoStatus: 'ativo',
-  valorMensalidade: 99.90,
-  dataVencimento: null,
-  planoTrialAte: null,
-  isTrialAtivo: false,
-  trialPlanosUsados: [],
-  apiKey: null,
-  chavePixCobranca: 'financeiro@phonecenter.com.br',
-  comprovanteUrl: null,
-  solicitacaoStatus: 'nenhuma',
-  solicitacaoAt: null,
-  observacaoPlano: null,
-  diasParaVencer: 30,
-  isBloqueado: false,
-  isVitalicio: false,
-  assinatura: lerAssinatura(null, null),
-  desconto: null,
-};
+export function useStorePlan(options?: UseStorePlanOptions) {
+  const ctx = useStoreContext();
+  const autoLoadHistorico = options?.autoLoadHistorico ?? false;
 
-export function useStorePlan() {
-  const { usuario } = useAuth();
-  const [planData, setPlanData] = useState<StorePlanData>(DEFAULT_PLAN);
-  const [loading, setLoading] = useState(true);
-
-  const fetchPlanData = useCallback(async () => {
-    try {
-      setLoading(true);
-      let targetLojaId = usuario?.lojaId;
-
-      // Sem loja do usuário, fica o plano padrão: a "primeira loja" do banco é de outra pessoa.
-      if (!targetLojaId) {
-        setPlanData(DEFAULT_PLAN);
-        return;
-      }
-
-      const { data: loja, error } = await supabase
-        .from('lojas')
-        .select('*')
-        .eq('id', targetLojaId)
-        .maybeSingle();
-
-      if (error || !loja) {
-        console.warn('Erro ao buscar plano da loja:', error?.message);
-        setPlanData(DEFAULT_PLAN);
-        return;
-      }
-
-      // Calcular dias para vencer considerando fim do dia local
-      let diasParaVencer = 30;
-      let isVencidoPorData = false;
-
-      const rawStatus = (loja.plano_status || 'ativo').toLowerCase();
-      const isVitalicio = rawStatus === 'vitalicio';
-
-      if (isVitalicio) {
-        diasParaVencer = 99999;
-        isVencidoPorData = false;
-      } else if (loja.data_vencimento) {
-        const parts = String(loja.data_vencimento).split('T')[0].split('-');
-        if (parts.length === 3) {
-          const year = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const day = parseInt(parts[2], 10);
-          const venc = new Date(year, month, day, 23, 59, 59, 999);
-          const diffTime = venc.getTime() - Date.now();
-          diasParaVencer = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          isVencidoPorData = diffTime < 0;
-        }
-      }
-
-      let status: StorePlanData['planoStatus'] = 'ativo';
-      if (!loja.ativo || rawStatus === 'bloqueado') {
-        status = 'bloqueado';
-      } else if (isVitalicio) {
-        status = 'vitalicio';
-      } else if (rawStatus === 'vencido' || isVencidoPorData) {
-        status = 'vencido';
-      } else if (rawStatus === 'pendente') {
-        status = 'pendente';
-      } else {
-        status = 'ativo';
-      }
-
-      const isBloqueado = status === 'bloqueado' || status === 'vencido';
-
-      // Checar se o teste grátis (DIAS_TESTE_GRATIS dias) está ativo
-      let isTrialAtivo = false;
-      if (loja.plano_trial_ate) {
-        const trialEnd = new Date(loja.plano_trial_ate).getTime();
-        isTrialAtivo = trialEnd > Date.now();
-      }
-
-      // Sincroniza no banco se constava como ativo mas a data já venceu (e não é vitalício)
-      if (isVencidoPorData && loja.plano_status === 'ativo' && !isTrialAtivo && !isVitalicio) {
-        supabase.from('lojas').update({ plano_status: 'vencido' }).eq('id', loja.id).then();
-      }
-
-      const planoTipo = (loja.plano_tipo || 'entrada') as TipoPlano;
-      const periodoFaturamento = (loja.periodo_cobranca || 'mensal') as PeriodoFaturamento;
-      const trialPlanosUsados = Array.isArray(loja.trial_planos_usados) ? loja.trial_planos_usados : [];
-
-      setPlanData({
-        lojaId: loja.id,
-        nomeLoja: loja.nome || 'Phone Center',
-        planoTipo,
-        periodoFaturamento,
-        planoStatus: status,
-        valorMensalidade: Number(loja.valor_mensalidade) || obterPlanoPorTipo(planoTipo).precos.mensal.valorMensal,
-        dataVencimento: loja.data_vencimento || null,
-        planoTrialAte: loja.plano_trial_ate || null,
-        isTrialAtivo,
-        trialPlanosUsados,
-        apiKey: loja.api_key || null,
-        chavePixCobranca: loja.chave_pix_cobranca || 'financeiro@phonecenter.com.br',
-        comprovanteUrl: loja.comprovante_url || null,
-        solicitacaoStatus: (loja.solicitacao_liberacao_status as any) || 'nenhuma',
-        solicitacaoAt: loja.solicitacao_liberacao_at || null,
-        observacaoPlano: loja.observacao_plano || null,
-        diasParaVencer,
-        isBloqueado,
-        isVitalicio,
-        assinatura: lerAssinatura(loja.configuracoes, loja.data_vencimento),
-        desconto: lerDescontoLoja(loja),
-      });
-    } catch (err) {
-      console.error('Erro ao carregar dados do plano:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [usuario?.lojaId]);
-
-  const [historicoPagamentos, setHistoricoPagamentos] = useState<any[]>([]);
-  const [loadingHistorico, setLoadingHistorico] = useState(false);
-
-  const fetchHistorico = useCallback(async () => {
-    const targetLojaId = planData.lojaId || usuario?.lojaId;
-    if (!targetLojaId) return;
-
-    try {
-      setLoadingHistorico(true);
-      const { data, error } = await supabase
-        .from('historico_pagamentos_planos')
-        .select('*')
-        .eq('loja_id', targetLojaId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setHistoricoPagamentos(data || []);
-    } catch (err) {
-      console.error('Erro ao buscar histórico de pagamentos:', err);
-    } finally {
-      setLoadingHistorico(false);
-    }
-  }, [planData.lojaId, usuario?.lojaId]);
+  const lojaId = ctx?.planData.lojaId ?? ctx?.lojaId ?? null;
+  const fetchHistorico = ctx?.fetchHistorico;
 
   useEffect(() => {
-    fetchPlanData();
-  }, [fetchPlanData]);
-
-  useEffect(() => {
-    if (planData.lojaId) {
+    if (autoLoadHistorico && lojaId && fetchHistorico) {
       fetchHistorico();
     }
-  }, [planData.lojaId, fetchHistorico]);
+  }, [autoLoadHistorico, lojaId, fetchHistorico]);
 
-  // Solicitar liberação / Enviar comprovante
-  const enviarSolicitacaoLiberacao = async (comprovanteBase64?: string, observacao?: string) => {
-    if (!planData.lojaId) throw new Error('Loja não encontrada');
+  const refetchPlan = useCallback(async () => {
+    await ctx?.fetchStore(true);
+  }, [ctx]);
 
-    try {
-      const now = new Date().toISOString();
-      const updates: any = {
-        solicitacao_liberacao_status: 'pendente_aprovacao',
-        solicitacao_liberacao_at: now,
-      };
+  const refetchHistorico = useCallback(async () => {
+    await ctx?.fetchHistorico();
+  }, [ctx]);
 
-      if (comprovanteBase64) {
-        updates.comprovante_url = comprovanteBase64;
-      }
-      if (observacao) {
-        updates.observacao_plano = observacao;
-      }
+  const enviarSolicitacaoLiberacao = useCallback(
+    async (comprovanteBase64?: string, observacao?: string) => {
+      if (!ctx) throw new Error('Loja não encontrada');
+      return ctx.enviarSolicitacaoLiberacao(comprovanteBase64, observacao);
+    },
+    [ctx]
+  );
 
-      const { error } = await supabase
-        .from('lojas')
-        .update(updates)
-        .eq('id', planData.lojaId);
+  const solicitarTrial = useCallback(
+    async (novoPlano: TipoPlano) => {
+      if (!ctx) throw new Error('Loja não identificada');
+      return ctx.solicitarTrial(novoPlano);
+    },
+    [ctx]
+  );
 
-      if (error) throw error;
+  const iniciarCheckoutCartao = useCallback(
+    async (plano?: TipoPlano, periodo?: PeriodoFaturamento) => {
+      if (!ctx) throw new Error('Loja não identificada');
+      return ctx.iniciarCheckoutCartao(plano, periodo);
+    },
+    [ctx]
+  );
 
-      // Grava no histórico de pagamentos de planos
-      await supabase.from('historico_pagamentos_planos').insert({
-        loja_id: planData.lojaId,
-        valor: planData.valorMensalidade,
-        status: 'pendente_aprovacao',
-        comprovante_url: comprovanteBase64 || null,
-        observacao: observacao || 'Solicitação de liberação enviada pelo lojista',
-        forma_pagamento: 'comprovante_pix',
-      });
-
-      await fetchPlanData();
-      await fetchHistorico();
-      return true;
-    } catch (err: any) {
-      console.error('Erro ao enviar solicitação de liberação:', err);
-      throw err;
-    }
-  };
-
-  // Solicitar o teste grátis (DIAS_TESTE_GRATIS dias) de um plano
-  const solicitarTrial = async (novoPlano: TipoPlano) => {
-    if (!planData.lojaId) throw new Error('Loja não identificada');
-
-    const res = await fetch('/api/planos/solicitar-trial', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lojaId: planData.lojaId,
-        novoPlano
-      })
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Erro ao ativar teste');
-    }
-
-    await fetchPlanData();
-    await fetchHistorico();
-    return data;
-  };
-
-  // Iniciar Checkout com Cartão de Crédito Mercado Pago
-  const iniciarCheckoutCartao = async (
-    plano: TipoPlano = planData.planoTipo,
-    periodo: PeriodoFaturamento = planData.periodoFaturamento
-  ) => {
-    if (!planData.lojaId) throw new Error('Loja não identificada');
-
-    const res = await fetch('/api/planos/pagar-cartao', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        lojaId: planData.lojaId,
-        plano,
-        periodo,
-        email: usuario?.email,
-        nome: usuario?.nome || planData.nomeLoja
-      })
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || 'Erro ao gerar checkout');
-    }
-
-    return data;
-  };
-
-  // Cancela ou desfaz o cancelamento. A loja é a do usuário logado (conferida no servidor).
-  const alterarAssinatura = async (acao: AcaoAssinatura, motivo?: string) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('Entre de novo para alterar a assinatura.');
-
-    const res = await fetch('/api/planos/assinatura', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify({ acao, motivo }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Não foi possível alterar a assinatura.');
-
-    await fetchPlanData();
-    return data;
-  };
+  const alterarAssinatura = useCallback(
+    async (acao: AcaoAssinatura, motivo?: string) => {
+      if (!ctx) throw new Error('Loja não identificada');
+      return ctx.alterarAssinatura(acao, motivo);
+    },
+    [ctx]
+  );
 
   return {
-    planData,
-    loading,
-    refetchPlan: fetchPlanData,
-    historicoPagamentos,
-    loadingHistorico,
-    refetchHistorico: fetchHistorico,
+    planData: ctx?.planData ?? DEFAULT_PLAN,
+    loading: ctx?.isLoadingPlan ?? false,
+    refetchPlan,
+    historicoPagamentos: ctx?.historicoPagamentos ?? [],
+    loadingHistorico: ctx?.loadingHistorico ?? false,
+    refetchHistorico,
     enviarSolicitacaoLiberacao,
     solicitarTrial,
     iniciarCheckoutCartao,
-    alterarAssinatura
+    alterarAssinatura,
   };
 }

@@ -80,15 +80,47 @@ export function MobileNav({ currentTab, onTabChange, isCollapsed = false, onTogg
   };
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    let observer: MutationObserver | null = null;
+    let rafId: number | null = null;
+
     const checkModal = () => {
-      const modal = document.querySelector('.modal-overlay, [role="dialog"], [data-radix-popper-content-wrapper], .pos-modal-overlay, .modal-panel');
+      rafId = null;
+      const modal = document.querySelector(
+        '.modal-overlay, [role="dialog"], [data-radix-popper-content-wrapper], .pos-modal-overlay, .modal-panel'
+      );
       setHasModalOpen(!!modal);
     };
 
-    checkModal();
-    const observer = new MutationObserver(checkModal);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-    return () => observer.disconnect();
+    const scheduleCheck = () => {
+      if (rafId === null) {
+        rafId = window.requestAnimationFrame(checkModal);
+      }
+    };
+
+    const syncObserver = () => {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      if (!mediaQuery.matches) {
+        setHasModalOpen(false);
+        return;
+      }
+      checkModal();
+      observer = new MutationObserver(scheduleCheck);
+      observer.observe(document.body, { childList: true, subtree: true });
+    };
+
+    syncObserver();
+    mediaQuery.addEventListener('change', syncObserver);
+
+    return () => {
+      mediaQuery.removeEventListener('change', syncObserver);
+      if (observer) observer.disconnect();
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const isSuperAdmin = checkIsSuperAdmin(usuario);

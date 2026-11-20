@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { 
   User, 
   CreditCard, 
@@ -9,11 +10,8 @@ import {
   ChevronDown, 
   Building2, 
   RefreshCw,
-  CheckCircle2,
   AlertTriangle,
-  XCircle,
   Smartphone,
-  Sparkles,
   SlidersHorizontal,
   Sun,
   Moon,
@@ -26,8 +24,6 @@ import { usePanelMode } from '@/hooks/usePanelMode';
 import { useColorTheme } from '@/components/ThemeProvider';
 import { checkIsSuperAdmin } from '@/lib/utils';
 import { obterPlanoPorTipo } from '@/lib/planos-config';
-import { TicketsModal } from '@/components/suporte/TicketsModal';
-import { ChatSuporteWidget } from '@/components/suporte/ChatSuporteWidget';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,8 +32,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+
+const TicketsModal = dynamic(() => import('@/components/suporte/TicketsModal').then((m) => m.TicketsModal), { ssr: false });
+const ChatSuporteWidget = dynamic(() => import('@/components/suporte/ChatSuporteWidget').then((m) => m.ChatSuporteWidget), { ssr: false });
 
 interface UserAccountMenuProps {
   onOpenMeuPlano: () => void;
@@ -258,8 +256,8 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <TicketsModal open={showTicketsModal} onOpenChange={setShowTicketsModal} />
-      <ChatSuporteWidget isOpen={showChatSuporte} onClose={() => setShowChatSuporte(false)} />
+      {showTicketsModal && <TicketsModal open={showTicketsModal} onOpenChange={setShowTicketsModal} />}
+      {showChatSuporte && <ChatSuporteWidget isOpen={showChatSuporte} onClose={() => setShowChatSuporte(false)} />}
     </>
   );
 }

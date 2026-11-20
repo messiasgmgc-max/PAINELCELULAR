@@ -65,7 +65,7 @@ export function MeuPlanoModal({ isOpen, onClose }: MeuPlanoModalProps) {
     loadingHistorico,
     refetchHistorico,
     alterarAssinatura
-  } = useStorePlan();
+  } = useStorePlan({ autoLoadHistorico: isOpen });
   const { usuario } = useAuth();
 
   // Estados de navegação interna

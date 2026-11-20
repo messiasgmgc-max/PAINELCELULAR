@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import GlobalClientEffects from "@/components/GlobalClientEffects";
 
 import { AuthProvider } from "@/contexts/AuthContext";
+import { StoreProvider } from "@/contexts/StoreContext";
 
 import "./global.css";
 
@@ -64,14 +65,6 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <head>
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="shortcut icon" href="/favicon.ico" />
-        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-        <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
         <meta name="theme-color" content="#000000" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -89,36 +82,38 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            {content}
+            <StoreProvider>
+              {content}
+            </StoreProvider>
           </AuthProvider>
         </ThemeProvider>
         <script
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
-                // updateViaCache:'none' faz o browser re-buscar o sw.js a cada carregamento
-                navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
-                  .then(reg => {
-                    // Verifica por atualizações assim que a página carrega
-                    reg.update().catch(() => {});
-
-                    // Quando um novo SW está esperando (após deploy), força a ativação
-                    reg.addEventListener('updatefound', () => {
-                      const newWorker = reg.installing;
-                      if (!newWorker) return;
-                      newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                          // Novo deploy detectado — manda o SW pular a fila e ativar
-                          newWorker.postMessage('SKIP_WAITING');
-                        }
+                var registerSw = function () {
+                  navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+                    .then(function (reg) {
+                      reg.addEventListener('updatefound', function () {
+                        var newWorker = reg.installing;
+                        if (!newWorker) return;
+                        newWorker.addEventListener('statechange', function () {
+                          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            newWorker.postMessage('SKIP_WAITING');
+                          }
+                        });
                       });
-                    });
-                  })
-                  .catch(() => {});
+                    })
+                    .catch(function () {});
+                };
+                if (document.readyState === 'complete') {
+                  registerSw();
+                } else {
+                  window.addEventListener('load', registerSw, { once: true });
+                }
 
-                // Quando o SW novo assumir o controle, recarrega a página automaticamente
-                let refreshing = false;
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                var refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', function () {
                   if (!refreshing) {
                     refreshing = true;
                     window.location.reload();

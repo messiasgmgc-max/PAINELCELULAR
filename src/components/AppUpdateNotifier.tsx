@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Sparkles, RefreshCw, X, ArrowUpCircle } from 'lucide-react';
@@ -56,11 +56,13 @@ export function AppUpdateNotifier() {
     }
   }, []);
 
-  // Checar ao logar ou ao inicializar sessão
+  // Checar ao logar ou ao inicializar sessão (atrasado para não competir com o carregamento inicial)
   useEffect(() => {
-    if (authReady) {
+    if (!authReady) return;
+    const timer = setTimeout(() => {
       checarAtualizacao(true);
-    }
+    }, 2500);
+    return () => clearTimeout(timer);
   }, [authReady, usuario?.id, checarAtualizacao]);
 
   // Listener para quando a aba volta a ficar visível

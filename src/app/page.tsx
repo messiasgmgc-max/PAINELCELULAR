@@ -1,42 +1,20 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { guardarPreselecaoEtiquetas } from '@/lib/etiquetas/pendentes';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn, checkIsSuperAdmin, checkIsVendedor, formatarNomeLojaAbreviado } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
-import { supabase } from '@/lib/supabaseClient';
+import { useStorePlan } from '@/hooks/useStorePlan';
 import { Button } from '@/components/ui/button';
-import { ClientesTab } from '@/components/ClientesTab';
-import { AparelhosTab } from '@/components/AparelhosTab';
-import { PecasTab } from '@/components/PecasTab';
-import { OrdensTab } from '@/components/OrdensTab';
-import { TecnicosTab } from '@/components/TecnicosTab';
-import { DashboardTab } from '@/components/DashboardTab';
-import { AgendamentosTab } from '@/components/AgendamentosTab';
-import { GarantiasTab } from '@/components/GarantiasTab';
-import { VendasTab } from '@/components/VendasTab';
-import { WhatsappTab } from '@/components/WhatsappTab';
-import { ConfiguracoesTab } from '@/components/ConfiguracoesTab';
 import { MobileNav } from '@/components/MobileNav';
-import { TaxasMaquininhaTab } from '@/components/TaxasMaquininhaTab';
-import { CalculadoraUpgradeTab } from '@/components/CalculadoraUpgradeTab';
-import { EtiquetasTab } from '@/components/EtiquetasTab';
-import { AtacadoTab } from '@/components/AtacadoTab';
-import SuperAdminTab from '@/components/SuperAdminTab';
-import { LogsTab } from '@/components/LogsTab';
 import { UserAccountMenu } from '@/components/UserAccountMenu';
-import { MeuPlanoModal } from '@/components/MeuPlanoModal';
-import { PlanPaywallModal } from '@/components/PlanPaywallModal';
 import { PwaInstallPrompt } from '@/components/PwaInstallPrompt';
-import { CommandPaletteModal } from '@/components/CommandPaletteModal';
 import { SupportFloatingButton } from '@/components/suporte/SupportFloatingButton';
 import { useColorTheme } from '@/components/ThemeProvider';
 import { 
-  Smartphone, 
-  LogOut,
-  User,
   Shield,
   CreditCard,
   Search,
@@ -44,11 +22,44 @@ import {
   Moon
 } from 'lucide-react';
 
+function TabLoadingFallback() {
+  return (
+    <div className="flex items-center justify-center min-h-[45vh]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-3 border-primary border-t-transparent" />
+        <p className="text-xs text-muted-foreground">Carregando módulo...</p>
+      </div>
+    </div>
+  );
+}
+
+const DashboardTab = dynamic(() => import('@/components/DashboardTab').then((m) => m.DashboardTab), { loading: TabLoadingFallback });
+const ClientesTab = dynamic(() => import('@/components/ClientesTab').then((m) => m.ClientesTab), { loading: TabLoadingFallback });
+const AparelhosTab = dynamic(() => import('@/components/AparelhosTab').then((m) => m.AparelhosTab), { loading: TabLoadingFallback });
+const PecasTab = dynamic(() => import('@/components/PecasTab').then((m) => m.PecasTab), { loading: TabLoadingFallback });
+const OrdensTab = dynamic(() => import('@/components/OrdensTab').then((m) => m.OrdensTab), { loading: TabLoadingFallback });
+const TecnicosTab = dynamic(() => import('@/components/TecnicosTab').then((m) => m.TecnicosTab), { loading: TabLoadingFallback });
+const AgendamentosTab = dynamic(() => import('@/components/AgendamentosTab').then((m) => m.AgendamentosTab), { loading: TabLoadingFallback });
+const GarantiasTab = dynamic(() => import('@/components/GarantiasTab').then((m) => m.GarantiasTab), { loading: TabLoadingFallback });
+const VendasTab = dynamic(() => import('@/components/VendasTab').then((m) => m.VendasTab), { loading: TabLoadingFallback });
+const ConfiguracoesTab = dynamic(() => import('@/components/ConfiguracoesTab').then((m) => m.ConfiguracoesTab), { loading: TabLoadingFallback });
+const TaxasMaquininhaTab = dynamic(() => import('@/components/TaxasMaquininhaTab').then((m) => m.TaxasMaquininhaTab), { loading: TabLoadingFallback });
+const CalculadoraUpgradeTab = dynamic(() => import('@/components/CalculadoraUpgradeTab').then((m) => m.CalculadoraUpgradeTab), { loading: TabLoadingFallback });
+const EtiquetasTab = dynamic(() => import('@/components/EtiquetasTab').then((m) => m.EtiquetasTab), { loading: TabLoadingFallback });
+const AtacadoTab = dynamic(() => import('@/components/AtacadoTab').then((m) => m.AtacadoTab), { loading: TabLoadingFallback });
+const SuperAdminTab = dynamic(() => import('@/components/SuperAdminTab'), { loading: TabLoadingFallback });
+const LogsTab = dynamic(() => import('@/components/LogsTab').then((m) => m.LogsTab), { loading: TabLoadingFallback });
+
+const MeuPlanoModal = dynamic(() => import('@/components/MeuPlanoModal').then((m) => m.MeuPlanoModal), { ssr: false });
+const PlanPaywallModal = dynamic(() => import('@/components/PlanPaywallModal').then((m) => m.PlanPaywallModal), { ssr: false });
+const CommandPaletteModal = dynamic(() => import('@/components/CommandPaletteModal').then((m) => m.CommandPaletteModal), { ssr: false });
+
 export default function Home() {
   const router = useRouter();
   const pathname = usePathname();
-  const { usuario, logout, loading, authReady } = useAuth();
-  const { config, atualizarNomeLoja, atualizarLogoLoja, atualizarAssinaturaLoja } = useStoreConfig(usuario?.lojaId);
+  const { usuario, loading, authReady } = useAuth();
+  const { config } = useStoreConfig(usuario?.lojaId);
+  const { planData, loading: planLoading } = useStorePlan();
   
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -162,8 +173,6 @@ export default function Home() {
   };
 
 
-
-  console.debug('Dashboard: render check', { loading, authReady, usuario: usuario?.email });
 
   if (!authReady || loading) {
     return (
@@ -361,14 +370,20 @@ export default function Home() {
       </main>
 
       {/* Modais Globais de Plano, PWA, Paywall, Palette e Botão Flutuante de Suporte */}
-      <MeuPlanoModal isOpen={showMeuPlanoModal} onClose={() => setShowMeuPlanoModal(false)} />
-      <PlanPaywallModal />
+      {showMeuPlanoModal && (
+        <MeuPlanoModal isOpen={showMeuPlanoModal} onClose={() => setShowMeuPlanoModal(false)} />
+      )}
+      {!planLoading && usuario && !checkIsSuperAdmin(usuario) && planData.isBloqueado && (
+        <PlanPaywallModal />
+      )}
       <PwaInstallPrompt />
-      <CommandPaletteModal
-        isOpen={showCommandPalette}
-        onClose={() => setShowCommandPalette(false)}
-        onSelectTab={handleSelectTabFromPalette}
-      />
+      {showCommandPalette && (
+        <CommandPaletteModal
+          isOpen={showCommandPalette}
+          onClose={() => setShowCommandPalette(false)}
+          onSelectTab={handleSelectTabFromPalette}
+        />
+      )}
       <SupportFloatingButton />
     </div>
   );

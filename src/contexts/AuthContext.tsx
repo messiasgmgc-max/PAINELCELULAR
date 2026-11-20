@@ -27,6 +27,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  const usuarioRef = React.useRef<SessaoUsuario | null>(null);
+
+  const atualizarUsuarioSeMudou = useCallback((proximo: SessaoUsuario | null) => {
+    setUsuario((anterior) => {
+      if (anterior === proximo) return anterior;
+      if (
+        anterior &&
+        proximo &&
+        anterior.id === proximo.id &&
+        anterior.email === proximo.email &&
+        anterior.nome === proximo.nome &&
+        anterior.role === proximo.role &&
+        anterior.lojaId === proximo.lojaId
+      ) {
+        return anterior;
+      }
+      usuarioRef.current = proximo;
+      return proximo;
+    });
+  }, []);
+
   // Tenta carregar cache síncrono do localStorage para ter 0ms de espera na renderização inicial
   useEffect(() => {
     try {
@@ -34,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && parsed.id) {
-          setUsuario(parsed);
+          atualizarUsuarioSeMudou(parsed);
           setLoading(false);
           setAuthReady(true);
         }
@@ -42,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       // Ignora erro de parse de cache
     }
-  }, []);
+  }, [atualizarUsuarioSeMudou]);
 
   // Montar objeto de usuário combinando Supabase Auth + Tabela perfis
   const montarUsuario = useCallback(async (session: any): Promise<SessaoUsuario | null> => {
@@ -51,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: perfil } = await supabase
         .from('perfis')
-        .select('*')
+        .select('nome, role, loja_id')
         .eq('id', session.user.id)
         .maybeSingle();
 
@@ -87,12 +108,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const u = await montarUsuario(session);
-        if (u) setUsuario(u);
+        if (u) atualizarUsuarioSeMudou(u);
       }
     } catch (e) {
       console.error('Erro ao recarregar usuário:', e);
     }
-  }, [montarUsuario]);
+  }, [montarUsuario, atualizarUsuarioSeMudou]);
 
   // Efeito principal de verificação de sessão (executa apenas uma vez no Root Layout)
   useEffect(() => {
@@ -108,23 +129,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           document.cookie = `sessao_usuario=${session.access_token}; path=/; max-age=86400; SameSite=Lax`;
           const usuarioMontado = await montarUsuario(session);
           if (isMounted) {
-            setUsuario(usuarioMontado);
+            atualizarUsuarioSeMudou(usuarioMontado);
           }
         } else {
           // Tenta via getUser caso exista cookie ativo sem sessão em memória
           const { data: { user } } = await supabase.auth.getUser();
           if (user && isMounted) {
             const usuarioMontado = await montarUsuario({ user });
-            setUsuario(usuarioMontado);
+            atualizarUsuarioSeMudou(usuarioMontado);
           } else if (isMounted) {
             document.cookie = `sessao_usuario=; path=/; max-age=0;`;
             try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
-            setUsuario(null);
+            atualizarUsuarioSeMudou(null);
           }
         }
       } catch (err) {
         console.error('Erro ao inicializar sessão:', err);
-        if (isMounted) setUsuario(null);
+        if (isMounted) atualizarUsuarioSeMudou(null);
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -139,22 +160,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
 
+      // INITIAL_SESSION já é tratado por inicializarSessao() acima — evita query duplicada em `perfis`
+      if (event === 'INITIAL_SESSION') return;
+
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || (session && event !== 'SIGNED_OUT')) {
         if (session?.access_token) {
           document.cookie = `sessao_usuario=${session.access_token}; path=/; max-age=86400; SameSite=Lax`;
         }
         const usuarioMontado = await montarUsuario(session);
-        setUsuario(usuarioMontado);
+        atualizarUsuarioSeMudou(usuarioMontado);
         if (event === 'SIGNED_IN' && usuarioMontado) {
           logAuth(usuarioMontado, 'Login');
         }
       } else if (event === 'SIGNED_OUT') {
-        if (usuario) {
-          logAuth(usuario, 'Logout');
+        if (usuarioRef.current) {
+          logAuth(usuarioRef.current, 'Logout');
         }
         document.cookie = `sessao_usuario=; path=/; max-age=0;`;
         try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
-        setUsuario(null);
+        atualizarUsuarioSeMudou(null);
       }
 
       setLoading(false);
@@ -165,7 +189,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isMounted = false;
       try { listener?.subscription?.unsubscribe?.(); } catch (e) {}
     };
-  }, [montarUsuario]);
+  }, [montarUsuario, atualizarUsuarioSeMudou]);
 
   // Redirecionamento automático seguro (somente quando deslogado e tentando acessar rota privada)
   useEffect(() => {

@@ -1,30 +1,38 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { LifeBuoy } from 'lucide-react';
-import { ChatSuporteWidget } from './ChatSuporteWidget';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabaseClient';
 import { checkIsSuperAdmin } from '@/lib/utils';
+
+const ChatSuporteWidget = dynamic(
+  () => import('./ChatSuporteWidget').then((m) => m.ChatSuporteWidget),
+  { ssr: false }
+);
 
 export function SupportFloatingButton() {
   const { usuario } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const checarNaoLidas = async () => {
-    if (!usuario) return;
+  const userId = usuario?.id;
+  const userLojaId = usuario?.lojaId || (usuario as any)?.loja_id || null;
+  const isSuperAdmin = checkIsSuperAdmin(usuario);
+
+  const checarNaoLidas = useCallback(async () => {
+    if (!userId) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
       if (!token) return;
 
-      const isSuperAdmin = checkIsSuperAdmin(usuario);
-      const userLoja = usuario?.lojaId || (usuario as any)?.loja_id;
       const url = isSuperAdmin
         ? `/api/chat-suporte?conversas=true&t=${Date.now()}`
-        : userLoja
-        ? `/api/chat-suporte?loja_id=${userLoja}&t=${Date.now()}`
+        : userLojaId
+        ? `/api/chat-suporte?loja_id=${userLojaId}&t=${Date.now()}`
         : `/api/chat-suporte?t=${Date.now()}`;
 
       const res = await fetch(url, {
@@ -34,6 +42,7 @@ export function SupportFloatingButton() {
         },
         cache: 'no-store',
       });
+      if (!res.ok) return;
       const data = await res.json();
 
       if (isSuperAdmin && data.conversas) {
@@ -43,17 +52,28 @@ export function SupportFloatingButton() {
         const total = data.mensagens.filter((m: any) => !m.lida && m.remetente === 'suporte').length;
         setUnreadCount(total);
       }
-    } catch (e) {
-      // Ignora erro
+    } catch {
+      // Ignora erro silenciosamente
     }
-  };
+  }, [userId, userLojaId, isSuperAdmin]);
 
   useEffect(() => {
-    if (!usuario) return;
-    checarNaoLidas();
-    const interval = setInterval(checarNaoLidas, 10000);
-    return () => clearInterval(interval);
-  }, [usuario]);
+    if (!userId) return;
+    // Atrasa a primeira checagem para não disputar rede com o carregamento inicial da loja
+    const initialTimer = setTimeout(checarNaoLidas, 1500);
+    const interval = setInterval(checarNaoLidas, 30_000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checarNaoLidas();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [userId, checarNaoLidas]);
 
   useEffect(() => {
     const handleAbrirChat = () => setIsOpen(true);
@@ -90,7 +110,7 @@ export function SupportFloatingButton() {
         </button>
       </div>
 
-      <ChatSuporteWidget isOpen={isOpen} onClose={() => setIsOpen(false)} />
+      {isOpen && <ChatSuporteWidget isOpen={isOpen} onClose={() => setIsOpen(false)} />}
     </>
   );
 }

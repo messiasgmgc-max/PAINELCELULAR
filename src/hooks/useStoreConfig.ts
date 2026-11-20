@@ -1,270 +1,88 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useCallback } from 'react';
+import {
+  useStoreContext,
+  DEFAULT_CONFIG,
+  type StoreConfig,
+} from '@/contexts/StoreContext';
 
-export interface StoreConfig {
-  nomeLoja: string;
-  subtituloLoja: string;
-  logoLoja: string | null;
-  assinaturaLoja: string | null;
-  enderecoLoja: string;
-  cnpjLoja: string;
-  telefoneLoja: string;
-  emailLoja: string;
-  garantiaDias: number;
-  chavePix: string;
-  corTema: string;
-  ordemAbas: string[];
-  mpAccessToken: string;
-  mpPublicKey: string;
-}
+export type { StoreConfig };
 
-const DEFAULT_CONFIG: StoreConfig = {
-  nomeLoja: 'Phone Center',
-  subtituloLoja: 'Sistema de Gestão',
-  logoLoja: null,
-  assinaturaLoja: null,
-  enderecoLoja: 'Endereço não configurado',
-  cnpjLoja: 'Não informado',
-  telefoneLoja: 'Não informado',
-  emailLoja: 'contato@loja.com',
-  garantiaDias: 90,
-  chavePix: '',
-  corTema: 'padrao',
-  ordemAbas: [],
-  mpAccessToken: '',
-  mpPublicKey: '',
-};
+export function useStoreConfig(_providedLojaId?: string | null) {
+  const ctx = useStoreContext();
 
-export function useStoreConfig(providedLojaId?: string | null) {
-  const [config, setConfig] = useState<StoreConfig>(DEFAULT_CONFIG);
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeLojaId, setActiveLojaId] = useState<string | null>(providedLojaId || null);
+  const salvarConfig = useCallback(
+    async (novaConfig: Partial<StoreConfig>) => {
+      if (!ctx) return;
+      await ctx.salvarConfig(novaConfig);
+    },
+    [ctx]
+  );
 
-  // Sincroniza activeLojaId sempre que providedLojaId mudar
-  useEffect(() => {
-    if (providedLojaId) {
-      setActiveLojaId(providedLojaId);
-    }
-  }, [providedLojaId]);
-
-  // Busca dados oficiais diretamente da tabela 'lojas' no Supabase sem NENHUM cache local
   const fetchStoreConfig = useCallback(async () => {
-    try {
-      setIsLoading(true);
+    if (!ctx) return;
+    await ctx.fetchStore(true);
+  }, [ctx]);
 
-      // Limpar resquícios do localStorage para evitar interferência de cache legado
-      if (typeof window !== 'undefined') {
-        Object.keys(localStorage).forEach((key) => {
-          if (key.startsWith('storeConfig:')) {
-            localStorage.removeItem(key);
-          }
-        });
-      }
+  const atualizarNomeLoja = useCallback(
+    (nomeLoja: string) => {
+      salvarConfig({ nomeLoja });
+    },
+    [salvarConfig]
+  );
 
-      let currentLojaId: string | null = providedLojaId || activeLojaId;
+  const atualizarLogoLoja = useCallback(
+    (logoLoja: string | null) => {
+      salvarConfig({ logoLoja });
+    },
+    [salvarConfig]
+  );
 
-      // Se não foi passado via parâmetro, busca a loja do usuário logado na tabela 'perfis'.
-      if (!currentLojaId) {
-        const { data: { session } } = await supabase.auth.getSession();
-        const userEmail = session?.user?.email;
+  const atualizarAssinaturaLoja = useCallback(
+    (assinaturaLoja: string | null) => {
+      salvarConfig({ assinaturaLoja });
+    },
+    [salvarConfig]
+  );
 
-        if (userEmail) {
-          const { data: perfil } = await supabase
-            .from('perfis')
-            .select('loja_id')
-            .eq('email', userEmail)
-            .maybeSingle();
+  const atualizarDadosEmpresa = useCallback(
+    (dados: Partial<StoreConfig>) => {
+      salvarConfig(dados);
+    },
+    [salvarConfig]
+  );
 
-          if (perfil?.loja_id) {
-            currentLojaId = String(perfil.loja_id);
-          }
-        }
-      }
-
-      // Sem loja identificada fica a configuração padrão. Pegar a "primeira loja" do banco
-      // mostrava nome, CNPJ e chave Pix de outra loja no recibo e na cobrança de fiado.
-      let lojaDb: any = null;
-      if (currentLojaId) {
-        setActiveLojaId(currentLojaId);
-        const { data: foundLoja } = await supabase
-          .from('lojas')
-          .select('*')
-          .eq('id', currentLojaId)
-          .maybeSingle();
-        lojaDb = foundLoja;
-      }
-
-      if (lojaDb) {
-        const configDb: StoreConfig = {
-          nomeLoja: lojaDb.nome || DEFAULT_CONFIG.nomeLoja,
-          subtituloLoja: lojaDb.subtitulo || DEFAULT_CONFIG.subtituloLoja,
-          logoLoja: lojaDb.logo_url || null,
-          assinaturaLoja: lojaDb.assinatura_url || null,
-          enderecoLoja: lojaDb.endereco || DEFAULT_CONFIG.enderecoLoja,
-          cnpjLoja: lojaDb.cnpj || DEFAULT_CONFIG.cnpjLoja,
-          telefoneLoja: lojaDb.telefone || DEFAULT_CONFIG.telefoneLoja,
-          emailLoja: lojaDb.email || DEFAULT_CONFIG.emailLoja,
-          garantiaDias: Number(lojaDb.garantia_dias || lojaDb.dias_garantia || DEFAULT_CONFIG.garantiaDias),
-          chavePix: lojaDb.chave_pix || lojaDb.pix || lojaDb.chave_pix_cobranca || lojaDb.chavePix || DEFAULT_CONFIG.chavePix,
-          corTema: lojaDb.cor_tema || DEFAULT_CONFIG.corTema,
-          ordemAbas: Array.isArray(lojaDb.ordem_abas) ? lojaDb.ordem_abas : [],
-          mpAccessToken: lojaDb.mp_access_token || '',
-          mpPublicKey: lojaDb.mp_public_key || '',
-        };
-        setConfig(configDb);
-        return;
-      }
-    } catch (error) {
-      console.error('Erro ao carregar dados oficiais da loja:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [providedLojaId, activeLojaId]);
-
-  useEffect(() => {
-    fetchStoreConfig();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(() => {
-      fetchStoreConfig();
-    });
-
-    return () => {
-      listener?.subscription?.unsubscribe?.();
-    };
-  }, [fetchStoreConfig]);
-
-  // Salva no banco de dados da loja correta e atualiza o estado imediatamente
-  const salvarConfig = async (novaConfig: Partial<StoreConfig>) => {
-    try {
-      const configAtualizada: StoreConfig = { ...config, ...novaConfig };
-      setConfig(configAtualizada);
-
-      let targetId = providedLojaId || activeLojaId;
-
-      if (!targetId) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.email) {
-          const { data: perfil } = await supabase
-            .from('perfis')
-            .select('loja_id')
-            .eq('email', session.user.email)
-            .maybeSingle();
-          if (perfil?.loja_id) targetId = String(perfil.loja_id);
-        }
-      }
-
-      const updatePayload: Record<string, any> = {};
-      if (novaConfig.nomeLoja !== undefined) updatePayload.nome = novaConfig.nomeLoja;
-      if (novaConfig.subtituloLoja !== undefined) updatePayload.subtitulo = novaConfig.subtituloLoja;
-      if (novaConfig.logoLoja !== undefined) updatePayload.logo_url = novaConfig.logoLoja;
-      if (novaConfig.assinaturaLoja !== undefined) updatePayload.assinatura_url = novaConfig.assinaturaLoja;
-      if (novaConfig.enderecoLoja !== undefined) updatePayload.endereco = novaConfig.enderecoLoja;
-      if (novaConfig.cnpjLoja !== undefined) updatePayload.cnpj = novaConfig.cnpjLoja;
-      if (novaConfig.telefoneLoja !== undefined) updatePayload.telefone = novaConfig.telefoneLoja;
-      if (novaConfig.emailLoja !== undefined) updatePayload.email = novaConfig.emailLoja;
-      if (novaConfig.chavePix !== undefined) {
-        updatePayload.chave_pix = novaConfig.chavePix;
-        updatePayload.pix = novaConfig.chavePix;
-        updatePayload.chave_pix_cobranca = novaConfig.chavePix;
-      }
-      if (novaConfig.garantiaDias !== undefined) {
-        updatePayload.garantia_dias = novaConfig.garantiaDias;
-        updatePayload.dias_garantia = novaConfig.garantiaDias;
-      }
-      if (novaConfig.corTema !== undefined) {
-        updatePayload.cor_tema = novaConfig.corTema;
-      }
-      if (novaConfig.ordemAbas !== undefined) {
-        updatePayload.ordem_abas = novaConfig.ordemAbas;
-      }
-      if (novaConfig.mpAccessToken !== undefined) {
-        updatePayload.mp_access_token = novaConfig.mpAccessToken;
-      }
-      if (novaConfig.mpPublicKey !== undefined) {
-        updatePayload.mp_public_key = novaConfig.mpPublicKey;
-      }
-
-      if (targetId) {
-        const { error } = await supabase
-          .from('lojas')
-          .update(updatePayload)
-          .eq('id', targetId);
-
-        if (error) {
-          console.error('Erro ao atualizar dados da loja no Supabase:', error);
-          throw error;
-        }
-      } else {
-        const { data: novaLoja } = await supabase
-          .from('lojas')
-          .insert([{
-            nome: novaConfig.nomeLoja || 'Minha Loja',
-            subtitulo: novaConfig.subtituloLoja || 'Sistema de Gestão',
-            endereco: novaConfig.enderecoLoja || '',
-            cnpj: novaConfig.cnpjLoja || '',
-            telefone: novaConfig.telefoneLoja || '',
-            email: novaConfig.emailLoja || '',
-            logo_url: novaConfig.logoLoja || null,
-            assinatura_url: novaConfig.assinaturaLoja || null,
-          }])
-          .select()
-          .maybeSingle();
-
-        if (novaLoja?.id) {
-          targetId = String(novaLoja.id);
-          setActiveLojaId(targetId);
-        }
-      }
-
-      await fetchStoreConfig();
-    } catch (error) {
-      console.error('Erro ao salvar configuração no banco:', error);
-      throw error;
-    }
-  };
-
-  const atualizarNomeLoja = (nomeLoja: string) => {
-    salvarConfig({ nomeLoja });
-  };
-
-  const atualizarLogoLoja = (logoLoja: string | null) => {
-    salvarConfig({ logoLoja });
-  };
-
-  const atualizarAssinaturaLoja = (assinaturaLoja: string | null) => {
-    salvarConfig({ assinaturaLoja });
-  };
-
-  const atualizarDadosEmpresa = (dados: Partial<StoreConfig>) => {
-    salvarConfig(dados);
-  };
-
-  const removerLogo = () => {
+  const removerLogo = useCallback(() => {
     salvarConfig({ logoLoja: null });
-  };
+  }, [salvarConfig]);
 
-  const removerAssinatura = () => {
+  const removerAssinatura = useCallback(() => {
     salvarConfig({ assinaturaLoja: null });
-  };
+  }, [salvarConfig]);
 
-  const resetarConfig = () => {
-    setConfig(DEFAULT_CONFIG);
-  };
+  const resetarConfig = useCallback(() => {
+    ctx?.resetarConfig();
+  }, [ctx]);
 
-  const atualizarCorTema = (corTema: string) => {
-    salvarConfig({ corTema });
-  };
+  const atualizarCorTema = useCallback(
+    (corTema: string) => {
+      salvarConfig({ corTema });
+    },
+    [salvarConfig]
+  );
 
-  const atualizarOrdemAbas = (ordemAbas: string[]) => {
-    salvarConfig({ ordemAbas });
-  };
+  const atualizarOrdemAbas = useCallback(
+    (ordemAbas: string[]) => {
+      salvarConfig({ ordemAbas });
+    },
+    [salvarConfig]
+  );
 
   return {
-    config,
-    isLoading,
-    lojaId: activeLojaId,
+    config: ctx?.config ?? DEFAULT_CONFIG,
+    isLoading: ctx?.isLoadingConfig ?? false,
+    lojaId: ctx?.lojaId ?? null,
     fetchStoreConfig,
     salvarConfig,
     atualizarNomeLoja,

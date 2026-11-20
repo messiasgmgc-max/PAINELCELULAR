@@ -33,17 +33,15 @@ export function useTecnicos() {
 
   // Buscar todos os técnicos
   const fetchTecnicos = useCallback(async () => {
+    if (!usuario?.lojaId) return;
     setLoading(true);
     setError(null);
     try {
-      const lojaId = await resolveLojaId();
-      let query = supabase.from('tecnicos').select('*');
-
-      if (lojaId) {
-        query = query.eq('loja_id', lojaId);
-      }
-
-      const { data, error } = await query.order('nome');
+      const { data, error } = await supabase
+        .from('tecnicos')
+        .select('*')
+        .eq('loja_id', usuario.lojaId)
+        .order('nome');
       if (error) throw error;
       setTecnicos(data || []);
     } catch (err: any) {
@@ -52,7 +50,7 @@ export function useTecnicos() {
     } finally {
       setLoading(false);
     }
-  }, [resolveLojaId]);
+  }, [usuario?.lojaId]);
 
   // Buscar técnicos por termo
   const buscarTecnicos = useCallback(async (termo: string) => {

@@ -52,9 +52,6 @@ export function DashboardTab() {
 
   useEffect(() => {
     setIsMounted(true);
-    fetchOrdensServico();
-    fetchPecas();
-    fetchTecnicos();
   }, []);
 
   // Vendas agregadas no banco (RPC dashboard_resumo, respeita a RLS da loja).
