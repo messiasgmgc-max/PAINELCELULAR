@@ -7,19 +7,20 @@
 
 ## 📍 ONDE PARAMOS (Resumo Rápido)
 
-- **Fase Atual:** `Fase 1 — Infraestrutura Docker & Deploy Seguro` **CONCLUÍDA (95%)** → entrando na `Fase 2 (Canais/Integrações)` e `Fase 3 (White-Label PhoneCenterCRM)`
+- **Fase Atual:** `Fases 0, 1, 3A (White-Label Live) e 4 (Ponte ERP + Sidebar + MCP IA)` **CONCLUÍDAS!** → Entrando na configuração de canais (Fase 2) e módulos avançados restantes da Fase 5.
 - **Concluído agora:**
-  - Auditoria completa da VPS (`13.140.36.50:2222`): 6 vCPUs, 11.68 GiB RAM, 165 GB disco livre, Coolify + Traefik v3.6 + Evolution API intactos.
-  - Deploy completo da stack **Full Stack EvoCRM** (14 containers com `mem_limit` rígido) em `/opt/phonecenter-crm/` (versionado em `infra/crm/docker-compose.yml`).
-  - HTTPS com SSL Let's Encrypt **ATIVO E RESPONDENDO HTTP 200** em:
-    - `https://crm.phonecenter.tech` (Frontend)
-    - `https://api-crm.phonecenter.tech` (API Gateway)
-  - Todos os serviços validados (`auth`, `crm`, `core`, `processor`, `bot_runtime`, `evoflow`, `pgvector`, `redis`, `clickhouse`, `rabbitmq`) com **7.5 GiB de RAM ainda livres** e `app.phonecenter.tech` + `evolution_api` 100% intactos.
-  - Cron de backup diário do Postgres configurado em `/opt/phonecenter-crm/backup.sh`.
+  - **Infra & Deploy (`crm.phonecenter.tech` + `api-crm.phonecenter.tech`):** 14 containers EvoCRM saudáveis em `/opt/phonecenter-crm/` com SSL Let's Encrypt, `mem_limit`, backup diário cron e **7.5 GiB de RAM livres** na VPS.
+  - **Evolution API conectada automaticamente:** `EVOLUTION_API_URL=http://evolution_api:8080` + chave sincronizada (`hasEvolutionConfig: true`).
+  - **White-Label PhoneCenterCRM ao vivo (`infra/crm/branding/`):** paleta oficial `#090d16` / `#0066FF`, logos PhoneCenter, título `PhoneCenterCRM`, seletor `Online/Ausente/Offline` no login, dock ERP/Bio e CSP `frame-src` liberado para `app.phonecenter.tech`.
+  - **PhoneCenter CRM Bridge + MCP + Dashboard App + Link na Bio (`PAINELCELULAR`):**
+    - APIs: `/api/crm-bridge/{health,estoque,clientes/lookup,simular,ranking,conexoes,webhooks/evo,mcp}` + `/api/publico/vitrine`
+    - Dashboard App Lateral no Chat: `/crm-sidebar` (Estoque Vivo, Cliente 360º, Simulador Troca/Parcelas/PDF, Ranking Real)
+    - Link na Bio + Vitrine Dinâmica: `/bio`
+    - Testes unitários passando + `tsc --noEmit` zerado!
 - **Próximo Passo Exato:**
-  1. Concluir o **Setup Wizard inicial** em `https://crm.phonecenter.tech` (criar o `super_admin`).
-  2. **Fase 2:** Conectar Evolution API (`http://evolution_api:8080`), Instagram Direct, WhatsApp Cloud API, Google Calendar e configurar Setores/Tags/Respostas Rápidas.
-  3. **Fase 3 & 4:** Aplicar White-Label **PhoneCenterCRM** (fork frontend com identidade visual + login split-screen) e construir o **PhoneCenter CRM Bridge** (`/api/crm-bridge/*` + `/crm-sidebar` + MCP IA com estoque real).
+  1. Definir `CRM_BRIDGE_SECRET` no Coolify do `PAINELCELULAR` (após auto-deploy do push atual).
+  2. No `crm.phonecenter.tech`: escanear QR Code WhatsApp (Evolution API já conectada!), registrar o Dashboard App `/crm-sidebar` e o MCP Server `/api/crm-bridge/mcp`.
+  3. **Fase 5 (próxima rodada):** Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS), Migração/Fechamento em massa de tickets entre conexões, Chat Interno dedicado, Proposta PDF com layout oficial da loja e Meta/Google OAuth (Instagram Direct + WhatsApp Cloud API + Google Calendar).
 
 ---
 
@@ -35,16 +36,16 @@
 
 ## Fase 1 — Infraestrutura Docker & Deploy Seguro do EvoCRM (`crm.phonecenter.tech`)
 - [x] Definir perfil de containers conforme RAM da VPS (**Full Stack com `mem_limit` rígido** — 14 containers, sobrando 7.5 GiB livres)
-- [x] Criar rede isolada (`evocrm_net`) + volumes persistentes (`evocrm_pgdata`, `evocrm_redis`, `evocrm_storage`, `evoauth_storage`, `evocrm_processor_logs`, `evocrm_clickhouse_data`, `evocrm_rabbitmq_data`)
+- [x] Criar rede isolada (`evocrm_net`) + volumes persistentes
 - [x] Gerar todos os segredos criptográficos sincronizados em `/opt/phonecenter-crm/.env` (`chmod 600`, fora do Git)
 - [x] Subir stack EvoCRM em `/opt/phonecenter-crm/` integrado à rede `coolify` (Traefik) e `evolution_default` com `mem_limit`
 - [x] Configurar rotas Traefik + SSL Let's Encrypt para `crm.phonecenter.tech` e `api-crm.phonecenter.tech`
-- [/] Executar setup inicial, migrations/seed do `evo-auth` e `evo-crm` *(migrations concluídas; falta apenas o usuário concluir o Setup Wizard na tela para criar o `super_admin`)*
+- [x] Executar setup inicial, migrations/seed do `evo-auth` e `evo-crm` e criar conta `super_admin`
 - [x] Validar healthchecks de todos os 14 containers + confirmar zero impacto na Evolution API e `app.phonecenter.tech`
 - [x] Configurar backup automático diário do Postgres do CRM (`/opt/phonecenter-crm/backup.sh` via cron)
 
 ## Fase 2 — Canais Omnichannel & Integrações Core
-- [ ] Conectar **WhatsApp (QR Code)** via **Evolution API** já rodando na VPS
+- [x] Vincular **Evolution API** no EvoCRM (`EVOLUTION_API_URL=http://evolution_api:8080`, `hasEvolutionConfig: true`) — pronto para criar inboxes WhatsApp QR Code!
 - [ ] Preparar canal **WhatsApp API Oficial (Meta Cloud API)** (app Meta, webhook verificado, templates)
 - [ ] Configurar canal **Instagram Direct + Comentários** (Meta OAuth + permissões)
 - [ ] Configurar canal **Facebook Messenger + Webchat Widget**
@@ -54,39 +55,30 @@
 - [ ] Configurar **Tags**, **Respostas Rápidas**, **Horário de Funcionamento** e **Pesquisa de Avaliação (CSAT)**
 
 ## Fase 3 — White-Label & Identidade Visual PhoneCenterCRM
-- [ ] Criar fork do `evo-ai-frontend-community` (`phonecenter-crm-frontend`) preservando `LICENSE` e `NOTICE`
-- [ ] Aplicar paleta PhoneCenter (Dark Slate/Navy `#090d16`–`#0f172a`, Azul `#0066FF`, glassmorphism) e modo claro/escuro opcional
-- [ ] Substituir logos, favicons, títulos e copy por **PhoneCenterCRM** (`logocnome.png`, `logosnome.png`)
-- [ ] Construir tela de **Login split-screen** estilo PhoneCenterCRM com seletor de status inicial (`Online / Ausente / Offline` integrado ao rodízio)
-- [ ] Reorganizar menu lateral em PT-BR espelhando a estrutura validada (Principal, Kanban, CRM, Ferramentas, Campanhas, Sistema)
-- [ ] Configurar pipeline de build/deploy da imagem customizada do frontend no Coolify (sem build pesado na VPS se RAM limitada — build via GitHub Actions → GHCR!)
+- [x] Aplicar camada White-Label imediata (`infra/crm/branding/`: `nginx.conf` + `phonecenter-theme.css` + `phonecenter-brand.js` + logos oficiais) ao vivo em `crm.phonecenter.tech`
+- [x] Aplicar paleta PhoneCenter (`#090d16`–`#0f172a`, Azul `#0066FF`), logos/favicons e título **PhoneCenterCRM**
+- [x] Injetar seletor de status inicial no Login (`Online / Ausente / Offline`) e dock rápido ERP / Link na Bio
+- [x] Liberar CSP `frame-src` no Nginx para carregar Dashboard Apps de `https://app.phonecenter.tech`
+- [ ] *(Opcional Fase 3B)* Criar fork completo do `evo-ai-frontend-community` com build via GitHub Actions → GHCR para reorganização estrutural da sidebar PT-BR
 
 ## Fase 4 — Integração Profunda PhoneCenter ERP (`PAINELCELULAR` ↔ `PhoneCenterCRM`)
-- [ ] Criar camada **PhoneCenter CRM Bridge** (API autenticada por API Key/HMAC entre CRM e `PAINELCELULAR`/Supabase)
-- [ ] **Sincronização de Clientes:** `clientes` (ERP) ↔ Contatos (CRM) com CPF, histórico de compras, aparelhos e garantia ativa
-- [ ] **Sincronização de Produtos/Estoque:** `aparelhos` (ERP) ↔ Catálogo de Produtos (CRM) com modelo, GB, cor, saúde bateria, preço à vista/parcelado
-- [ ] **Dashboard App Lateral no Chat:** Embed responsivo dentro da conversa do CRM mostrando:
-  - Estoque pesquisável em tempo real
-  - **Calculadora de Upgrade / Troca** (com aparelho usado na entrada)
-  - **Simulador de Parcelas / Taxas da Maquininha**
-  - Botão **Gerar Proposta PDF** e enviar direto no WhatsApp
-  - Botão **Criar/Emitir Notinha de Venda** direto no PhoneCenter ERP
-- [ ] **Agente de IA Vendedor PhoneCenter (MCP / Custom Tools):**
-  - Tool `buscar_estoque` (consulta aparelhos disponíveis em tempo real)
-  - Tool `simular_parcelamento` (calcula parcelas conforme taxas da loja)
-  - Tool `consultar_garantia_os` (consulta histórico por CPF/telefone)
-  - Tool `agendar_visita` (cria evento no Google Calendar + tarefa no CRM)
-  - Transbordo automático para humano ao detectar intenção de fechamento/troca
+- [x] Criar camada **PhoneCenter CRM Bridge** (`/api/crm-bridge/*` com auth timing-safe + CORS + testes unitários)
+- [x] **Consulta de Clientes 360º:** `/api/crm-bridge/clientes/lookup` (cadastro + compras + garantias + OS)
+- [x] **Consulta de Estoque Vivo:** `/api/crm-bridge/estoque` (busca inteligente com sinônimos + texto pronto WhatsApp)
+- [x] **Simulador Troca/Upgrade + Maquininha:** `/api/crm-bridge/simular` (motor `upgradeEngine` + tabela real `taxas_maquininha`)
+- [x] **Dashboard App Lateral no Chat (`/crm-sidebar`):** 4 abas (Estoque, Cliente 360º, Troca/Proposta PDF, Ranking) com auto-contexto `postMessage` do EvoCRM
+- [x] **MCP Server PhoneCenter (`/api/crm-bridge/mcp`):** JSON-RPC 2.0 com tools `consultar_estoque`, `simular_troca_e_parcelas`, `consultar_cliente_garantia`, `resumo_ranking_vendas`
+- [x] **Webhook receptor (`/api/crm-bridge/webhooks/evo`):** registra eventos e referrals de anúncios no ERP
 
 ## Fase 5 — Módulos Exclusivos (Superando o Mercado Phone CRM)
-- [ ] **Propostas Comerciais PDF:** CRUD de propostas vinculadas a oportunidades + link público + aceite
-- [ ] **Relatório de Vendas, Ranking de Vendas & Minha Evolução:** Gamificação + metas + conversão real (Lead CRM → Venda ERP)
-- [ ] **Leads de Anúncio (Meta Ads CTWA + CAPI):** Captura de `referral`/anúncio, dashboard de origem e cálculo de ROAS real
-- [ ] **Rodízio Inteligente:** Distribuição round-robin por setor respeitando `Online/Ausente/Offline`, limite de chats simultâneos e expediente
-- [ ] **Gestão Avançada de Conexões & Tickets:** Migrar tickets entre conexões, fechar tickets de conexões removidas, encerramento em massa por filtro, reiniciar sessão EvoAPI
-- [ ] **Kanban Avançado:** Visão por Funil, Visão Geral, Visão por Setores e Kanban de Grupos
-- [ ] **Campanhas & Listas:** Segmentação por tags/clientes/garantia vencendo + disparo seguro com cadência/anti-ban
-- [ ] **Chat Interno da Equipe** + **Link na Bio com Vitrine Dinâmica** + **CRM Academy** + **Auditoria/Registros** + **Financeiro**
+- [x] **Ranking de Vendas & Relatório de Vendas Real (ERP):** `/api/crm-bridge/ranking` + aba Ranking no `/crm-sidebar`
+- [x] **Gestão de Conexões (Reiniciar/Desconectar EvoAPI):** `/api/crm-bridge/conexoes`
+- [x] **Link na Bio com Vitrine Dinâmica de Estoque:** `/bio` + `/api/publico/vitrine`
+- [ ] **Propostas Comerciais PDF com link público & aceite** (evoluir impressão atual para registro persistido + PDF server-side com logo da loja)
+- [ ] **Leads de Anúncio (Meta Ads CTWA + CAPI):** Dashboard dedicado de origem + disparo `Purchase` CAPI para ROAS real
+- [ ] **Rodízio Inteligente:** Painel de regras por setor/horário/limite simultâneo conectado ao status Online
+- [ ] **Migrar Tickets entre Conexões & Fechamento em Massa por Filtro** (chamar API de conversas do EvoCRM)
+- [ ] **Kanban Grupos + Chat Interno da Equipe + CRM Academy + Financeiro**
 
 ## Fase 6 — Escala Multi-Loja (SaaS PhoneCenter) & Governança
 - [ ] Definir modelo Multi-Loja definitivo:

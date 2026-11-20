@@ -1,0 +1,168 @@
+/* ============================================================================
+ * PhoneCenterCRM — Identidade Visual Oficial (White-Label sobre EvoCRM)
+ * Paleta oficial PhoneCenter: Dark Slate/Navy (#090d16, #0f172a, #111827)
+ * + Azul Elétrico (#0066FF / #007BFF)
+ * ============================================================================ */
+
+:root {
+  --pc-blue: #0066ff;
+  --pc-blue-bright: #007bff;
+  --pc-blue-deep: #0044cc;
+  --pc-navy-950: #090d16;
+  --pc-navy-900: #0f172a;
+  --pc-navy-800: #1e293b;
+
+  /* Tema Claro com Sidebar Dark Navy (ergonomia estilo CRM Mercado Phone + marca PhoneCenter) */
+  --primary: #0066ff !important;
+  --primary-foreground: #ffffff !important;
+  --ring: #0066ff !important;
+  --chart-1: #0066ff !important;
+  --chart-2: #10b981 !important;
+  --chart-3: #3b82f6 !important;
+  --chart-4: #6366f1 !important;
+  --chart-5: #f59e0b !important;
+
+  --sidebar: #090d16 !important;
+  --sidebar-foreground: #e2e8f0 !important;
+  --sidebar-primary: #0066ff !important;
+  --sidebar-primary-foreground: #ffffff !important;
+  --sidebar-accent: #16213e !important;
+  --sidebar-accent-foreground: #ffffff !important;
+  --sidebar-border: rgba(255, 255, 255, 0.08) !important;
+  --sidebar-ring: #0066ff !important;
+}
+
+.dark {
+  --background: #090d16 !important;
+  --foreground: #f8fafc !important;
+  --card: #0f172a !important;
+  --card-foreground: #f8fafc !important;
+  --popover: #0f172a !important;
+  --popover-foreground: #f8fafc !important;
+  --primary: #007bff !important;
+  --primary-foreground: #ffffff !important;
+  --secondary: #1e293b !important;
+  --secondary-foreground: #f8fafc !important;
+  --muted: #111827 !important;
+  --muted-foreground: #94a3b8 !important;
+  --accent: #1e293b !important;
+  --accent-foreground: #ffffff !important;
+  --border: rgba(255, 255, 255, 0.1) !important;
+  --input: rgba(255, 255, 255, 0.12) !important;
+  --ring: #007bff !important;
+
+  --sidebar: #090d16 !important;
+  --sidebar-foreground: #e2e8f0 !important;
+  --sidebar-primary: #0066ff !important;
+  --sidebar-primary-foreground: #ffffff !important;
+  --sidebar-accent: #16213e !important;
+  --sidebar-accent-foreground: #ffffff !important;
+  --sidebar-border: rgba(255, 255, 255, 0.08) !important;
+  --sidebar-ring: #007bff !important;
+}
+
+/* Destaque PhoneCenter em links ativos da sidebar */
+aside a[aria-current="page"],
+aside [data-active="true"],
+nav a[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(0, 102, 255, 0.28), rgba(0, 102, 255, 0.1)) !important;
+  border-left: 3px solid #007bff !important;
+  color: #ffffff !important;
+}
+
+/* Scrollbar elegante PhoneCenter */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 102, 255, 0.6);
+}
+
+/* Badge/barra de atalho rápido PhoneCenter no canto inferior esquerdo */
+#pc-brand-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(0, 102, 255, 0.14);
+  border: 1px solid rgba(0, 102, 255, 0.35);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+#pc-login-status-box {
+  margin-top: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 102, 255, 0.3);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+#pc-login-status-box label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+
+#pc-login-status-box select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #090d16;
+  color: #ffffff;
+  font-size: 13px;
+}
+
+#pc-login-status-box .pc-hint {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Botão flutuante discreto de retorno ao PhoneCenter ERP */
+#pc-quick-dock {
+  position: fixed;
+  right: 16px;
+  bottom: 14px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#pc-quick-dock a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0066ff, #0044cc);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 102, 255, 0.35);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  opacity: 0.9;
+}
+
+#pc-quick-dock a:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+}

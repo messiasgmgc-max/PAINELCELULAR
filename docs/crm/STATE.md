@@ -4,39 +4,37 @@
 
 ## 1. Infraestrutura & Acessos (Sem Segredos)
 - **VPS IP:** `13.140.36.50` · **SSH:** `root@13.140.36.50:2222` ✅
-- **OS:** Ubuntu Linux `5.15.0-202-generic` (`vmi3558908`)
-- **Hardware Auditado Pós-Deploy (2026-11-20):**
-  - **CPU:** `6 vCPUs`
-  - **RAM:** `11.68 GiB` total · `3.4 GiB` em uso (36.7%) · **`7.5 GiB` ainda disponíveis**
-  - **Disco:** `194 GB` total · `~40 GB` usado · **`~154 GB` livre**
+- **Hardware Pós-Deploy (2026-11-20):** `6 vCPUs` · `3.4 / 11.68 GiB RAM` (`7.5 GiB` livres) · `~154 GB` disco livre
 - **Orquestrador:** Coolify `4.7.6` + `coolify-proxy` (`traefik:v3.6`, rede `coolify`, certresolver `letsencrypt`)
-- **Apps pré-existentes (100% INTOCADOS):**
-  - `PAINELCELULAR` (`https://app.phonecenter.tech` — `HTTP 200`)
-  - `evolution_api` (`evoapicloud/evolution-api:latest`, `/root/evolution`, rede `evolution_default`, porta interna `8080` / host `8082`)
-  - `evolution_postgres`, `aster-*`
+- **Apps pré-existentes (100% INTOCADOS):** `app.phonecenter.tech` (`PAINELCELULAR`), `evolution_api` (v2.3.7, rede `evolution_default`), `evolution_postgres`, `aster-*`
 
-## 2. Domínios & SSL (Ativos)
-- `https://crm.phonecenter.tech` → `evocrm_frontend:80` (**HTTP 200 + TLS Let's Encrypt ✅**)
-- `https://api-crm.phonecenter.tech` → `evocrm_gateway:3030` (**HTTP 200 + TLS Let's Encrypt ✅**)
+## 2. Domínios & Endpoints Ativos
+- **CRM (White-Label PhoneCenterCRM):** `https://crm.phonecenter.tech` (`HTTP 200` + TLS ✅)
+- **CRM API Gateway:** `https://api-crm.phonecenter.tech` (`HTTP 200` + TLS ✅)
+- **PhoneCenter ERP:** `https://app.phonecenter.tech` (`HTTP 200` + TLS ✅)
+- **Dashboard App Lateral (Chat):** `https://app.phonecenter.tech/crm-sidebar?token=<CRM_BRIDGE_SECRET>`
+- **Link na Bio + Vitrine:** `https://app.phonecenter.tech/bio`
+- **MCP Server IA (JSON-RPC 2.0):** `https://app.phonecenter.tech/api/crm-bridge/mcp`
+- **CRM Bridge REST APIs:** `/api/crm-bridge/{health,estoque,clientes/lookup,simular,ranking,conexoes,webhooks/evo}`
 
-## 3. Stack PhoneCenterCRM em Produção (`/opt/phonecenter-crm`)
-- Compose versionado (sem segredos): [infra/crm/docker-compose.yml](../../infra/crm/docker-compose.yml)
-- Segredos em `/opt/phonecenter-crm/.env` (`chmod 600`, fora do Git)
-- **14 containers ativos e saudáveis (Full Stack + EvoFlow + ClickHouse + RabbitMQ + IA Processor + Bot Runtime):**
-  `evocrm_pgvector`, `evocrm_redis`, `evocrm_clickhouse`, `evocrm_rabbitmq`, `evocrm_auth`, `evocrm_auth_sidekiq`, `evocrm_crm`, `evocrm_crm_sidekiq`, `evocrm_core`, `evocrm_processor`, `evocrm_bot_runtime`, `evocrm_evoflow`, `evocrm_gateway`, `evocrm_frontend`
-- Todos com `mem_limit` rígido e zero portas publicadas no host.
-- **Backup diário:** `/opt/phonecenter-crm/backup.sh` agendado via cron (`03:30 UTC`, retenção 7 dias) — primeiro dump testado e validado.
+## 3. O que Já Está Rodando em Produção
+- **Stack EvoCRM Full (14 containers, `/opt/phonecenter-crm/`):** todos saudáveis com `mem_limit`, backup diário `03:30 UTC`.
+- **Evolution API já conectada no CRM:** `EVOLUTION_API_URL=http://evolution_api:8080` + `EVOLUTION_ADMIN_SECRET` configurados (`hasEvolutionConfig: true` ✅).
+- **White-Label PhoneCenterCRM (Camada 3A ativa):** `infra/crm/branding/` aplicado no `evocrm_frontend` com paleta `#090d16` / `#0066FF`, logos oficiais PhoneCenter, CSP `frame-src` liberado para `app.phonecenter.tech`, seletor `Online/Ausente/Offline` no login e dock rápido ERP/Bio.
+- **Ponte PhoneCenter ERP + MCP + Sidebar + Bio (Fase 4 + parte da 5):** implementados e testados em `PAINELCELULAR` (0 erros TS, testes verdes).
 
-## 4. Bloqueios & Próxima Ação Imediata
-- **Ação do Usuário (1 minuto):** Abrir `https://crm.phonecenter.tech` e concluir o **Setup Wizard inicial** (criação da conta `super_admin` do PhoneCenterCRM).
-- **Próximas Fases Técnicas (prontas para execução):**
-  - **Fase 2:** Conectar `evolution_api` (URL interna `http://evolution_api:8080` ou pública), WhatsApp Cloud API, Instagram Direct, Google Calendar, Setores, Tags e Respostas Rápidas.
-  - **Fase 3:** Fork white-label do `evo-ai-frontend-community` com identidade visual **PhoneCenterCRM** (cores `#090d16` / `#0066FF`, logos, login split-screen com `Online/Ausente/Offline`, sidebar PT-BR) + CI/CD via GitHub Actions → GHCR.
-  - **Fase 4:** Construir **PhoneCenter CRM Bridge** (`/api/crm-bridge/*`) + **Dashboard App Lateral** (`/crm-sidebar`) + **MCP Server** para IA consultar estoque real do Supabase.
+## 4. Ações Rápidas para Ativar 100% no Painel
+1. Definir `CRM_BRIDGE_SECRET=<chave-forte>` nas variáveis de ambiente do app `PAINELCELULAR` no Coolify (e opcionalmente `CRM_DEFAULT_LOJA_ID`).
+2. No **PhoneCenterCRM (`crm.phonecenter.tech`)**:
+   - **Canais:** criar inbox WhatsApp (Evolution API já está `hasEvolutionConfig: true`!) e escanear QR Code.
+   - **Dashboard Apps:** cadastrar `https://app.phonecenter.tech/crm-sidebar?token=<CRM_BRIDGE_SECRET>` como App Lateral do atendimento!
+   - **Admin > MCP Servers:** cadastrar `https://app.phonecenter.tech/api/crm-bridge/mcp` com header `X-PhoneCenter-CRM-Key: <CRM_BRIDGE_SECRET>` para a IA consultar estoque, troca, parcelas e garantias!
+   - **Webhooks:** apontar eventos do CRM para `https://app.phonecenter.tech/api/crm-bridge/webhooks/evo?token=<CRM_BRIDGE_SECRET>`.
 
 ## 5. Log Compacto de Sessões
 - **2026-11-20 (Sessão 1):**
-  - Criados `AgentsCRM.md`, `TODOCRM.md`, `docs/crm/*` e `infra/crm/docker-compose.yml`.
-  - Validado SSH (`13.140.36.50:2222`), auditada VPS, feito deploy completo dos 14 containers em `/opt/phonecenter-crm` com TLS Let's Encrypt em `crm.phonecenter.tech` e `api-crm.phonecenter.tech`.
-  - Validados healthchecks internos de todos os serviços (`auth`, `crm`, `core`, `processor`, `bot_runtime`, `evoflow`, `pgvector`, `redis`, `clickhouse`, `rabbitmq`) + `app.phonecenter.tech` e `evolution_api` 100% intactos.
-  - Configurado backup automático diário do Postgres (`pg_dump`).
+  - Docs modulares criados (`AgentsCRM.md`, `TODOCRM.md`, `docs/crm/*`).
+  - Stack 14 containers EvoCRM subida em `/opt/phonecenter-crm/` com SSL em `crm.phonecenter.tech` e `api-crm.phonecenter.tech` + backup cron diário.
+  - Evolution API (`http://evolution_api:8080`) vinculada automaticamente (`hasEvolutionConfig: true`).
+  - White-label PhoneCenterCRM (`infra/crm/branding/`) aplicado ao vivo em `crm.phonecenter.tech`.
+  - Construídos e testados no `PAINELCELULAR`: `/api/crm-bridge/{health,estoque,clientes/lookup,simular,ranking,conexoes,webhooks/evo,mcp}`, `/api/publico/vitrine`, `/crm-sidebar` (Dashboard App 4 abas) e `/bio` (Link na Bio + Vitrine).
