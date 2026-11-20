@@ -16,7 +16,10 @@ import {
   Sparkles,
   ExternalLink,
   AlertCircle,
+  Sliders,
+  Link2,
 } from 'lucide-react';
+import CrmOpsPanel from '@/components/crm/CrmOpsPanel';
 
 interface EstoqueItem {
   id: string;
@@ -102,7 +105,7 @@ interface RankingResult {
   topModelos: Array<{ modelo: string; quantidade: number; faturamento: number }>;
 }
 
-type AbaId = 'cliente' | 'estoque' | 'simulador' | 'ranking';
+type AbaId = 'cliente' | 'estoque' | 'simulador' | 'ranking' | 'ops';
 
 const formatBRL = (v: number) =>
   (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -147,6 +150,8 @@ export default function CrmSidebarPage() {
   const [valorTrocaManual, setValorTrocaManual] = useState('');
   const [simulacao, setSimulacao] = useState<SimulacaoResult | null>(null);
   const [loadingSim, setLoadingSim] = useState(false);
+  const [propostaLink, setPropostaLink] = useState<{ url: string; protocolo: string } | null>(null);
+  const [gerandoProposta, setGerandoProposta] = useState(false);
 
   // Aba Ranking
   const [rankingDias, setRankingDias] = useState(30);
@@ -436,13 +441,14 @@ export default function CrmSidebarPage() {
       )}
 
       {/* Navegação por abas */}
-      <nav className="grid grid-cols-4 gap-1 p-2 bg-[#0f172a]/70 border-b border-white/10">
+      <nav className="grid grid-cols-5 gap-1 p-2 bg-[#0f172a]/70 border-b border-white/10">
         {(
           [
             { id: 'estoque', label: 'Estoque', icon: Smartphone },
             { id: 'cliente', label: 'Cliente', icon: UserCheck },
-            { id: 'simulador', label: 'Troca/Calc', icon: Calculator },
+            { id: 'simulador', label: 'Troca', icon: Calculator },
             { id: 'ranking', label: 'Ranking', icon: Trophy },
+            { id: 'ops', label: 'Ops', icon: Sliders },
           ] as const
         ).map((item) => {
           const Icon = item.icon;
@@ -871,6 +877,82 @@ export default function CrmSidebarPage() {
                     <Printer className="w-3.5 h-3.5" /> PDF
                   </button>
                 </div>
+
+                <button
+                  disabled={gerandoProposta}
+                  onClick={async () => {
+                    if (!token) return;
+                    const valorNum = Number(valorAparelho.replace(',', '.')) || 0;
+                    if (valorNum <= 0) return;
+                    setGerandoProposta(true);
+                    try {
+                      const res = await fetch('/api/crm-bridge/propostas', {
+                        method: 'POST',
+                        headers: headersBridge,
+                        body: JSON.stringify({
+                          clienteNome: contatoCtx.nome || cliente360?.cliente?.nome || 'Cliente',
+                          clienteTelefone: contatoCtx.telefone || cliente360?.cliente?.telefone || '',
+                          modeloNovo: modeloNovo || 'Aparelho Selecionado',
+                          valorAparelho: valorNum,
+                          entradaPix: Number(entradaPix.replace(',', '.')) || 0,
+                          valorTrocaManual: valorTrocaManual
+                            ? Number(valorTrocaManual.replace(',', '.'))
+                            : undefined,
+                          troca: usarTroca
+                            ? {
+                                modelo: trocaModelo,
+                                capacidade: trocaCapacidade,
+                                condicoes: {
+                                  bateriaPercentual: Number(trocaBateria) || 85,
+                                  estadoTela: trocaTela,
+                                  estadoCarcaca: trocaCarcaca,
+                                  faceIdFunciona: trocaFaceId,
+                                },
+                              }
+                            : undefined,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (res.ok && data.ok && data.urlPublica) {
+                        setPropostaLink({
+                          url: data.urlPublica,
+                          protocolo: data.proposta?.protocolo || '#PROP',
+                        });
+                        if (data.proposta?.texto_whatsapp) {
+                          copiarTexto(data.proposta.texto_whatsapp, 'sim-link');
+                        }
+                      } else {
+                        setErroAuth(data.error || 'Erro ao gerar link de proposta.');
+                      }
+                    } finally {
+                      setGerandoProposta(false);
+                    }
+                  }}
+                  className="w-full py-1.5 px-2 rounded-lg bg-[#0066FF]/25 hover:bg-[#0066FF]/40 border border-[#0066FF]/50 text-blue-200 font-semibold flex items-center justify-center gap-1.5"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  {gerandoProposta
+                    ? 'Gerando link oficial...'
+                    : copiadoId === 'sim-link'
+                      ? 'Link oficial copiado pro WhatsApp!'
+                      : 'Gerar Link Oficial de Proposta'}
+                </button>
+
+                {propostaLink && (
+                  <div className="p-2 rounded-lg bg-[#090d16] border border-emerald-500/30 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-emerald-300 truncate">
+                      {propostaLink.protocolo}: {propostaLink.url}
+                    </span>
+                    <a
+                      href={propostaLink.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-300 underline shrink-0"
+                    >
+                      Abrir
+                    </a>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -965,6 +1047,11 @@ export default function CrmSidebarPage() {
               </>
             )}
           </div>
+        )}
+
+        {/* ==================== ABA OPS (ADS, CHAT INTERNO, CONEXÕES) ==================== */}
+        {aba === 'ops' && (
+          <CrmOpsPanel headersBridge={headersBridge} token={token} />
         )}
       </main>
     </div>

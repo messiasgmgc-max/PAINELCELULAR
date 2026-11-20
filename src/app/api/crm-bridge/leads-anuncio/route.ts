@@ -1,0 +1,136 @@
+import { NextRequest } from 'next/server';
+import { supabaseAdmin } from '@/integrations/supabase/server';
+import {
+  autenticarBridge,
+  crmBridgeJson,
+  crmBridgeOptionsResponse,
+  resolverLojaBridge,
+} from '@/lib/crm-bridge/auth';
+import {
+  dispararMetaCapiPurchase,
+  obterDashboardAnunciosBridge,
+  registrarLeadAnuncioBridge,
+} from '@/lib/crm-bridge/fase5';
+
+export async function OPTIONS() {
+  return crmBridgeOptionsResponse();
+}
+
+export async function GET(req: NextRequest) {
+  const auth = autenticarBridge(req);
+  if (!auth.ok) {
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+  }
+
+  const loja = await resolverLojaBridge(req);
+  if (!loja) {
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+  }
+
+  const dias = Number(req.nextUrl.searchParams.get('dias') || 30);
+  const dashboard = await obterDashboardAnunciosBridge(
+    loja.id,
+    Number.isFinite(dias) ? dias : 30
+  );
+  return crmBridgeJson({ ok: true, loja, ...dashboard });
+}
+
+export async function POST(req: NextRequest) {
+  const auth = autenticarBridge(req);
+  if (!auth.ok) {
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+  }
+
+  const loja = await resolverLojaBridge(req);
+  if (!loja) {
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+  }
+
+  try {
+    const body = await req.json();
+    const lead = await registrarLeadAnuncioBridge(
+      loja.id,
+      {
+        origem: String(body.origem || 'meta_ctwa'),
+        ctwaClid: String(body.ctwaClid || ''),
+        sourceId: String(body.sourceId || ''),
+        campaignName: String(body.campaignName || ''),
+        adHeadline: String(body.adHeadline || ''),
+        adBody: String(body.adBody || ''),
+        sourceUrl: String(body.sourceUrl || ''),
+      },
+      {
+        nome: body.contatoNome ? String(body.contatoNome) : '',
+        telefone: body.contatoTelefone ? String(body.contatoTelefone) : '',
+      }
+    );
+    return crmBridgeJson({ ok: true, loja, lead }, 201);
+  } catch (err) {
+    return crmBridgeJson(
+      { ok: false, error: err instanceof Error ? err.message : 'Erro ao criar lead.' },
+      500
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const auth = autenticarBridge(req);
+  if (!auth.ok) {
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+  }
+
+  const loja = await resolverLojaBridge(req);
+  if (!loja) {
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+  }
+
+  try {
+    const body = await req.json();
+    const leadId = String(body.id || '').trim();
+    const status = String(body.status || 'convertido').trim();
+    const valorVenda = Math.max(0, Number(body.valorVenda) || 0);
+
+    if (!leadId) {
+      return crmBridgeJson({ ok: false, error: 'Informe id do lead.' }, 400);
+    }
+
+    const { data: lead, error } = await supabaseAdmin
+      .from('crm_leads_anuncio')
+      .update({
+        status,
+        valor_venda: valorVenda,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', leadId)
+      .eq('loja_id', loja.id)
+      .select('*')
+      .single();
+
+    if (error || !lead) {
+      return crmBridgeJson({ ok: false, error: error?.message || 'Lead não encontrado.' }, 404);
+    }
+
+    let capiResult: { sent: boolean; reason?: string } = { sent: false };
+    if (status === 'convertido' && valorVenda > 0 && !lead.capi_enviado) {
+      capiResult = await dispararMetaCapiPurchase({
+        telefone: String(lead.contato_telefone || ''),
+        ctwaClid: String(lead.ctwa_clid || ''),
+        valor: valorVenda,
+        eventId: `pc_lead_${lead.id}`,
+      });
+      if (capiResult.sent) {
+        await supabaseAdmin
+          .from('crm_leads_anuncio')
+          .update({ capi_enviado: true, capi_enviado_em: new Date().toISOString() })
+          .eq('id', lead.id);
+      }
+    }
+
+    return crmBridgeJson({ ok: true, lead, capi: capiResult });
+  } catch (err) {
+    return crmBridgeJson(
+      { ok: false, error: err instanceof Error ? err.message : 'Erro ao atualizar lead.' },
+      500
+    );
+  }
+}

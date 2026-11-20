@@ -7,20 +7,20 @@
 
 ## 📍 ONDE PARAMOS (Resumo Rápido)
 
-- **Fase Atual:** `Fases 0, 1, 3A (White-Label Live) e 4 (Ponte ERP + Sidebar + MCP IA)` **CONCLUÍDAS!** → Entrando na configuração de canais (Fase 2) e módulos avançados restantes da Fase 5.
-- **Concluído agora:**
-  - **Infra & Deploy (`crm.phonecenter.tech` + `api-crm.phonecenter.tech`):** 14 containers EvoCRM saudáveis em `/opt/phonecenter-crm/` com SSL Let's Encrypt, `mem_limit`, backup diário cron e **7.5 GiB de RAM livres** na VPS.
-  - **Evolution API conectada automaticamente:** `EVOLUTION_API_URL=http://evolution_api:8080` + chave sincronizada (`hasEvolutionConfig: true`).
-  - **White-Label PhoneCenterCRM ao vivo (`infra/crm/branding/`):** paleta oficial `#090d16` / `#0066FF`, logos PhoneCenter, título `PhoneCenterCRM`, seletor `Online/Ausente/Offline` no login, dock ERP/Bio e CSP `frame-src` liberado para `app.phonecenter.tech`.
-  - **PhoneCenter CRM Bridge + MCP + Dashboard App + Link na Bio (`PAINELCELULAR`):**
-    - APIs: `/api/crm-bridge/{health,estoque,clientes/lookup,simular,ranking,conexoes,webhooks/evo,mcp}` + `/api/publico/vitrine`
-    - Dashboard App Lateral no Chat: `/crm-sidebar` (Estoque Vivo, Cliente 360º, Simulador Troca/Parcelas/PDF, Ranking Real)
-    - Link na Bio + Vitrine Dinâmica: `/bio`
-    - Testes unitários passando + `tsc --noEmit` zerado!
+- **Fase Atual:** `Fases 0, 1, 3A (White-Label), 4 (Ponte ERP + MCP IA) e 5 (Módulos Exclusivos)` **CONCLUÍDAS!** → Pronto para ativação final das credenciais no Coolify/Supabase e Fase 2 (canais Meta/Google) + Fase 6 (Escala Multi-Loja & Pix).
+- **Concluído agora (Rodada Final Fase 5):**
+  - Migration SQL criada: `supabase/migrations/20261120_phonecenter_crm_modulos.sql` (`crm_propostas`, `crm_leads_anuncio`, `crm_chat_interno`).
+  - **Propostas Comerciais com Link Público & Aceite:** `/api/crm-bridge/propostas`, `/api/publico/proposta/[token]` e página pública `/proposta/[token]` (com logo PhoneCenter, troca, parcelamento 1x–18x, aceite com 1 clique e impressão PDF).
+  - **Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS):** captura automática no webhook `/api/crm-bridge/webhooks/evo`, dashboard `/api/crm-bridge/leads-anuncio` e disparo server-side Meta Conversions API (`Purchase`).
+  - **Chat Interno da Equipe:** `/api/crm-bridge/chat-interno` com 5 canais (`#geral`, `#vendas`, `#trocas`, `#assistencia`, `#gerencia`).
+  - **Gestão Avançada de Conexões & Tickets (Print 2):** `/api/crm-bridge/tickets-ops` (migrar tickets entre conexões, fechar inativos por filtro, fechar todos) + `/api/crm-bridge/conexoes` (reiniciar/desconectar Evolution API).
+  - **Dashboard App Lateral (`/crm-sidebar`) turbinado:** agora com **5 abas** (*Estoque*, *Cliente*, *Troca + Link Oficial de Proposta*, *Ranking*, *Ops [Ads CTWA / Chat Equipe / Conexões & Tickets]*).
+  - `pnpm typecheck` zerado e 9/9 testes unitários do CRM Bridge passando!
 - **Próximo Passo Exato:**
-  1. Definir `CRM_BRIDGE_SECRET` no Coolify do `PAINELCELULAR` (após auto-deploy do push atual).
-  2. No `crm.phonecenter.tech`: escanear QR Code WhatsApp (Evolution API já conectada!), registrar o Dashboard App `/crm-sidebar` e o MCP Server `/api/crm-bridge/mcp`.
-  3. **Fase 5 (próxima rodada):** Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS), Migração/Fechamento em massa de tickets entre conexões, Chat Interno dedicado, Proposta PDF com layout oficial da loja e Meta/Google OAuth (Instagram Direct + WhatsApp Cloud API + Google Calendar).
+  1. Rodar `supabase/migrations/20261120_phonecenter_crm_modulos.sql` no SQL Editor do Supabase (para criar as 3 novas tabelas).
+  2. Configurar no Coolify do `PAINELCELULAR`: `CRM_BRIDGE_SECRET` (obrigatório), `CRM_EVO_ACCESS_TOKEN` (para migrar/fechar tickets em massa), e opcionalmente `META_PIXEL_ID` + `META_CAPI_ACCESS_TOKEN`.
+  3. No `https://crm.phonecenter.tech`: conectar WhatsApp QR (Evolution API já ativa!), cadastrar Dashboard App `/crm-sidebar?token=...`, MCP Server `/api/crm-bridge/mcp` e Webhook `/api/crm-bridge/webhooks/evo?token=...`.
+  4. **Próxima etapa sob demanda:** Fase 2 (Instagram Direct, WhatsApp Cloud API Oficial, Google Calendar OAuth) e Fase 6 (Multi-Loja SaaS via Coolify API + Pix/Asaas no chat).
 
 ---
 
@@ -72,13 +72,13 @@
 
 ## Fase 5 — Módulos Exclusivos (Superando o Mercado Phone CRM)
 - [x] **Ranking de Vendas & Relatório de Vendas Real (ERP):** `/api/crm-bridge/ranking` + aba Ranking no `/crm-sidebar`
-- [x] **Gestão de Conexões (Reiniciar/Desconectar EvoAPI):** `/api/crm-bridge/conexoes`
+- [x] **Gestão de Conexões (Reiniciar/Desconectar EvoAPI):** `/api/crm-bridge/conexoes` + aba Ops
 - [x] **Link na Bio com Vitrine Dinâmica de Estoque:** `/bio` + `/api/publico/vitrine`
-- [ ] **Propostas Comerciais PDF com link público & aceite** (evoluir impressão atual para registro persistido + PDF server-side com logo da loja)
-- [ ] **Leads de Anúncio (Meta Ads CTWA + CAPI):** Dashboard dedicado de origem + disparo `Purchase` CAPI para ROAS real
-- [ ] **Rodízio Inteligente:** Painel de regras por setor/horário/limite simultâneo conectado ao status Online
-- [ ] **Migrar Tickets entre Conexões & Fechamento em Massa por Filtro** (chamar API de conversas do EvoCRM)
-- [ ] **Kanban Grupos + Chat Interno da Equipe + CRM Academy + Financeiro**
+- [x] **Propostas Comerciais com link público, aceite & PDF:** `crm_propostas` + `/api/crm-bridge/propostas` + `/proposta/[token]`
+- [x] **Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS):** `crm_leads_anuncio` + captura automática no webhook + `/api/crm-bridge/leads-anuncio` + Meta CAPI `Purchase`
+- [x] **Migrar Tickets entre Conexões & Fechamento em Massa por Filtro:** `/api/crm-bridge/tickets-ops` + painel visual na aba Ops
+- [x] **Chat Interno da Equipe:** `crm_chat_interno` + `/api/crm-bridge/chat-interno` (5 canais) + painel visual na aba Ops
+- [ ] **Rodízio Inteligente avançado + Kanban Grupos + CRM Academy + Financeiro (Fase 5B/6)**
 
 ## Fase 6 — Escala Multi-Loja (SaaS PhoneCenter) & Governança
 - [ ] Definir modelo Multi-Loja definitivo:

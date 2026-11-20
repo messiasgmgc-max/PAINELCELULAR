@@ -6,6 +6,10 @@ import {
   crmBridgeOptionsResponse,
   resolverLojaBridge,
 } from '@/lib/crm-bridge/auth';
+import {
+  extrairReferralAnuncio,
+  registrarLeadAnuncioBridge,
+} from '@/lib/crm-bridge/fase5';
 
 export async function OPTIONS() {
   return crmBridgeOptionsResponse();
@@ -13,8 +17,9 @@ export async function OPTIONS() {
 
 /**
  * Receptor de webhooks do PhoneCenterCRM (EvoCRM).
- * Registra eventos importantes (ex: oportunidade ganha, lead de anúncio CTWA,
- * conversa resolvida, CSAT respondido) na auditoria do PhoneCenter ERP.
+ * - Registra eventos relevantes na auditoria (logs_sistema)
+ * - Captura automaticamente Leads de Anúncio (Meta Click-to-WhatsApp / Instagram Ads / UTM)
+ *   para a tabela crm_leads_anuncio!
  */
 export async function POST(req: NextRequest) {
   const auth = autenticarBridge(req);
@@ -24,16 +29,32 @@ export async function POST(req: NextRequest) {
 
   const loja = await resolverLojaBridge(req);
   try {
-    const payload = await req.json();
+    const payload = (await req.json()) as Record<string, unknown>;
     const evento = String(payload?.event || payload?.type || 'crm_webhook');
-    const contato = payload?.contact || payload?.conversation?.meta?.sender || {};
-    const referral =
-      payload?.referral ||
-      payload?.additional_attributes?.referral ||
-      payload?.conversation?.additional_attributes?.referral ||
-      null;
+    const conv = (payload.conversation || {}) as Record<string, unknown>;
+    const meta = (conv.meta || {}) as Record<string, unknown>;
+    const contato = (payload.contact || meta.sender || {}) as Record<string, unknown>;
 
-    // Registra log estruturado sem travar o webhook caso tabela tenha variações
+    const referral = extrairReferralAnuncio(payload);
+    let leadAnuncioSalvo = false;
+
+    if (referral && loja?.id) {
+      try {
+        await registrarLeadAnuncioBridge(
+          loja.id,
+          referral,
+          {
+            nome: String(contato.name || ''),
+            telefone: String(contato.phone_number || ''),
+          },
+          { evento, conversationId: conv.id || null }
+        );
+        leadAnuncioSalvo = true;
+      } catch {
+        // Não bloqueia webhook se migration ainda não foi aplicada
+      }
+    }
+
     try {
       await supabaseAdmin.from('logs_sistema').insert({
         loja_id: loja?.id || null,
@@ -43,12 +64,12 @@ export async function POST(req: NextRequest) {
           contatoNome: contato?.name || null,
           contatoTelefone: contato?.phone_number || null,
           referral,
-          pipelineItemId: payload?.pipeline_item?.id || null,
+          leadAnuncioSalvo,
           recebidoEm: new Date().toISOString(),
         }).slice(0, 4000),
       });
     } catch {
-      // Falha silenciosa de log não deve rejeitar webhook do CRM
+      // Falha silenciosa de log não rejeita webhook
     }
 
     return crmBridgeJson({
@@ -57,6 +78,7 @@ export async function POST(req: NextRequest) {
       event: evento,
       lojaId: loja?.id || null,
       hasAdReferral: Boolean(referral),
+      leadAnuncioSalvo,
     });
   } catch (err) {
     return crmBridgeJson(
