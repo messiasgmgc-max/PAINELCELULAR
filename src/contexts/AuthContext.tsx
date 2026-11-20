@@ -156,8 +156,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     inicializarSessao();
 
-    // Listener para mudanças de estado do Supabase (Login, Logout, Token Refresh)
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // Listener para mudanças de estado do Supabase (Login, Logout, Token Refresh).
+    // IMPORTANTE: o callback NÃO pode ser async nem aguardar queries do Supabase
+    // diretamente aqui, pois GoTrueClient aguarda onAuthStateChange enquanto segura
+    // o lock interno de sessão — chamar supabase.from() aqui causa deadlock infinito.
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return;
 
       // INITIAL_SESSION já é tratado por inicializarSessao() acima — evita query duplicada em `perfis`
@@ -167,22 +170,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (session?.access_token) {
           document.cookie = `sessao_usuario=${session.access_token}; path=/; max-age=86400; SameSite=Lax`;
         }
-        const usuarioMontado = await montarUsuario(session);
-        atualizarUsuarioSeMudou(usuarioMontado);
-        if (event === 'SIGNED_IN' && usuarioMontado) {
-          logAuth(usuarioMontado, 'Login');
-        }
+        setLoading(false);
+        setAuthReady(true);
+
+        // Executa fora do lock do GoTrueClient para nunca travar `.from()` / `.rpc()`
+        setTimeout(() => {
+          if (!isMounted) return;
+          montarUsuario(session)
+            .then((usuarioMontado) => {
+              if (!isMounted) return;
+              atualizarUsuarioSeMudou(usuarioMontado);
+              if (event === 'SIGNED_IN' && usuarioMontado) {
+                logAuth(usuarioMontado, 'Login');
+              }
+            })
+            .catch((err) => {
+              console.error('Erro ao sincronizar usuário após evento de auth:', err);
+            });
+        }, 0);
       } else if (event === 'SIGNED_OUT') {
-        if (usuarioRef.current) {
-          logAuth(usuarioRef.current, 'Logout');
-        }
+        const prevUser = usuarioRef.current;
         document.cookie = `sessao_usuario=; path=/; max-age=0;`;
         try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
         atualizarUsuarioSeMudou(null);
-      }
+        setLoading(false);
+        setAuthReady(true);
 
-      setLoading(false);
-      setAuthReady(true);
+        if (prevUser) {
+          setTimeout(() => {
+            logAuth(prevUser, 'Logout');
+          }, 0);
+        }
+      }
     });
 
     return () => {

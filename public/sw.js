@@ -1,7 +1,7 @@
 // sw.js — Cache estável para chunks imutáveis + Stale-While-Revalidate para assets + Network-First para HTML
-const STATIC_CACHE = 'phone-center-static-v2';
-const ASSET_CACHE = 'phone-center-assets-v2';
-const PAGE_CACHE = 'phone-center-pages-v2';
+const STATIC_CACHE = 'phone-center-static-v3';
+const ASSET_CACHE = 'phone-center-assets-v3';
+const PAGE_CACHE = 'phone-center-pages-v3';
 const ACTIVE_CACHES = new Set([STATIC_CACHE, ASSET_CACHE, PAGE_CACHE]);
 
 self.addEventListener('install', (event) => {
