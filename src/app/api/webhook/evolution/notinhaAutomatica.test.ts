@@ -29,6 +29,9 @@ import {
   buscarPropostaNotinhaRecente,
   limparMencoesBot,
   extrairMensagemMarcadaParaBot,
+  extrairVendaDeMensagemReagidaComRecibo,
+  salvarSnapshotMensagemWebhook,
+  buscarSnapshotMensagemWebhook,
   type PropostaNotinha,
 } from './notinhaAutomatica';
 import {
@@ -2039,6 +2042,177 @@ Modelo: iPhone 15 Pro 256gb preto imei 350015753668064`;
   assert.equal(Buffer.from(emissao.pdfBase64, 'base64').slice(0, 4).toString(), '%PDF');
   assert.equal(emissao.nomeLoja, 'Lucas Imports');
   assert.ok(emissao.mensagem.includes('06/11/2026'));
+});
+
+test('extrairVendaDeMensagemReagidaComRecibo extrai formulário, texto cru e foto com legenda curta', () => {
+  // 1. Formulário formal
+  const form = extrairVendaDeMensagemReagidaComRecibo(`Para finalizar seu pedido:
+Nome: Mariana Costa
+CPF: 111.222.333-44
+Telefone: 31 98888-7777
+Modelo: iPhone 15 128gb Preto imei 350015753668064
+Valor: R$ 4.100,00
+Pix`);
+  assert.ok(form);
+  assert.equal(form.cliente.nome, 'Mariana Costa');
+  assert.equal(form.cliente.cpf, '111.222.333-44');
+  assert.equal(form.aparelho.modelo, 'iPhone 15');
+  assert.equal(form.valorTotal, 4100);
+
+  // 2. Texto cru sem rótulos
+  const textoCru = extrairVendaDeMensagemReagidaComRecibo(`João Silva
+141.806.446-73
+31 99909-6222
+iPhone 15 Pro Max 256gb Preto imei 350015753668064
+5200 pix`);
+  assert.ok(textoCru);
+  assert.equal(textoCru.cliente.nome, 'João Silva');
+  assert.equal(textoCru.cliente.cpf, '141.806.446-73');
+  assert.match(String(textoCru.cliente.telefone || ''), /99909/);
+  assert.equal(textoCru.aparelho.modelo, 'iPhone 15 Pro Max');
+  assert.equal(textoCru.aparelho.capacidade, '256GB');
+  assert.equal(textoCru.aparelho.cor, 'Preto');
+  assert.equal(textoCru.aparelho.imei, '350015753668064');
+  assert.equal(textoCru.valorTotal, 5200);
+  assert.equal(textoCru.formaPagamento, 'pix');
+
+  // 3. Foto com legenda curta ("Carlos Eduardo 4500")
+  const comFoto = extrairVendaDeMensagemReagidaComRecibo(
+    'Carlos Eduardo 4500 no pix',
+    [
+      {
+        imei: '350015753668064',
+        modelo: 'iPhone 14 Pro',
+        capacidade: '128GB',
+        cor: 'Roxo',
+        timestamp: Date.now(),
+      },
+    ]
+  );
+  assert.ok(comFoto);
+  assert.equal(comFoto.cliente.nome, 'Carlos Eduardo');
+  assert.equal(comFoto.aparelho.modelo, 'iPhone 14 Pro');
+  assert.equal(comFoto.aparelho.capacidade, '128GB');
+  assert.equal(comFoto.aparelho.imei, '350015753668064');
+  assert.equal(comFoto.valorTotal, 4500);
+
+  // 4. Sem texto e sem foto retorna null
+  assert.equal(extrairVendaDeMensagemReagidaComRecibo('', []), null);
+});
+
+test('salvarSnapshotMensagemWebhook / buscarSnapshotMensagemWebhook e origemReacao na PropostaNotinha', async () => {
+  const memStore = new Map<string, any>();
+  const mockSupabase: any = {
+    from() {
+      const state: { chave?: string; chaves?: string[]; tipo?: string } = {};
+      const chain: any = {
+        select() { return chain; },
+        eq(col: string, val: any) {
+          if (col === 'chave') state.chave = val;
+          if (col === 'tipo') state.tipo = val;
+          return chain;
+        },
+        in(col: string, vals: any[]) {
+          if (col === 'chave') state.chaves = vals;
+          return chain;
+        },
+        order() { return chain; },
+        limit() {
+          const rows = Array.from(memStore.values()).filter(
+            (r) =>
+              (!state.chaves || state.chaves.includes(r.chave)) &&
+              (!state.tipo || r.tipo === state.tipo)
+          );
+          return Promise.resolve({ data: rows, error: null });
+        },
+        maybeSingle() {
+          const row = state.chave ? memStore.get(state.chave) : null;
+          if (row && (!state.tipo || row.tipo === state.tipo)) {
+            return Promise.resolve({ data: row, error: null });
+          }
+          return Promise.resolve({ data: null, error: null });
+        },
+        upsert(payload: any) {
+          memStore.set(payload.chave, payload);
+          return Promise.resolve({ data: payload, error: null });
+        },
+      };
+      return chain;
+    },
+  };
+
+  await salvarSnapshotMensagemWebhook(
+    mockSupabase,
+    '1203630001@g.us',
+    'MSG-OLD-99',
+    {
+      texto: 'Pedro Henrique - iPhone 15 128gb Azul 3900',
+      hasImage: true,
+      foto: {
+        imei: '350015753668064',
+        modelo: 'iPhone 15',
+        capacidade: '128GB',
+        cor: 'Azul',
+        timestamp: Date.now(),
+      },
+      pushName: 'Vendedor',
+      authorPhone: '5531999990000',
+      participant: '5531999990000@s.whatsapp.net',
+      fromMe: false,
+      timestamp: Date.now(),
+    },
+    'loja-1'
+  );
+
+  const recuperado = await buscarSnapshotMensagemWebhook(
+    mockSupabase,
+    '1203630001@g.us',
+    'MSG-OLD-99'
+  );
+  assert.ok(recuperado);
+  assert.equal(recuperado.hasImage, true);
+  assert.equal(recuperado.foto?.imei, '350015753668064');
+
+  const venda = extrairVendaDeMensagemReagidaComRecibo(
+    recuperado.texto,
+    recuperado.foto ? [recuperado.foto] : [],
+    recuperado.pushName
+  );
+  assert.ok(venda);
+
+  const proposta = construirPropostaNotinha({
+    id: 'prop-reac-1',
+    lojaId: 'loja-1',
+    remoteJid: '1203630001@g.us',
+    origemReacao: {
+      remoteJid: '1203630001@g.us',
+      messageId: 'MSG-OLD-99',
+      fromMe: false,
+      participant: '5531999990000@s.whatsapp.net',
+    },
+    vendaDetectada: venda,
+    estoque: [],
+    fotosRecentes: recuperado.foto ? [recuperado.foto] : [],
+    pushName: 'Vendedor',
+  });
+
+  assert.deepEqual(proposta.origemReacao, {
+    remoteJid: '1203630001@g.us',
+    messageId: 'MSG-OLD-99',
+    fromMe: false,
+    participant: '5531999990000@s.whatsapp.net',
+  });
+
+  await salvarPropostaNotinha(mockSupabase, 'loja-1', '5531993586377@s.whatsapp.net', 'PV-MSG-1', proposta);
+  const buscadaPv = await buscarPropostaNotinhaRecente(
+    mockSupabase,
+    ['notinha:5531993586377@s.whatsapp.net:PV-MSG-1'],
+    null,
+    30
+  );
+  assert.ok(buscadaPv);
+  assert.equal(buscadaPv.origemReacao?.messageId, 'MSG-OLD-99');
+  assert.equal(buscadaPv.origemReacao?.remoteJid, '1203630001@g.us');
 });
 
 

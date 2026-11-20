@@ -82,6 +82,10 @@ import {
   limparFotoRecente,
   limparMencoesBot,
   extrairMensagemMarcadaParaBot,
+  extrairVendaDeMensagemReagidaComRecibo,
+  salvarSnapshotMensagemWebhook,
+  buscarSnapshotMensagemWebhook,
+  type OrigemReacaoNotinha,
   type PropostaNotinha,
   type FotoRecenteCache,
 } from './notinhaAutomatica';
@@ -1417,6 +1421,185 @@ async function buscarMidiaBase64Evolution(
   return (await tentarFind()) || (await tentarGet());
 }
 
+// ── AUXILIAR: Enviar Reação (Emoji) em uma Mensagem via Evolution API ──
+async function enviarReacaoWhatsApp(
+  instanceName: string,
+  origem: OrigemReacaoNotinha,
+  emoji: string
+): Promise<boolean> {
+  if (!EVOLUTION_URL || !EVOLUTION_API_KEY || !origem?.messageId || !origem?.remoteJid) {
+    return false;
+  }
+
+  const targetInstance = instanceName || DEFAULT_INSTANCE;
+  const endpoint = `${EVOLUTION_URL}/message/sendReaction/${targetInstance}`;
+  const keyPayload = {
+    remoteJid: origem.remoteJid,
+    fromMe: Boolean(origem.fromMe),
+    id: origem.messageId,
+    ...(origem.participant ? { participant: origem.participant } : {}),
+  };
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        key: keyPayload,
+        reaction: emoji,
+      }),
+    });
+
+    if (res.ok) {
+      console.log(`✅ [Reação] Emoji "${emoji}" aplicado na mensagem ${origem.messageId} em ${origem.remoteJid}`);
+      return true;
+    }
+
+    const resFallback = await fetch(endpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: EVOLUTION_API_KEY,
+      },
+      body: JSON.stringify({
+        reactionMessage: {
+          key: keyPayload,
+          text: emoji,
+        },
+      }),
+    });
+
+    if (resFallback.ok) {
+      console.log(`✅ [Reação] Emoji "${emoji}" aplicado (fallback) na mensagem ${origem.messageId}`);
+      return true;
+    }
+
+    const errText = await resFallback.text().catch(() => res.statusText);
+    console.warn(`⚠️ [Reação] Falha ao enviar reação "${emoji}" para ${origem.messageId}:`, errText);
+    return false;
+  } catch (err: any) {
+    console.warn('⚠️ [Reação] Exceção ao enviar reação via Evolution API:', err?.message || err);
+    return false;
+  }
+}
+
+interface MensagemHistoricoEvolution {
+  id: string;
+  remoteJid: string;
+  texto: string;
+  hasImage: boolean;
+  imageMimeType: string;
+  base64?: string;
+  pushName?: string;
+  participant?: string;
+  fromMe: boolean;
+  rawMessage: any;
+}
+
+// ── AUXILIAR: Buscar Mensagem Antiga no Histórico da Evolution API (/chat/findMessages) ──
+async function buscarMensagemHistoricoEvolution(
+  instanceName: string,
+  remoteJid: string,
+  messageId: string
+): Promise<MensagemHistoricoEvolution | null> {
+  if (!EVOLUTION_URL || !EVOLUTION_API_KEY || !messageId) return null;
+  const targetInstance = instanceName || DEFAULT_INSTANCE;
+  const endpoint = `${EVOLUTION_URL}/chat/findMessages/${targetInstance}`;
+
+  const consultas = [
+    ...(remoteJid ? [{ where: { key: { id: messageId, remoteJid } }, limit: 10 }] : []),
+    { where: { key: { id: messageId } }, limit: 10 },
+  ];
+
+  for (const bodyPayload of consultas) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        signal: AbortSignal.timeout(12000),
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: EVOLUTION_API_KEY,
+        },
+        body: JSON.stringify(bodyPayload),
+      });
+
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => null);
+      const recordsRaw =
+        data?.messages?.records ||
+        data?.messages ||
+        data?.records ||
+        data?.data ||
+        data;
+
+      const records: any[] = Array.isArray(recordsRaw) ? recordsRaw : [];
+      if (records.length === 0) continue;
+
+      const alvo =
+        records.find(
+          (r) =>
+            (r?.key?.id === messageId || r?.id === messageId) &&
+            (!remoteJid || !r?.key?.remoteJid || r.key.remoteJid === remoteJid)
+        ) ||
+        records.find((r) => r?.key?.id === messageId || r?.id === messageId) ||
+        records[0];
+
+      if (!alvo) continue;
+
+      const rawRoot = alvo.message || {};
+      const unwrapped =
+        rawRoot.ephemeralMessage?.message ||
+        rawRoot.viewOnceMessage?.message ||
+        rawRoot.viewOnceMessageV2?.message ||
+        rawRoot.viewOnceMessageV2Extension?.message ||
+        rawRoot.documentWithCaptionMessage?.message ||
+        rawRoot;
+
+      const imageMsg = unwrapped?.imageMessage || alvo.imageMessage || null;
+      const hasImage = Boolean(
+        imageMsg || alvo.messageType === 'imageMessage'
+      );
+
+      const texto = String(
+        unwrapped?.conversation ||
+          unwrapped?.extendedTextMessage?.text ||
+          imageMsg?.caption ||
+          unwrapped?.documentMessage?.caption ||
+          alvo.caption ||
+          ''
+      ).trim();
+
+      return {
+        id: String(alvo?.key?.id || alvo?.id || messageId),
+        remoteJid: String(alvo?.key?.remoteJid || remoteJid),
+        texto,
+        hasImage,
+        imageMimeType: String(imageMsg?.mimetype || 'image/jpeg'),
+        base64: String(alvo.base64 || rawRoot.base64 || imageMsg?.base64 || ''),
+        pushName: alvo.pushName ? String(alvo.pushName) : undefined,
+        participant: String(
+          alvo?.key?.participantPn ||
+            alvo?.participantPn ||
+            alvo?.key?.participant ||
+            alvo?.participant ||
+            ''
+        ) || undefined,
+        fromMe: Boolean(alvo?.key?.fromMe),
+        rawMessage: alvo,
+      };
+    } catch (err: any) {
+      console.warn('⚠️ [findMessages Evolution] Erro ao buscar mensagem no histórico:', err?.message || err);
+    }
+  }
+
+  return null;
+}
+
 // ── AUXILIAR: Checagem de IMEI Roubado / Bloqueio de Segurança ──
 interface ChecagemImeiResult {
   bloqueado: boolean;
@@ -2491,6 +2674,14 @@ async function despacharPosEmissaoNotinha(params: {
     Promise.resolve(supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesLimpar)).catch(() => null),
   ];
 
+  if (proposta.origemReacao?.messageId && proposta.origemReacao?.remoteJid) {
+    tarefas.push(
+      enviarReacaoWhatsApp(instanceName, proposta.origemReacao, '✅').catch((errReac) => {
+        console.warn('[Reação Confirmação] Falha ao reagir com ✅ na mensagem original:', errReac);
+      })
+    );
+  }
+
   // 1. Verifica se há telefone válido do cliente para disparo do Recibo Digital e PDF em paralelo
   const telLimpo = proposta.telefone ? formatarTelefoneWhatsApp(proposta.telefone) : '';
   const temWhatsCliente = Boolean(resultadoEmissao.linkRecibo && telLimpo && telLimpo.length >= 12 && !telLimpo.startsWith('000'));
@@ -2665,12 +2856,23 @@ export async function POST(request: Request) {
     }
 
     // Extrai dados da mensagem ANTES de consultar o banco (evita DB hits em mensagens próprias/status)
-    const msgData = payload.data?.message ? payload.data : payload;
+    const msgData =
+      payload.data?.message || payload.data?.reaction || payload.data?.key
+        ? payload.data
+        : payload;
     const key = msgData.key || {};
-    const remoteJid = String(key.remoteJid || '');
+    const reactionMessagePreview =
+      msgData.message?.reactionMessage ||
+      payload.data?.reaction ||
+      payload.reaction ||
+      (eventName.includes('reaction') ? (payload.data || payload) : null);
+    const emojiPreviewReacao = String(reactionMessagePreview?.text || '').trim();
+    const ehReacaoReciboHumano = Boolean(reactionMessagePreview?.key?.id && emojiPreviewReacao === '🧾');
+    const remoteJid = String(key.remoteJid || reactionMessagePreview?.key?.remoteJid || '');
 
-    // Ignora chamadas de status broadcast ou mensagens enviadas pelo próprio bot (fromMe)
-    if (key.fromMe || remoteJid.includes('status@broadcast')) {
+    // Ignora chamadas de status broadcast ou mensagens enviadas pelo próprio bot (fromMe),
+    // exceto reação humana com 🧾 (permite que o dono reaja usando o próprio número conectado).
+    if (remoteJid.includes('status@broadcast') || (key.fromMe && !ehReacaoReciboHumano)) {
       return NextResponse.json({ status: 'ok', message: 'Mensagem própria ou broadcast ignorada.' }, { status: 200 });
     }
 
@@ -2680,16 +2882,23 @@ export async function POST(request: Request) {
 
     // ── IDEMPOTÊNCIA: a Evolution reentrega o webhook em timeout/erro ──
     // Sem esta trava um retry registra a mesma venda duas vezes.
-    const jaProcessada = !(await registrarMensagemComoProcessada(supabase, key.id, {
+    // Para reações, usa chave própria para não colidir com o ID da mensagem original.
+    const chaveIdempotencia = reactionMessagePreview?.key?.id
+      ? `react:${key.id || ''}:${reactionMessagePreview.key.id}:${emojiPreviewReacao}:${msgData.messageTimestamp || payload.date_time || ''}`
+      : key.id;
+    const jaProcessada = !(await registrarMensagemComoProcessada(supabase, chaveIdempotencia, {
       lojaId,
       remoteJid,
     }));
     if (jaProcessada) {
-      console.log(`♻️ [Idempotência] Mensagem ${key.id} já processada; reentrega ignorada.`);
+      console.log(`♻️ [Idempotência] Mensagem ${chaveIdempotencia} já processada; reentrega ignorada.`);
       return NextResponse.json({ status: 'ok', message: 'Mensagem já processada anteriormente.' }, { status: 200 });
     }
 
     const isGroup = remoteJid.endsWith('@g.us');
+    const botSenderPhone = String(payload.sender || (msgData as any)?.me?.id || '')
+      .replace(/@.*$/, '')
+      .replace(/\D/g, '');
     const participantJid = String(
       (key as any).participantPn ||
       (msgData as any).participantPn ||
@@ -2711,8 +2920,15 @@ export async function POST(request: Request) {
     const senderPhoneRaw = senderJid.replace(/@.*$/, '').replace(/\D/g, '');
     const senderPhone = normalizarTelefoneOuLid(senderPhoneRaw);
 
-    const authorPhone = isGroup ? (participantPhone || senderPhone) : senderPhone;
-    const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : senderPhone);
+    // Em reações com fromMe=true, remoteJid é o chat alvo (ex.: grupo/cliente), e o autor real é a instância/participante.
+    const authorPhone = key.fromMe
+      ? (participantPhone && participantPhone !== senderPhone
+          ? participantPhone
+          : normalizarTelefoneOuLid(botSenderPhone) || participantPhone || '5531993586377')
+      : isGroup
+        ? (participantPhone || senderPhone)
+        : senderPhone;
+    const pushName = msgData.pushName || msgData.verifiedBizName || (isGroup ? 'Participante' : authorPhone || senderPhone);
     const targetDestination = isGroup ? remoteJid : (normalizarTelefoneOuLid(senderPhone) || normalizarTelefoneOuLid(remoteJid));
 
     // Garante que apenas a primeira resposta enviada de volta ao remetente receba o cabeçalho de transcrição do áudio
@@ -2851,9 +3067,6 @@ export async function POST(request: Request) {
     const papelUsuario = ehModeradorMaster ? 'owner' : (usuarioResolvido?.papel || 'staff');
 
     // ── DETECÇÃO DE MARCAÇÃO DO BOT (@MENCÃO / REPLY EM MENSAGEM CITADA) ──
-    const botSenderPhone = String(payload.sender || (msgData as any)?.me?.id || '')
-      .replace(/@.*$/, '')
-      .replace(/\D/g, '');
     const marcacaoBot = extrairMensagemMarcadaParaBot({
       msgData,
       payload,
@@ -2905,12 +3118,8 @@ export async function POST(request: Request) {
       lojaId = 'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
     }
 
-    // ── 3.0. TRATAMENTO DE REAÇÕES (EMISSÃO OU CANCELAMENTO DA NOTINHA COM ✅ / ❌) ──
-    const reactionMessage =
-      msgData.message?.reactionMessage ||
-      payload.data?.reaction ||
-      payload.reaction ||
-      (eventName.includes('reaction') ? (payload.data || payload) : null);
+    // ── 3.0. TRATAMENTO DE REAÇÕES (EMISSÃO/CANCELAMENTO DE PRÉVIA OU REAÇÃO 🧾 NO HISTÓRICO -> PV) ──
+    const reactionMessage = reactionMessagePreview;
 
     if (reactionMessage && reactionMessage.key?.id) {
       const idMensagemReagida = String(reactionMessage.key.id);
@@ -2920,14 +3129,36 @@ export async function POST(request: Request) {
       if (acaoReacao) {
         console.log(`👍 [Reação Notinha] Emoji "${emojiReacao}" -> Ação: ${acaoReacao} para mensagem ${idMensagemReagida} em ${remoteJid}`);
 
-        const chavesReacao = [
-          `notinha:${remoteJid}:${idMensagemReagida}`,
-          `notinha:${targetDestination}:${idMensagemReagida}`,
-          `notinha:${remoteJid}:ultima`,
-          `notinha:${targetDestination}:ultima`,
-        ];
+        const chavesExatas = Array.from(
+          new Set(
+            [
+              `notinha:${remoteJid}:${idMensagemReagida}`,
+              `notinha:${targetDestination}:${idMensagemReagida}`,
+              (!isGroup && targetDestination && !targetDestination.includes('@'))
+                ? `notinha:${targetDestination}@s.whatsapp.net:${idMensagemReagida}`
+                : null,
+              authorPhone ? `notinha:${authorPhone}:${idMensagemReagida}` : null,
+              ehModeradorMaster ? `notinha:105278892703905@lid:${idMensagemReagida}` : null,
+            ].filter(Boolean) as string[]
+          )
+        );
+        const chavesLimpezaReacao = Array.from(
+          new Set(
+            [
+              ...chavesExatas,
+              `notinha:${remoteJid}:ultima`,
+              `notinha:${targetDestination}:ultima`,
+              (!isGroup && targetDestination && !targetDestination.includes('@'))
+                ? `notinha:${targetDestination}@s.whatsapp.net:ultima`
+                : null,
+              authorPhone ? `notinha:${authorPhone}:ultima` : null,
+              ehModeradorMaster ? 'notinha:105278892703905@lid:ultima' : null,
+            ].filter(Boolean) as string[]
+          )
+        );
+        const chavesReacao = emojiReacao === '🧾' ? chavesExatas : chavesLimpezaReacao;
 
-        // Busca proposta na memória primeiro e fallback no Supabase
+        // Busca proposta exata pelo ID da mensagem (e :ultima apenas fora de 🧾 avulso)
         const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesReacao, null, 30);
 
         if (propostaPendente) {
@@ -2960,11 +3191,7 @@ export async function POST(request: Request) {
               nomeLojaFallback: nomeLoja,
               proposta: propostaPendente,
               resultadoEmissao,
-              chavesLimpar: [
-                `notinha:${remoteJid}:${idMensagemReagida}`,
-                `notinha:${remoteJid}:ultima`,
-                `notinha:${targetDestination}:ultima`,
-              ],
+              chavesLimpar: chavesLimpezaReacao,
               idMensagemEditar: idMensagemReagida,
               enviarTexto: enviarMensagemWhatsApp,
             });
@@ -2974,11 +3201,7 @@ export async function POST(request: Request) {
               message: resultadoEmissao.sucesso ? 'Notinha emitida com sucesso via reação.' : 'Falha na emissão da notinha.',
             }, { status: 200 });
           } else {
-            await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', [
-              `notinha:${remoteJid}:${idMensagemReagida}`,
-              `notinha:${remoteJid}:ultima`,
-              `notinha:${targetDestination}:ultima`,
-            ]);
+            await supabase.from('whatsapp_acoes_pendentes').delete().in('chave', chavesLimpezaReacao);
             const msgCancelamento = `❌ *Emissão da notinha cancelada por ${pushName}.*\nPara tentar novamente, envie os dados corrigidos no grupo.`;
             await editarOuResponderMensagemWhatsApp(
               instanceName,
@@ -2989,6 +3212,239 @@ export async function POST(request: Request) {
 
             return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via reação.' }, { status: 200 });
           }
+        }
+
+        // ── REAÇÃO 🧾 EM QUALQUER MENSAGEM DO HISTÓRICO (FOTO, TEXTO CRU OU FORMULÁRIO) -> ENVIA PRÉVIA NO PV DE QUEM REAGIU ──
+        if (emojiReacao === '🧾') {
+          const remoteJidOriginal = String(reactionMessage.key?.remoteJid || remoteJid || '');
+          const telefoneReator =
+            normalizarTelefoneOuLid(authorPhone || (key.fromMe ? botSenderPhone : senderPhone)).replace(/\D/g, '') ||
+            '5531993586377';
+          const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || 'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
+
+          let autorizadoReator = ehModeradorMaster || verificarSeModeradorOuDonoGeral(telefoneReator);
+          if (!autorizadoReator && lojaEfetivaId) {
+            const permReator = await verificarPermissaoWhatsApp(lojaEfetivaId, telefoneReator, ['owner', 'staff']);
+            autorizadoReator = permReator.autorizado && (!isGroup || permReator.papel !== 'nao_configurado');
+          }
+
+          if (!autorizadoReator) {
+            console.log(`🔇 [Reação 🧾] Reator ${telefoneReator} não autorizado na loja ${lojaEfetivaId}.`);
+            return NextResponse.json(
+              { status: 'ignored', message: 'Reação 🧾 ignorada: usuário não autorizado.' },
+              { status: 200 }
+            );
+          }
+
+          let snapshot = await buscarSnapshotMensagemWebhook(supabase, remoteJidOriginal, idMensagemReagida);
+          if (!snapshot && targetDestination && targetDestination !== remoteJidOriginal) {
+            snapshot = await buscarSnapshotMensagemWebhook(supabase, targetDestination, idMensagemReagida);
+          }
+
+          const precisaBuscarHist = !snapshot || (snapshot.hasImage && !snapshot.foto);
+          const msgHist = precisaBuscarHist
+            ? await buscarMensagemHistoricoEvolution(instanceName, remoteJidOriginal, idMensagemReagida)
+            : null;
+
+          if (!snapshot && !msgHist) {
+            await despacharMensagemWhatsApp(
+              instanceName,
+              telefoneReator,
+              '⚠️ Não encontrei o conteúdo dessa mensagem no histórico do WhatsApp. Encaminhe ou responda a mensagem marcando o bot!'
+            );
+            return NextResponse.json(
+              { status: 'warning', message: 'Mensagem reagida com 🧾 não encontrada no histórico.' },
+              { status: 200 }
+            );
+          }
+
+          let textoOriginal = String(snapshot?.texto || msgHist?.texto || '').trim();
+          const hasImgOrigem = Boolean(snapshot?.hasImage || msgHist?.hasImage);
+          const pushNameOrigem = snapshot?.pushName || msgHist?.pushName || pushName;
+          const authorOrigem =
+            snapshot?.authorPhone ||
+            normalizarTelefoneOuLid(msgHist?.participant || reactionMessage.key?.participant || '');
+          const fromMeOrigem = Boolean(reactionMessage.key?.fromMe ?? snapshot?.fromMe ?? msgHist?.fromMe);
+          const participantOrigem =
+            reactionMessage.key?.participant || snapshot?.participant || msgHist?.participant || undefined;
+
+          const fotosParaProposta: FotoRecenteCache[] = [];
+          if (snapshot?.foto && (snapshot.foto.imei || snapshot.foto.modelo)) {
+            fotosParaProposta.push(snapshot.foto);
+          } else if (hasImgOrigem) {
+            let imgBase64 = msgHist?.base64 || '';
+            let imgMime = msgHist?.imageMimeType || 'image/jpeg';
+
+            if (!imgBase64) {
+              const rawWrapper = msgHist?.rawMessage || {
+                key: {
+                  id: idMensagemReagida,
+                  remoteJid: remoteJidOriginal,
+                  fromMe: fromMeOrigem,
+                  ...(participantOrigem ? { participant: participantOrigem } : {}),
+                },
+              };
+              const mediaRes = await buscarMidiaBase64Evolution(
+                instanceName,
+                idMensagemReagida,
+                rawWrapper,
+                remoteJidOriginal,
+                imgMime
+              );
+              if (mediaRes) {
+                imgBase64 = mediaRes.base64;
+                imgMime = mediaRes.mimetype || imgMime;
+              }
+            }
+
+            if (imgBase64) {
+              try {
+                const visionHist = await processImageVision(imgBase64, imgMime);
+                if (visionHist) {
+                  const imeiHist = visionHist.imei ? String(visionHist.imei).replace(/\D/g, '') : null;
+                  const modeloHist = visionHist.modelo ? String(visionHist.modelo).trim() : null;
+                  const capHist = visionHist.capacidade ? String(visionHist.capacidade).trim() : null;
+                  const corHist = visionHist.cor ? String(visionHist.cor).trim() : null;
+                  const batHist = visionHist.saude_bateria ? Number(visionHist.saude_bateria) : null;
+
+                  if (!textoOriginal && visionHist.texto_venda_visivel) {
+                    textoOriginal = String(visionHist.texto_venda_visivel).trim();
+                  }
+
+                  if (imeiHist || modeloHist) {
+                    const fotoOcrHist: FotoRecenteCache = {
+                      imei: imeiHist,
+                      modelo: modeloHist,
+                      capacidade: capHist,
+                      cor: corHist,
+                      bateria: batHist,
+                      pushName: pushNameOrigem,
+                      timestamp: Date.now(),
+                    };
+                    fotosParaProposta.push(fotoOcrHist);
+
+                    void salvarSnapshotMensagemWebhook(
+                      supabase,
+                      remoteJidOriginal,
+                      idMensagemReagida,
+                      {
+                        texto: textoOriginal,
+                        hasImage: true,
+                        foto: fotoOcrHist,
+                        pushName: pushNameOrigem,
+                        authorPhone: authorOrigem,
+                        participant: participantOrigem,
+                        fromMe: fromMeOrigem,
+                        timestamp: Date.now(),
+                      },
+                      lojaEfetivaId
+                    );
+                  }
+                }
+              } catch (ocrErr) {
+                console.warn('⚠️ [Reação 🧾] Erro no OCR da imagem histórica:', ocrErr);
+              }
+            }
+          }
+
+          if (fotosParaProposta.length === 0) {
+            const fotoRecenteChat =
+              (await buscarFotoRecente(
+                supabase,
+                lojaEfetivaId,
+                remoteJidOriginal,
+                authorOrigem || '',
+                undefined,
+                60
+              )) ||
+              (telefoneReator && telefoneReator !== authorOrigem
+                ? await buscarFotoRecente(supabase, lojaEfetivaId, remoteJidOriginal, telefoneReator, undefined, 60)
+                : null);
+
+            if (fotoRecenteChat) {
+              fotosParaProposta.push(fotoRecenteChat);
+            }
+          }
+
+          const vendaExtraida = extrairVendaDeMensagemReagidaComRecibo(
+            textoOriginal,
+            fotosParaProposta,
+            pushNameOrigem
+          );
+
+          if (!vendaExtraida) {
+            await despacharMensagemWhatsApp(
+              instanceName,
+              telefoneReator,
+              '⚠️ Li a mensagem reagida com 🧾, mas não encontrei dados de venda ou foto suficientes para montar a notinha.'
+            );
+            return NextResponse.json(
+              { status: 'ok', message: 'Sem dados suficientes na mensagem reagida com 🧾.' },
+              { status: 200 }
+            );
+          }
+
+          const { data: apsEstoque } = await supabase
+            .from('aparelhos')
+            .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+            .eq('loja_id', lojaEfetivaId)
+            .order('ativo', { ascending: false })
+            .order('dataCadastro', { ascending: false })
+            .limit(600);
+
+          const origemReacao: OrigemReacaoNotinha = {
+            remoteJid: remoteJidOriginal,
+            messageId: idMensagemReagida,
+            fromMe: fromMeOrigem,
+            ...(participantOrigem ? { participant: participantOrigem } : {}),
+          };
+
+          const proposta = construirPropostaNotinha({
+            id: `notinha-reac-${Date.now()}`,
+            lojaId: lojaEfetivaId,
+            remoteJid: remoteJidOriginal,
+            origemReacao,
+            vendaDetectada: vendaExtraida,
+            estoque: apsEstoque || [],
+            fotosRecentes: fotosParaProposta,
+            pushName: pushNameOrigem,
+          });
+
+          const msgPv =
+            `📥 *Notinha capturada via reação 🧾*\n` +
+            (remoteJidOriginal.endsWith('@g.us') ? `_Origem: Grupo_\n\n` : '\n') +
+            formatarMensagemPreviaNotinha(proposta);
+
+          const destinoPrivado = telefoneReator;
+          const envioPv = await despacharMensagemWhatsAppComRetorno(instanceName, destinoPrivado, msgPv);
+
+          if (envioPv.ok) {
+            const refMsgPv = envioPv.messageId || `notinha-reac-${Date.now()}`;
+            const pvJidPadrao = `${destinoPrivado}@s.whatsapp.net`;
+            await salvarPropostaNotinha(supabase, lojaEfetivaId, pvJidPadrao, refMsgPv, proposta);
+            await salvarPropostaNotinha(supabase, lojaEfetivaId, destinoPrivado, refMsgPv, proposta);
+            if (verificarSeModeradorOuDonoGeral(destinoPrivado)) {
+              await salvarPropostaNotinha(supabase, lojaEfetivaId, '105278892703905@lid', refMsgPv, proposta);
+            }
+          }
+
+          if (lojaEfetivaId) {
+            registrarLogWhatsappAsync({
+              loja_id: lojaEfetivaId,
+              contato: `${pushName} (Reação 🧾 -> PV ${destinoPrivado})`,
+              mensagem: `[REAÇÃO 🧾 -> PV] ${proposta.clienteNome} | ${proposta.modelo} (IMEI: ${proposta.imei || '-'})`,
+            });
+          }
+
+          return NextResponse.json(
+            {
+              status: envioPv.ok ? 'ok' : 'error',
+              message: envioPv.ok
+                ? 'Prévia da notinha enviada no privado do reator com sucesso.'
+                : 'Falha ao enviar prévia no privado do reator.',
+            },
+            { status: 200 }
+          );
         }
       }
     }
@@ -3200,18 +3656,42 @@ export async function POST(request: Request) {
             }
 
             // Salva no Supabase (whatsapp_acoes_pendentes) e remove a flag foto_processando
-            if (lojaId && (imeiLido || modeloLido)) {
-              await salvarFotoRecente(supabase, lojaId, remoteJid, authorPhone, {
-                imei: imeiLido,
-                modelo: modeloLido,
-                capacidade: capLida,
-                cor: corLida,
-                bateria: bateriaLida,
-                pushName,
-                timestamp: Date.now(),
-              });
+            const fotoOcrSnapshot: FotoRecenteCache | undefined =
+              imeiLido || modeloLido
+                ? {
+                    imei: imeiLido,
+                    modelo: modeloLido,
+                    capacidade: capLida,
+                    cor: corLida,
+                    bateria: bateriaLida,
+                    pushName,
+                    timestamp: Date.now(),
+                  }
+                : undefined;
+
+            if (lojaId && fotoOcrSnapshot) {
+              await salvarFotoRecente(supabase, lojaId, remoteJid, authorPhone, fotoOcrSnapshot);
             } else {
               await limparFotoProcessando(supabase, remoteJid);
+            }
+
+            if (hasDirectImage && key.id) {
+              void salvarSnapshotMensagemWebhook(
+                supabase,
+                remoteJid,
+                String(key.id),
+                {
+                  texto: captionText || String(visionData.texto_venda_visivel || ''),
+                  hasImage: true,
+                  foto: fotoOcrSnapshot,
+                  pushName,
+                  authorPhone,
+                  participant: key.participant || undefined,
+                  fromMe: Boolean(key.fromMe),
+                  timestamp: Date.now(),
+                },
+                lojaId
+              );
             }
 
             // ── CASO 1: A foto foi enviada na mesma mensagem com legenda de formulário de pedido / venda ──
@@ -3557,6 +4037,24 @@ export async function POST(request: Request) {
       });
     }
 
+    if (key.id && textContent && !hasDirectImage) {
+      void salvarSnapshotMensagemWebhook(
+        supabase,
+        remoteJid,
+        String(key.id),
+        {
+          texto: textContent,
+          hasImage: false,
+          pushName,
+          authorPhone,
+          participant: key.participant || undefined,
+          fromMe: Boolean(key.fromMe),
+          timestamp: Date.now(),
+        },
+        lojaId
+      );
+    }
+
     const lowerText = textContent.toLowerCase().trim();
     const ehComandoExplicito = textContent.trim().startsWith('!');
     const ehComandoModo = lowerText.startsWith('!modo') || lowerText.startsWith('!config');
@@ -3800,8 +4298,10 @@ export async function POST(request: Request) {
         marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
         `notinha:${remoteJid}:ultima`,
         `notinha:${targetDestination}:ultima`,
+        (!isGroup && targetDestination && !targetDestination.includes('@')) ? `notinha:${targetDestination}@s.whatsapp.net:ultima` : null,
         authorPhone ? `notinha:${authorPhone}:ultima` : null,
         senderPhone ? `notinha:${senderPhone}:ultima` : null,
+        ehModeradorMaster ? 'notinha:105278892703905@lid:ultima' : null,
       ].filter(Boolean))) as string[];
 
       const propostaPendente = await buscarPropostaNotinhaRecente(supabase, chavesBusca, null, 30);
@@ -3968,8 +4468,10 @@ export async function POST(request: Request) {
         marcacaoBot.quotedStanzaId ? `notinha:${targetDestination}:${marcacaoBot.quotedStanzaId}` : null,
         `notinha:${remoteJid}:ultima`,
         `notinha:${targetDestination}:ultima`,
+        (!isGroup && targetDestination && !targetDestination.includes('@')) ? `notinha:${targetDestination}@s.whatsapp.net:ultima` : null,
         authorPhone ? `notinha:${authorPhone}:ultima` : null,
         senderPhone ? `notinha:${senderPhone}:ultima` : null,
+        ehModeradorMaster ? 'notinha:105278892703905@lid:ultima' : null,
       ].filter(Boolean))) as string[];
 
       const proposta = await buscarPropostaNotinhaRecente(supabase, chavesBusca, null, 30);

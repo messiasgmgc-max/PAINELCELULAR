@@ -68,11 +68,19 @@ export interface TrocaPropostaNotinha {
   observacoes?: string;
 }
 
+export interface OrigemReacaoNotinha {
+  remoteJid: string;
+  messageId: string;
+  fromMe?: boolean;
+  participant?: string;
+}
+
 export interface PropostaNotinha {
   id: string;
   lojaId?: string;
   remoteJid?: string;
   messageId?: string;
+  origemReacao?: OrigemReacaoNotinha;
   clienteNome: string;
   cpf?: string;
   telefone?: string;
@@ -824,6 +832,7 @@ export function construirPropostaNotinha(params: {
   id?: string;
   lojaId?: string;
   remoteJid?: string;
+  origemReacao?: OrigemReacaoNotinha;
   vendaDetectada: ParsedVenda;
   estoque: AparelhoEstoqueConsulta[];
   fotosRecentes?: FotoRecenteCache[];
@@ -833,6 +842,7 @@ export function construirPropostaNotinha(params: {
     id = `prop-${Date.now()}`,
     lojaId,
     remoteJid,
+    origemReacao,
     vendaDetectada,
     estoque,
     fotosRecentes = [],
@@ -1057,6 +1067,7 @@ export function construirPropostaNotinha(params: {
     id,
     lojaId,
     remoteJid,
+    ...(origemReacao ? { origemReacao } : {}),
     clienteNome: vendaDetectada.cliente?.nome || pushName || 'Cliente Balcão',
     cpf: vendaDetectada.cliente?.cpf || undefined,
     telefone: vendaDetectada.cliente?.telefone || undefined,
@@ -3331,6 +3342,380 @@ export async function emitirVendaAtacadoComFoto(params: {
       sucesso: false,
       mensagem: `⚠️ *Falha ao registrar venda atacado:*\n${msgErro}`,
     };
+  }
+}
+
+const REGEX_APARELHO_REACAO =
+  /\b(?:iphone|ipad|macbook|apple\s*watch|galaxy|samsung|xiaomi|redmi|poco|motorola|moto|realme)\b|\b(?:1[1-7]|xr|xs|se|16e)\s*(?:pro\s*max|promax|pro|plus|mini)\b/i;
+
+const STOPWORDS_NOME_PESSOA_REACAO = new Set([
+  ...STOPWORDS_ATACADO_NOME,
+  'upgrade', 'troca', 'tradein', 'seminovo', 'lacrado', 'novo', 'usado',
+  'garantia', 'bateria', 'bat', 'preto', 'preta', 'branco', 'branca',
+  'azul', 'roxo', 'dourado', 'verde', 'rosa', 'vermelho', 'laranja',
+  'desert', 'natural', 'titanio', 'titânio', 'grafite', 'prata', 'cinza',
+  'estelar', 'iphone', 'ipad', 'macbook', 'samsung', 'galaxy', 'xiaomi',
+  'redmi', 'poco', 'motorola', 'moto', 'realme', 'gb', 'tb', 'sem', 'com',
+  'para', 'pro', 'pra', 'entrega', 'retirada', 'rua', 'av', 'avenida',
+  'bairro', 'cidade', 'cep', 'cpf', 'nome', 'telefone', 'email', 'obs',
+]);
+
+function limparNomeCandidatoReacao(bruto: string): string | null {
+  let s = String(bruto || '')
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ')
+    .replace(
+      /^(?:cliente|comprador|lojista|nome(?:\s+completo)?|para|pro|pra)\s*[:=-]?\s*/i,
+      ''
+    )
+    .replace(
+      /(?:^|\s)(?:(?:no|via|em|por)\s+)?(?:pix|dinheiro|fiado|a\s+prazo|cart[aã]o(?:\s+de\s+(?:cr[eé]dito|d[eé]bito))?)\b/gi,
+      ' '
+    )
+    .replace(/^[-–—:.,/*_\s]+|[-–—:.,/*_\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!s || s.length < 2 || s.length > 60) return null;
+  if (/https?:\/\/|@/i.test(s)) return null;
+  if (/\d/.test(s)) return null;
+  if (REGEX_APARELHO_REACAO.test(s)) return null;
+  if (/\b(?:imei|serial|bateria|bat|garantia|lacrado|seminovo|upgrade|troca|cep|rua|avenida|bairro|cidade)\b/i.test(s)) {
+    return null;
+  }
+
+  const palavras = s.split(/\s+/);
+  if (palavras.length > 5) return null;
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s.'&-]*$/.test(s)) return null;
+  if (STOPWORDS_NOME_PESSOA_REACAO.has(s.toLowerCase())) return null;
+  if (palavras.every((p) => STOPWORDS_NOME_PESSOA_REACAO.has(p.toLowerCase()))) return null;
+
+  return s;
+}
+
+/**
+ * Extrai os dados de venda a partir de uma mensagem antiga/crua ou foto com legenda
+ * marcada com reação de recibo (`🧾`), sem exigir gatilhos formais de formulário.
+ */
+export function extrairVendaDeMensagemReagidaComRecibo(
+  texto: string,
+  fotos?: FotoRecenteCache[],
+  pushNameRemetente?: string
+): ParsedVenda | null {
+  const textoLimpo = limparMencoesBot(texto || '').trim();
+  const temFoto = Boolean(fotos && fotos.length > 0);
+  if (!textoLimpo && !temFoto) return null;
+
+  const formal = textoLimpo ? detectarFormularioOuPedidoVenda(textoLimpo) : null;
+  const parsed: ParsedVenda = formal
+    ? {
+        ...formal,
+        cliente: { ...(formal.cliente || {}) },
+        aparelho: { ...(formal.aparelho || {}) },
+        aparelhos: Array.isArray(formal.aparelhos) ? formal.aparelhos.map((a) => ({ ...a })) : undefined,
+      }
+    : sanitizarECompletarVendaParsed(null, textoLimpo);
+
+  // 1. Extrai CPF sem rótulo explícito (11 dígitos com pontuação ou isolado, sem confundir com IMEI ou celular)
+  if (!parsed.cliente.cpf && textoLimpo) {
+    const matchesCpf = Array.from(textoLimpo.matchAll(/(?<!\d)(\d{3}\.?\d{3}\.?\d{3}-?\d{2})(?!\d)/g));
+    for (const m of matchesCpf) {
+      const bruto = m[1];
+      const digits = digitos(bruto);
+      const teveSeparador = /[.-]/.test(bruto);
+      if (digits.length === 11 && (teveSeparador || !/^[1-9]\d9\d{8}$/.test(digits))) {
+        parsed.cliente.cpf = bruto;
+        break;
+      }
+    }
+  }
+
+  // 2. Extrai telefone brasileiro sem rótulo (ex: "31 99909-6222", "(31) 999096222", "+55 31 99909-6222")
+  if (!parsed.cliente.telefone && textoLimpo) {
+    let textoParaTel = textoLimpo;
+    if (parsed.cliente.cpf) {
+      textoParaTel = textoParaTel.replace(parsed.cliente.cpf, ' ');
+    }
+    textoParaTel = textoParaTel.replace(/\b\d{14,18}\b/g, ' ');
+    const matchesTel = Array.from(
+      textoParaTel.matchAll(/(?<!\d)(?:\+?55\s*)?\(?\d{2}\)?[\s.-]*9?\d{4}[-\s.]?\d{4}(?!\d)/g)
+    );
+    for (const m of matchesTel) {
+      const bruto = m[0].trim();
+      if (/^\d{5}-\d{3}$/.test(bruto)) continue; // CEP
+      const d = digitos(bruto);
+      if (d.length >= 10 && d.length <= 13) {
+        parsed.cliente.telefone = bruto;
+        break;
+      }
+    }
+  }
+
+  const atacadoTexto = textoLimpo ? detectarVendaAtacadoPorTextoOuAudio(textoLimpo) : null;
+  const atacadoFotoTexto = textoLimpo ? detectarVendaAtacadoComFoto(textoLimpo) : null;
+
+  // 3. Extrai modelo/aparelho de texto cru quando não veio na seção formal "Modelo:"
+  if (!parsed.aparelho.modelo && textoLimpo) {
+    if (atacadoTexto?.fotoVirtual.modelo) {
+      parsed.aparelho.modelo = limparNomeModelo(atacadoTexto.fotoVirtual.modelo) || atacadoTexto.fotoVirtual.modelo;
+      if (!parsed.aparelho.capacidade && atacadoTexto.fotoVirtual.capacidade) {
+        parsed.aparelho.capacidade = atacadoTexto.fotoVirtual.capacidade;
+      }
+      if (!parsed.aparelho.cor && atacadoTexto.fotoVirtual.cor) {
+        parsed.aparelho.cor = atacadoTexto.fotoVirtual.cor;
+      }
+      if (!parsed.aparelho.imei && atacadoTexto.fotoVirtual.imei) {
+        parsed.aparelho.imei = atacadoTexto.fotoVirtual.imei;
+      }
+      if (!parsed.aparelho.bateria && atacadoTexto.fotoVirtual.bateria) {
+        const batNum = parseInt(String(atacadoTexto.fotoVirtual.bateria).replace(/\D/g, ''), 10);
+        if (!Number.isNaN(batNum) && batNum > 0 && batNum <= 100) {
+          parsed.aparelho.bateria = batNum;
+        }
+      }
+    } else {
+      const segmentos = textoLimpo
+        .split(/\r?\n|\s+[-–—|]+\s+/)
+        .map((seg) => seg.trim())
+        .filter(Boolean);
+
+      for (const seg of segmentos) {
+        if (/(?:upgrade|trade[- ]?in|troca)\b/i.test(seg)) continue;
+        const matchMod = seg.match(REGEX_APARELHO_REACAO);
+        if (!matchMod) continue;
+
+        const trecho = seg.slice(matchMod.index ?? 0).trim();
+        if (!parsed.aparelho.capacidade) {
+          const capM = trecho.match(/\b(32|64|128|256|512)\s*(?:gb|g|gigas?)\b|\b(1|2)\s*(?:tb|t|teras?)\b/i);
+          if (capM) {
+            parsed.aparelho.capacidade = capM[1] ? `${capM[1]}GB` : `${capM[2]}TB`;
+          }
+        }
+        if (!parsed.aparelho.cor) {
+          const corM = extrairCorDeTexto(trecho);
+          if (corM) parsed.aparelho.cor = corM;
+        }
+        if (!parsed.aparelho.imei) {
+          const imeiM =
+            trecho.match(/(?:imei|final|serial)\s*[:=-]?\s*#?(\d{4,16})\b/i) ||
+            trecho.match(/\b(\d{14,16})\b/);
+          if (imeiM) parsed.aparelho.imei = imeiM[1];
+        }
+        if (!parsed.aparelho.bateria) {
+          const batM = trecho.match(/\b(\d{2,3})\s*%/);
+          if (batM) {
+            const b = parseInt(batM[1], 10);
+            if (b >= 50 && b <= 100) parsed.aparelho.bateria = b;
+          }
+        }
+
+        const semValorEPgto = trecho
+          .replace(/(?:\b(?:por|valor|pre[cç]o)\s*[:=-]?\s*)?(?:R\$\s*)?\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?/gi, ' ')
+          .replace(/\b(?:por\s+)?(?:R\$\s*)?\d{3,5}(?:[.,]\d{1,2})?(?:\s*reais)?\b/gi, ' ')
+          .replace(/\b(?:no|via|em)?\s*(?:pix|dinheiro|fiado|a\s+prazo|cart[aã]o(?:\s+de\s+(?:cr[eé]dito|d[eé]bito))?)\b/gi, ' ')
+          .replace(/\b(?:para|pro|pra)\s+[A-Za-zÀ-ÖØ-öø-ÿ\s]+$/i, '')
+          .trim();
+
+        const modeloLimpo = limparNomeModelo(semValorEPgto);
+        if (modeloLimpo && modeloLimpo.length >= 2) {
+          parsed.aparelho.modelo = modeloLimpo;
+          break;
+        }
+      }
+    }
+  }
+
+  // 4. Se não veio modelo no texto (ou texto é só nome/valor/vazio), aproveita dados da foto OCR
+  if (fotos && fotos.length > 0) {
+    const f0 = fotos[0];
+    if (!parsed.aparelho.modelo && f0.modelo) {
+      parsed.aparelho.modelo = limparNomeModelo(f0.modelo) || f0.modelo;
+    }
+    if (!parsed.aparelho.capacidade && f0.capacidade) parsed.aparelho.capacidade = f0.capacidade;
+    if (!parsed.aparelho.cor && f0.cor) parsed.aparelho.cor = extrairCorDeTexto(f0.cor) || f0.cor;
+    if (!parsed.aparelho.imei && f0.imei) parsed.aparelho.imei = f0.imei;
+    if (!parsed.aparelho.bateria && f0.bateria) {
+      const batFoto = parseInt(String(f0.bateria).replace(/\D/g, ''), 10);
+      if (!Number.isNaN(batFoto) && batFoto > 0 && batFoto <= 100) {
+        parsed.aparelho.bateria = batFoto;
+      }
+    }
+  }
+
+  // 5. Extrai valor total sem rótulo (ex: "5200 pix", "por 3800", "4.800,00")
+  if ((!parsed.valorTotal || parsed.valorTotal <= 0) && textoLimpo) {
+    const valExplicito = textoLimpo.match(
+      /(?:\b(?:por|valor|pre[cç]o|total)\s*[:=-]?\s*(?:R\$\s*)?|R\$\s*)(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{3,5}(?:[.,]\d{1,2})?)(?:\s*reais)?\b/i
+    );
+    if (valExplicito) {
+      const v = parseValorMonetarioToken(valExplicito[1], true);
+      if (v !== null && v > 0) parsed.valorTotal = v;
+    }
+
+    if ((!parsed.valorTotal || parsed.valorTotal <= 0) && atacadoFotoTexto?.valor) {
+      parsed.valorTotal = atacadoFotoTexto.valor;
+    }
+    if ((!parsed.valorTotal || parsed.valorTotal <= 0) && atacadoTexto?.vendaAtacado.valor) {
+      parsed.valorTotal = atacadoTexto.vendaAtacado.valor;
+    }
+
+    if (!parsed.valorTotal || parsed.valorTotal <= 0) {
+      let textoMascara = textoLimpo;
+      if (parsed.cliente.cpf) textoMascara = textoMascara.replace(parsed.cliente.cpf, ' ');
+      if (parsed.cliente.telefone) textoMascara = textoMascara.replace(parsed.cliente.telefone, ' ');
+      textoMascara = textoMascara
+        .replace(/\b\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?\b/g, ' ')
+        .replace(/\b\d{5}-\d{3}\b/g, ' ')
+        .replace(/\b\d{7,}\b/g, ' ')
+        .replace(/\b(?:32|64|128|256|512|1024)\s*(?:gb|g|gigas?)\b/gi, ' ')
+        .replace(/\b(?:1|2)\s*(?:tb|t|teras?)\b/gi, ' ')
+        .replace(/\b\d{1,3}\s*%/g, ' ');
+
+      const tokensValor = Array.from(
+        textoMascara.matchAll(/(?<![\d\/-])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{3,5}(?:[.,]\d{1,2})?)(?![\d\/-])/g)
+      );
+      for (const tv of tokensValor) {
+        const rawTok = tv[1];
+        if (/^(?:64|128|256|512)$/.test(rawTok)) continue;
+        if (/^20[2-3]\d$/.test(rawTok)) {
+          // Só aceita 2020..2039 se vier fora de contexto de data/ano; evita ano solto exceto valores >= 100 em contexto de preço
+          if (/\b(?:ano|data|de)\s*$/i.test(textoMascara.slice(Math.max(0, (tv.index || 0) - 10), tv.index || 0))) {
+            continue;
+          }
+        }
+        const v = parseValorMonetarioToken(rawTok, true);
+        if (v !== null && v >= 100 && v < 100000) {
+          parsed.valorTotal = v;
+          break;
+        }
+      }
+    }
+  }
+
+  if (parsed.valorTotal && (!parsed.valorVolta || parsed.valorVolta <= 0)) {
+    parsed.valorVolta = parsed.valorTotal;
+  }
+
+  // 6. Extrai nome do cliente em texto cru (ex: primeira linha "João Silva", "Carlos Eduardo - ...", ou "João 4500")
+  if (!parsed.cliente.nome) {
+    let nomeResolvido: string | null =
+      atacadoFotoTexto?.clienteNome || atacadoTexto?.vendaAtacado.clienteNome || null;
+
+    if (!nomeResolvido && textoLimpo) {
+      let textoLimpoParaNome = textoLimpo;
+      if (parsed.cliente.cpf) textoLimpoParaNome = textoLimpoParaNome.replace(parsed.cliente.cpf, '\n');
+      if (parsed.cliente.telefone) textoLimpoParaNome = textoLimpoParaNome.replace(parsed.cliente.telefone, '\n');
+      if (parsed.cliente.email) textoLimpoParaNome = textoLimpoParaNome.replace(parsed.cliente.email, '\n');
+
+      const segmentosNome = textoLimpoParaNome
+        .split(/\r?\n|\s+[-–—|]+\s+|\s*,\s*/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      for (const seg of segmentosNome) {
+        const cand = limparNomeCandidatoReacao(seg);
+        if (cand) {
+          nomeResolvido = cand;
+          break;
+        }
+      }
+    }
+
+    parsed.cliente.nome = nomeResolvido || (pushNameRemetente && pushNameRemetente.trim()) || 'Cliente';
+  }
+
+  if (!parsed.formaPagamento) {
+    parsed.formaPagamento = atacadoFotoTexto?.formaPagamento || atacadoTexto?.vendaAtacado.formaPagamento || 'pix';
+  }
+
+  if (parsed.aparelho.modelo && (!parsed.aparelhos || parsed.aparelhos.length === 0)) {
+    parsed.aparelhos = [{ ...parsed.aparelho }];
+  } else if (!parsed.aparelho.modelo && (!parsed.aparelhos || parsed.aparelhos.length === 0)) {
+    parsed.aparelho.modelo = 'Smartphone';
+    parsed.aparelhos = [{ ...parsed.aparelho }];
+  }
+
+  return parsed;
+}
+
+export interface SnapshotMensagemWebhook {
+  texto: string;
+  hasImage: boolean;
+  foto?: FotoRecenteCache;
+  pushName?: string;
+  authorPhone?: string;
+  participant?: string;
+  fromMe?: boolean;
+  timestamp: number;
+}
+
+/**
+ * Salva um snapshot leve de cada mensagem recebida no Supabase para permitir
+ * reconstruir o contexto mesmo quando o usuário reage horas/dias depois com `🧾`.
+ */
+export async function salvarSnapshotMensagemWebhook(
+  supabase: SupabaseClient,
+  remoteJid: string,
+  messageId: string,
+  dados: SnapshotMensagemWebhook,
+  lojaId?: string | null
+): Promise<void> {
+  if (!remoteJid || !messageId || typeof (supabase as any)?.from !== 'function') return;
+  const agora = dados.timestamp || Date.now();
+  const chave = `msg_hist:${remoteJid}:${messageId}`;
+
+  try {
+    await supabase.from('whatsapp_acoes_pendentes').upsert(
+      {
+        chave,
+        loja_id: lojaId || null,
+        tipo: 'faltando_dados',
+        action: 'snapshot_mensagem',
+        params: {
+          ...dados,
+          timestamp: agora,
+        } as any,
+        resumo: (dados.texto || (dados.hasImage ? '[Foto de aparelho/etiqueta]' : 'Mensagem')).slice(0, 120),
+        criado_em: new Date(agora).toISOString(),
+      },
+      { onConflict: 'chave' }
+    );
+  } catch (err) {
+    console.warn('[Snapshot Webhook] Erro ao salvar snapshot de mensagem:', err);
+  }
+}
+
+/**
+ * Recupera o snapshot salvo para uma mensagem específica (`msg_hist:${remoteJid}:${messageId}`).
+ */
+export async function buscarSnapshotMensagemWebhook(
+  supabase: SupabaseClient,
+  remoteJid: string,
+  messageId: string,
+  maxDias: number = 7
+): Promise<SnapshotMensagemWebhook | null> {
+  if (!remoteJid || !messageId || typeof (supabase as any)?.from !== 'function') return null;
+
+  try {
+    const { data } = await supabase
+      .from('whatsapp_acoes_pendentes')
+      .select('params, criado_em')
+      .eq('chave', `msg_hist:${remoteJid}:${messageId}`)
+      .eq('tipo', 'faltando_dados')
+      .maybeSingle();
+
+    if (!data?.params) return null;
+
+    if (data.criado_em) {
+      const idadeMs = Date.now() - new Date(data.criado_em).getTime();
+      if (idadeMs > maxDias * 24 * 60 * 60 * 1000) {
+        return null;
+      }
+    }
+
+    return data.params as SnapshotMensagemWebhook;
+  } catch (err) {
+    console.warn('[Snapshot Webhook] Erro ao buscar snapshot de mensagem:', err);
+    return null;
   }
 }
 
