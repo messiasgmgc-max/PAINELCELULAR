@@ -32,6 +32,7 @@ describe('planos-config', () => {
     assert.equal(verificarPermissaoRecursoPlano('entrada', 'fiado_devedores'), false);
     assert.equal(verificarPermissaoRecursoPlano('entrada', 'consulta_imei'), false);
     assert.equal(verificarPermissaoRecursoPlano('entrada', 'escuta_multiloja'), false);
+    assert.equal(verificarPermissaoRecursoPlano('entrada', 'crm_omnichannel'), false);
 
     // Intermediário
     assert.equal(verificarPermissaoRecursoPlano('intermediario', 'bot_basico'), true);
@@ -40,17 +41,20 @@ describe('planos-config', () => {
     assert.equal(verificarPermissaoRecursoPlano('intermediario', 'broadcast_grupos'), true);
     assert.equal(verificarPermissaoRecursoPlano('intermediario', 'escuta_multiloja'), false);
     assert.equal(verificarPermissaoRecursoPlano('intermediario', 'api_key_acesso'), false);
+    assert.equal(verificarPermissaoRecursoPlano('intermediario', 'crm_omnichannel'), false);
 
     // Avançado
     assert.equal(verificarPermissaoRecursoPlano('avancado', 'escuta_multiloja'), true);
     assert.equal(verificarPermissaoRecursoPlano('avancado', 'api_key_acesso'), true);
     assert.equal(verificarPermissaoRecursoPlano('avancado', 'auditoria_avancada'), true);
+    assert.equal(verificarPermissaoRecursoPlano('avancado', 'crm_omnichannel'), true);
   });
 
   it('deve identificar plano mínimo para cada recurso', () => {
     assert.equal(obterPlanoMinimoParaRecurso('bot_basico'), 'entrada');
     assert.equal(obterPlanoMinimoParaRecurso('fiado_devedores'), 'intermediario');
     assert.equal(obterPlanoMinimoParaRecurso('escuta_multiloja'), 'avancado');
+    assert.equal(obterPlanoMinimoParaRecurso('crm_omnichannel'), 'avancado');
   });
 
   it('deve retornar plano entrada quando valor for nulo ou inválido', () => {

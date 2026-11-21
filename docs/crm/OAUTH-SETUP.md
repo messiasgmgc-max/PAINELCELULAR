@@ -29,9 +29,9 @@ Use estas URLs exatas ao criar seus Apps no **Meta for Developers** e **Google C
 
 | Integração | URL de Callback / Webhook Oficial |
 | :--- | :--- |
-| **WhatsApp API Oficial (Meta Cloud)** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/whatsapp` |
-| **Instagram Direct + Comentários** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/instagram`<br>OAuth Redirect: `https://crm.phonecenter.tech/instagram/callback` |
-| **Facebook Messenger + Feed** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/facebook/feed` |
+| **WhatsApp API Oficial (Meta Cloud)** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/whatsapp`<br>Verify Token: `phonecenter_meta_verify_2026` |
+| **Instagram Direct + Comentários** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/instagram`<br>Verify Token: `phonecenter_meta_verify_2026`<br>OAuth Redirect: `https://crm.phonecenter.tech/instagram/callback` |
+| **Facebook Messenger + Feed** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/facebook/feed`<br>Verify Token: `phonecenter_meta_verify_2026` |
 | **Google Calendar OAuth** | Redirect URI: `https://crm.phonecenter.tech/google-calendar/callback` |
 | **Google Sheets / Gmail OAuth** | Redirect URI: `https://crm.phonecenter.tech/google/callback` |
 | **WhatsApp Evolution API (QR Code)** | **JÁ CONFIGURADO AUTOMATICAMENTE** (`http://evolution_api:8080`, `hasEvolutionConfig: true`) |

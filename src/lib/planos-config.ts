@@ -16,6 +16,7 @@ export type RecursoPlano =
   | 'escuta_multiloja'
   | 'auditoria_avancada'
   | 'api_key_acesso'
+  | 'crm_omnichannel'
   | 'suporte_vip';
 
 export interface PlanoConfig {
@@ -110,7 +111,8 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
       'Bot cobrando fiado e saldo devedor no WhatsApp (!abater, !saldo)',
       'Checagem de IMEI pelo bot (!checarimei)',
       'Disparo de lista de estoque em grupos (!broadcast)',
-      'Rede multi-loja, trilha de auditoria e API'
+      'Rede multi-loja, trilha de auditoria e API',
+      'PhoneCenterCRM Omnichannel (WhatsApp + Instagram + IA com Estoque Vivo)'
     ],
     recursos: [
       'painel_web',
@@ -156,6 +158,10 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
       'Recibo de abatimento enviado ao cliente no WhatsApp',
       'Suporte humano no WhatsApp'
     ],
+    naoInclui: [
+      'PhoneCenterCRM Omnichannel (WhatsApp + Instagram + Kanban + IA com Estoque Vivo)',
+      'Rede multi-loja, trilha de auditoria e API'
+    ],
     recursos: [
       'painel_web',
       'bot_basico',
@@ -197,6 +203,7 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
     },
     beneficios: [
       'Tudo do plano Intermediário',
+      'PhoneCenterCRM Omnichannel exclusivo (WhatsApp + Instagram + Kanban + IA com Estoque Vivo)',
       'Escuta e busca de estoque em grupos multi-loja (rede de parceiros)',
       'Trilha de auditoria com log de alterações e aprovações',
       'Chave de API para integrar sistemas e bots próprios',
@@ -216,6 +223,7 @@ export const PLANOS_SISTEMA: Record<TipoPlano, PlanoConfig> = {
       'escuta_multiloja',
       'auditoria_avancada',
       'api_key_acesso',
+      'crm_omnichannel',
       'suporte_vip'
     ]
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { registrarLog } from '@/lib/logger';
+import { autoProvisionarCrmAoPagarPlano } from '@/lib/crm-bridge/autoProvision';
 
 export async function GET(request: Request) {
   try {
@@ -70,6 +71,13 @@ export async function GET(request: Request) {
               tipo_evento: 'plano',
               acao: 'Mensalidade Paga via PIX',
               detalhes: `Assinatura liberada automaticamente! Novo vencimento: ${novoVencimento} (MP ID: ${paymentId})`
+            });
+
+            // Auto-provisiona instância CRM isolada se o plano da loja for Avançado
+            await autoProvisionarCrmAoPagarPlano({
+              lojaId,
+              nomeLoja: loja.nome,
+              planoTipo: loja.plano_tipo,
             });
 
             return NextResponse.json({

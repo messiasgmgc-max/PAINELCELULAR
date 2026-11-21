@@ -8,6 +8,7 @@ import { cn, checkIsSuperAdmin, checkIsVendedor, formatarNomeLojaAbreviado } fro
 import { useAuth } from '@/hooks/useAuth';
 import { useStoreConfig } from '@/hooks/useStoreConfig';
 import { useStorePlan } from '@/hooks/useStorePlan';
+import { verificarPermissaoRecursoPlano } from '@/lib/planos-config';
 import { Button } from '@/components/ui/button';
 import { MobileNav } from '@/components/MobileNav';
 import { UserAccountMenu } from '@/components/UserAccountMenu';
@@ -19,7 +20,9 @@ import {
   CreditCard,
   Search,
   Sun,
-  Moon
+  Moon,
+  Lock,
+  Settings2
 } from 'lucide-react';
 
 function TabLoadingFallback() {
@@ -314,17 +317,39 @@ export default function Home() {
                 )}
               </button>
 
-              {/* Botão PhoneCenterCRM */}
-              <a
-                href="https://crm.phonecenter.tech"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-[#0066FF]/50 bg-[#0066FF]/15 hover:bg-[#0066FF]/30 text-blue-200 font-semibold transition-all shrink-0"
-                title="Abrir PhoneCenterCRM (Atendimento & Vendas)"
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="hidden sm:inline">CRM</span>
-              </a>
+              {/* Botão PhoneCenterCRM (exclusivo Plano Avançado / Vitalício / Super Admin) */}
+              {checkIsSuperAdmin(usuario) ||
+              planData.isVitalicio ||
+              verificarPermissaoRecursoPlano(planData.planoTipo, 'crm_omnichannel') ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <a
+                    href="https://crm.phonecenter.tech"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-[#0066FF]/50 bg-[#0066FF]/15 hover:bg-[#0066FF]/30 text-blue-200 font-semibold transition-all"
+                    title="Abrir PhoneCenterCRM (Atendimento & Vendas)"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="hidden sm:inline">CRM</span>
+                  </a>
+                  <a
+                    href={usuario?.lojaId ? `/crm-config?loja_id=${usuario.lojaId}` : '/crm-config'}
+                    className="inline-flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all"
+                    title="Configurar PhoneCenterCRM & Instâncias"
+                  >
+                    <Settings2 className="w-4 h-4 text-[#007BFF]" />
+                  </a>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowMeuPlanoModal(true)}
+                  className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-amber-500/35 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 font-semibold transition-all shrink-0 cursor-pointer"
+                  title="PhoneCenterCRM exclusivo do Plano Avançado — clique para fazer upgrade"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">CRM</span>
+                </button>
+              )}
 
               {/* Botão Meu Plano */}
               <Button

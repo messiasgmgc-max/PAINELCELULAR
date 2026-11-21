@@ -19,6 +19,9 @@
 - **MCP Server IA (JSON-RPC 2.0):** `https://app.phonecenter.tech/api/crm-bridge/mcp`
 - **CRM Bridge REST APIs:** `/api/crm-bridge/{health,config-loja,estoque,clientes/lookup,simular,propostas,ranking,leads-anuncio,chat-interno,conexoes,tickets-ops,pix-reserva,multi-loja/provisionar,webhooks/evo,webhooks/pagamento}`
 - **Migrations SQL pendentes no Supabase:** `20261120_phonecenter_crm_modulos.sql`, `20261120_phonecenter_crm_fase6.sql`, `20261120_phonecenter_crm_loja_configs.sql`
+- **Gate de Plano (`crm_omnichannel`):** exclusivo do plano **`avancado`** (R$ 299/mês) + `vitalicio` + `super_admin`; planos `entrada`/`intermediario` veem `CRM 🔒` abrindo modal de Upgrade.
+- **Auto-Provisionamento ao Pagar Plano Avançado:** hooked em `/api/planos/verificar-pix` e `/api/planos/pagar-cartao` (`autoProvision.ts`) → registra `crm_tenants` + `crm_loja_configs` e dispara Coolify API se configurada.
+- **Meta Verify Tokens pré-configurados no EvoCRM:** `INSTAGRAM_VERIFY_TOKEN`, `IG_VERIFY_TOKEN`, `FB_VERIFY_TOKEN` = `phonecenter_meta_verify_2026` (falta apenas `INSTAGRAM_APP_ID` + `INSTAGRAM_APP_SECRET` do Meta for Developers).
 - **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo a cada 5 min (`ram=32% disk=22% evo=running`)
 
 ## 3. O que Já Está Rodando em Produção

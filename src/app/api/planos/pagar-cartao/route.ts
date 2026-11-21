@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { aplicarDesconto, lerDescontoLoja } from '@/lib/planos/desconto';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { calcularValoresPlano, TipoPlano, PeriodoFaturamento } from '@/lib/planos-config';
+import { autoProvisionarCrmAoPagarPlano } from '@/lib/crm-bridge/autoProvision';
 
 export async function POST(request: Request) {
   try {
@@ -122,6 +123,13 @@ export async function POST(request: Request) {
           periodo_contratado: periodo,
           mp_payment_id: String(mpData.id),
           observacao: `Cartão de Crédito aprovado na hora (ID: ${mpData.id}) - Plano ${planoInfo.nomePlano} renovado até ${novoVencimento}`
+        });
+
+        // Auto-provisiona instância CRM isolada se contratou o plano Avançado
+        await autoProvisionarCrmAoPagarPlano({
+          lojaId,
+          nomeLoja: loja.nome,
+          planoTipo: plano,
         });
 
         return NextResponse.json({
