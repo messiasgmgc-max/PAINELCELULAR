@@ -11,6 +11,7 @@ import {
   obterDashboardAnunciosBridge,
   registrarLeadAnuncioBridge,
 } from '@/lib/crm-bridge/fase5';
+import { obterConfigCrmLoja } from '@/lib/crm-bridge/lojaConfig';
 
 export async function OPTIONS() {
   return crmBridgeOptionsResponse();
@@ -112,11 +113,14 @@ export async function PATCH(req: NextRequest) {
 
     let capiResult: { sent: boolean; reason?: string } = { sent: false };
     if (status === 'convertido' && valorVenda > 0 && !lead.capi_enviado) {
+      const { config: cfgLoja } = await obterConfigCrmLoja(loja.id);
       capiResult = await dispararMetaCapiPurchase({
         telefone: String(lead.contato_telefone || ''),
         ctwaClid: String(lead.ctwa_clid || ''),
         valor: valorVenda,
         eventId: `pc_lead_${lead.id}`,
+        pixelId: cfgLoja.meta_pixel_id || undefined,
+        accessToken: cfgLoja.meta_capi_access_token || undefined,
       });
       if (capiResult.sent) {
         await supabaseAdmin

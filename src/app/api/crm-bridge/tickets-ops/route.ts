@@ -3,25 +3,31 @@ import {
   autenticarBridge,
   crmBridgeJson,
   crmBridgeOptionsResponse,
+  resolverLojaBridge,
 } from '@/lib/crm-bridge/auth';
+import { obterConfigCrmLoja } from '@/lib/crm-bridge/lojaConfig';
 
 export async function OPTIONS() {
   return crmBridgeOptionsResponse();
 }
 
-function getEvoCrmConfig() {
+async function getEvoCrmConfig(req: NextRequest) {
+  const loja = await resolverLojaBridge(req);
+  const cfg = loja ? (await obterConfigCrmLoja(loja.id)).config : null;
   const apiUrl = (
-    process.env.CRM_EVO_API_URL || 'https://api-crm.phonecenter.tech'
+    cfg?.crm_api_url ||
+    process.env.CRM_EVO_API_URL ||
+    'https://api-crm.phonecenter.tech'
   ).replace(/\/+$/, '');
-  const accessToken = (process.env.CRM_EVO_ACCESS_TOKEN || '').trim();
+  const accessToken = (cfg?.crm_access_token || process.env.CRM_EVO_ACCESS_TOKEN || '').trim();
   return { apiUrl, accessToken };
 }
 
-async function evoFetch(path: string, init: RequestInit = {}) {
-  const { apiUrl, accessToken } = getEvoCrmConfig();
+async function evoFetch(req: NextRequest, path: string, init: RequestInit = {}) {
+  const { apiUrl, accessToken } = await getEvoCrmConfig(req);
   if (!accessToken) {
     throw new Error(
-      'CRM_EVO_ACCESS_TOKEN não configurado (gere um Access Token em crm.phonecenter.tech/settings/access-tokens).'
+      'Token do CRM não configurado para esta loja (configure em /crm-config no Supabase).'
     );
   }
   const res = await fetch(`${apiUrl}${path}`, {
@@ -54,21 +60,21 @@ export async function GET(req: NextRequest) {
     return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
   }
 
-  const { accessToken } = getEvoCrmConfig();
+  const { accessToken } = await getEvoCrmConfig(req);
   if (!accessToken) {
     return crmBridgeJson({
       ok: true,
       configured: false,
       inboxes: [],
       message:
-        'Configure CRM_EVO_ACCESS_TOKEN no Coolify para habilitar operações em massa de tickets.',
+        'Configure o Access Token do CRM desta loja em /crm-config (Supabase) para habilitar operações em massa de tickets.',
     });
   }
 
   try {
     const [inboxesRes, convsRes] = await Promise.all([
-      evoFetch('/api/v1/inboxes'),
-      evoFetch('/api/v1/conversations?status=open&page=1'),
+      evoFetch(req, '/api/v1/inboxes'),
+      evoFetch(req, '/api/v1/conversations?status=open&page=1'),
     ]);
 
     const inboxesPayload = inboxesRes.data as Record<string, unknown> | unknown[];
@@ -118,7 +124,7 @@ export async function POST(req: NextRequest) {
       const qs = new URLSearchParams({ status: 'open', page: '1' });
       if (inboxId) qs.set('inbox_id', String(inboxId));
 
-      const listRes = await evoFetch(`/api/v1/conversations?${qs.toString()}`);
+      const listRes = await evoFetch(req, `/api/v1/conversations?${qs.toString()}`);
       if (!listRes.ok) {
         return crmBridgeJson(
           { ok: false, error: 'Erro ao listar conversas no EvoCRM.', details: listRes.data },
@@ -140,7 +146,7 @@ export async function POST(req: NextRequest) {
       for (const conv of alvos.slice(0, 100)) {
         const id = conv.id;
         if (!id) continue;
-        const r = await evoFetch(`/api/v1/conversations/${id}/toggle_status`, {
+        const r = await evoFetch(req, `/api/v1/conversations/${id}/toggle_status`, {
           method: 'POST',
           body: JSON.stringify({ status: 'resolved' }),
         });
@@ -166,6 +172,7 @@ export async function POST(req: NextRequest) {
       }
 
       const listRes = await evoFetch(
+        req,
         `/api/v1/conversations?status=open&inbox_id=${origemInboxId}&page=1`
       );
       if (!listRes.ok) {
@@ -186,7 +193,7 @@ export async function POST(req: NextRequest) {
         const contactId = sender.id;
         if (!contactId) continue;
 
-        const createRes = await evoFetch('/api/v1/conversations', {
+        const createRes = await evoFetch(req, '/api/v1/conversations', {
           method: 'POST',
           body: JSON.stringify({
             inbox_id: destinoInboxId,
@@ -200,7 +207,7 @@ export async function POST(req: NextRequest) {
         });
 
         if (createRes.ok && conv.id) {
-          await evoFetch(`/api/v1/conversations/${conv.id}/toggle_status`, {
+          await evoFetch(req, `/api/v1/conversations/${conv.id}/toggle_status`, {
             method: 'POST',
             body: JSON.stringify({ status: 'resolved' }),
           });

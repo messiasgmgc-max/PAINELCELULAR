@@ -310,11 +310,13 @@ export async function dispararMetaCapiPurchase(input: {
   ctwaClid?: string;
   valor: number;
   eventId: string;
+  pixelId?: string;
+  accessToken?: string;
 }): Promise<{ sent: boolean; reason?: string }> {
-  const pixelId = (process.env.META_PIXEL_ID || '').trim();
-  const accessToken = (process.env.META_CAPI_ACCESS_TOKEN || '').trim();
+  const pixelId = (input.pixelId || process.env.META_PIXEL_ID || '').trim();
+  const accessToken = (input.accessToken || process.env.META_CAPI_ACCESS_TOKEN || '').trim();
   if (!pixelId || !accessToken) {
-    return { sent: false, reason: 'META_PIXEL_ID ou META_CAPI_ACCESS_TOKEN não configurados.' };
+    return { sent: false, reason: 'Meta Pixel/CAPI não configurado para esta loja.' };
   }
 
   const telLimpo = String(input.telefone || '').replace(/\D/g, '');

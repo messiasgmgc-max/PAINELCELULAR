@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import { formatarBRL } from './queries';
+import { obterConfigCrmLoja } from './lojaConfig';
 
 /**
  * Calcula CRC16-CCITT (0x1021, init 0xFFFF) exigido pelo padrão EMV/BACEN do Pix.
@@ -122,8 +123,9 @@ export async function criarReservaPixBridge(
   let pixCopiaCola = '';
   let linkPagamento = '';
 
-  const mpToken = (process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
-  const asaasKey = (process.env.ASAAS_API_KEY || '').trim();
+  const { config: cfgLoja } = await obterConfigCrmLoja(lojaId);
+  const mpToken = (cfgLoja.mercadopago_access_token || process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
+  const asaasKey = (cfgLoja.asaas_api_key || process.env.ASAAS_API_KEY || '').trim();
 
   if (mpToken) {
     try {
@@ -157,8 +159,8 @@ export async function criarReservaPixBridge(
       // fallback para EMV
     }
   } else if (asaasKey) {
-    // Asaas requer customerId; se configurado ASAAS_DEFAULT_CUSTOMER_ID cria cobrança Pix
-    const asaasCustomer = (process.env.ASAAS_DEFAULT_CUSTOMER_ID || '').trim();
+    // Asaas requer customerId; lê da loja no Supabase ou fallback env
+    const asaasCustomer = (cfgLoja.asaas_customer_id || process.env.ASAAS_DEFAULT_CUSTOMER_ID || '').trim();
     const asaasUrl = (process.env.ASAAS_API_URL || 'https://api.asaas.com/v3').replace(/\/+$/, '');
     if (asaasCustomer) {
       try {
@@ -195,16 +197,16 @@ export async function criarReservaPixBridge(
   }
 
   if (!pixCopiaCola) {
-    const chavePix = (input.chavePixManual || process.env.CRM_PIX_KEY || '').trim();
+    const chavePix = (input.chavePixManual || cfgLoja.pix_key || process.env.CRM_PIX_KEY || '').trim();
     if (!chavePix) {
       throw new Error(
-        'Informe chavePixManual ou configure CRM_PIX_KEY (ou MERCADOPAGO_ACCESS_TOKEN / ASAAS_API_KEY) no Coolify.'
+        'Configure a Chave Pix da loja em /crm-config (tabela crm_loja_configs no Supabase) ou informe chavePix no formulário.'
       );
     }
     pixCopiaCola = gerarBrCodePix({
       chavePix,
       nomeRecebedor: nomeLoja,
-      cidade: input.cidade || process.env.CRM_PIX_CITY || 'BRASIL',
+      cidade: input.cidade || cfgLoja.pix_city || process.env.CRM_PIX_CITY || 'BRASIL',
       valor: valorSinal,
       txid: protocolo,
       descricao: `Reserva ${input.aparelhoModelo}`,

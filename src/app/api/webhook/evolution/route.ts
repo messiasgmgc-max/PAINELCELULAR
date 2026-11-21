@@ -36,6 +36,7 @@ import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { notificarSaidaVendaGrupoEstoque } from '@/lib/whatsapp/notificarSaidaEstoque';
 import { ehMensagemDeEntradaEstoque, ehRelatorioOuConferencia } from './entradaInteligente';
 import { formatarTelefoneWhatsApp } from '@/lib/whatsappService';
+import { espelharWebhookEvolutionParaCrm } from '@/lib/crm-bridge/lojaConfig';
 import { gerarRelatorioFechamentoDia } from './handlers/fechamentoDiaHandler';
 import {
   detectarSaidaDiretaEstoque,
@@ -2872,6 +2873,9 @@ export async function POST(request: Request) {
       payload.instanceName ||
       payload.data?.instance ||
       DEFAULT_INSTANCE;
+
+    // Espelhamento opcional e não-bloqueante para PhoneCenterCRM (configurado por loja no Supabase)
+    after(() => espelharWebhookEvolutionParaCrm(String(instanceName || ''), rawBody));
 
     const eventName = String(payload.event || payload.type || '').toLowerCase();
 

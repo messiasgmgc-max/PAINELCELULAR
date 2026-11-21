@@ -12,12 +12,13 @@
 - **CRM (White-Label PhoneCenterCRM):** `https://crm.phonecenter.tech` (`HTTP 200` + TLS ✅)
 - **CRM API Gateway:** `https://api-crm.phonecenter.tech` (`HTTP 200` + TLS ✅)
 - **PhoneCenter ERP:** `https://app.phonecenter.tech` (`HTTP 200` + TLS ✅)
-- **Dashboard App Lateral (Chat):** `https://app.phonecenter.tech/crm-sidebar?token=<CRM_BRIDGE_SECRET>` *(5 abas: Estoque, Cliente, Troca/Proposta, Ranking, Ops)*
+- **Configuração Multi-Loja por Instância (Supabase):** `https://app.phonecenter.tech/crm-config` (`crm_loja_configs`)
+- **Dashboard App Lateral (Chat):** `https://app.phonecenter.tech/crm-sidebar?loja_id=<LOJA>&token=<CRM_BRIDGE_SECRET>` *(5 abas: Estoque, Cliente, Troca/Proposta, Ranking, Ops)*
 - **Proposta Pública (com Aceite + PDF):** `https://app.phonecenter.tech/proposta/<token>`
 - **Link na Bio + Vitrine:** `https://app.phonecenter.tech/bio`
 - **MCP Server IA (JSON-RPC 2.0):** `https://app.phonecenter.tech/api/crm-bridge/mcp`
-- **CRM Bridge REST APIs:** `/api/crm-bridge/{health,estoque,clientes/lookup,simular,propostas,ranking,leads-anuncio,chat-interno,conexoes,tickets-ops,pix-reserva,multi-loja/provisionar,webhooks/evo,webhooks/pagamento}`
-- **Migrations SQL pendentes no Supabase:** `20261120_phonecenter_crm_modulos.sql` e `20261120_phonecenter_crm_fase6.sql`
+- **CRM Bridge REST APIs:** `/api/crm-bridge/{health,config-loja,estoque,clientes/lookup,simular,propostas,ranking,leads-anuncio,chat-interno,conexoes,tickets-ops,pix-reserva,multi-loja/provisionar,webhooks/evo,webhooks/pagamento}`
+- **Migrations SQL pendentes no Supabase:** `20261120_phonecenter_crm_modulos.sql`, `20261120_phonecenter_crm_fase6.sql`, `20261120_phonecenter_crm_loja_configs.sql`
 - **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo a cada 5 min (`ram=32% disk=22% evo=running`)
 
 ## 3. O que Já Está Rodando em Produção
