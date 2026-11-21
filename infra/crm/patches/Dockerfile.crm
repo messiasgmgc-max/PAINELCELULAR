@@ -1,0 +1,3 @@
+FROM evoapicloud/evo-ai-crm-community:latest
+
+COPY instagram_unified_login.rb /app/config/initializers/instagram_unified_login.rb

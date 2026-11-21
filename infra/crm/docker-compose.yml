@@ -246,7 +246,7 @@ services:
   # CRM Service (Rails) — Porta 3000
   # ---------------------------------------------------------------------------
   evocrm_crm:
-    image: evoapicloud/evo-ai-crm-community:latest
+    image: ${CRM_IMAGE:-evoapicloud/evo-ai-crm-community:latest}
     container_name: evocrm_crm
     restart: unless-stopped
     mem_limit: 768m
@@ -293,8 +293,13 @@ services:
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_STORAGE_URL: https://${API_DOMAIN}
       SIDEKIQ_CONCURRENCY: 5
+      INSTAGRAM_CONFIG_ID: ${INSTAGRAM_CONFIG_ID:-}
+      INSTAGRAM_UNIFIED_APP_ID: ${INSTAGRAM_UNIFIED_APP_ID:-}
+      INSTAGRAM_UNIFIED_APP_SECRET: ${INSTAGRAM_UNIFIED_APP_SECRET:-}
+      INSTAGRAM_UNIFIED_API_VERSION: ${INSTAGRAM_UNIFIED_API_VERSION:-v25.0}
     volumes:
       - evocrm_storage:/app/storage
+      - ./patches/instagram_unified_login.rb:/app/config/initializers/instagram_unified_login.rb:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/health/live || wget -qO- http://127.0.0.1:3000/health/live >/dev/null"]
       interval: 20s
@@ -303,7 +308,7 @@ services:
       start_period: 90s
 
   evocrm_crm_sidekiq:
-    image: evoapicloud/evo-ai-crm-community:latest
+    image: ${CRM_IMAGE:-evoapicloud/evo-ai-crm-community:latest}
     container_name: evocrm_crm_sidekiq
     restart: unless-stopped
     mem_limit: 512m
@@ -343,8 +348,13 @@ services:
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_STORAGE_URL: https://${API_DOMAIN}
       SIDEKIQ_CONCURRENCY: 5
+      INSTAGRAM_CONFIG_ID: ${INSTAGRAM_CONFIG_ID:-}
+      INSTAGRAM_UNIFIED_APP_ID: ${INSTAGRAM_UNIFIED_APP_ID:-}
+      INSTAGRAM_UNIFIED_APP_SECRET: ${INSTAGRAM_UNIFIED_APP_SECRET:-}
+      INSTAGRAM_UNIFIED_API_VERSION: ${INSTAGRAM_UNIFIED_API_VERSION:-v25.0}
     volumes:
       - evocrm_storage:/app/storage
+      - ./patches/instagram_unified_login.rb:/app/config/initializers/instagram_unified_login.rb:ro
     healthcheck:
       disable: true
 

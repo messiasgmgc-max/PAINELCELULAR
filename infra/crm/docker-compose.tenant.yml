@@ -74,7 +74,7 @@ services:
       ACTIVE_STORAGE_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
 
   crm:
-    image: evoapicloud/evo-ai-crm-community:latest
+    image: ${CRM_IMAGE:-evoapicloud/evo-ai-crm-community:latest}
     restart: unless-stopped
     mem_limit: 640m
     command: sh -c "until wget -qO- http://auth:3001/health >/dev/null 2>&1; do sleep 5; done; bundle exec rails db:migrate 2>&1 || true; bundle exec rails s -p 3000 -b 0.0.0.0"
@@ -108,9 +108,13 @@ services:
       CORS_ORIGINS: https://${TENANT_SLUG}.crm.phonecenter.tech,https://api-${TENANT_SLUG}.crm.phonecenter.tech
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_STORAGE_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
+      INSTAGRAM_CONFIG_ID: ${INSTAGRAM_CONFIG_ID:-}
+      INSTAGRAM_UNIFIED_APP_ID: ${INSTAGRAM_UNIFIED_APP_ID:-}
+      INSTAGRAM_UNIFIED_APP_SECRET: ${INSTAGRAM_UNIFIED_APP_SECRET:-}
+      INSTAGRAM_UNIFIED_API_VERSION: ${INSTAGRAM_UNIFIED_API_VERSION:-v25.0}
 
   crm_sidekiq:
-    image: evoapicloud/evo-ai-crm-community:latest
+    image: ${CRM_IMAGE:-evoapicloud/evo-ai-crm-community:latest}
     restart: unless-stopped
     mem_limit: 384m
     command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
@@ -139,6 +143,10 @@ services:
       FRONTEND_URL: https://${TENANT_SLUG}.crm.phonecenter.tech
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_STORAGE_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
+      INSTAGRAM_CONFIG_ID: ${INSTAGRAM_CONFIG_ID:-}
+      INSTAGRAM_UNIFIED_APP_ID: ${INSTAGRAM_UNIFIED_APP_ID:-}
+      INSTAGRAM_UNIFIED_APP_SECRET: ${INSTAGRAM_UNIFIED_APP_SECRET:-}
+      INSTAGRAM_UNIFIED_API_VERSION: ${INSTAGRAM_UNIFIED_API_VERSION:-v25.0}
 
   core:
     image: evoapicloud/evo-ai-core-service-community:latest

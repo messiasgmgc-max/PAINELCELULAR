@@ -50,20 +50,35 @@ No painel do Coolify → Projeto do `PAINELCELULAR` → **Environment Variables*
 
 ## 3. URLs Exatas de Callback & Webhook no PhoneCenterCRM (`api-crm.phonecenter.tech`)
 
-Use estas URLs ao criar seus Apps no **Meta for Developers** e **Google Cloud Console** (e preencha IDs/Secrets em `https://crm.phonecenter.tech` → **Admin → Configurações**):
+Use estas URLs exatas (validadas ao vivo em `api-crm.phonecenter.tech`) ao criar seus Apps no **Meta for Developers** e **Google Cloud Console** (e preencha IDs/Secrets em `https://crm.phonecenter.tech/settings/admin/channels`):
 
 | Integração | URL de Callback / Webhook Oficial |
 | :--- | :--- |
-| **WhatsApp API Oficial (Meta Cloud)** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/whatsapp`<br>Verify Token: `phonecenter_meta_verify_2026` |
-| **Instagram Direct + Comentários** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/instagram`<br>Verify Token: `phonecenter_meta_verify_2026`<br>OAuth Redirect: `https://crm.phonecenter.tech/instagram/callback` |
-| **Facebook Messenger + Feed** | Webhook: `https://api-crm.phonecenter.tech/api/v1/webhooks/facebook/feed`<br>Verify Token: `phonecenter_meta_verify_2026` |
+| **Instagram (Unified Login + Comentários)** | Webhook: `https://api-crm.phonecenter.tech/webhooks/instagram`<br>Verify Token: `phonecenter_meta_verify_2026`<br>OAuth Redirect: `https://crm.phonecenter.tech/instagram/callback` |
+| **Facebook Messenger + Página** | Webhook: `https://api-crm.phonecenter.tech/bot`<br>Verify Token: `phonecenter_meta_verify_2026` |
+| **WhatsApp API Oficial (Meta Cloud)** | Webhook: `https://api-crm.phonecenter.tech/webhooks/whatsapp/<+55NUMERO>`<br>Verify Token: copiado da aba **Configuração** da caixa de entrada criada no CRM |
 | **Google Calendar OAuth** | Redirect URI: `https://crm.phonecenter.tech/google-calendar/callback` |
 | **Google Sheets / Gmail OAuth** | Redirect URI: `https://crm.phonecenter.tech/google/callback` |
 | **WhatsApp Evolution API (QR Code)** | **JÁ CONFIGURADO AUTOMATICAMENTE** (`http://evolution_api:8080`, `hasEvolutionConfig: true`) |
 
 ---
 
-## 4. Sincronização do White-Label atualizado na VPS (Comando Único)
+## 4. Instagram Unified Login (Apps novos da Meta — sem Página do Facebook)
+
+Para apps recentes da Meta (em que o login legado `instagram.com/oauth/authorize` foi bloqueado com `Invalid platform app`), o patch nativo [instagram_unified_login.rb](../../infra/crm/patches/instagram_unified_login.rb) reestrutura o `evocrm_crm` para o fluxo oficial **Instagram API with Unified Login (SUAT)** sem exigir migrations nem Página do Facebook:
+
+1. No Meta for Developers → **Casos de uso → Instagram → API setup with Unified login**, crie uma configuração (`SUAT`, `Nunca`, ativo `Conta do Instagram`) e salve o Redirect URI `https://crm.phonecenter.tech/instagram/callback`. Copie o **ID da configuração (`CONFIG_ID`)**.
+2. Copie os arquivos de [infra/crm/patches/](../../infra/crm/patches/) para a VPS e aplique em **1 comando**:
+
+```bash
+ssh -p 2222 root@13.140.36.50 "mkdir -p /opt/phonecenter-crm/patches" && \
+scp -P 2222 infra/crm/patches/* root@13.140.36.50:/opt/phonecenter-crm/patches/ && \
+ssh -p 2222 root@13.140.36.50 "sed -i 's/\r$//' /opt/phonecenter-crm/patches/apply-instagram-unified.sh && bash /opt/phonecenter-crm/patches/apply-instagram-unified.sh <SEU_CONFIG_ID>"
+```
+
+---
+
+## 5. Sincronização do White-Label atualizado na VPS (Comando Único)
 
 Após dar `git pull` em um clone atualizado ou a partir da sua máquina local com acesso SSH em `root@13.140.36.50:2222`, copie os arquivos de [infra/crm/branding/](../../infra/crm/branding/) para `/opt/phonecenter-crm/branding/` e recarregue o Nginx sem downtime:
 
@@ -74,7 +89,7 @@ ssh -p 2222 root@13.140.36.50 "docker exec evocrm_frontend nginx -s reload"
 
 ---
 
-## 5. Escala Multi-Loja SaaS (`compartilhado` vs `isolado`)
+## 6. Escala Multi-Loja SaaS (`compartilhado` vs `isolado`)
 
 - **Padrão `compartilhado` (Plano Avançado R\$ 299/mês):** Chame `POST https://app.phonecenter.tech/api/crm-bridge/multi-loja/provisionar` com `{ lojaId, nomeLoja, modo: "compartilhado" }` — gera `bridge_token`/`webhook_token` isolados, cria Time no EvoCRM compartilhado (`crm.phonecenter.tech`) e ativa a loja imediatamente.
 - **Enterprise `isolado`:** Passe `modo: "isolado"` (com DNS wildcard `*.crm.phonecenter.tech → 13.140.36.50`). Quando `COOLIFY_API_URL` + `COOLIFY_API_TOKEN` estiverem configurados, o provisionador envia [infra/crm/docker-compose.tenant.yml](../../infra/crm/docker-compose.tenant.yml) codificado em Base64 (`docker_compose_raw`) para subir a stack isolada completa com IA dedicada.

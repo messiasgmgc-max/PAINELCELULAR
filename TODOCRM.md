@@ -21,13 +21,13 @@
   - **Telefonia, UX Native & Suite Completa (`/crm-hub` + `infra/crm/branding/`):**
     - **CRM Phone / Telefonia:** Click-to-Call, webhook universal PABX/VoIP (`/api/crm-bridge/webhooks/telefonia`, `/api/crm-bridge/telefonia`) e banner popup Cliente 360º ao vivo no `/crm-sidebar`.
     - **Suite `/crm-hub`:** Abas de Operação/Pós-Venda/Telefonia, Rodízio Avançado por Setor (`/api/crm-bridge/rodizio`), Campanhas Anti-Ban (`/api/crm-bridge/campanhas`), Kanban de Grupos & Comunidades (`/api/crm-bridge/kanban-grupos`), CRM Academy (`/api/crm-bridge/academy`), Financeiro de Reservas/Comissões e Gestor Multi-Loja.
-    - **White-Label `infra/crm/branding/`:** Status real pós-login na API EvoCRM, badges visuais de SLA em atraso/crítico, atalho global `Ctrl+K` para a Suite PhoneCenter, alternância Dark/Light-Navy e `Dockerfile` dedicado (`infra/crm/branding/Dockerfile`).
+    - **White-Label `infra/crm/branding/` & Instagram Unified Login (`infra/crm/patches/`):** Status real pós-login, badges SLA, `Ctrl+K`, tema Dark/Light-Navy, `Dockerfile` White-Label e reestruturação completa do Instagram do EvoCRM para **Meta Unified Login** ([instagram_unified_login.rb](infra/crm/patches/instagram_unified_login.rb) + [Dockerfile.crm](infra/crm/patches/Dockerfile.crm) + [apply-instagram-unified.sh](infra/crm/patches/apply-instagram-unified.sh) sem precisar de Página do Facebook) + URLs de webhook validadas ao vivo em `OAUTH-SETUP.md`.
     - **SaaS Multi-Loja (`autoProvision.ts` & `docker-compose.tenant.yml`):** Modo padrão `compartilhado` (instantâneo com tokens isolados + Time no EvoCRM) e modo `isolado` Enterprise (com stack completa de IA e payload `docker_compose_raw` Base64 para Coolify).
   - `npm run typecheck` com **0 erros** e **`npm test` 586/586 passando** (zero falhas!).
 - **Ações manuais externas restantes:**
   1. Aplicar as migrations SQL pendentes no Supabase (incluindo `20261121_phonecenter_crm_completo.sql`).
-  2. Configurar variáveis no Coolify e credenciais OAuth externas (Meta Cloud/Instagram/Google Calendar) conforme `docs/crm/OAUTH-SETUP.md`.
-  3. Opcionalmente sincronizar a pasta atualizada `infra/crm/branding/` para `/opt/phonecenter-crm/branding/` na VPS e rodar teste E2E ao vivo.
+  2. Configurar variáveis no Coolify e aplicar `apply-instagram-unified.sh <CONFIG_ID>` + sync do `branding/` na VPS conforme `docs/crm/OAUTH-SETUP.md`.
+  3. Opcionalmente finalizar canais extras (Facebook Page / Google Calendar) e rodar teste E2E ao vivo.
 
 ---
 
@@ -54,7 +54,7 @@
 ## Fase 2 — Canais Omnichannel & Integrações Core
 - [x] Vincular **Evolution API** no EvoCRM (`EVOLUTION_API_URL=http://evolution_api:8080`, `hasEvolutionConfig: true`) — pronto para criar inboxes WhatsApp QR Code!
 - [ ] Preparar canal **WhatsApp API Oficial (Meta Cloud API)** (app Meta, webhook verificado, templates)
-- [ ] Configurar canal **Instagram Direct + Comentários** (Meta OAuth + permissões)
+- [/] Configurar canal **Instagram Direct + Comentários** (webhook `https://api-crm.phonecenter.tech/webhooks/instagram` validado ✅ + patch Unified Login [instagram_unified_login.rb](infra/crm/patches/instagram_unified_login.rb) pronto para aplicar na VPS)
 - [ ] Configurar canal **Facebook Messenger + Webchat Widget**
 - [ ] Configurar **Google Calendar** (OAuth Google Cloud → agendamento de visitas/retiradas no CRM)
 - [ ] Configurar **SMTP transacional** (Resend/SMTP) e **Storage S3/R2** (opcional para mídias pesadas)
