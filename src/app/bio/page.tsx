@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MessageCircle, Search, Smartphone, ShieldCheck, Sparkles } from 'lucide-react';
+import { MessageCircle, Search, Smartphone, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 
 interface VitrineItem {
   id: string;
@@ -28,8 +28,8 @@ export default function LinkNaBioVitrinePage() {
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const lojaId = sp.get('loja_id') || '';
-    const wa = (sp.get('wa') || '').replace(/\D/g, '');
-    setWhatsappNum(wa);
+    const waUrl = (sp.get('wa') || '').replace(/\D/g, '');
+    if (waUrl) setWhatsappNum(waUrl);
 
     const qs = new URLSearchParams();
     if (lojaId) qs.set('loja_id', lojaId);
@@ -42,6 +42,7 @@ export default function LinkNaBioVitrinePage() {
       .then((d) => {
         if (d.ok) {
           if (d.loja?.nome) setLojaNome(d.loja.nome);
+          if (!waUrl && d.loja?.whatsapp) setWhatsappNum(String(d.loja.whatsapp));
           setItens(d.itens || []);
         }
       })
@@ -71,7 +72,7 @@ export default function LinkNaBioVitrinePage() {
         </div>
 
         {/* Botões rápidos de setor */}
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <button
             onClick={() =>
               abrirWhatsApp(`Olá ${lojaNome}! Vim pelo Link na Bio e quero ver os aparelhos disponíveis.`)
@@ -87,6 +88,14 @@ export default function LinkNaBioVitrinePage() {
             className="py-3 px-4 rounded-xl bg-[#0f172a] hover:bg-slate-800 border border-white/15 font-semibold text-sm flex items-center justify-center gap-2"
           >
             <Sparkles className="w-4 h-4 text-[#007BFF]" /> Simular Troca
+          </button>
+          <button
+            onClick={() =>
+              abrirWhatsApp(`Olá ${lojaNome}! Preciso de assistência técnica / garantia para meu aparelho.`)
+            }
+            className="py-3 px-4 rounded-xl bg-[#0f172a] hover:bg-slate-800 border border-white/15 font-semibold text-sm flex items-center justify-center gap-2"
+          >
+            <Wrench className="w-4 h-4 text-amber-400" /> Assistência / OS
           </button>
         </div>
 

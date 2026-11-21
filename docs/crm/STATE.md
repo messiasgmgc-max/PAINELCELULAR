@@ -4,44 +4,37 @@
 
 ## 1. Infraestrutura & Acessos (Sem Segredos)
 - **VPS IP:** `13.140.36.50` · **SSH:** `root@13.140.36.50:2222` ✅
-- **Hardware Pós-Deploy (2026-11-20):** `6 vCPUs` · `3.4 / 11.68 GiB RAM` (`7.5 GiB` livres) · `~154 GB` disco livre
 - **Orquestrador:** Coolify `4.7.6` + `coolify-proxy` (`traefik:v3.6`, rede `coolify`, certresolver `letsencrypt`)
 - **Apps pré-existentes (100% INTOCADOS):** `app.phonecenter.tech` (`PAINELCELULAR`), `evolution_api` (v2.3.7, rede `evolution_default`), `evolution_postgres`, `aster-*`
+- **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo a cada 5 min
 
 ## 2. Domínios & Endpoints Ativos
 - **CRM (White-Label PhoneCenterCRM):** `https://crm.phonecenter.tech` (`HTTP 200` + TLS ✅)
 - **CRM API Gateway:** `https://api-crm.phonecenter.tech` (`HTTP 200` + TLS ✅)
 - **PhoneCenter ERP:** `https://app.phonecenter.tech` (`HTTP 200` + TLS ✅)
-- **Configuração Multi-Loja por Instância (Supabase):** `https://app.phonecenter.tech/crm-config` (`crm_loja_configs`)
-- **Dashboard App Lateral (Chat):** `https://app.phonecenter.tech/crm-sidebar?loja_id=<LOJA>&token=<CRM_BRIDGE_SECRET>` *(5 abas: Estoque, Cliente, Troca/Proposta, Ranking, Ops)*
-- **Proposta Pública (com Aceite + PDF):** `https://app.phonecenter.tech/proposta/<token>`
-- **Link na Bio + Vitrine:** `https://app.phonecenter.tech/bio`
-- **MCP Server IA (JSON-RPC 2.0):** `https://app.phonecenter.tech/api/crm-bridge/mcp`
-- **CRM Bridge REST APIs:** `/api/crm-bridge/{health,config-loja,estoque,clientes/lookup,simular,propostas,ranking,leads-anuncio,chat-interno,conexoes,tickets-ops,pix-reserva,multi-loja/provisionar,webhooks/evo,webhooks/pagamento}`
-- **Migrations SQL pendentes no Supabase:** `20261120_phonecenter_crm_modulos.sql`, `20261120_phonecenter_crm_fase6.sql`, `20261120_phonecenter_crm_loja_configs.sql`
-- **Gate de Plano (`crm_omnichannel`):** exclusivo do plano **`avancado`** (R$ 299/mês) + `vitalicio` + `super_admin`; planos `entrada`/`intermediario` veem `CRM 🔒` abrindo modal de Upgrade.
-- **Auto-Provisionamento ao Pagar Plano Avançado:** hooked em `/api/planos/verificar-pix` e `/api/planos/pagar-cartao` (`autoProvision.ts`) → registra `crm_tenants` + `crm_loja_configs` e dispara Coolify API se configurada.
-- **Meta Verify Tokens pré-configurados no EvoCRM:** `INSTAGRAM_VERIFY_TOKEN`, `IG_VERIFY_TOKEN`, `FB_VERIFY_TOKEN` = `phonecenter_meta_verify_2026` (falta apenas `INSTAGRAM_APP_ID` + `INSTAGRAM_APP_SECRET` do Meta for Developers).
-- **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo a cada 5 min (`ram=32% disk=22% evo=running`)
+- **Suite Gerencial PhoneCenter CRM (`/crm-hub`):** `https://app.phonecenter.tech/crm-hub` *(Pós-Venda Turbo, Telefonia, Rodízio, Campanhas Anti-Ban, Kanban Grupos, Academy, Financeiro, Multi-Loja)*
+- **Configuração Isolada por Loja (`/crm-config`):** `https://app.phonecenter.tech/crm-config` *(sessão ERP nativa + `bridge_token` / `webhook_token` isolados + Pós-Venda + SLA + Telefonia)*
+- **Dashboard App Lateral (`/crm-sidebar`):** `https://app.phonecenter.tech/crm-sidebar?loja_id=<LOJA>&token=<BRIDGE_TOKEN_LOJA>` *(Estoque 1-clique + Reserva IMEI + Troca/Vision + Ranking/Evolução + Telefonia/Pix/Ops)*
+- **Proposta Pública (`/proposta/<token>`)** & **Link na Bio (`/bio`)**: rotas públicas liberadas em `AuthContext.tsx` (vitrine `/bio` oculta aparelhos reservados)
+- **MCP Server IA (JSON-RPC 2.0, 8 tools):** `https://app.phonecenter.tech/api/crm-bridge/mcp`
+- **APIs CRM Bridge (`/api/crm-bridge/*`):**
+  - Core & Segurança: `health`, `minha-loja`, `config-loja`, `estoque`, `clientes/lookup`, `imei`, `simular`, `avaliar-foto-troca`
+  - Vendas & Pós-Venda: `enviar-mensagem`, `pre-venda`, `propostas`, `pix-reserva`, `ranking`, `metas`, `pos-venda`, `notificar-os`
+  - Canais, Operação & SaaS: `conexoes`, `tickets-ops`, `chat-interno`, `leads-anuncio`, `rodizio`, `campanhas`, `kanban-grupos`, `academy`, `telefonia`, `multi-loja/provisionar`
+  - Webhooks: `webhooks/evo`, `webhooks/pagamento` (validação real API MP), `webhooks/telefonia`
+- **Migrations SQL no Supabase:** `20261120_phonecenter_crm_modulos.sql`, `20261120_phonecenter_crm_fase6.sql`, `20261120_phonecenter_crm_loja_configs.sql`, **`20261121_phonecenter_crm_completo.sql`** *(rodar no SQL Editor)*
+- **Gate & Multi-Loja SaaS:** exclusivo do plano `avancado` (R\$ 299/mês) + `vitalicio` + `super_admin`; provisionamento padrão `compartilhado` (tokens isolados + Time EvoCRM) e `isolado` Enterprise (`infra/crm/docker-compose.tenant.yml` via Coolify API).
 
-## 3. O que Já Está Rodando em Produção
-- **Stack EvoCRM Full (14 containers, `/opt/phonecenter-crm/`):** todos saudáveis com `mem_limit`, backup diário `03:30 UTC`.
-- **Evolution API já conectada no CRM:** `EVOLUTION_API_URL=http://evolution_api:8080` + `EVOLUTION_ADMIN_SECRET` configurados (`hasEvolutionConfig: true` ✅).
-- **White-Label PhoneCenterCRM (Camada 3A ativa):** `infra/crm/branding/` aplicado no `evocrm_frontend` com paleta `#090d16` / `#0066FF`, logos oficiais PhoneCenter, CSP `frame-src` liberado para `app.phonecenter.tech`, seletor `Online/Ausente/Offline` no login e dock rápido ERP/Bio.
-- **Ponte PhoneCenter ERP + MCP + Sidebar + Bio (Fase 4 + parte da 5):** implementados e testados em `PAINELCELULAR` (0 erros TS, testes verdes).
+## 3. O que Já Está Rodando em Produção vs Repo
+- **Stack EvoCRM Full (14 containers, `/opt/phonecenter-crm/`):** rodando com `EVOLUTION_API_URL=http://evolution_api:8080` (`hasEvolutionConfig: true`) e backup diário `03:30 UTC`.
+- **White-Label Atualizado (`infra/crm/branding/`):** sincronizar pasta para `/opt/phonecenter-crm/branding/` na VPS para ativar status real pós-login, badges SLA, `Ctrl+K`, logos atualizados e tema Dark/Light-Navy (além de `Dockerfile` pronto).
+- **Suite ERP + Segurança + Automação (`PAINELCELULAR`):** código completo validado com `npm run typecheck` (0 erros) e `npm test` (586/586 testes verdes).
 
-## 4. Ações Rápidas para Ativar 100% no Painel
-1. Definir `CRM_BRIDGE_SECRET=<chave-forte>` nas variáveis de ambiente do app `PAINELCELULAR` no Coolify (e opcionalmente `CRM_DEFAULT_LOJA_ID`).
-2. No **PhoneCenterCRM (`crm.phonecenter.tech`)**:
-   - **Canais:** criar inbox WhatsApp (Evolution API já está `hasEvolutionConfig: true`!) e escanear QR Code.
-   - **Dashboard Apps:** cadastrar `https://app.phonecenter.tech/crm-sidebar?token=<CRM_BRIDGE_SECRET>` como App Lateral do atendimento!
-   - **Admin > MCP Servers:** cadastrar `https://app.phonecenter.tech/api/crm-bridge/mcp` com header `X-PhoneCenter-CRM-Key: <CRM_BRIDGE_SECRET>` para a IA consultar estoque, troca, parcelas e garantias!
-   - **Webhooks:** apontar eventos do CRM para `https://app.phonecenter.tech/api/crm-bridge/webhooks/evo?token=<CRM_BRIDGE_SECRET>`.
+## 4. Ações Rápidas para Ativar 100%
+1. Aplicar as migrations SQL pendentes no Supabase (especialmente `20261121_phonecenter_crm_completo.sql`).
+2. Abrir `https://app.phonecenter.tech/crm-config`, gerar/copiar o `bridge_token` e `webhook_token` isolados da loja e cadastrar Dashboard App `/crm-sidebar`, MCP Server `/api/crm-bridge/mcp` e Webhooks no `crm.phonecenter.tech`.
+3. Sincronizar `infra/crm/branding/` na VPS (comando em `docs/crm/OAUTH-SETUP.md`) e configurar cron diário em `/api/crm-bridge/pos-venda`.
 
 ## 5. Log Compacto de Sessões
-- **2026-11-20 (Sessão 1):**
-  - Docs modulares criados (`AgentsCRM.md`, `TODOCRM.md`, `docs/crm/*`).
-  - Stack 14 containers EvoCRM subida em `/opt/phonecenter-crm/` com SSL em `crm.phonecenter.tech` e `api-crm.phonecenter.tech` + backup cron diário.
-  - Evolution API (`http://evolution_api:8080`) vinculada automaticamente (`hasEvolutionConfig: true`).
-  - White-label PhoneCenterCRM (`infra/crm/branding/`) aplicado ao vivo em `crm.phonecenter.tech`.
-  - Construídos e testados no `PAINELCELULAR`: `/api/crm-bridge/{health,estoque,clientes/lookup,simular,ranking,conexoes,webhooks/evo,mcp}`, `/api/publico/vitrine`, `/crm-sidebar` (Dashboard App 4 abas) e `/bio` (Link na Bio + Vitrine).
+- **2026-11-20 (Sessão 1):** Infra EvoCRM 14 containers na VPS, SSL, Evolution API vinculada, White-Label Camada 3A e CRM Bridge inicial (Fases 4, 5 parcial, 6).
+- **2026-11-21 (Sessão 2):** Correção dos bugs auditados (auth 3 níveis, tokens isolados por loja, CORS allowlist, validação API Mercado Pago, reserva/liberação real de IMEI via `aplicarMudancaEstoque`, rotas públicas, `registrarLog`, paginação/`source_id` em `tickets-ops`), funções matadoras (1-clique enviar chat/venda PDF, Pós-Venda Turbo 9 réguas + OS, proposta quente, 8 tools MCP, IA Vision foto troca, IMEI Luhn, Minha Evolução), Telefonia PABX/Click-to-Call, Suite `/crm-hub`, upgrade White-Label (`Dockerfile`/SLA/`Ctrl+K`), SaaS Multi-Loja `compartilhado`+`isolado`, lazy import browser em `logger.ts`, e 586/586 testes verdes.

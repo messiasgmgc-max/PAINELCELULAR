@@ -7,18 +7,27 @@
 
 ## 📍 ONDE PARAMOS (Resumo Rápido)
 
-- **Fase Atual:** `Fases 0, 1, 3A, 4, 5 e 6` **CONCLUÍDAS NO CÓDIGO E NA INFRA!** 🎉
-- **Concluído agora (Fase 6 + Setup OAuth):**
-  - **Botão `CRM` nativo no cabeçalho do `PAINELCELULAR`** (`app.phonecenter.tech` → abre `https://crm.phonecenter.tech` em 1 clique).
-  - **Cobrança Pix / Sinal de Reserva no Chat:** `crm_reservas_pix` + `/api/crm-bridge/pix-reserva` (BR Code EMV BACEN com CRC16-CCITT real + suporte nativo a **Mercado Pago** e **Asaas**) + webhook `/api/crm-bridge/webhooks/pagamento` + sub-aba **Pix** no `/crm-sidebar`.
-  - **Escala Multi-Loja SaaS:** `crm_tenants` + `/api/crm-bridge/multi-loja/provisionar` + template isolado `infra/crm/docker-compose.tenant.yml`.
-  - **Monitoramento VPS:** `/opt/phonecenter-crm/health-monitor.sh` ativo via cron a cada 5 min (`OK ram=32% disk=22% evo=running`).
-  - **Guia de OAuth & Coolify:** `docs/crm/OAUTH-SETUP.md` com URLs reais de Callback/Webhook do EvoCRM para Google Calendar, Instagram Direct e WhatsApp Cloud API.
-  - `pnpm typecheck` zerado e **11/11 testes unitários** do CRM Bridge passando!
-- **Ações finais do usuário (5 min para 100% operacional):**
-  1. Configurar `CRM_BRIDGE_SECRET` (+ opcionais `CRM_PIX_KEY`, `CRM_EVO_ACCESS_TOKEN`, etc.) no Coolify do `PAINELCELULAR` (ver `docs/crm/OAUTH-SETUP.md`).
-  2. Rodar as 2 migrations SQL no Supabase (`20261120_phonecenter_crm_modulos.sql` e `20261120_phonecenter_crm_fase6.sql`).
-  3. Cadastrar o Dashboard App `/crm-sidebar?token=...`, o MCP Server `/api/crm-bridge/mcp`, o Webhook `/api/crm-bridge/webhooks/evo?token=...` e conectar o WhatsApp QR no `https://crm.phonecenter.tech`.
+- **Fase Atual:** `Fases 0, 1, 3, 4, 5, 5B e 6` **CONCLUÍDAS NO CÓDIGO E NA INFRA!** 🚀
+- **Entregas da Sessão Atual (2026-11-21):**
+  - **Blindagem Multi-Loja & Correções Críticas:**
+    - Autenticação em 3 níveis (`master`, `sessao` ERP, `loja_token` por loja via `bridge_token` / `webhook_token` gerenciáveis em `/crm-config` e `/api/crm-bridge/minha-loja`), removendo fallback cross-tenant e isolando instâncias da Evolution API por loja.
+    - CORS restrito por allowlist (`origemPermitidaCrm` em `src/lib/crm-bridge/auth.ts`).
+    - Webhook Mercado Pago (`/api/crm-bridge/webhooks/pagamento`) validado via API real `GET /v1/payments/{id}` (`status === 'approved'`) + reserva real e idempotente de IMEI em `aparelhos` usando `aplicarMudancaEstoque()` (`patchReserva` / `patchLiberarReserva`).
+    - Rotas públicas `/bio`, `/proposta` e `/crm-sidebar` liberadas em `AuthContext.tsx`; correção de logs (`registrarLog()`), paginação/source_id e fechamento de conexões em `tickets-ops`, ocultação de aparelhos reservados na vitrine `/bio`, e lazy import browser em `src/lib/logger.ts`.
+  - **Funções Matadoras do CRM:**
+    - **1-Clique Enviar no Chat (`/api/crm-bridge/enviar-mensagem`)** + **1-Clique Fechar Venda & Notinha PDF (`/api/crm-bridge/pre-venda`)** via `registrarVendaAtomica()` e `gerarReciboPdfBuffer()`.
+    - **Motor de Pós-Venda Automático "PhoneCenter Turbo" (`posVenda.ts`, `/api/crm-bridge/pos-venda`, `/api/crm-bridge/notificar-os`)**: 9 réguas (D+0, D+7 Google Review, D+90/180/300 Upgrade com pré-avaliação automática, Garantia D-15, Aniversário, Follow-up Proposta 24h e Notificação OS) + alertas instantâneos de **Proposta Quente** (aberta/aceita/recusada) no chat interno.
+    - **MCP Server IA expandido para 8 tools (`/api/crm-bridge/mcp`)**, **IA Vision Avaliação de Troca por Foto (`/api/crm-bridge/avaliar-foto-troca`)**, **Validador IMEI Luhn GSMA (`/api/crm-bridge/imei`)** e **Metas / Minha Evolução (`/api/crm-bridge/metas`)**.
+  - **Telefonia, UX Native & Suite Completa (`/crm-hub` + `infra/crm/branding/`):**
+    - **CRM Phone / Telefonia:** Click-to-Call, webhook universal PABX/VoIP (`/api/crm-bridge/webhooks/telefonia`, `/api/crm-bridge/telefonia`) e banner popup Cliente 360º ao vivo no `/crm-sidebar`.
+    - **Suite `/crm-hub`:** Abas de Operação/Pós-Venda/Telefonia, Rodízio Avançado por Setor (`/api/crm-bridge/rodizio`), Campanhas Anti-Ban (`/api/crm-bridge/campanhas`), Kanban de Grupos & Comunidades (`/api/crm-bridge/kanban-grupos`), CRM Academy (`/api/crm-bridge/academy`), Financeiro de Reservas/Comissões e Gestor Multi-Loja.
+    - **White-Label `infra/crm/branding/`:** Status real pós-login na API EvoCRM, badges visuais de SLA em atraso/crítico, atalho global `Ctrl+K` para a Suite PhoneCenter, alternância Dark/Light-Navy e `Dockerfile` dedicado (`infra/crm/branding/Dockerfile`).
+    - **SaaS Multi-Loja (`autoProvision.ts` & `docker-compose.tenant.yml`):** Modo padrão `compartilhado` (instantâneo com tokens isolados + Time no EvoCRM) e modo `isolado` Enterprise (com stack completa de IA e payload `docker_compose_raw` Base64 para Coolify).
+  - `npm run typecheck` com **0 erros** e **`npm test` 586/586 passando** (zero falhas!).
+- **Ações manuais externas restantes:**
+  1. Aplicar as migrations SQL pendentes no Supabase (incluindo `20261121_phonecenter_crm_completo.sql`).
+  2. Configurar variáveis no Coolify e credenciais OAuth externas (Meta Cloud/Instagram/Google Calendar) conforme `docs/crm/OAUTH-SETUP.md`.
+  3. Opcionalmente sincronizar a pasta atualizada `infra/crm/branding/` para `/opt/phonecenter-crm/branding/` na VPS e rodar teste E2E ao vivo.
 
 ---
 
@@ -49,39 +58,41 @@
 - [ ] Configurar canal **Facebook Messenger + Webchat Widget**
 - [ ] Configurar **Google Calendar** (OAuth Google Cloud → agendamento de visitas/retiradas no CRM)
 - [ ] Configurar **SMTP transacional** (Resend/SMTP) e **Storage S3/R2** (opcional para mídias pesadas)
-- [ ] Configurar **Setores de Atendimento** (Vendas, Troca/Upgrade, Assistência/Garantia, Atacado, Financeiro) e **Equipe / RBAC**
-- [ ] Configurar **Tags**, **Respostas Rápidas**, **Horário de Funcionamento** e **Pesquisa de Avaliação (CSAT)**
+- [x] Configurar **Setores de Atendimento & Rodízio** (Vendas, Troca/Upgrade, Assistência/Garantia, Atacado, Financeiro) no PhoneCenter CRM Suite (`/crm-hub` + `/api/crm-bridge/rodizio`)
+- [ ] Configurar **Tags**, **Respostas Rápidas**, **Horário de Funcionamento** e **Pesquisa de Avaliação (CSAT)** diretamente nos canais externos após login em produção
 
 ## Fase 3 — White-Label & Identidade Visual PhoneCenterCRM
-- [x] Aplicar camada White-Label imediata (`infra/crm/branding/`: `nginx.conf` + `phonecenter-theme.css` + `phonecenter-brand.js` + logos oficiais) ao vivo em `crm.phonecenter.tech`
-- [x] Aplicar paleta PhoneCenter (`#090d16`–`#0f172a`, Azul `#0066FF`), logos/favicons e título **PhoneCenterCRM**
-- [x] Injetar seletor de status inicial no Login (`Online / Ausente / Offline`) e dock rápido ERP / Link na Bio
+- [x] Aplicar camada White-Label imediata (`infra/crm/branding/`: `nginx.conf` + `phonecenter-theme.css` + `phonecenter-brand.js` + logos oficiais)
+- [x] Aplicar paleta PhoneCenter (`#090d16`–`#0f172a`, Azul `#0066FF`), logos/favicons oficiais e título **PhoneCenterCRM**
+- [x] Injetar seletor de status inicial no Login com sincronização real pós-login, badges visuais de SLA, atalho `Ctrl+K` para `/crm-hub` e alternância Dark/Light-Navy
 - [x] Liberar CSP `frame-src` no Nginx para carregar Dashboard Apps de `https://app.phonecenter.tech`
-- [ ] *(Opcional Fase 3B)* Criar fork completo do `evo-ai-frontend-community` com build via GitHub Actions → GHCR para reorganização estrutural da sidebar PT-BR
+- [x] Criar `infra/crm/branding/Dockerfile` pronto para imagem White-Label customizada (e comando único de sync para `/opt/phonecenter-crm/branding/`)
 
 ## Fase 4 — Integração Profunda PhoneCenter ERP (`PAINELCELULAR` ↔ `PhoneCenterCRM`)
-- [x] Criar camada **PhoneCenter CRM Bridge** (`/api/crm-bridge/*` com auth timing-safe + CORS + testes unitários)
-- [x] **Consulta de Clientes 360º:** `/api/crm-bridge/clientes/lookup` (cadastro + compras + garantias + OS)
-- [x] **Consulta de Estoque Vivo:** `/api/crm-bridge/estoque` (busca inteligente com sinônimos + texto pronto WhatsApp)
-- [x] **Simulador Troca/Upgrade + Maquininha:** `/api/crm-bridge/simular` (motor `upgradeEngine` + tabela real `taxas_maquininha`)
-- [x] **Dashboard App Lateral no Chat (`/crm-sidebar`):** 4 abas (Estoque, Cliente 360º, Troca/Proposta PDF, Ranking) com auto-contexto `postMessage` do EvoCRM
-- [x] **MCP Server PhoneCenter (`/api/crm-bridge/mcp`):** JSON-RPC 2.0 com tools `consultar_estoque`, `simular_troca_e_parcelas`, `consultar_cliente_garantia`, `resumo_ranking_vendas`
-- [x] **Webhook receptor (`/api/crm-bridge/webhooks/evo`):** registra eventos e referrals de anúncios no ERP
+- [x] Criar camada **PhoneCenter CRM Bridge** (`/api/crm-bridge/*` com auth 3 níveis, tokens isolados por loja, CORS allowlist & testes unitários)
+- [x] **Consulta de Clientes 360º:** `/api/crm-bridge/clientes/lookup` + **Consulta IMEI Luhn GSMA:** `/api/crm-bridge/imei`
+- [x] **Consulta de Estoque Vivo:** `/api/crm-bridge/estoque` (com status `reservado`, texto WhatsApp e envio 1-clique no chat)
+- [x] **Simulador Troca/Upgrade + Foto IA Vision + Maquininha:** `/api/crm-bridge/simular` + `/api/crm-bridge/avaliar-foto-troca`
+- [x] **Dashboard App Lateral no Chat (`/crm-sidebar`):** Estoque (1-clique enviar/fechar venda), Cliente 360º, Troca/Proposta PDF + Vision, Ranking & Minha Evolução, Ops/Pix/Telefonia
+- [x] **MCP Server PhoneCenter (`/api/crm-bridge/mcp`):** JSON-RPC 2.0 com **8 tools** (consulta + gerar proposta + gerar Pix reserva + agendar visita + transferir vendedor)
+- [x] **Webhook receptor (`/api/crm-bridge/webhooks/evo`):** registra eventos, leads de anúncios e conversão Meta CAPI via `registrarLog()`
 
-## Fase 5 — Módulos Exclusivos (Superando o Mercado Phone CRM)
-- [x] **Ranking de Vendas & Relatório de Vendas Real (ERP):** `/api/crm-bridge/ranking` + aba Ranking no `/crm-sidebar`
-- [x] **Gestão de Conexões (Reiniciar/Desconectar EvoAPI):** `/api/crm-bridge/conexoes` + aba Ops
-- [x] **Link na Bio com Vitrine Dinâmica de Estoque:** `/bio` + `/api/publico/vitrine`
-- [x] **Propostas Comerciais com link público, aceite & PDF:** `crm_propostas` + `/api/crm-bridge/propostas` + `/proposta/[token]`
-- [x] **Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS):** `crm_leads_anuncio` + captura automática no webhook + `/api/crm-bridge/leads-anuncio` + Meta CAPI `Purchase`
-- [x] **Migrar Tickets entre Conexões & Fechamento em Massa por Filtro:** `/api/crm-bridge/tickets-ops` + painel visual na aba Ops
-- [x] **Chat Interno da Equipe:** `crm_chat_interno` + `/api/crm-bridge/chat-interno` (5 canais) + painel visual na aba Ops
-- [ ] **Rodízio Inteligente avançado + Kanban Grupos + CRM Academy + Financeiro (Fase 5B/6)**
+## Fase 5 — Módulos Exclusivos & Telefonia (Superando o Mercado Phone CRM)
+- [x] **Ranking de Vendas, Metas & Minha Evolução:** `/api/crm-bridge/ranking` + `/api/crm-bridge/metas`
+- [x] **Gestão de Conexões Isolada por Loja (EvoAPI):** `/api/crm-bridge/conexoes` + `/api/crm-bridge/minha-loja`
+- [x] **Link na Bio com Vitrine Dinâmica (oculta reservados):** `/bio` + `/api/publico/vitrine`
+- [x] **Propostas Comerciais com link público, aceite, PDF & Alertas de Proposta Quente:** `crm_propostas` + `/api/crm-bridge/propostas` + `/proposta/[token]`
+- [x] **Leads de Anúncio (Meta Ads CTWA + CAPI/ROAS):** `crm_leads_anuncio` + captura automática no webhook + `/api/crm-bridge/leads-anuncio`
+- [x] **Migrar Tickets entre Conexões (`source_id` + paginação completa) & Fechamento em Massa:** `/api/crm-bridge/tickets-ops`
+- [x] **Chat Interno da Equipe & Fechamento 1-Clique com Notinha PDF:** `/api/crm-bridge/chat-interno` + `/api/crm-bridge/pre-venda`
+- [x] **Motor de Pós-Venda Automático "PhoneCenter Turbo" (9 réguas + OS Status):** `posVenda.ts` + `/api/crm-bridge/pos-venda` + `/api/crm-bridge/notificar-os`
+- [x] **Telefonia / CRM Phone (Click-to-Call + Webhook PABX/VoIP + Popup 360º):** `/api/crm-bridge/telefonia` + `/api/crm-bridge/webhooks/telefonia`
+- [x] **Suite `/crm-hub` + Rodízio Inteligente + Campanhas Anti-Ban + Kanban Grupos + CRM Academy + Financeiro (Fase 5B)**
 
 ## Fase 6 — Escala Multi-Loja (SaaS PhoneCenter) & Governança
-- [x] Definir modelo Multi-Loja definitivo + criar template isolado `infra/crm/docker-compose.tenant.yml` e API `/api/crm-bridge/multi-loja/provisionar` (`crm_tenants`)
-- [x] Integrar link direto **CRM** no cabeçalho do painel principal `PAINELCELULAR` (`src/app/page.tsx`)
-- [x] Integrar **Pix EMV BACEN / Asaas / Mercado Pago** para cobrança de sinal/reserva dentro do chat (`/api/crm-bridge/pix-reserva` + `/api/crm-bridge/webhooks/pagamento` + sub-aba Pix)
+- [x] Definir modelo Multi-Loja híbrido (`compartilhado` padrão R\$ 299/mês + `isolado` Enterprise com IA completa) em `infra/crm/docker-compose.tenant.yml` e `/api/crm-bridge/multi-loja/provisionar` (`crm_tenants` + `autoProvision.ts`)
+- [x] Integrar links diretos **CRM** e **Suite (`/crm-hub`)** no cabeçalho do `PAINELCELULAR` (`src/app/page.tsx`) + sessão nativa em `/crm-config`
+- [x] Integrar **Pix EMV BACEN / Asaas / Mercado Pago (validação real API + lock/unlock real de IMEI via `aplicarMudancaEstoque`)**
 - [x] Monitoramento automático da VPS (`/opt/phonecenter-crm/health-monitor.sh` via cron a cada 5 min — `ram=32% disk=22%`)
-- [x] Documentar URLs oficiais de OAuth/Webhook Meta & Google + envs Coolify em `docs/crm/OAUTH-SETUP.md`
-- [ ] Executar teste E2E ao vivo pós-configuração das envs no Coolify e migrations no Supabase
+- [x] Atualizar `docs/crm/OAUTH-SETUP.md` com tokens isolados, Telefonia webhook, Cron Pós-Venda e sync de branding
+- [ ] Executar teste E2E ao vivo pós-aplicação das migrations SQL no Supabase, envs no Coolify e sync do branding na VPS

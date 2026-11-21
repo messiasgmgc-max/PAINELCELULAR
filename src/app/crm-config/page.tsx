@@ -13,7 +13,13 @@ import {
   AlertTriangle,
   ShieldCheck,
   Radio,
+  Sparkles,
+  Phone,
+  Clock,
+  KeyRound,
+  RotateCw,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 
 interface LojaItem {
   id: string;
@@ -43,6 +49,16 @@ interface ConfigForm {
   meta_pixel_id: string;
   meta_capi_access_token: string;
   whatsapp_bio_numero: string;
+  bridge_token: string;
+  webhook_token: string;
+  modo_tenant: 'compartilhado' | 'isolado';
+  google_review_url: string;
+  pos_venda_ativo: boolean;
+  telefonia_ativo: boolean;
+  telefonia_provedor: 'click_to_call' | 'sip_webrtc' | 'webhook_pabx';
+  telefonia_ramal_url: string;
+  sla_alerta_minutos: number;
+  sla_critico_minutos: number;
 }
 
 const DEFAULT_FORM: ConfigForm = {
@@ -61,19 +77,32 @@ const DEFAULT_FORM: ConfigForm = {
   meta_pixel_id: '',
   meta_capi_access_token: '',
   whatsapp_bio_numero: '',
+  bridge_token: '',
+  webhook_token: '',
+  modo_tenant: 'compartilhado',
+  google_review_url: '',
+  pos_venda_ativo: false,
+  telefonia_ativo: false,
+  telefonia_provedor: 'click_to_call',
+  telefonia_ramal_url: '',
+  sla_alerta_minutos: 15,
+  sla_critico_minutos: 120,
 };
 
 export default function CrmConfigPage() {
   const [token, setToken] = useState('');
   const [tokenInput, setTokenInput] = useState('');
+  const [authFalhou, setAuthFalhou] = useState(false);
+  const [escopoGlobal, setEscopoGlobal] = useState(false);
   const [lojas, setLojas] = useState<LojaItem[]>([]);
   const [lojaId, setLojaId] = useState('');
   const [lojaNome, setLojaNome] = useState('');
   const [form, setForm] = useState<ConfigForm>(DEFAULT_FORM);
   const [instancias, setInstancias] = useState<InstanciaEvo[]>([]);
   const [migrationPendente, setMigrationPendente] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [rotacionando, setRotacionando] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
   const [copiado, setCopiado] = useState<string | null>(null);
 
@@ -81,41 +110,70 @@ export default function CrmConfigPage() {
     const sp = new URLSearchParams(window.location.search);
     const t = sp.get('token') || window.localStorage.getItem('pc_crm_bridge_token') || '';
     const l = sp.get('loja_id') || '';
-    if (t) {
-      window.localStorage.setItem('pc_crm_bridge_token', t);
-      setToken(t);
+    if (sp.get('token')) {
+      window.localStorage.setItem('pc_crm_bridge_token', sp.get('token') || '');
     }
+    if (t) setToken(t);
     if (l) setLojaId(l);
   }, []);
 
-  const headers = useMemo(() => {
+  const buildHeaders = useCallback(async () => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) h['X-PhoneCenter-CRM-Key'] = token;
     if (lojaId) h['x-phonecenter-loja-id'] = lojaId;
+    if (!token) {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          h.Authorization = `Bearer ${session.access_token}`;
+        }
+      } catch {
+        // segue via cookie
+      }
+    }
     return h;
   }, [token, lojaId]);
 
   const carregarTudo = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
     setMensagem(null);
     try {
+      const headers = await buildHeaders();
       const qs = new URLSearchParams({ listar_lojas: '1' });
       if (lojaId) qs.set('loja_id', lojaId);
 
       const [cfgRes, evoRes] = await Promise.all([
-        fetch(`/api/crm-bridge/config-loja?${qs.toString()}`, { headers }),
-        fetch('/api/crm-bridge/conexoes', { headers }),
+        fetch(`/api/crm-bridge/config-loja?${qs.toString()}`, {
+          headers,
+          credentials: 'include',
+        }),
+        fetch('/api/crm-bridge/conexoes', {
+          headers,
+          credentials: 'include',
+        }),
       ]);
 
-      const cfgData = await cfgRes.json();
+      const cfgData = await cfgRes.json().catch(() => ({}));
       const evoData = await evoRes.json().catch(() => ({}));
 
-      if (!cfgRes.ok || !cfgData.ok) {
-        setMensagem({ tipo: 'erro', texto: cfgData.error || 'Chave CRM_BRIDGE_SECRET inválida.' });
+      if (cfgRes.status === 401) {
+        setAuthFalhou(true);
         return;
       }
 
+      if (!cfgRes.ok || !cfgData.ok) {
+        setAuthFalhou(false);
+        setMensagem({
+          tipo: 'erro',
+          texto: cfgData.error || 'Erro ao carregar configuração da loja.',
+        });
+        return;
+      }
+
+      setAuthFalhou(false);
+      setEscopoGlobal(Boolean(cfgData.escopoGlobal));
       if (Array.isArray(cfgData.lojas)) setLojas(cfgData.lojas);
       if (cfgData.loja?.id) {
         setLojaId(cfgData.loja.id);
@@ -138,20 +196,22 @@ export default function CrmConfigPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, lojaId, headers]);
+  }, [lojaId, buildHeaders]);
 
   useEffect(() => {
-    if (token) carregarTudo();
-  }, [token, lojaId, carregarTudo]);
+    carregarTudo();
+  }, [carregarTudo]);
 
   const salvar = async () => {
-    if (!token || !lojaId) return;
+    if (!lojaId) return;
     setSalvando(true);
     setMensagem(null);
     try {
+      const headers = await buildHeaders();
       const res = await fetch('/api/crm-bridge/config-loja', {
         method: 'PUT',
         headers,
+        credentials: 'include',
         body: JSON.stringify({ loja_id: lojaId, ...form }),
       });
       const data = await res.json();
@@ -171,6 +231,39 @@ export default function CrmConfigPage() {
     }
   };
 
+  const rotacionarToken = async (tipo: 'rotacionar_bridge_token' | 'rotacionar_webhook_token') => {
+    if (!lojaId) return;
+    if (
+      !window.confirm(
+        'Rotacionar este token invalida o link anterior no CRM até atualizar lá. Continuar?'
+      )
+    ) {
+      return;
+    }
+    setRotacionando(tipo);
+    try {
+      const headers = await buildHeaders();
+      const res = await fetch('/api/crm-bridge/config-loja', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ loja_id: lojaId, action: tipo }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setMensagem({
+          tipo: 'ok',
+          texto: 'Token isolado rotacionado! Copie os novos links abaixo e atualize no CRM.',
+        });
+        await carregarTudo();
+      } else {
+        setMensagem({ tipo: 'erro', texto: data.error || 'Erro ao rotacionar token.' });
+      }
+    } finally {
+      setRotacionando(null);
+    }
+  };
+
   const copiar = async (id: string, val: string) => {
     await navigator.clipboard.writeText(val);
     setCopiado(id);
@@ -179,6 +272,11 @@ export default function CrmConfigPage() {
 
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://app.phonecenter.tech';
+
+  const bridgeTokenUso = form.bridge_token || token || '<BRIDGE_TOKEN_DA_LOJA>';
+  const webhookTokenUso = form.webhook_token || bridgeTokenUso;
+
+  const pronto = useMemo(() => !authFalhou && Boolean(lojaId), [authFalhou, lojaId]);
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 py-8 px-4">
@@ -193,14 +291,20 @@ export default function CrmConfigPage() {
             />
             <div>
               <h1 className="text-xl font-bold text-white">
-                PhoneCenter<span className="text-[#007BFF]">CRM</span> — Configuração por Loja / Instância
+                PhoneCenter<span className="text-[#007BFF]">CRM</span> — Configuração por Loja &amp; Segurança
               </h1>
               <p className="text-xs text-slate-400">
-                Cada loja guarda sua própria instância Evolution API, Chave Pix, Token CRM e Meta CAPI no Supabase.
+                Tokens isolados por loja, WhatsApp Evolution API, Pix, Pós-Venda IA, Telefonia e Meta CAPI.
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/crm-hub"
+              className="px-3.5 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-200 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Central CRM Suite
+            </a>
             <a
               href={form.crm_frontend_url || 'https://crm.phonecenter.tech'}
               target="_blank"
@@ -218,14 +322,24 @@ export default function CrmConfigPage() {
           </div>
         </header>
 
-        {/* Autenticação */}
-        {!token && (
+        {/* Autenticação apenas se sessão não encontrada */}
+        {authFalhou && (
           <div className="p-5 rounded-2xl bg-[#0f172a] border border-[#0066FF]/40 space-y-3">
             <div className="font-semibold text-white flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-[#007BFF]" />
-              Informe sua chave CRM_BRIDGE_SECRET
+              Faça login no PhoneCenter ERP ou informe um token de acesso
             </div>
-            <div className="flex gap-2">
+            <p className="text-xs text-slate-400">
+              Para gestores da loja, basta estar logado no painel. Administradores da plataforma também
+              podem informar a chave mestra ou o <code>bridge_token</code> da loja.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="/login"
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold"
+              >
+                Ir para Login do ERP
+              </a>
               <input
                 type="password"
                 value={tokenInput}
@@ -236,8 +350,8 @@ export default function CrmConfigPage() {
                     setToken(tokenInput.trim());
                   }
                 }}
-                placeholder="Digite o CRM_BRIDGE_SECRET configurado no Coolify..."
-                className="flex-1 px-3 py-2 rounded-xl bg-[#090d16] border border-white/15 text-sm text-white"
+                placeholder="Ou cole o bridge_token / CRM_BRIDGE_SECRET..."
+                className="flex-1 min-w-[220px] px-3 py-2 rounded-xl bg-[#090d16] border border-white/15 text-sm text-white"
               />
               <button
                 onClick={() => {
@@ -259,8 +373,8 @@ export default function CrmConfigPage() {
             <AlertTriangle className="w-5 h-5 shrink-0" />
             <div>
               <strong>Migration pendente no Supabase:</strong> execute{' '}
-              <code>supabase/migrations/20261120_phonecenter_crm_loja_configs.sql</code> no SQL
-              Editor do Supabase para habilitar o salvamento por loja.
+              <code>supabase/migrations/20261121_phonecenter_crm_completo.sql</code> no SQL Editor
+              do Supabase para habilitar tokens isolados por loja, Pós-Venda IA, Telefonia e SLA.
             </div>
           </div>
         )}
@@ -277,26 +391,32 @@ export default function CrmConfigPage() {
           </div>
         )}
 
-        {token && (
+        {pronto && (
           <>
-            {/* Seletor de Loja */}
+            {/* Barra da Loja */}
             <div className="p-4 rounded-2xl bg-[#0f172a] border border-white/10 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-[240px]">
-                <label className="text-xs font-semibold text-slate-300 shrink-0">
-                  Loja / Tenant:
-                </label>
-                <select
-                  value={lojaId}
-                  onChange={(e) => setLojaId(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl bg-[#090d16] border border-white/15 text-sm text-white"
-                >
-                  {lojas.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.nome} ({l.id.slice(0, 8)})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {escopoGlobal && lojas.length > 1 ? (
+                <div className="flex items-center gap-3 flex-1 min-w-[240px]">
+                  <label className="text-xs font-semibold text-slate-300 shrink-0">
+                    Loja / Tenant:
+                  </label>
+                  <select
+                    value={lojaId}
+                    onChange={(e) => setLojaId(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl bg-[#090d16] border border-white/15 text-sm text-white"
+                  >
+                    {lojas.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.nome} ({l.id.slice(0, 8)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="text-sm font-semibold text-white">
+                  Loja ativa: <span className="text-[#007BFF]">{lojaNome || lojaId}</span>
+                </div>
+              )}
               <button
                 onClick={carregarTudo}
                 className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 flex items-center gap-1.5"
@@ -305,6 +425,53 @@ export default function CrmConfigPage() {
                 Atualizar
               </button>
             </div>
+
+            {/* Bloco 0: Tokens Isolados desta Loja */}
+            <section className="p-5 rounded-2xl bg-[#0f172a] border border-emerald-500/30 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-emerald-400" />
+                  Segurança Multi-Loja: Tokens Isolados desta Loja
+                </h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  Escopo travado na loja
+                </span>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-[#090d16] border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-semibold">Bridge Token (Sidebar &amp; MCP)</span>
+                    <button
+                      type="button"
+                      disabled={rotacionando === 'rotacionar_bridge_token'}
+                      onClick={() => rotacionarToken('rotacionar_bridge_token')}
+                      className="text-blue-300 hover:text-blue-200 flex items-center gap-1 text-[11px]"
+                    >
+                      <RotateCw className="w-3 h-3" /> Rotacionar
+                    </button>
+                  </div>
+                  <div className="font-mono text-[11px] text-emerald-300 truncate">
+                    {form.bridge_token || 'Rode a migration 20261121 para gerar automaticamente'}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-[#090d16] border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-semibold">Webhook Token (Evo / Pix / VoIP)</span>
+                    <button
+                      type="button"
+                      disabled={rotacionando === 'rotacionar_webhook_token'}
+                      onClick={() => rotacionarToken('rotacionar_webhook_token')}
+                      className="text-blue-300 hover:text-blue-200 flex items-center gap-1 text-[11px]"
+                    >
+                      <RotateCw className="w-3 h-3" /> Rotacionar
+                    </button>
+                  </div>
+                  <div className="font-mono text-[11px] text-amber-300 truncate">
+                    {form.webhook_token || 'Rode a migration 20261121 para gerar automaticamente'}
+                  </div>
+                </div>
+              </div>
+            </section>
 
             {/* Bloco 1: Instância Evolution API */}
             <section className="p-5 rounded-2xl bg-[#0f172a] border border-white/10 space-y-4">
@@ -358,7 +525,7 @@ export default function CrmConfigPage() {
                     onChange={(e) =>
                       setForm((f) => ({ ...f, evolution_instance_name: e.target.value }))
                     }
-                    placeholder="ex: lucasimports ou testegui"
+                    placeholder="ex: lucasimports"
                     className="w-full mt-1 px-3 py-2 rounded-xl bg-[#090d16] border border-white/10 text-sm text-white"
                   />
                 </div>
@@ -376,8 +543,7 @@ export default function CrmConfigPage() {
                       <strong className="text-white block">
                         Espelhar Webhook pro CRM (Modo Seguro)
                       </strong>
-                      Use se a instância já roda o bot de notinhas do PhoneCenter — encaminha cópia
-                      para o CRM sem derrubar o bot!
+                      Encaminha cópia para o CRM sem interferir no bot de notinhas do PhoneCenter.
                     </span>
                   </label>
                 </div>
@@ -416,7 +582,7 @@ export default function CrmConfigPage() {
                   <input
                     value={form.crm_access_token}
                     onChange={(e) => setForm((f) => ({ ...f, crm_access_token: e.target.value }))}
-                    placeholder="Opcional — usado para operações em massa de tickets"
+                    placeholder="Opcional — usado para envio direto e ops em massa"
                     className="w-full mt-1 px-3 py-2 rounded-xl bg-[#090d16] border border-white/10 text-sm text-white"
                   />
                 </div>
@@ -510,7 +676,7 @@ export default function CrmConfigPage() {
               </div>
             </section>
 
-            {/* Bloco 4: Meta Ads CAPI desta Loja */}
+            {/* Bloco 4: Meta Ads CAPI */}
             <section className="p-5 rounded-2xl bg-[#0f172a] border border-white/10 space-y-3">
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
                 <Megaphone className="w-4 h-4 text-blue-400" />
@@ -540,6 +706,122 @@ export default function CrmConfigPage() {
               </div>
             </section>
 
+            {/* Bloco 5: Pós-Venda Turbo, SLA & Telefonia */}
+            <section className="p-5 rounded-2xl bg-[#0f172a] border border-white/10 space-y-4">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#007BFF]" />
+                5. Pós-Venda Automático, SLA Visual &amp; Telefonia (CRM Phone)
+              </h2>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[#090d16] border border-white/10 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.pos_venda_ativo}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, pos_venda_ativo: e.target.checked }))
+                    }
+                    className="mt-0.5 accent-[#0066FF]"
+                  />
+                  <span className="text-xs text-slate-300">
+                    <strong className="text-white block">Ativar Pós-Venda Automático (Turbo IA)</strong>
+                    Dispara acompanhamento D+7, recompra com avaliação automática D+90/180/300 e
+                    lembretes de garantia/aniversário.
+                  </span>
+                </label>
+                <div>
+                  <label className="text-xs text-slate-400">
+                    Link de Avaliação Google Meu Negócio (D+7)
+                  </label>
+                  <input
+                    value={form.google_review_url}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, google_review_url: e.target.value }))
+                    }
+                    placeholder="https://g.page/r/..."
+                    className="w-full mt-1 px-3 py-2 rounded-xl bg-[#090d16] border border-white/10 text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-[#090d16] border border-white/10 space-y-2">
+                  <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" /> SLA Visual nos Cards
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] text-slate-400">Alerta Amarelo (min)</label>
+                      <input
+                        type="number"
+                        value={form.sla_alerta_minutos}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            sla_alerta_minutos: Number(e.target.value) || 15,
+                          }))
+                        }
+                        className="w-full mt-1 px-2.5 py-1.5 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Crítico Vermelho (min)</label>
+                      <input
+                        type="number"
+                        value={form.sla_critico_minutos}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            sla_critico_minutos: Number(e.target.value) || 120,
+                          }))
+                        }
+                        className="w-full mt-1 px-2.5 py-1.5 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[#090d16] border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-400" /> Telefonia / CRM Phone
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={form.telefonia_ativo}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, telefonia_ativo: e.target.checked }))
+                      }
+                      className="accent-[#0066FF]"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={form.telefonia_provedor}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          telefonia_provedor: e.target.value as ConfigForm['telefonia_provedor'],
+                        }))
+                      }
+                      className="px-2 py-1.5 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                    >
+                      <option value="click_to_call">Click-to-Call (tel:)</option>
+                      <option value="sip_webrtc">Softphone WebRTC</option>
+                      <option value="webhook_pabx">PABX / Asterisk / Zenvia</option>
+                    </select>
+                    <input
+                      value={form.telefonia_ramal_url}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, telefonia_ramal_url: e.target.value }))
+                      }
+                      placeholder="URL WebRTC / Ramal (opc.)"
+                      className="px-2 py-1.5 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
             {/* Botão Salvar */}
             <div className="flex justify-end">
               <button
@@ -552,27 +834,37 @@ export default function CrmConfigPage() {
               </button>
             </div>
 
-            {/* Links Prontos para Colar no CRM */}
+            {/* Links Prontos para Colar no CRM (usando tokens isolados da loja!) */}
             {lojaId && (
               <section className="p-5 rounded-2xl bg-[#0f172a] border border-[#0066FF]/35 space-y-3">
                 <h2 className="text-sm font-bold text-white">
-                  Links Prontos desta Loja (copie e cole no PhoneCenterCRM)
+                  Links Prontos desta Loja (Tokens Isolados — Seguro para Produção)
                 </h2>
                 {[
                   {
                     id: 'sidebar',
                     label: 'Dashboard App (Barra Lateral do Chat)',
-                    url: `${origin}/crm-sidebar?loja_id=${lojaId}&token=${encodeURIComponent(token)}`,
+                    url: `${origin}/crm-sidebar?loja_id=${lojaId}&token=${encodeURIComponent(bridgeTokenUso)}`,
                   },
                   {
                     id: 'mcp',
                     label: 'MCP Server IA (Admin > MCP Servers + header X-PhoneCenter-CRM-Key)',
-                    url: `${origin}/api/crm-bridge/mcp?loja_id=${lojaId}`,
+                    url: `${origin}/api/crm-bridge/mcp?token=${encodeURIComponent(bridgeTokenUso)}`,
                   },
                   {
                     id: 'webhook',
-                    label: 'Webhook do CRM → ERP (captura Leads CTWA & Eventos)',
-                    url: `${origin}/api/crm-bridge/webhooks/evo?loja_id=${lojaId}&token=${encodeURIComponent(token)}`,
+                    label: 'Webhook do CRM → ERP (captura Leads CTWA, CAPI & Eventos)',
+                    url: `${origin}/api/crm-bridge/webhooks/evo?token=${encodeURIComponent(webhookTokenUso)}`,
+                  },
+                  {
+                    id: 'webhook-pix',
+                    label: 'Webhook de Pagamento Pix (Mercado Pago / Asaas)',
+                    url: `${origin}/api/crm-bridge/webhooks/pagamento?token=${encodeURIComponent(webhookTokenUso)}`,
+                  },
+                  {
+                    id: 'webhook-tel',
+                    label: 'Webhook PABX / VoIP (Identificador de Chamadas)',
+                    url: `${origin}/api/crm-bridge/webhooks/telefonia?token=${encodeURIComponent(webhookTokenUso)}`,
                   },
                   {
                     id: 'bio',

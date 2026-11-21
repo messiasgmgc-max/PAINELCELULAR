@@ -14,20 +14,53 @@ import {
   QrCode,
   Copy,
   Check,
+  ExternalLink,
+  Trash2,
 } from 'lucide-react';
+
+interface EstoqueResumo {
+  id: string;
+  modelo: string;
+  capacidade: string;
+  cor: string;
+  preco: number;
+  reservado?: boolean;
+}
+
+interface ReservaPixItem {
+  id: string;
+  protocolo: string;
+  aparelho_modelo: string;
+  cliente_nome: string;
+  valor_sinal: number;
+  provedor: string;
+  status: string;
+}
 
 interface Props {
   headersBridge: Record<string, string>;
-  token: string;
+  autenticado: boolean;
   agenteNome?: string;
+  conversationId?: string;
+  clienteCtx?: { nome: string; telefone: string };
+  estoqueItens?: EstoqueResumo[];
+  onEnviadoChat?: (msg: string) => void;
 }
 
-type SubAba = 'ads' | 'chat' | 'pix' | 'ops';
+type SubAba = 'ads' | 'pix' | 'chat' | 'ops';
 
 const formatBRL = (v: number) =>
   (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props) {
+export default function CrmOpsPanel({
+  headersBridge,
+  autenticado,
+  agenteNome,
+  conversationId,
+  clienteCtx,
+  estoqueItens = [],
+  onEnviadoChat,
+}: Props) {
   const [sub, setSub] = useState<SubAba>('ads');
 
   // Leads de Anúncio
@@ -72,36 +105,48 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
   const [loadingOps, setLoadingOps] = useState(false);
 
   // Pix / Sinal Reserva
+  const [pixAparelhoId, setPixAparelhoId] = useState('');
   const [pixModelo, setPixModelo] = useState('');
   const [pixValor, setPixValor] = useState('200');
   const [pixChave, setPixChave] = useState('');
-  const [pixCliente, setPixCliente] = useState('');
+  const [pixCliente, setPixCliente] = useState(clienteCtx?.nome || '');
+  const [pixTelefone, setPixTelefone] = useState(clienteCtx?.telefone || '');
   const [pixGerado, setPixGerado] = useState<{
     protocolo: string;
     provedor: string;
     pixCopiaCola: string;
     textoWhatsapp: string;
   } | null>(null);
+  const [reservasRecentes, setReservasRecentes] = useState<ReservaPixItem[]>([]);
   const [pixCopiado, setPixCopiado] = useState(false);
   const [pixLoading, setPixLoading] = useState(false);
 
+  useEffect(() => {
+    if (clienteCtx?.nome && !pixCliente) setPixCliente(clienteCtx.nome);
+    if (clienteCtx?.telefone && !pixTelefone) setPixTelefone(clienteCtx.telefone);
+  }, [clienteCtx, pixCliente, pixTelefone]);
+
   const carregarAds = useCallback(async () => {
-    if (!token) return;
+    if (!autenticado) return;
     setLoadingAds(true);
     try {
-      const res = await fetch('/api/crm-bridge/leads-anuncio?dias=30', { headers: headersBridge });
+      const res = await fetch('/api/crm-bridge/leads-anuncio?dias=30', {
+        headers: headersBridge,
+        credentials: 'include',
+      });
       const data = await res.json();
       if (res.ok && data.ok) setAdsData(data);
     } finally {
       setLoadingAds(false);
     }
-  }, [token, headersBridge]);
+  }, [autenticado, headersBridge]);
 
   const carregarChat = useCallback(async () => {
-    if (!token) return;
+    if (!autenticado) return;
     try {
       const res = await fetch(`/api/crm-bridge/chat-interno?canal=${canal}`, {
         headers: headersBridge,
+        credentials: 'include',
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -111,15 +156,31 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
     } catch {
       // ignora
     }
-  }, [token, canal, headersBridge]);
+  }, [autenticado, canal, headersBridge]);
+
+  const carregarPix = useCallback(async () => {
+    if (!autenticado) return;
+    try {
+      const res = await fetch('/api/crm-bridge/pix-reserva', {
+        headers: headersBridge,
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (res.ok && data.ok && Array.isArray(data.reservas)) {
+        setReservasRecentes(data.reservas.slice(0, 8));
+      }
+    } catch {
+      // ignora
+    }
+  }, [autenticado, headersBridge]);
 
   const carregarOps = useCallback(async () => {
-    if (!token) return;
+    if (!autenticado) return;
     setLoadingOps(true);
     try {
       const [cRes, tRes] = await Promise.all([
-        fetch('/api/crm-bridge/conexoes', { headers: headersBridge }),
-        fetch('/api/crm-bridge/tickets-ops', { headers: headersBridge }),
+        fetch('/api/crm-bridge/conexoes', { headers: headersBridge, credentials: 'include' }),
+        fetch('/api/crm-bridge/tickets-ops', { headers: headersBridge, credentials: 'include' }),
       ]);
       const cData = await cRes.json().catch(() => ({}));
       const tData = await tRes.json().catch(() => ({}));
@@ -138,19 +199,21 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
     } finally {
       setLoadingOps(false);
     }
-  }, [token, headersBridge]);
+  }, [autenticado, headersBridge]);
 
   useEffect(() => {
     if (sub === 'ads') carregarAds();
+    if (sub === 'pix') carregarPix();
     if (sub === 'chat') carregarChat();
     if (sub === 'ops') carregarOps();
-  }, [sub, carregarAds, carregarChat, carregarOps]);
+  }, [sub, carregarAds, carregarPix, carregarChat, carregarOps]);
 
   const enviarChat = async () => {
-    if (!novaMsg.trim() || !token) return;
+    if (!novaMsg.trim() || !autenticado) return;
     const res = await fetch('/api/crm-bridge/chat-interno', {
       method: 'POST',
       headers: headersBridge,
+      credentials: 'include',
       body: JSON.stringify({
         canal,
         autorNome: autorChat || 'Vendedor',
@@ -170,9 +233,55 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
     const res = await fetch('/api/crm-bridge/leads-anuncio', {
       method: 'PATCH',
       headers: headersBridge,
+      credentials: 'include',
       body: JSON.stringify({ id, status: 'convertido', valorVenda }),
     });
     if (res.ok) carregarAds();
+  };
+
+  const atualizarStatusPix = async (id: string, status: 'pago' | 'cancelado') => {
+    setStatusOps(
+      status === 'pago' ? 'Confirmando pagamento e travando IMEI...' : 'Cancelando e liberando...'
+    );
+    const res = await fetch('/api/crm-bridge/pix-reserva', {
+      method: 'PATCH',
+      headers: headersBridge,
+      credentials: 'include',
+      body: JSON.stringify({ id, status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      setStatusOps(
+        status === 'pago'
+          ? `Pix confirmado!${data.estoqueReservado ? ' 🔒 Aparelho travado como RESERVADO!' : ''}`
+          : `Reserva cancelada.${data.estoqueLiberado ? ' Aparelho devolvido para disponível.' : ''}`
+      );
+      carregarPix();
+    } else {
+      setStatusOps(data.error || 'Erro ao atualizar reserva.');
+    }
+  };
+
+  const enviarPixNoChat = async () => {
+    if (!pixGerado) return;
+    setStatusOps('Enviando Pix no chat...');
+    const res = await fetch('/api/crm-bridge/enviar-mensagem', {
+      method: 'POST',
+      headers: headersBridge,
+      credentials: 'include',
+      body: JSON.stringify({
+        conversationId,
+        telefone: pixTelefone || clienteCtx?.telefone,
+        texto: pixGerado.textoWhatsapp,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      setStatusOps('Pix enviado direto no chat!');
+      onEnviadoChat?.('Pix enviado no WhatsApp!');
+    } else {
+      setStatusOps(data.error || 'Falha ao enviar direto; use Copiar.');
+    }
   };
 
   const reiniciarInstancia = async (instanceName: string) => {
@@ -180,6 +289,7 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
     const res = await fetch('/api/crm-bridge/conexoes', {
       method: 'POST',
       headers: headersBridge,
+      credentials: 'include',
       body: JSON.stringify({ action: 'restart', instanceName }),
     });
     const data = await res.json().catch(() => ({}));
@@ -188,7 +298,11 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
   };
 
   const executarTicketOp = async (
-    action: 'fechar_todos' | 'fechar_por_filtro' | 'migrar_conexao'
+    action:
+      | 'fechar_todos'
+      | 'fechar_por_filtro'
+      | 'fechar_conexoes_removidas'
+      | 'migrar_conexao'
   ) => {
     if (action === 'fechar_todos' && !window.confirm('Encerrar todos os atendimentos abertos?')) {
       return;
@@ -197,6 +311,7 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
     const res = await fetch('/api/crm-bridge/tickets-ops', {
       method: 'POST',
       headers: headersBridge,
+      credentials: 'include',
       body: JSON.stringify({
         action,
         inboxId: origemInbox ? Number(origemInbox) : undefined,
@@ -219,6 +334,22 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
 
   return (
     <div className="space-y-2.5">
+      {/* Atalho destaque para Central Completa */}
+      <a
+        href="/crm-hub"
+        target="_blank"
+        rel="noreferrer"
+        className="p-2.5 rounded-xl bg-gradient-to-r from-[#0044cc]/40 to-[#0066FF]/20 border border-[#0066FF]/50 hover:border-[#007BFF] flex items-center justify-between text-white"
+      >
+        <div>
+          <div className="font-bold text-[11px]">Abrir Central CRM Suite</div>
+          <div className="text-[10px] text-blue-200">
+            Pós-Venda IA • Rodízio • Campanhas Anti-Ban • Telefonia
+          </div>
+        </div>
+        <ExternalLink className="w-4 h-4 text-blue-300 shrink-0" />
+      </a>
+
       {/* Sub-navegação */}
       <div className="grid grid-cols-4 gap-1 bg-[#0f172a] p-1 rounded-xl border border-white/10">
         {(
@@ -264,8 +395,7 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
             <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[11px] flex gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>
-                Aplique a migration <code>20261120_phonecenter_crm_modulos.sql</code> no Supabase para
-                ativar Leads de Anúncio, Propostas e Chat Interno.
+                Aplique as migrations em <code>supabase/migrations/</code> para ativar Leads de Anúncio.
               </span>
             </div>
           )}
@@ -344,8 +474,7 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
                 })}
                 {adsData.leads.length === 0 && (
                   <div className="text-center py-4 text-slate-500">
-                    Nenhum lead de anúncio capturado ainda. Aponte o webhook do CRM para{' '}
-                    <code>/api/crm-bridge/webhooks/evo</code>.
+                    Nenhum lead de anúncio capturado ainda.
                   </div>
                 )}
               </div>
@@ -386,12 +515,17 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
             className="w-full px-2.5 py-1 rounded-lg bg-[#0f172a] border border-white/10 text-[11px] text-slate-200"
           />
 
-          <div className="h-60 overflow-y-auto p-2.5 rounded-xl bg-[#0f172a] border border-white/10 space-y-2">
+          <div className="h-56 overflow-y-auto p-2.5 rounded-xl bg-[#0f172a] border border-white/10 space-y-2">
             {mensagens.map((m) => (
               <div key={m.id} className="p-2 rounded-lg bg-[#090d16] border border-white/5">
                 <div className="flex justify-between text-[10px] text-slate-400">
                   <strong className="text-blue-300">{m.autor_nome}</strong>
-                  <span>{new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span>
+                    {new Date(m.created_at).toLocaleTimeString('pt-BR', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
                 </div>
                 <div className="text-slate-100 mt-0.5 whitespace-pre-wrap">{m.mensagem}</div>
               </div>
@@ -427,8 +561,34 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
           <div className="p-2.5 rounded-xl bg-[#0f172a] border border-white/10 space-y-2">
             <div className="font-semibold text-white text-[12px] flex items-center gap-1.5">
               <QrCode className="w-3.5 h-3.5 text-emerald-400" />
-              Gerar Sinal Pix / Reserva de Aparelho
+              Gerar Sinal Pix &amp; Travar IMEI
             </div>
+
+            {estoqueItens.length > 0 && (
+              <select
+                value={pixAparelhoId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setPixAparelhoId(id);
+                  const found = estoqueItens.find((it) => it.id === id);
+                  if (found) {
+                    setPixModelo(`${found.modelo} ${found.capacidade} ${found.cor}`.trim());
+                  }
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+              >
+                <option value="">Selecionar aparelho do estoque (para travar IMEI)...</option>
+                {estoqueItens
+                  .filter((i) => !i.reservado)
+                  .slice(0, 35)
+                  .map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.modelo} {i.capacidade} {i.cor} — {formatBRL(i.preco)}
+                    </option>
+                  ))}
+              </select>
+            )}
+
             <input
               value={pixModelo}
               onChange={(e) => setPixModelo(e.target.value)}
@@ -450,12 +610,20 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
                 className="px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
               />
             </div>
-            <input
-              value={pixChave}
-              onChange={(e) => setPixChave(e.target.value)}
-              placeholder="Chave Pix da loja (opcional se CRM_PIX_KEY estiver no Coolify)"
-              className="w-full px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
-            />
+            <div className="grid grid-cols-2 gap-1.5">
+              <input
+                value={pixTelefone}
+                onChange={(e) => setPixTelefone(e.target.value)}
+                placeholder="WhatsApp cliente"
+                className="px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+              />
+              <input
+                value={pixChave}
+                onChange={(e) => setPixChave(e.target.value)}
+                placeholder="Chave Pix (opc.)"
+                className="px-2.5 py-1.5 rounded-lg bg-[#090d16] border border-white/10 text-white"
+              />
+            </div>
             <button
               disabled={pixLoading || !pixModelo || !pixValor}
               onClick={async () => {
@@ -465,10 +633,13 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
                   const res = await fetch('/api/crm-bridge/pix-reserva', {
                     method: 'POST',
                     headers: headersBridge,
+                    credentials: 'include',
                     body: JSON.stringify({
+                      aparelhoId: pixAparelhoId || undefined,
                       aparelhoModelo: pixModelo,
                       valorSinal: Number(pixValor.replace(',', '.')) || 0,
                       clienteNome: pixCliente || 'Cliente',
+                      clienteTelefone: pixTelefone || undefined,
                       chavePix: pixChave || undefined,
                     }),
                   });
@@ -480,6 +651,7 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
                       pixCopiaCola: data.pixCopiaCola,
                       textoWhatsapp: data.textoWhatsapp,
                     });
+                    carregarPix();
                   } else {
                     setStatusOps(data.error || 'Erro ao gerar Pix.');
                   }
@@ -510,24 +682,82 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
                 value={pixGerado.pixCopiaCola}
                 className="w-full p-2 rounded-lg bg-[#090d16] border border-white/10 text-[10px] font-mono text-slate-300"
               />
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(pixGerado.textoWhatsapp);
-                  setPixCopiado(true);
-                  setTimeout(() => setPixCopiado(false), 1800);
-                }}
-                className="w-full py-1.5 rounded-lg bg-[#0066FF] hover:bg-[#0052CC] text-white font-semibold flex items-center justify-center gap-1.5"
-              >
-                {pixCopiado ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" /> Mensagem + Pix Copiados!
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" /> Copiar Mensagem + Pix pro WhatsApp
-                  </>
-                )}
-              </button>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={enviarPixNoChat}
+                  className="py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center justify-center gap-1"
+                >
+                  <Send className="w-3 h-3" /> Enviar no Chat
+                </button>
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(pixGerado.textoWhatsapp);
+                    setPixCopiado(true);
+                    setTimeout(() => setPixCopiado(false), 1800);
+                  }}
+                  className="py-1.5 rounded-lg bg-[#0066FF] hover:bg-[#0052CC] text-white font-semibold flex items-center justify-center gap-1"
+                >
+                  {pixCopiado ? (
+                    <>
+                      <Check className="w-3 h-3" /> Copiado
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" /> Copiar
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {reservasRecentes.length > 0 && (
+            <div className="p-2.5 rounded-xl bg-[#0f172a] border border-white/10 space-y-1.5">
+              <div className="font-semibold text-white text-[11px]">Reservas Pix Recentes</div>
+              {reservasRecentes.map((r) => (
+                <div
+                  key={r.id}
+                  className="p-2 rounded-lg bg-[#090d16] border border-white/5 space-y-1"
+                >
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="font-semibold text-white truncate pr-2">
+                      #{r.protocolo} • {r.aparelho_modelo}
+                    </span>
+                    <span
+                      className={`text-[10px] uppercase font-bold ${
+                        r.status === 'pago'
+                          ? 'text-emerald-400'
+                          : r.status === 'cancelado'
+                            ? 'text-red-400'
+                            : 'text-amber-300'
+                      }`}
+                    >
+                      {r.status}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400">
+                    <span>
+                      {r.cliente_nome} • {formatBRL(r.valor_sinal)}
+                    </span>
+                    {r.status === 'pendente' && (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => atualizarStatusPix(r.id, 'pago')}
+                          className="px-2 py-0.5 rounded bg-emerald-600/25 text-emerald-300 border border-emerald-500/40"
+                        >
+                          Confirmar Pago
+                        </button>
+                        <button
+                          onClick={() => atualizarStatusPix(r.id, 'cancelado')}
+                          className="px-2 py-0.5 rounded bg-red-600/20 text-red-300 border border-red-500/30"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -581,7 +811,9 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
               );
             })}
             {instancias.length === 0 && (
-              <div className="text-slate-500 text-center py-2">Nenhuma instância listada.</div>
+              <div className="text-slate-500 text-center py-2">
+                Nenhuma instância vinculada a esta loja em /crm-config.
+              </div>
             )}
           </div>
 
@@ -592,10 +824,8 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
             </div>
             {!evoConfigured ? (
               <p className="text-[11px] text-slate-400">
-                Para migrar/fechar tickets em massa, adicione{' '}
-                <code className="text-blue-300">CRM_EVO_ACCESS_TOKEN</code> nas envs do{' '}
-                <code>PAINELCELULAR</code> (gere em{' '}
-                <code>crm.phonecenter.tech/settings/access-tokens</code>).
+                Configure o Access Token do CRM desta loja em <code>/crm-config</code> para liberar
+                migração e fechamento em massa de tickets.
               </p>
             ) : (
               <>
@@ -631,6 +861,13 @@ export default function CrmOpsPanel({ headersBridge, token, agenteNome }: Props)
                   className="w-full py-1.5 rounded-lg bg-[#0066FF]/25 hover:bg-[#0066FF]/40 border border-[#0066FF]/40 text-blue-200 font-medium"
                 >
                   Migrar Tickets (Origem → Destino)
+                </button>
+
+                <button
+                  onClick={() => executarTicketOp('fechar_conexoes_removidas')}
+                  className="w-full py-1.5 rounded-lg bg-slate-700/40 hover:bg-slate-700/60 border border-white/10 text-slate-200 font-medium flex items-center justify-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" /> Fechar Tickets de Conexões Removidas
                 </button>
 
                 <div className="flex gap-1.5 items-center">

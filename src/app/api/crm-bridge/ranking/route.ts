@@ -1,25 +1,25 @@
 import { NextRequest } from 'next/server';
 import {
-  autenticarBridge,
+  autenticarBridgeAvancado,
   crmBridgeJson,
   crmBridgeOptionsResponse,
-  resolverLojaBridge,
+  resolverLojaAutorizada,
 } from '@/lib/crm-bridge/auth';
 import { obterRankingVendasBridge } from '@/lib/crm-bridge/queries';
 
-export async function OPTIONS() {
-  return crmBridgeOptionsResponse();
+export async function OPTIONS(req: NextRequest) {
+  return crmBridgeOptionsResponse(req);
 }
 
 export async function GET(req: NextRequest) {
-  const auth = autenticarBridge(req);
+  const auth = await autenticarBridgeAvancado(req);
   if (!auth.ok) {
-    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401, req);
   }
 
-  const loja = await resolverLojaBridge(req);
+  const loja = await resolverLojaAutorizada(req, auth);
   if (!loja) {
-    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404, req);
   }
 
   const diasParam = Number(req.nextUrl.searchParams.get('dias') || 30);
@@ -28,9 +28,13 @@ export async function GET(req: NextRequest) {
     Number.isFinite(diasParam) ? diasParam : 30
   );
 
-  return crmBridgeJson({
-    ok: true,
-    loja,
-    ...ranking,
-  });
+  return crmBridgeJson(
+    {
+      ok: true,
+      loja,
+      ...ranking,
+    },
+    200,
+    req
+  );
 }

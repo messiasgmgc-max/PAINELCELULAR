@@ -1,10 +1,10 @@
 import { NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/integrations/supabase/server';
 import {
-  autenticarBridge,
+  autenticarBridgeAvancado,
   crmBridgeJson,
   crmBridgeOptionsResponse,
-  resolverLojaBridge,
+  resolverLojaAutorizada,
 } from '@/lib/crm-bridge/auth';
 import {
   dispararMetaCapiPurchase,
@@ -13,19 +13,19 @@ import {
 } from '@/lib/crm-bridge/fase5';
 import { obterConfigCrmLoja } from '@/lib/crm-bridge/lojaConfig';
 
-export async function OPTIONS() {
-  return crmBridgeOptionsResponse();
+export async function OPTIONS(req: NextRequest) {
+  return crmBridgeOptionsResponse(req);
 }
 
 export async function GET(req: NextRequest) {
-  const auth = autenticarBridge(req);
+  const auth = await autenticarBridgeAvancado(req);
   if (!auth.ok) {
-    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401, req);
   }
 
-  const loja = await resolverLojaBridge(req);
+  const loja = await resolverLojaAutorizada(req, auth);
   if (!loja) {
-    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404, req);
   }
 
   const dias = Number(req.nextUrl.searchParams.get('dias') || 30);
@@ -33,18 +33,18 @@ export async function GET(req: NextRequest) {
     loja.id,
     Number.isFinite(dias) ? dias : 30
   );
-  return crmBridgeJson({ ok: true, loja, ...dashboard });
+  return crmBridgeJson({ ok: true, loja, ...dashboard }, 200, req);
 }
 
 export async function POST(req: NextRequest) {
-  const auth = autenticarBridge(req);
+  const auth = await autenticarBridgeAvancado(req);
   if (!auth.ok) {
-    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401, req);
   }
 
-  const loja = await resolverLojaBridge(req);
+  const loja = await resolverLojaAutorizada(req, auth);
   if (!loja) {
-    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404, req);
   }
 
   try {
@@ -65,24 +65,25 @@ export async function POST(req: NextRequest) {
         telefone: body.contatoTelefone ? String(body.contatoTelefone) : '',
       }
     );
-    return crmBridgeJson({ ok: true, loja, lead }, 201);
+    return crmBridgeJson({ ok: true, loja, lead }, 201, req);
   } catch (err) {
     return crmBridgeJson(
       { ok: false, error: err instanceof Error ? err.message : 'Erro ao criar lead.' },
-      500
+      500,
+      req
     );
   }
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = autenticarBridge(req);
+  const auth = await autenticarBridgeAvancado(req);
   if (!auth.ok) {
-    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401, req);
   }
 
-  const loja = await resolverLojaBridge(req);
+  const loja = await resolverLojaAutorizada(req, auth);
   if (!loja) {
-    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404);
+    return crmBridgeJson({ ok: false, error: 'Nenhuma loja ativa encontrada.' }, 404, req);
   }
 
   try {
@@ -92,7 +93,7 @@ export async function PATCH(req: NextRequest) {
     const valorVenda = Math.max(0, Number(body.valorVenda) || 0);
 
     if (!leadId) {
-      return crmBridgeJson({ ok: false, error: 'Informe id do lead.' }, 400);
+      return crmBridgeJson({ ok: false, error: 'Informe id do lead.' }, 400, req);
     }
 
     const { data: lead, error } = await supabaseAdmin
@@ -108,7 +109,7 @@ export async function PATCH(req: NextRequest) {
       .single();
 
     if (error || !lead) {
-      return crmBridgeJson({ ok: false, error: error?.message || 'Lead não encontrado.' }, 404);
+      return crmBridgeJson({ ok: false, error: error?.message || 'Lead não encontrado.' }, 404, req);
     }
 
     let capiResult: { sent: boolean; reason?: string } = { sent: false };
@@ -130,11 +131,12 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    return crmBridgeJson({ ok: true, lead, capi: capiResult });
+    return crmBridgeJson({ ok: true, lead, capi: capiResult }, 200, req);
   } catch (err) {
     return crmBridgeJson(
       { ok: false, error: err instanceof Error ? err.message : 'Erro ao atualizar lead.' },
-      500
+      500,
+      req
     );
   }
 }

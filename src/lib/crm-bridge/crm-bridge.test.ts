@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { segredoIgual } from './auth';
+import { origemPermitidaCrm, segredoIgual } from './auth';
+import { validarImeiLuhn } from './imei';
 import {
   calcularTabelaParcelamento,
   formatarItemEstoqueWhatsapp,
@@ -57,5 +58,36 @@ describe('CRM Bridge — Auth & Utilitários', () => {
     assert.match(txt, /256GB • Titânio Natural/);
     assert.match(txt, /98%/);
     assert.match(txt, /PhoneCenter/);
+  });
+
+  it('valida allowlist de origens CORS do CRM Bridge', () => {
+    assert.equal(origemPermitidaCrm('https://app.phonecenter.tech'), true);
+    assert.equal(origemPermitidaCrm('https://crm.phonecenter.tech'), true);
+    assert.equal(origemPermitidaCrm('https://loja1.crm.phonecenter.tech'), true);
+    assert.equal(origemPermitidaCrm('http://localhost:3000'), true);
+
+    assert.equal(origemPermitidaCrm('https://evil.com'), false);
+    assert.equal(origemPermitidaCrm('https://crm.phonecenter.tech.evil.com'), false);
+    assert.equal(origemPermitidaCrm(null), false);
+    assert.equal(origemPermitidaCrm(''), false);
+  });
+
+  it('valida IMEI de 15 dígitos via algoritmo Luhn GSMA', () => {
+    const ok = validarImeiLuhn('490154203237518');
+    assert.equal(ok.valido, true);
+    assert.equal(ok.limpo, '490154203237518');
+
+    const formatado = validarImeiLuhn('490154-20-323751-8');
+    assert.equal(formatado.valido, true);
+    assert.equal(formatado.limpo, '490154203237518');
+
+    const luhnInvalido = validarImeiLuhn('490154203237519');
+    assert.equal(luhnInvalido.valido, false);
+
+    const repetido = validarImeiLuhn('111111111111111');
+    assert.equal(repetido.valido, false);
+
+    const curto = validarImeiLuhn('4901542032');
+    assert.equal(curto.valido, false);
   });
 });

@@ -17,6 +17,8 @@ export interface EstoqueItemBridge {
   capacidade: string;
   cor: string;
   condicao: string;
+  status?: string;
+  reservado?: boolean;
   saudeBateria: string;
   preco: number;
   precoAtacado: number | null;
@@ -207,22 +209,27 @@ export async function buscarEstoqueBridge(
     lista.sort((a, b) => (Number(b.preco) || 0) - (Number(a.preco) || 0));
   }
 
-  return lista.slice(0, limit).map((ap) => ({
-    id: String(ap.id || ''),
-    codigo: String(ap.codigo || ''),
-    marca: String(ap.marca || 'Apple'),
-    modelo: String(ap.modelo || ''),
-    capacidade: String(ap.capacidade || ''),
-    cor: String(ap.cor || ''),
-    condicao: String(ap.condicao || 'seminovo'),
-    saudeBateria: String(ap.saude_bateria || ''),
-    preco: Number(ap.preco) || 0,
-    precoAtacado: ap.precoAtacado != null ? Number(ap.precoAtacado) : null,
-    quantidade: Math.max(1, Number(ap.quantidade) || 1),
-    categoria: String(ap.categoria || 'aparelho'),
-    observacoes: String(ap.observacoes || ''),
-    imeiFinal: mascararImei(ap.imei),
-  }));
+  return lista.slice(0, limit).map((ap) => {
+    const status = String(ap.status || 'disponivel').toLowerCase();
+    return {
+      id: String(ap.id || ''),
+      codigo: String(ap.codigo || ''),
+      marca: String(ap.marca || 'Apple'),
+      modelo: String(ap.modelo || ''),
+      capacidade: String(ap.capacidade || ''),
+      cor: String(ap.cor || ''),
+      condicao: String(ap.condicao || 'seminovo'),
+      status,
+      reservado: status === 'reservado',
+      saudeBateria: String(ap.saude_bateria || ''),
+      preco: Number(ap.preco) || 0,
+      precoAtacado: ap.precoAtacado != null ? Number(ap.precoAtacado) : null,
+      quantidade: Math.max(1, Number(ap.quantidade) || 1),
+      categoria: String(ap.categoria || 'aparelho'),
+      observacoes: String(ap.observacoes || ''),
+      imeiFinal: mascararImei(ap.imei),
+    };
+  });
 }
 
 export async function lookupClienteBridge(

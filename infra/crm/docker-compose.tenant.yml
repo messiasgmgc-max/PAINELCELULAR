@@ -1,11 +1,11 @@
 # =============================================================================
-# PhoneCenterCRM — Template Multi-Loja Isolado (Provisionamento SaaS Coolify)
+# PhoneCenterCRM — Template Multi-Loja Isolado (Enterprise / Dedicado Coolify)
 # =============================================================================
-# Cada loja cliente recebe:
+# Cada loja Enterprise recebe stack completa (incluindo Agentes de IA):
 #   - https://${TENANT_SLUG}.crm.phonecenter.tech (Frontend White-Label)
 #   - https://api-${TENANT_SLUG}.crm.phonecenter.tech (API Gateway)
-#   - Banco Postgres dedicado (evocrm_${TENANT_SLUG}) + Redis DB isolado
-#   - Zero vazamento de contatos/mensagens entre lojas concorrentes!
+#   - Postgres pgvector + Redis dedicados + IA (core, processor, bot_runtime)
+#   - Zero vazamento de contatos/mensagens entre lojas!
 # =============================================================================
 
 name: phonecenter-crm-${TENANT_SLUG}
@@ -22,6 +22,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - tenant_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d evocrm_${TENANT_SLUG}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
@@ -31,6 +36,11 @@ services:
     networks: [tenant_net]
     volumes:
       - tenant_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   auth:
     image: evoapicloud/evo-auth-service-community:latest
@@ -38,6 +48,9 @@ services:
     mem_limit: 448m
     command: bash -c "bundle exec rails db:migrate 2>&1 || true; bundle exec rails s -p 3001 -b 0.0.0.0"
     networks: [tenant_net]
+    depends_on:
+      pgvector: { condition: service_healthy }
+      redis: { condition: service_healthy }
     environment:
       RAILS_ENV: production
       RAILS_MAX_THREADS: 4
@@ -66,6 +79,9 @@ services:
     mem_limit: 640m
     command: sh -c "until wget -qO- http://auth:3001/health >/dev/null 2>&1; do sleep 5; done; bundle exec rails db:migrate 2>&1 || true; bundle exec rails s -p 3000 -b 0.0.0.0"
     networks: [tenant_net, evolution_default]
+    depends_on:
+      pgvector: { condition: service_healthy }
+      redis: { condition: service_healthy }
     environment:
       RAILS_ENV: production
       RAILS_SERVE_STATIC_FILES: "true"
@@ -82,7 +98,11 @@ services:
       POSTGRES_SSLMODE: disable
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
       EVO_AUTH_SERVICE_URL: http://auth:3001
+      EVO_AI_CORE_SERVICE_URL: http://core:5555
       EVO_FLOW_ENABLED: "false"
+      BOT_RUNTIME_URL: http://bot_runtime:8080
+      BOT_RUNTIME_SECRET: ${BOT_RUNTIME_SECRET}
+      BOT_RUNTIME_POSTBACK_BASE_URL: http://crm:3000
       BACKEND_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
       FRONTEND_URL: https://${TENANT_SLUG}.crm.phonecenter.tech
       CORS_ORIGINS: https://${TENANT_SLUG}.crm.phonecenter.tech,https://api-${TENANT_SLUG}.crm.phonecenter.tech
@@ -110,20 +130,101 @@ services:
       POSTGRES_SSLMODE: disable
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
       EVO_AUTH_SERVICE_URL: http://auth:3001
+      EVO_AI_CORE_SERVICE_URL: http://core:5555
       EVO_FLOW_ENABLED: "false"
+      BOT_RUNTIME_URL: http://bot_runtime:8080
+      BOT_RUNTIME_SECRET: ${BOT_RUNTIME_SECRET}
+      BOT_RUNTIME_POSTBACK_BASE_URL: http://crm:3000
       BACKEND_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
       FRONTEND_URL: https://${TENANT_SLUG}.crm.phonecenter.tech
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_STORAGE_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
+
+  core:
+    image: evoapicloud/evo-ai-core-service-community:latest
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [tenant_net]
+    depends_on:
+      pgvector: { condition: service_healthy }
+    environment:
+      DB_HOST: pgvector
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: evocrm_${TENANT_SLUG}
+      DB_SSLMODE: disable
+      PORT: "5555"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      EVOLUTION_BASE_URL: http://crm:3000
+      EVO_AUTH_BASE_URL: http://auth:3001
+      AI_PROCESSOR_URL: http://processor:8000
+      AI_PROCESSOR_VERSION: v1
+
+  processor:
+    image: evoapicloud/evo-ai-processor-community:latest
+    restart: unless-stopped
+    mem_limit: 640m
+    command: sh -c "alembic upgrade head 2>&1 || true; python -m scripts.run_seeders; uvicorn src.main:app --host $$HOST --port $$PORT"
+    networks: [tenant_net]
+    depends_on:
+      pgvector: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      POSTGRES_CONNECTION_STRING: postgresql://postgres:${POSTGRES_PASSWORD}@pgvector:5432/evocrm_${TENANT_SLUG}?sslmode=disable
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_SSL: "false"
+      REDIS_DB: 1
+      HOST: 0.0.0.0
+      PORT: "8000"
+      DEBUG: "false"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      EVOAI_CRM_API_TOKEN: ${EVOAI_CRM_API_TOKEN}
+      EVO_AUTH_BASE_URL: http://auth:3001
+      EVO_AI_CRM_URL: http://crm:3000
+      CORE_SERVICE_URL: http://core:5555/api/v1
+      APP_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
+      API_URL: https://api-${TENANT_SLUG}.crm.phonecenter.tech
+      ORGANIZATION_NAME: PhoneCenterCRM
+
+  bot_runtime:
+    image: evoapicloud/evo-bot-runtime:latest
+    restart: unless-stopped
+    mem_limit: 192m
+    networks: [tenant_net]
+    depends_on:
+      redis: { condition: service_healthy }
+    environment:
+      LISTEN_ADDR: 0.0.0.0:8080
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      AI_PROCESSOR_URL: http://processor:8000
+      BOT_RUNTIME_SECRET: ${BOT_RUNTIME_SECRET}
+      AI_CALL_TIMEOUT_SECONDS: 90
+      MEDIA_HOST_ALLOWLIST: api-${TENANT_SLUG}.crm.phonecenter.tech,${TENANT_SLUG}.crm.phonecenter.tech
 
   gateway:
     image: evoapicloud/evo-crm-gateway:latest
     restart: unless-stopped
     mem_limit: 96m
     networks: [tenant_net, coolify]
+    depends_on:
+      - auth
+      - crm
+      - core
+      - processor
+      - bot_runtime
     environment:
       AUTH_UPSTREAM: auth:3001
       CRM_UPSTREAM: crm:3000
+      CORE_UPSTREAM: core:5555
+      PROCESSOR_UPSTREAM: processor:8000
+      BOT_RUNTIME_UPSTREAM: bot_runtime:8080
     labels:
       - traefik.enable=true
       - traefik.docker.network=coolify

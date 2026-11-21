@@ -1,5 +1,3 @@
-import { supabase } from '@/lib/supabaseClient';
-
 export type TipoEventoLog = 
   | 'login' 
   | 'venda' 
@@ -53,6 +51,7 @@ export async function registrarLog(params: RegistrarLogParams): Promise<void> {
       const { supabaseAdmin } = await import('@/integrations/supabase/server');
       ({ error } = await supabaseAdmin.from('logs_sistema').insert([payload]));
     } else {
+      const { supabase } = await import('@/lib/supabaseClient');
       ({ error } = await supabase.from('logs_sistema').insert([payload]));
     }
 

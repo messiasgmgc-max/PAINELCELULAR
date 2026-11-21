@@ -1,5 +1,9 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from '@/integrations/supabase/server';
+import { patchLiberarReserva, patchReserva } from '@/lib/estoque/ciclo';
+import { aplicarMudancaEstoque } from '@/lib/estoque/movimentacoes';
+import { registrarLog } from '@/lib/logger';
+import { enviarTextoWhatsApp } from '@/lib/whatsappService';
 import { formatarBRL } from './queries';
 import { obterConfigCrmLoja } from './lojaConfig';
 
@@ -270,4 +274,209 @@ export async function criarReservaPixBridge(
     linkPagamento,
     textoWhatsapp,
   };
+}
+
+/**
+ * Consulta a API oficial do Mercado Pago para confirmar que um pagamento está
+ * realmente com status === 'approved' (nunca confia cegamente em 'payment.updated').
+ */
+export async function verificarStatusPagamentoMercadoPago(
+  paymentId: string,
+  mpToken: string
+): Promise<{ approved: boolean; status: string; externalReference?: string }> {
+  const id = String(paymentId || '').trim();
+  const token = String(mpToken || '').trim();
+  if (!id || !token) {
+    return { approved: false, status: 'unverified' };
+  }
+
+  try {
+    const res = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      return { approved: false, status: `http_${res.status}` };
+    }
+    const data = (await res.json()) as Record<string, unknown>;
+    const status = String(data.status || '').toLowerCase();
+    return {
+      approved: status === 'approved',
+      status: status || 'unknown',
+      externalReference: data.external_reference ? String(data.external_reference) : undefined,
+    };
+  } catch {
+    return { approved: false, status: 'network_error' };
+  }
+}
+
+/**
+ * Confirma o pagamento do sinal Pix de forma idempotente, trava o aparelho no estoque
+ * como 'reservado' (via aplicarMudancaEstoque com auditoria), registra alerta no
+ * Chat Interno e envia confirmação automática no WhatsApp do cliente.
+ */
+export async function efetivarConfirmacaoReservaPix(
+  reservaId: string,
+  lojaId: string
+): Promise<{
+  updated: boolean;
+  reserva: Record<string, unknown> | null;
+  estoqueReservado: boolean;
+  whatsappEnviado: boolean;
+}> {
+  const agora = new Date().toISOString();
+
+  const { data: atual } = await supabaseAdmin
+    .from('crm_reservas_pix')
+    .select('*')
+    .eq('id', reservaId)
+    .eq('loja_id', lojaId)
+    .maybeSingle();
+
+  if (!atual) {
+    return { updated: false, reserva: null, estoqueReservado: false, whatsappEnviado: false };
+  }
+
+  if (atual.status === 'pago') {
+    return { updated: false, reserva: atual, estoqueReservado: false, whatsappEnviado: false };
+  }
+
+  const { data: reservaAtualizada } = await supabaseAdmin
+    .from('crm_reservas_pix')
+    .update({
+      status: 'pago',
+      pago_em: agora,
+      updated_at: agora,
+    })
+    .eq('id', reservaId)
+    .eq('loja_id', lojaId)
+    .neq('status', 'pago')
+    .select('*')
+    .maybeSingle();
+
+  if (!reservaAtualizada) {
+    return { updated: false, reserva: atual, estoqueReservado: false, whatsappEnviado: false };
+  }
+
+  const protocolo = String(reservaAtualizada.protocolo || '');
+  const clienteNome = String(reservaAtualizada.cliente_nome || 'Cliente');
+  const modelo = String(reservaAtualizada.aparelho_modelo || 'Aparelho');
+  const aparelhoId = reservaAtualizada.aparelho_id ? String(reservaAtualizada.aparelho_id) : '';
+
+  let estoqueReservado = false;
+  if (aparelhoId) {
+    try {
+      const resEst = await aplicarMudancaEstoque(supabaseAdmin, {
+        ids: [aparelhoId],
+        patch: patchReserva(`[RESERVADO #${protocolo} - ${clienteNome}]`),
+        tipo: 'edicao',
+        origem: 'crm_reserva',
+        lojaId,
+        filtroElegivel: (a) => {
+          const st = String(a.status || 'disponivel').toLowerCase();
+          return a.ativo !== false && st !== 'vendido' && st !== 'baixado' && st !== 'cliente';
+        },
+        observacao: `Sinal Pix confirmado (#${protocolo}) — ${modelo}`,
+      });
+      estoqueReservado = resEst.afetados > 0;
+    } catch (err) {
+      console.warn('[Pix Reserva] Aviso ao travar aparelho no estoque:', err);
+    }
+  }
+
+  try {
+    await supabaseAdmin.from('crm_chat_interno').insert({
+      loja_id: lojaId,
+      canal: 'vendas',
+      autor_nome: 'Pix Automático',
+      autor_cargo: 'sistema',
+      mensagem: `✅ Sinal Pix confirmado (#${protocolo}) para ${clienteNome} — ${modelo} (${formatarBRL(Number(reservaAtualizada.valor_sinal) || 0)}).${estoqueReservado ? ' 🔒 Aparelho travado como RESERVADO no estoque!' : ''}`,
+      referencia_ticket: protocolo,
+    });
+  } catch {
+    // Não bloqueia se chat interno não existir
+  }
+
+  let whatsappEnviado = false;
+  const telefone = String(reservaAtualizada.cliente_telefone || '').trim();
+  if (telefone.replace(/\D/g, '').length >= 10) {
+    try {
+      const envio = await enviarTextoWhatsApp({
+        lojaId,
+        telefone,
+        texto: [
+          `✅ *SINAL DE RESERVA CONFIRMADO!*`,
+          ``,
+          `Olá *${clienteNome}*! Recebemos o pagamento do seu sinal (*#${protocolo}*).`,
+          `📱 Aparelho reservado: *${modelo}*`,
+          `💰 Valor confirmado: *${formatarBRL(Number(reservaAtualizada.valor_sinal) || 0)}*`,
+          ``,
+          `Seu aparelho já está separado para você! Qualquer dúvida, responda por aqui.`,
+        ].join('\n'),
+      });
+      whatsappEnviado = envio.success;
+    } catch {
+      whatsappEnviado = false;
+    }
+  }
+
+  await registrarLog({
+    loja_id: lojaId,
+    tipo_evento: 'estoque',
+    acao: 'Reserva Pix confirmada',
+    detalhes: `Protocolo #${protocolo} (${modelo}) para ${clienteNome}. Estoque reservado: ${estoqueReservado ? 'sim' : 'não'}.`,
+  });
+
+  return {
+    updated: true,
+    reserva: reservaAtualizada,
+    estoqueReservado,
+    whatsappEnviado,
+  };
+}
+
+/**
+ * Cancela uma reserva Pix e libera o aparelho no estoque de volta para 'disponivel'.
+ */
+export async function cancelarELiberarReservaPix(
+  reservaId: string,
+  lojaId: string
+): Promise<{ updated: boolean; reserva: Record<string, unknown> | null; estoqueLiberado: boolean }> {
+  const agora = new Date().toISOString();
+  const { data: reserva } = await supabaseAdmin
+    .from('crm_reservas_pix')
+    .update({
+      status: 'cancelado',
+      pago_em: null,
+      updated_at: agora,
+    })
+    .eq('id', reservaId)
+    .eq('loja_id', lojaId)
+    .select('*')
+    .maybeSingle();
+
+  if (!reserva) {
+    return { updated: false, reserva: null, estoqueLiberado: false };
+  }
+
+  let estoqueLiberado = false;
+  const aparelhoId = reserva.aparelho_id ? String(reserva.aparelho_id) : '';
+  if (aparelhoId) {
+    try {
+      const resEst = await aplicarMudancaEstoque(supabaseAdmin, {
+        ids: [aparelhoId],
+        patch: patchLiberarReserva(''),
+        tipo: 'restauracao',
+        origem: 'crm_reserva',
+        lojaId,
+        filtroElegivel: (a) => String(a.status || '').toLowerCase() === 'reservado',
+        observacao: `Reserva Pix cancelada (#${reserva.protocolo || ''})`,
+      });
+      estoqueLiberado = resEst.afetados > 0;
+    } catch (err) {
+      console.warn('[Pix Reserva] Aviso ao liberar aparelho no estoque:', err);
+    }
+  }
+
+  return { updated: true, reserva, estoqueLiberado };
 }

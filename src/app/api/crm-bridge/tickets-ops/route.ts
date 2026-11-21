@@ -1,18 +1,19 @@
 import { NextRequest } from 'next/server';
 import {
-  autenticarBridge,
+  autenticarBridgeAvancado,
   crmBridgeJson,
   crmBridgeOptionsResponse,
-  resolverLojaBridge,
+  resolverLojaAutorizada,
+  type AuthBridgeContext,
 } from '@/lib/crm-bridge/auth';
 import { obterConfigCrmLoja } from '@/lib/crm-bridge/lojaConfig';
 
-export async function OPTIONS() {
-  return crmBridgeOptionsResponse();
+export async function OPTIONS(req: NextRequest) {
+  return crmBridgeOptionsResponse(req);
 }
 
-async function getEvoCrmConfig(req: NextRequest) {
-  const loja = await resolverLojaBridge(req);
+async function getEvoCrmConfig(req: NextRequest, auth: AuthBridgeContext) {
+  const loja = await resolverLojaAutorizada(req, auth);
   const cfg = loja ? (await obterConfigCrmLoja(loja.id)).config : null;
   const apiUrl = (
     cfg?.crm_api_url ||
@@ -20,11 +21,16 @@ async function getEvoCrmConfig(req: NextRequest) {
     'https://api-crm.phonecenter.tech'
   ).replace(/\/+$/, '');
   const accessToken = (cfg?.crm_access_token || process.env.CRM_EVO_ACCESS_TOKEN || '').trim();
-  return { apiUrl, accessToken };
+  return { apiUrl, accessToken, loja };
 }
 
-async function evoFetch(req: NextRequest, path: string, init: RequestInit = {}) {
-  const { apiUrl, accessToken } = await getEvoCrmConfig(req);
+async function evoFetch(
+  req: NextRequest,
+  auth: AuthBridgeContext,
+  path: string,
+  init: RequestInit = {}
+) {
+  const { apiUrl, accessToken } = await getEvoCrmConfig(req, auth);
   if (!accessToken) {
     throw new Error(
       'Token do CRM não configurado para esta loja (configure em /crm-config no Supabase).'
@@ -50,31 +56,121 @@ async function evoFetch(req: NextRequest, path: string, init: RequestInit = {}) 
   return { ok: res.ok, status: res.status, data: json };
 }
 
+function extrairPayloadConversas(raw: unknown): Array<Record<string, unknown>> {
+  const obj = (raw || {}) as Record<string, unknown>;
+  const dataObj = (obj.data || {}) as Record<string, unknown>;
+  const payload = dataObj.payload || obj.payload || obj.data || [];
+  return Array.isArray(payload) ? (payload as Array<Record<string, unknown>>) : [];
+}
+
+async function listarTodasConversasAbertas(
+  req: NextRequest,
+  auth: AuthBridgeContext,
+  opts: { inboxId?: number; maxPages?: number } = {}
+): Promise<Array<Record<string, unknown>>> {
+  const maxPages = Math.min(Math.max(opts.maxPages || 10, 1), 20);
+  const todas: Array<Record<string, unknown>> = [];
+  const vistos = new Set<string>();
+
+  for (let page = 1; page <= maxPages; page++) {
+    const qs = new URLSearchParams({ status: 'open', page: String(page) });
+    if (opts.inboxId) qs.set('inbox_id', String(opts.inboxId));
+
+    const res = await evoFetch(req, auth, `/api/v1/conversations?${qs.toString()}`);
+    if (!res.ok) {
+      if (page === 1) {
+        throw new Error(`Falha ao listar conversas no CRM (HTTP ${res.status}).`);
+      }
+      break;
+    }
+
+    const lote = extrairPayloadConversas(res.data);
+    if (lote.length === 0) break;
+
+    let novosNoLote = 0;
+    for (const conv of lote) {
+      const id = String(conv.id || '');
+      if (id && !vistos.has(id)) {
+        vistos.add(id);
+        todas.push(conv);
+        novosNoLote += 1;
+      }
+    }
+    if (novosNoLote === 0 || lote.length < 15) break;
+  }
+
+  return todas;
+}
+
+async function obterOuCriarSourceIdDestino(
+  req: NextRequest,
+  auth: AuthBridgeContext,
+  contactId: number | string,
+  destinoInboxId: number
+): Promise<string | undefined> {
+  try {
+    const cRes = await evoFetch(req, auth, `/api/v1/contacts/${contactId}`);
+    if (cRes.ok && cRes.data) {
+      const payload = ((cRes.data as Record<string, unknown>).payload ||
+        cRes.data) as Record<string, unknown>;
+      const inboxes = Array.isArray(payload.contact_inboxes)
+        ? (payload.contact_inboxes as Array<Record<string, unknown>>)
+        : [];
+      const match = inboxes.find((ci) => {
+        const ib = (ci.inbox || {}) as Record<string, unknown>;
+        return Number(ci.inbox_id || ib.id) === destinoInboxId && ci.source_id;
+      });
+      if (match?.source_id) return String(match.source_id);
+    }
+  } catch {
+    // continua para tentativa de criação
+  }
+
+  try {
+    const ciRes = await evoFetch(req, auth, `/api/v1/contacts/${contactId}/contact_inboxes`, {
+      method: 'POST',
+      body: JSON.stringify({ inbox_id: destinoInboxId }),
+    });
+    if (ciRes.ok && ciRes.data) {
+      const d = ciRes.data as Record<string, unknown>;
+      const payload = (d.payload || d) as Record<string, unknown>;
+      if (payload.source_id) return String(payload.source_id);
+    }
+  } catch {
+    // fallback sem source_id
+  }
+  return undefined;
+}
+
 /**
  * GET /api/crm-bridge/tickets-ops
  * Lista inboxes/conexões do PhoneCenterCRM e resumo de atendimentos abertos.
  */
 export async function GET(req: NextRequest) {
-  const auth = autenticarBridge(req);
+  const auth = await autenticarBridgeAvancado(req, { requireGestao: true });
   if (!auth.ok) {
-    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401, req);
   }
 
-  const { accessToken } = await getEvoCrmConfig(req);
+  const { accessToken } = await getEvoCrmConfig(req, auth);
   if (!accessToken) {
-    return crmBridgeJson({
-      ok: true,
-      configured: false,
-      inboxes: [],
-      message:
-        'Configure o Access Token do CRM desta loja em /crm-config (Supabase) para habilitar operações em massa de tickets.',
-    });
+    return crmBridgeJson(
+      {
+        ok: true,
+        configured: false,
+        inboxes: [],
+        message:
+          'Configure o Access Token do CRM desta loja em /crm-config (Supabase) para habilitar operações em massa de tickets.',
+      },
+      200,
+      req
+    );
   }
 
   try {
     const [inboxesRes, convsRes] = await Promise.all([
-      evoFetch(req, '/api/v1/inboxes'),
-      evoFetch(req, '/api/v1/conversations?status=open&page=1'),
+      evoFetch(req, auth, '/api/v1/inboxes'),
+      evoFetch(req, auth, '/api/v1/conversations?status=open&page=1'),
     ]);
 
     const inboxesPayload = inboxesRes.data as Record<string, unknown> | unknown[];
@@ -85,80 +181,97 @@ export async function GET(req: NextRequest) {
     const convsPayload = convsRes.data as Record<string, unknown>;
     const meta = (convsPayload?.data as Record<string, unknown>)?.meta || convsPayload?.meta || {};
 
-    return crmBridgeJson({
-      ok: true,
-      configured: true,
-      inboxes,
-      meta,
-    });
+    return crmBridgeJson(
+      {
+        ok: true,
+        configured: true,
+        inboxes,
+        meta,
+      },
+      200,
+      req
+    );
   } catch (err) {
     return crmBridgeJson(
       { ok: false, error: err instanceof Error ? err.message : 'Erro ao consultar EvoCRM.' },
-      502
+      502,
+      req
     );
   }
 }
 
 /**
  * POST /api/crm-bridge/tickets-ops
- * Utilitários operacionais de gestão de atendimentos (Print 2 Mercado Phone):
- * - action: 'fechar_todos' | 'fechar_por_filtro' (inboxId, diasInativo)
- * - action: 'migrar_conexao' (origemInboxId, destinoInboxId)
+ * Utilitários operacionais de gestão de atendimentos (paginação completa):
+ * - action: 'fechar_todos' | 'fechar_por_filtro' | 'fechar_conexoes_removidas'
+ * - action: 'migrar_conexao' (com resolução de contact_inbox source_id)
  */
 export async function POST(req: NextRequest) {
-  const auth = autenticarBridge(req);
+  const auth = await autenticarBridgeAvancado(req, { requireGestao: true });
   if (!auth.ok) {
-    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401);
+    return crmBridgeJson({ ok: false, error: auth.error }, auth.status || 401, req);
   }
 
   try {
     const body = await req.json();
     const action = String(body?.action || '').trim();
 
-    if (action === 'fechar_todos' || action === 'fechar_por_filtro') {
+    if (
+      action === 'fechar_todos' ||
+      action === 'fechar_por_filtro' ||
+      action === 'fechar_conexoes_removidas'
+    ) {
       const inboxId = body.inboxId ? Number(body.inboxId) : undefined;
       const diasInativo = body.diasInativo ? Number(body.diasInativo) : 0;
       const limiteCorte =
         diasInativo > 0 ? Date.now() - diasInativo * 86400 * 1000 : Number.MAX_SAFE_INTEGER;
 
-      const qs = new URLSearchParams({ status: 'open', page: '1' });
-      if (inboxId) qs.set('inbox_id', String(inboxId));
+      const convs = await listarTodasConversasAbertas(req, auth, { inboxId, maxPages: 10 });
 
-      const listRes = await evoFetch(req, `/api/v1/conversations?${qs.toString()}`);
-      if (!listRes.ok) {
-        return crmBridgeJson(
-          { ok: false, error: 'Erro ao listar conversas no EvoCRM.', details: listRes.data },
-          listRes.status
-        );
+      let inboxesAtivasIds: Set<number> | null = null;
+      if (action === 'fechar_conexoes_removidas') {
+        const inboxesRes = await evoFetch(req, auth, '/api/v1/inboxes');
+        const inboxesPayload = inboxesRes.data as Record<string, unknown> | unknown[];
+        const listaInboxes = (
+          Array.isArray(inboxesPayload)
+            ? inboxesPayload
+            : inboxesPayload?.payload || inboxesPayload?.data || []
+        ) as Array<Record<string, unknown>>;
+        inboxesAtivasIds = new Set(listaInboxes.map((i) => Number(i.id)).filter(Boolean));
       }
 
-      const raw = listRes.data as Record<string, unknown>;
-      const payload = (raw?.data as Record<string, unknown>)?.payload || raw?.payload || [];
-      const convs = Array.isArray(payload) ? (payload as Array<Record<string, unknown>>) : [];
-
       const alvos = convs.filter((c) => {
+        if (action === 'fechar_conexoes_removidas' && inboxesAtivasIds) {
+          const cid = Number(c.inbox_id || 0);
+          return !cid || !inboxesAtivasIds.has(cid);
+        }
         if (diasInativo <= 0) return true;
         const ts = Number(c.last_activity_at || c.timestamp || 0) * 1000;
         return ts > 0 && ts <= limiteCorte;
       });
 
       let encerrados = 0;
-      for (const conv of alvos.slice(0, 100)) {
+      for (const conv of alvos.slice(0, 250)) {
         const id = conv.id;
         if (!id) continue;
-        const r = await evoFetch(req, `/api/v1/conversations/${id}/toggle_status`, {
+        const r = await evoFetch(req, auth, `/api/v1/conversations/${id}/toggle_status`, {
           method: 'POST',
           body: JSON.stringify({ status: 'resolved' }),
         });
         if (r.ok) encerrados += 1;
       }
 
-      return crmBridgeJson({
-        ok: true,
-        action,
-        analisados: convs.length,
-        encerrados,
-      });
+      return crmBridgeJson(
+        {
+          ok: true,
+          action,
+          analisados: convs.length,
+          elegiveis: alvos.length,
+          encerrados,
+        },
+        200,
+        req
+      );
     }
 
     if (action === 'migrar_conexao') {
@@ -167,47 +280,42 @@ export async function POST(req: NextRequest) {
       if (!origemInboxId || !destinoInboxId || origemInboxId === destinoInboxId) {
         return crmBridgeJson(
           { ok: false, error: 'Informe origemInboxId e destinoInboxId distintos.' },
-          400
+          400,
+          req
         );
       }
 
-      const listRes = await evoFetch(
-        req,
-        `/api/v1/conversations?status=open&inbox_id=${origemInboxId}&page=1`
-      );
-      if (!listRes.ok) {
-        return crmBridgeJson(
-          { ok: false, error: 'Falha ao consultar conversas da conexão de origem.' },
-          listRes.status
-        );
-      }
-
-      const raw = listRes.data as Record<string, unknown>;
-      const payload = (raw?.data as Record<string, unknown>)?.payload || raw?.payload || [];
-      const convs = Array.isArray(payload) ? (payload as Array<Record<string, unknown>>) : [];
+      const convs = await listarTodasConversasAbertas(req, auth, {
+        inboxId: origemInboxId,
+        maxPages: 10,
+      });
 
       let migrados = 0;
-      for (const conv of convs.slice(0, 50)) {
+      for (const conv of convs.slice(0, 150)) {
         const meta = (conv.meta || {}) as Record<string, unknown>;
         const sender = (meta.sender || {}) as Record<string, unknown>;
-        const contactId = sender.id;
+        const contactId = sender.id as string | number | undefined;
         if (!contactId) continue;
 
-        const createRes = await evoFetch(req, '/api/v1/conversations', {
+        const sourceId = await obterOuCriarSourceIdDestino(req, auth, contactId, destinoInboxId);
+        const createBody: Record<string, unknown> = {
+          inbox_id: destinoInboxId,
+          contact_id: contactId,
+          status: 'open',
+          message: {
+            content: `🔄 Atendimento migrado automaticamente da conexão #${origemInboxId} (ticket anterior #${conv.id}).`,
+            private: true,
+          },
+        };
+        if (sourceId) createBody.source_id = sourceId;
+
+        const createRes = await evoFetch(req, auth, '/api/v1/conversations', {
           method: 'POST',
-          body: JSON.stringify({
-            inbox_id: destinoInboxId,
-            contact_id: contactId,
-            status: 'open',
-            message: {
-              content: `🔄 Atendimento migrado automaticamente da conexão #${origemInboxId} (ticket anterior #${conv.id}).`,
-              private: true,
-            },
-          }),
+          body: JSON.stringify(createBody),
         });
 
         if (createRes.ok && conv.id) {
-          await evoFetch(req, `/api/v1/conversations/${conv.id}/toggle_status`, {
+          await evoFetch(req, auth, `/api/v1/conversations/${conv.id}/toggle_status`, {
             method: 'POST',
             body: JSON.stringify({ status: 'resolved' }),
           });
@@ -215,24 +323,34 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return crmBridgeJson({
-        ok: true,
-        action,
-        origemInboxId,
-        destinoInboxId,
-        encontrados: convs.length,
-        migrados,
-      });
+      return crmBridgeJson(
+        {
+          ok: true,
+          action,
+          origemInboxId,
+          destinoInboxId,
+          encontrados: convs.length,
+          migrados,
+        },
+        200,
+        req
+      );
     }
 
     return crmBridgeJson(
-      { ok: false, error: 'Ação inválida. Use fechar_todos, fechar_por_filtro ou migrar_conexao.' },
-      400
+      {
+        ok: false,
+        error:
+          'Ação inválida. Use fechar_todos, fechar_por_filtro, fechar_conexoes_removidas ou migrar_conexao.',
+      },
+      400,
+      req
     );
   } catch (err) {
     return crmBridgeJson(
       { ok: false, error: err instanceof Error ? err.message : 'Erro operacional.' },
-      500
+      500,
+      req
     );
   }
 }

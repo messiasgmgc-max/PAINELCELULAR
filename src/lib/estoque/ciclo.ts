@@ -16,7 +16,7 @@
  *    com `data_saida` e `motivo_saida` preenchidos.
  */
 
-export const STATUS_APARELHO = ['disponivel', 'vendido', 'baixado', 'manutencao', 'cliente'] as const;
+export const STATUS_APARELHO = ['disponivel', 'reservado', 'vendido', 'baixado', 'manutencao', 'cliente'] as const;
 export type StatusAparelho = (typeof STATUS_APARELHO)[number];
 
 export const MOTIVOS_SAIDA = ['venda', 'baixa_manual', 'baixa_massa', 'manutencao', 'perda'] as const;
@@ -42,7 +42,9 @@ export type OrigemMovimentacao =
   | 'atacado'
   | 'manutencao'
   | 'devolucao'
-  | 'bot_whatsapp';
+  | 'bot_whatsapp'
+  | 'crm_reserva'
+  | 'crm_venda';
 
 /** Colunas que definem se e por que o aparelho está no estoque. */
 export const CAMPOS_CICLO = ['ativo', 'status', 'condicao', 'data_saida', 'motivo_saida'] as const;
@@ -164,6 +166,25 @@ export function patchRestauracao(): PatchCiclo {
     status: 'disponivel',
     data_saida: null,
     motivo_saida: null,
+  };
+}
+
+/** Patch padronizado para reservar aparelho após sinal Pix no CRM (mantém ativo=true no patrimônio da loja). */
+export function patchReserva(observacao?: string): PatchCiclo {
+  return {
+    ativo: true,
+    status: 'reservado',
+    data_saida: null,
+    motivo_saida: null,
+    ...(observacao ? { observacoes: observacao } : {}),
+  };
+}
+
+/** Patch padronizado para liberar um aparelho reservado de volta a disponível. */
+export function patchLiberarReserva(observacao?: string): PatchCiclo {
+  return {
+    ...patchRestauracao(),
+    ...(observacao !== undefined ? { observacoes: observacao } : {}),
   };
 }
 

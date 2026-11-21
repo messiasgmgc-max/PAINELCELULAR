@@ -72,7 +72,24 @@ export default function Home() {
   const subtitulo = config.subtituloLoja || 'Sistema de Gestão';
   const headerLogoLoja = config.logoLoja;
   const [showMeuPlanoModal, setShowMeuPlanoModal] = useState(false);
+  const [crmFrontendUrl, setCrmFrontendUrl] = useState('https://crm.phonecenter.tech');
   const { colorTheme, setColorTheme } = useColorTheme();
+
+  useEffect(() => {
+    if (!usuario?.lojaId && !checkIsSuperAdmin(usuario)) return;
+    let cancelled = false;
+    fetch('/api/crm-bridge/minha-loja', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.ok && d?.crmFrontendUrl) {
+          setCrmFrontendUrl(String(d.crmFrontendUrl));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [usuario]);
 
   const normalizeTabFromPath = (path: string) => {
     const segment = path.split('/').filter(Boolean)[0] || 'dashboard';
@@ -323,7 +340,7 @@ export default function Home() {
               verificarPermissaoRecursoPlano(planData.planoTipo, 'crm_omnichannel') ? (
                 <div className="flex items-center gap-1 shrink-0">
                   <a
-                    href="https://crm.phonecenter.tech"
+                    href={crmFrontendUrl || 'https://crm.phonecenter.tech'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-[#0066FF]/50 bg-[#0066FF]/15 hover:bg-[#0066FF]/30 text-blue-200 font-semibold transition-all"
@@ -331,6 +348,13 @@ export default function Home() {
                   >
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     <span className="hidden sm:inline">CRM</span>
+                  </a>
+                  <a
+                    href="/crm-hub"
+                    className="hidden sm:inline-flex items-center gap-1 text-xs h-9 sm:h-10 px-2.5 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 text-slate-200 font-semibold transition-all"
+                    title="Central CRM Suite (Pós-Venda IA, Rodízio, Campanhas, Telefonia)"
+                  >
+                    Suite
                   </a>
                   <a
                     href={usuario?.lojaId ? `/crm-config?loja_id=${usuario.lojaId}` : '/crm-config'}
