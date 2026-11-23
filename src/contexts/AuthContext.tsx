@@ -214,7 +214,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!authReady || loading) return;
 
-    const rotasPublicas = ['/login', '/assinar', '/avaliar', '/upgrade', '/coleta', '/motoboy', '/recibo', '/bio', '/proposta', '/crm-sidebar'];
+    const rotasPublicas = ['/login', '/assinar', '/avaliar', '/upgrade', '/coleta', '/motoboy', '/recibo', '/bio', '/proposta', '/crm-sidebar', '/privacidade', '/termos', '/exclusao-dados'];
     const ehRotaPublica = rotasPublicas.some(r => pathname === r || pathname?.startsWith(`${r}/`));
 
     if (!usuario && !ehRotaPublica && !pathname?.startsWith('/api/')) {
