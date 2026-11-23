@@ -13,7 +13,9 @@ export interface VisionEtiquetaResult {
   saude_bateria?: number | string | null;
   preco?: number | null;
   codigo_etiqueta?: string | null;
-  condicao?: 'novo' | 'seminovo' | 'usado' | null;
+  condicao?: 'novo' | 'seminovo' | 'usado' | 'danificado' | null;
+  observacoes?: string | null;
+  data_entrada?: string | null;
   texto_venda_visivel?: string | null;
   // Campos de Comprovante de Pagamento:
   amount?: number | null;
@@ -51,20 +53,22 @@ export function isValidImageBase64(base64Str: string): { isValid: boolean; detec
 }
 
 const DEFAULT_VISION_PROMPT = `Você é um assistente de visão computacional de alta precisão para uma loja de celulares e assistência técnica.
-Analise a imagem fornecida com atenção aos detalhes do texto e números.
+Analise a imagem fornecida com atenção máxima tanto ao texto manuscrito/impresso das etiquetas quanto ao ESTADO FÍSICO E COR REAL do aparelho na foto.
 
 A imagem pode ser:
-1. Uma ETIQUETA DE CELULAR, caixa ou adesivo de aparelho (iPhone, Xiaomi, Samsung, Motorola, etc.). Extraia:
+1. Uma FOTO DE CELULAR, ETIQUETA DE CELULAR (manuscrita ou impressa), caixa ou adesivo de aparelho (iPhone, Xiaomi, Samsung, Motorola, etc.). Extraia:
 {
   "tipo_documento": "etiqueta_aparelho",
-  "modelo": "Nome do modelo EXATAMENTE como escrito na etiqueta (se só estiver escrito 'iPhone' sem número da geração, retorne 'iPhone'; se não houver modelo legível, retorne null. NUNCA adivinhe ou invente a geração do aparelho)",
-  "capacidade": "Capacidade de armazenamento (ex: 128GB, 256GB, 64GB) ou null",
-  "cor": "Cor do aparelho (ex: Azul, Preto, Branco, Estelar, Dourado) ou null",
-  "imei": "Número do IMEI com 15 dígitos numéricos (apenas dígitos) ou o final de 4 a 6 dígitos caso a etiqueta mostre apenas os últimos dígitos (ex: '7896')",
-  "saude_bateria": "Porcentagem da bateria se houver (número inteiro ex: 88 ou null)",
+  "modelo": "Nome padronizado do modelo. EXPANDA abreviações comuns de etiqueta manuscrita de loja: '16PM' ou '16 PM' -> 'iPhone 16 Pro Max', '15PM' -> 'iPhone 15 Pro Max', '15P' -> 'iPhone 15 Pro', '14PM' -> 'iPhone 14 Pro Max', '13PM' -> 'iPhone 13 Pro Max', '16e' -> 'iPhone 16e', '17 Air' -> 'iPhone 17 Air', '18PM' -> 'iPhone 18 Pro Max', '18P' -> 'iPhone 18 Pro'. NÃO inclua a capacidade (ex: 256) dentro do campo modelo. Se não houver modelo legível, retorne null (NUNCA invente geração).",
+  "capacidade": "Capacidade de armazenamento com unidade (ex: '256' na etiqueta vira '256GB', '128' vira '128GB', '512' vira '512GB', '64' vira '64GB', '1TB' vira '1TB') ou null",
+  "cor": "Cor do aparelho. Se não estiver escrita na etiqueta, IDENTIFIQUE visualmente a cor física do aparelho na foto (ex: 'Desert' para titânio deserto/dourado claro dos iPhones 16 Pro/Pro Max, 'Natural' para titânio natural/cinza claro, 'Azul' para titânio azul/azul, 'Preto', 'Branco', 'Roxo', 'Rosa', 'Verde', 'Dourado', 'Vermelho', 'Laranja') ou null",
+  "imei": "Número do IMEI com 15 dígitos numéricos OU o final de 4 a 6 dígitos escrito na etiqueta (ex: '6147', '7887'). IMPORTANTE: se o número estiver cortado/ilegível com MENOS de 4 dígitos (ex: apenas 3 dígitos como '887'), retorne null — NUNCA chute nem retorne menos de 4 dígitos.",
+  "saude_bateria": "Porcentagem da bateria se houver na etiqueta (número inteiro ex: 84 para '84%', ou null)",
   "preco": "Valor numérico do preço se constar na etiqueta (ex: 2800.00 ou null)",
   "codigo_etiqueta": "Código interno, ID ou número do código de barras (ex: 8665041 ou null)",
-  "condicao": "seminovo, novo ou usado se especificado",
+  "condicao": "seminovo, novo, usado ou danificado (use 'danificado' se houver avaria física grave visível como vidro traseiro ou tela quebrada)",
+  "observacoes": "Observações curtas de defeito/avaria. Inspecione VISUALMENTE o aparelho na foto (ex: 'Traseira quebrada', 'Tela quebrada', 'Lente da câmera quebrada', 'Carcaça amassada') E também qualquer defeito escrito na etiqueta (ex: 'Traseira', 'Tela', 'Face ID off', 'BG', 'TG', 'Cam', 'Msg bateria'). Se não houver nenhum defeito visível nem anotado, retorne null.",
+  "data_entrada": "Data de entrada se escrita em fita/etiqueta no aparelho (ex: 'ENTROU 21/11' -> '21/11', ou null)",
   "texto_venda_visivel": "Se a imagem for um print/captura de tela mostrando mensagem, legenda do WhatsApp ou anotação fora da etiqueta física com nome de comprador/lojista e/ou valor de venda (ex: 'GM 700', 'GM700', 'João 2500'), transcreva esse texto exato aqui; se for apenas a foto da etiqueta/aparelho sem texto de comprador externo, retorne null"
 }
 
@@ -85,7 +89,8 @@ A imagem pode ser:
 
 Regras Cruciais:
 - Para valores monetários, retorne como float numérico puro (ex: R$ 3.200,00 vira 3200.00).
-- Limpe o IMEI para conter apenas números, sem barras ou hífens.
+- Limpe o IMEI para conter apenas números, sem barras ou hífens. Se tiver menos de 4 dígitos, retorne null.
+- Em etiquetas de 4 cantos (ex: '16PM  256' em cima, '84%  6147' embaixo), reconheça cada campo separadamente (modelo, capacidade, bateria, imei).
 - Retorne ESTRITAMENTE um JSON válido, sem tags markdown ou comentários.`;
 
 /**
@@ -261,27 +266,145 @@ export async function analyzeImageWithGemini(
   return null;
 }
 
+const REGEX_VALOR_NULO_TEXTO = /^(?:null|undefined|none|n\/?a|nenhum|nenhuma|sem\s+observa[cç][oõ]es?|sem\s+detalhes?|n[aã]o\s+informad[oa]|n[aã]o\s+identificad[oa]|-)$/i;
+
+function limparTextoVision(valor: unknown): string | null {
+  if (valor === undefined || valor === null) return null;
+  const limpo = String(valor).replace(/\s+/g, ' ').trim();
+  if (!limpo || REGEX_VALOR_NULO_TEXTO.test(limpo)) return null;
+  return limpo;
+}
+
+export function normalizarCapacidadeVision(capBruta: unknown): string | null {
+  const limpo = limparTextoVision(capBruta);
+  if (!limpo) return null;
+  const matchTb = limpo.match(/^([12])\s*(?:tb|t|teras?)$/i) || limpo.match(/^(1024)\s*(?:gb|g)?$/i);
+  if (matchTb) {
+    return matchTb[1] === '1024' ? '1TB' : `${matchTb[1]}TB`;
+  }
+  const matchGb = limpo.match(/^(32|64|128|256|512)\s*(?:gb|g|gigas?)?$/i);
+  if (matchGb) {
+    return `${matchGb[1]}GB`;
+  }
+  return limpo.toUpperCase().replace(/\s+/g, '');
+}
+
+export function expandirModeloEtiqueta(modeloBruto: string): {
+  modelo: string;
+  capacidadeExtraida?: string;
+} {
+  let texto = String(modeloBruto || '').replace(/\s+/g, ' ').trim();
+  let capacidadeExtraida: string | undefined;
+
+  // Extrai capacidade colada/embutida no campo modelo (ex: "15PM 256", "16PM 256GB", "iPhone 16 Pro Max 1TB")
+  const matchCapTb = texto.match(/\b([12])\s*(?:tb|tera)\b/i);
+  if (matchCapTb) {
+    capacidadeExtraida = `${matchCapTb[1]}TB`;
+    texto = texto.replace(matchCapTb[0], ' ');
+  } else {
+    const matchCapGb = texto.match(/\b(32|64|128|256|512)\s*(?:gb|g)?\b/i);
+    if (matchCapGb) {
+      capacidadeExtraida = `${matchCapGb[1]}GB`;
+      texto = texto.replace(matchCapGb[0], ' ');
+    }
+  }
+
+  texto = texto.replace(/\s+/g, ' ').trim();
+
+  // Expande abreviações manuscritas de etiqueta de loja de iPhone (ex: 16PM, 15PM, 15P, 14PM, 16E, 18PM, 18P)
+  const ehOutraMarca = /\b(samsung|galaxy|xiaomi|redmi|poco|motorola|moto|edge|realme|ipad|watch|macbook|airpods?|ps5|ps4|xbox)\b/i.test(texto);
+  if (!ehOutraMarca) {
+    const matchSigla = texto.match(
+      /^(?:apple\s+)?(?:iphone\s+|ip\s+)?(2\d|1\d|[7-8])\s*(pm|p\s*max|promax|pro\s*max|pro|p|plus|\+|air|mini|m|e)?$/i
+    );
+    if (matchSigla) {
+      const geracao = matchSigla[1];
+      const suf = (matchSigla[2] || '').toLowerCase().replace(/\s+/g, '');
+      let sufixoNorm = '';
+      if (suf === 'pm' || suf === 'pmax' || suf === 'promax') sufixoNorm = ' Pro Max';
+      else if (suf === 'p' || suf === 'pro') sufixoNorm = ' Pro';
+      else if (suf === 'plus' || suf === '+') sufixoNorm = ' Plus';
+      else if (suf === 'air') sufixoNorm = ' Air';
+      else if (suf === 'mini' || suf === 'm') sufixoNorm = ' Mini';
+      else if (suf === 'e') sufixoNorm = 'e';
+      texto = `iPhone ${geracao}${sufixoNorm}`;
+    } else {
+      const matchX = texto.match(/^(?:apple\s+)?(?:iphone\s+|ip\s+)?(xs\s*max|xs|xr|x|se(?:\s*[23])?)$/i);
+      if (matchX) {
+        const tok = matchX[1].toUpperCase().replace(/\s+/g, ' ').trim();
+        texto = `iPhone ${tok === 'XS MAX' ? 'XS Max' : tok}`;
+      }
+    }
+  }
+
+  return {
+    modelo: texto.replace(/\s+/g, ' ').trim(),
+    ...(capacidadeExtraida ? { capacidadeExtraida } : {}),
+  };
+}
+
+function normalizarCorVision(corBruta: unknown): string | null {
+  const limpo = limparTextoVision(corBruta);
+  if (!limpo) return null;
+  const lower = limpo.toLowerCase();
+  if (lower.includes('desert') || lower.includes('deserto')) return 'Desert';
+  if (lower.includes('natural')) return 'Natural';
+  return limpo;
+}
+
 /**
  * Normaliza os dados do retorno da IA para garantir consistência
  */
-function normalizarResultadoVision(data: any): VisionEtiquetaResult {
+export function normalizarResultadoVision(data: any): VisionEtiquetaResult {
   const result: VisionEtiquetaResult = {
     tipo_documento: data.tipo_documento || 'etiqueta_aparelho',
     ...data,
   };
 
-  // Se tiver IMEI, limpa caracteres não-numéricos
-  if (result.imei) {
-    result.imei = String(result.imei).replace(/\D/g, '');
+  // Normaliza modelo e expande siglas manuscritas (ex: "15PM 256" -> "iPhone 15 Pro Max" + "256GB")
+  const modeloLimpo = limparTextoVision(result.modelo);
+  if (modeloLimpo) {
+    const { modelo, capacidadeExtraida } = expandirModeloEtiqueta(modeloLimpo);
+    result.modelo = modelo || null;
+    if (!limparTextoVision(result.capacidade) && capacidadeExtraida) {
+      result.capacidade = capacidadeExtraida;
+    }
+  } else {
+    result.modelo = null;
+  }
+
+  // Normaliza capacidade (ex: "256" -> "256GB")
+  result.capacidade = normalizarCapacidadeVision(result.capacidade);
+
+  // Normaliza cor
+  result.cor = normalizarCorVision(result.cor);
+
+  // Valida IMEI: aceita 4–6 dígitos (final na etiqueta) ou 14–16 dígitos (IMEI completo).
+  // Descarta fragmentos cortados (< 4 dígitos, como "887") para nunca poluir venda ou busca.
+  if (result.imei !== undefined && result.imei !== null) {
+    const imeiDigits = String(result.imei).replace(/\D/g, '');
+    if ((imeiDigits.length >= 4 && imeiDigits.length <= 6) || (imeiDigits.length >= 14 && imeiDigits.length <= 16)) {
+      result.imei = imeiDigits;
+    } else {
+      result.imei = null;
+    }
+  } else {
+    result.imei = null;
   }
 
   // Normaliza saúde da bateria
   if (result.saude_bateria !== undefined && result.saude_bateria !== null) {
     const batNum = parseInt(String(result.saude_bateria).replace(/\D/g, ''), 10);
-    if (!isNaN(batNum) && batNum > 0 && batNum <= 100) {
-      result.saude_bateria = batNum;
-    }
+    result.saude_bateria = !isNaN(batNum) && batNum > 0 && batNum <= 100 ? batNum : null;
+  } else {
+    result.saude_bateria = null;
   }
+
+  // Normaliza observações (defeito físico visível ou anotado na etiqueta) e data de entrada
+  result.observacoes = limparTextoVision(result.observacoes);
+  result.data_entrada = limparTextoVision(result.data_entrada);
+  result.codigo_etiqueta = limparTextoVision(result.codigo_etiqueta);
+  result.texto_venda_visivel = limparTextoVision(result.texto_venda_visivel);
 
   // Normaliza preço
   if (result.preco !== undefined && result.preco !== null) {

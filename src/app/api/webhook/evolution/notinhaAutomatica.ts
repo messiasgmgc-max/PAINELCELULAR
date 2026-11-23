@@ -169,14 +169,25 @@ export function limparNomeModelo(m: string): string {
   limpo = limpo.replace(/^\s*(?:\d+\s*(?:[-–—.)]|x|un|unid(?:ades?)?)\s*|[•*-]\s*)/i, '');
   limpo = limpo.replace(/^\s*(?:upgrade|troca|trade[- ]?in)\b\s*[:=-]?\s*/i, '');
 
-  // Separa número colado com pro/plus/max/mini (ex: "15pro" -> "15 Pro")
-  limpo = limpo
-    .replace(/\b(\d+)(pro\s*max|promax)\b/gi, '$1 Pro Max')
-    .replace(/\b(\d+)(pro)\b/gi, '$1 Pro')
-    .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
-    .replace(/\b(\d+)(mini)\b/gi, '$1 Mini');
+  // Separa e expande abreviações de etiqueta de iPhone (ex: "15PM" -> "15 Pro Max", "16P" -> "16 Pro", "13M" -> "13 Mini")
+  const ehOutraMarca = /\b(samsung|galaxy|xiaomi|redmi|poco|motorola|moto|edge|realme|ipad|watch|macbook|airpods?|ps5|ps4|xbox)\b/i.test(limpo);
+  if (!ehOutraMarca) {
+    limpo = limpo
+      .replace(/\b(2\d|1\d|[7-8])\s*(?:pm|p\s*max|promax|pro\s*max)\b/gi, '$1 Pro Max')
+      .replace(/\b(2\d|1\d|[7-8])\s*(?:pro|p)\b/gi, '$1 Pro')
+      .replace(/\b(2\d|1\d|[7-8])\s*(?:plus|\+)\b/gi, '$1 Plus')
+      .replace(/\b(2\d|1\d|[7-8])\s*(?:air)\b/gi, '$1 Air')
+      .replace(/\b(2\d|1\d|[7-8])\s*(?:mini|m)\b/gi, '$1 Mini')
+      .replace(/\b(2\d|1\d)\s*e\b/gi, '$1e');
+  } else {
+    limpo = limpo
+      .replace(/\b(\d+)(pro\s*max|promax)\b/gi, '$1 Pro Max')
+      .replace(/\b(\d+)(pro)\b/gi, '$1 Pro')
+      .replace(/\b(\d+)(plus)\b/gi, '$1 Plus')
+      .replace(/\b(\d+)(mini)\b/gi, '$1 Mini');
+  }
 
-  // Remove menção a imei, serial, lacrado, seminovo, bateria, garantia, gb, cores comuns, fragmentos de RAM/memória e capacidades como "256g"
+  // Remove menção a imei, serial, lacrado, seminovo, bateria, garantia, gb, cores comuns, fragmentos de RAM/memória e capacidades como "256g" ou "256" solto
   limpo = limpo
     .replace(/\bimei\b.*$/i, '')
     .replace(/\+?\s*R\$\s*[0-9.,]+/gi, '')
@@ -190,6 +201,7 @@ export function limparNomeModelo(m: string): string {
     .replace(/\b(?:lacrado|seminovo|novo|usado|caixa\s*fechada)\b/gi, '')
     .replace(/\b\d+\s*(?:gb|tb|g)\s*(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
     .replace(/\b\d+\s*(?:gb|tb|g)\b/gi, '')
+    .replace(/\b(?:32|64|128|256|512)\b$/g, '')
     .replace(/(?:,\s*)?(?:de\s+)?ram\s*(?:e\s*)?(?:de\s+)?(?:mem[oó]ria|armazenamento|rom)?\b/gi, '')
     .replace(/\b(?:de\s+)?(?:ram|mem[oó]ria|armazenamento|rom)\b/gi, '')
     .replace(
@@ -209,6 +221,7 @@ export function limparNomeModelo(m: string): string {
     .replace(/\bpro\s*max\b/gi, 'Pro Max')
     .replace(/\bpro\b/gi, 'Pro')
     .replace(/\bplus\b/gi, 'Plus')
+    .replace(/\bair\b/gi, 'Air')
     .replace(/\bmini\b/gi, 'Mini');
 
   return normalizarNomeModelo(limpo);
@@ -2453,6 +2466,8 @@ export interface FotoRecenteCache {
   capacidade?: string | null;
   cor?: string | null;
   bateria?: number | string | null;
+  observacoes?: string | null;
+  dataEntrada?: string | null;
   pushName?: string;
   timestamp: number;
   historicoFotos?: FotoRecenteCache[];
@@ -3136,7 +3151,7 @@ function finalizarVendaAtacado(
   formaPagamento?: string,
   valoresIndividuais?: number[]
 ): VendaAtacadoDetectada | null {
-  const nome = trabalhoBruto
+  let nome = trabalhoBruto
     .replace(
       /^(?:atacado|venda\s+atacado|vendido(?:\s+(?:para|pro|pra))?|vendi(?:\s+(?:para|pro|pra))?|cliente|comprador|lojista|para|pro|pra)\s*[:=-]?\s*/i,
       ''
@@ -3144,6 +3159,20 @@ function finalizarVendaAtacado(
     .replace(/^[-–—:.,/*_\s]+|[-–—:.,/*_\s]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  // Remove verbos/conectores soltos no final do nome (ex: "Edgard vendido por R$4150" -> "Edgard", "Carlos saiu por 2500" -> "Carlos")
+  let anterior = '';
+  while (nome && nome !== anterior) {
+    anterior = nome;
+    nome = nome
+      .replace(
+        /(?:\s+[-–—:]?\s*|\s+)(?:vendid[oa]s?|vendi|venda|saiu|foi|pag[oa]s?|pagou|paguei|no\s+valor(?:\s+de)?|valor(?:\s+de)?|por|para|pro|pra|de)\s*$/i,
+        ''
+      )
+      .replace(/^[-–—:.,/*_\s]+|[-–—:.,/*_\s]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
   if (!nome || nome.length < 2 || nome.length > 60) return null;
   if (!/[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(nome)) return null;
@@ -3464,6 +3493,58 @@ export async function temFotoRecenteOuProcessando(
   }
 }
 
+export interface AvaliacaoEstoqueAtacado {
+  todosConfirmadosNoEstoque: boolean;
+  itens: Array<{
+    foto: FotoRecenteCache;
+    modeloLimpo: string;
+    imeiValido: string | null;
+    cruzamento: ResultadoCruzamentoEstoque;
+  }>;
+}
+
+/**
+ * Avalia se todas as fotos de uma venda de atacado casam de forma inequívoca com aparelhos
+ * disponíveis no estoque antes de registrar a venda automaticamente (Opção A).
+ */
+export function avaliarEstoqueVendaAtacadoComFoto(
+  fotos: FotoRecenteCache[],
+  estoque: AparelhoEstoqueConsulta[]
+): AvaliacaoEstoqueAtacado {
+  const aparelhoIdsUsados = new Set<string>();
+  const itens = (fotos || []).map((foto) => {
+    const imeiDigits = digitos(foto.imei);
+    const imeiValido =
+      (imeiDigits.length >= 4 && imeiDigits.length <= 6) || (imeiDigits.length >= 14 && imeiDigits.length <= 16)
+        ? imeiDigits
+        : null;
+    const modeloLimpo = limparNomeModelo(foto.modelo || '') || String(foto.modelo || '').trim();
+    const estoqueDisponivel = estoque.filter(
+      (e) => !e.id || !aparelhoIdsUsados.has(e.id) || (imeiValido && digitos(e.imei) === imeiValido)
+    );
+
+    const cruzamento = cruzarAparelhoComEstoque(estoqueDisponivel, {
+      modelo: modeloLimpo,
+      capacidade: foto.capacidade,
+      cor: foto.cor,
+      imei: imeiValido,
+      bateria: foto.bateria,
+    });
+
+    if (cruzamento.status === 'confirmado' && cruzamento.aparelhoEncontrado?.id) {
+      aparelhoIdsUsados.add(cruzamento.aparelhoEncontrado.id);
+    }
+
+    return { foto, modeloLimpo, imeiValido, cruzamento };
+  });
+
+  const todosConfirmadosNoEstoque =
+    itens.length > 0 &&
+    itens.every((it) => it.cruzamento.status === 'confirmado' && Boolean(it.cruzamento.aparelhoEncontrado?.id));
+
+  return { todosConfirmadosNoEstoque, itens };
+}
+
 /**
  * Registra uma venda de atacado a partir de foto(s) com IMEI + nome do comprador abaixo
  * (com valor = 0 quando não informado) usando `registrarVendaAtomica`.
@@ -3538,15 +3619,23 @@ export async function emitirVendaAtacadoComFoto(params: {
     let custoTotal = 0;
 
     const itensVendaPayload = fotos.map((foto, idx) => {
+      const imeiDigitsFoto = digitos(foto.imei);
+      const imeiFotoValido =
+        (imeiDigitsFoto.length >= 4 && imeiDigitsFoto.length <= 6) ||
+        (imeiDigitsFoto.length >= 14 && imeiDigitsFoto.length <= 16)
+          ? imeiDigitsFoto
+          : null;
+      const modeloFotoLimpo = limparNomeModelo(foto.modelo || '') || foto.modelo;
+
       const estoqueDisponivel = estoque.filter(
-        (e) => !e.id || !aparelhoIdsUsados.has(e.id) || (foto.imei && digitos(e.imei) === digitos(foto.imei))
+        (e) => !e.id || !aparelhoIdsUsados.has(e.id) || (imeiFotoValido && digitos(e.imei) === imeiFotoValido)
       );
 
       const cruzamento = cruzarAparelhoComEstoque(estoqueDisponivel, {
-        modelo: foto.modelo,
+        modelo: modeloFotoLimpo,
         capacidade: foto.capacidade,
         cor: foto.cor,
-        imei: foto.imei,
+        imei: imeiFotoValido,
         bateria: foto.bateria,
       });
 
@@ -3568,14 +3657,14 @@ export async function emitirVendaAtacadoComFoto(params: {
         statusPorItem.push(cruzamento.mensagem);
       }
 
-      const modeloFinal = limparNomeModelo(apEnc?.modelo || foto.modelo || '') || 'Smartphone';
+      const modeloFinal = limparNomeModelo(apEnc?.modelo || modeloFotoLimpo || '') || 'Smartphone';
       const capFinal = apEnc?.capacidade || foto.capacidade || undefined;
       const corBruta = apEnc?.cor || foto.cor || undefined;
       const corFinal = corBruta ? extrairCorDeTexto(corBruta) || corBruta : undefined;
       const imeiFinal =
-        foto.imei && digitos(foto.imei).length >= 14
-          ? foto.imei
-          : apEnc?.imei || foto.imei || '';
+        imeiFotoValido && imeiFotoValido.length >= 14
+          ? imeiFotoValido
+          : apEnc?.imei || imeiFotoValido || '';
       const custoItem = Number(apEnc?.custo || 0);
       custoTotal += custoItem;
 

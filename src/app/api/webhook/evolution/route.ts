@@ -45,6 +45,22 @@ import {
   salvarVendaAtacadoRecente,
   tentarEditarValorVendaAtacado,
 } from './handlers/estoqueSaidaRapidaHandler';
+import {
+  aplicarImeiEmAtacadoPendente,
+  buscarEntradaFotoPendente,
+  buscarVendaAtacadoPendente,
+  construirDadosEntradaDeVision,
+  ehLegendaEntradaFotoDireta,
+  executarEntradaEstoquePorFoto,
+  extrairImeiCorrecaoRapida,
+  formatarMensagemAtacadoPendente,
+  formatarResumoDadosEntradaFoto,
+  limparEntradaFotoPendente,
+  limparVendaAtacadoPendente,
+  salvarEntradaFotoPendente,
+  salvarVendaAtacadoPendente,
+  type DadosVendaAtacadoPendente,
+} from './handlers/fotoOperacoesHandler';
 import { gerarMensagemTabelaPlanos, gerarMensagemVencimentoPlano } from './handlers/planosHandler';
 import {
   detectarComandoAparelhoEmprestado,
@@ -59,6 +75,7 @@ import {
   detectarVendaAtacadoMultiploComFoto,
   detectarVendaAtacadoPorTextoOuAudio,
   temFotoRecenteOuProcessando,
+  avaliarEstoqueVendaAtacadoComFoto,
   emitirVendaAtacadoComFoto,
   cruzarAparelhoComEstoque,
   construirPropostaNotinha,
@@ -1802,29 +1819,20 @@ ${comparativoBateria ? comparativoBateria + '\n' : ''}
   }
 
   // ── CASO B: Aparelho NÃO ENCONTRADO no banco de dados ──
-  const precoSugerido = precoLido ? `R$ ${precoLido.toFixed(2).replace('.', ',')}` : 'Não informado';
-  const capFmt = capacidadeLida || '128GB';
-  const modFmt = modeloLido || 'Smartphone';
-  const imeiFmt = imei || 'SEM-IMEI';
+  const dadosEntradaPreview = construirDadosEntradaDeVision(vision, lojaId, '', pushName);
+  const resumoEstruturado = dadosEntradaPreview
+    ? formatarResumoDadosEntradaFoto(dadosEntradaPreview)
+    : `📱 *Modelo:* ${modeloLido || 'Smartphone'}\n💾 *Capacidade:* ${capacidadeLida || '128GB'}\n🔋 *Bateria:* ${bateriaLida ? `${bateriaLida}%` : 'Não informada'}\n🔢 *IMEI:* \`${imei || 'Não identificado'}\`\n🎨 *Cor:* ${corLida || 'Padrão'}\n📝 *Observação:* ${vision.observacoes || 'Nenhuma'}`;
 
-  return `🔍 *APARELHO NÃO ENCONTRADO NO ESTOQUE*
-
-🤖 *Dados lidos da etiqueta com IA:*
-• *Modelo:* ${modFmt}
-• *Capacidade:* ${capFmt}
-• *Cor:* ${corLida || 'Padrão'}
-• *IMEI:* \`${imei || 'Não identificado'}\`
-• *Bateria:* ${bateriaLida ? bateriaLida + '%' : 'Não informada'}
-• *Preço na Etiqueta:* ${precoSugerido}
-• *Código da Etiqueta:* ${codigoEtiqueta || 'N/A'}
-
-💡 *Vai emitir uma venda ou notinha?*
-Envie o formulário do pedido em seguida que eu vinculo o IMEI lido automaticamente!
-
-📥 *Ou deseja dar entrada desse aparelho no sistema?*
-Basta responder:
-\`!cadastrar ${modFmt} ${capFmt} ${imeiFmt} ${precoLido || ''}\`
-e eu cadastro no estoque da loja instantaneamente!`.trim();
+  return (
+    `🔍 *APARELHO NÃO ENCONTRADO NO ESTOQUE*\n\n` +
+    `🤖 *Dados lidos da foto/etiqueta com IA:*\n` +
+    `${resumoEstruturado}\n\n` +
+    `📥 *Deseja cadastrar este aparelho no estoque?*\n` +
+    `• Reaja com ✅ ou responda *cadastrar* / *sim* para dar entrada agora!\n` +
+    `• ❌ Reaja com ❌ ou responda *cancelar* para descartar.\n\n` +
+    `💡 _Ou envie o nome do comprador (atacado) / formulário de venda em seguida para vincular esta foto._`
+  ).trim();
 }
 
 // ── AUXILIAR: Processar Lista de Preços de Fornecedor ──
@@ -3278,6 +3286,93 @@ export async function POST(request: Request) {
           }
         }
 
+        // ── REAÇÃO ✅ / ❌ EM VENDA ATACADO PENDENTE (OPÇÃO A) ──
+        if (emojiReacao !== '🧾') {
+          const atacadoPendenteReac = await buscarVendaAtacadoPendente(supabase, jidsReacao, idMensagemReagida);
+          if (atacadoPendenteReac) {
+            const lojaEfetivaAtac = atacadoPendenteReac.lojaId || lojaReacaoId || '';
+            if (acaoReacao === 'confirmar' || acaoReacao === 'confirmar_sem_troca') {
+              const { data: apsEstoqueAtac } = await supabase
+                .from('aparelhos')
+                .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+                .eq('loja_id', lojaEfetivaAtac)
+                .order('ativo', { ascending: false })
+                .order('dataCadastro', { ascending: false })
+                .limit(600);
+
+              const resultadoAtacado = await emitirVendaAtacadoComFoto({
+                supabase,
+                lojaId: lojaEfetivaAtac,
+                vendaAtacado: atacadoPendenteReac.vendaAtacado,
+                fotos: atacadoPendenteReac.fotos,
+                estoque: apsEstoqueAtac || [],
+                usuarioNome: nomeUsuario || pushName || atacadoPendenteReac.usuarioNome || 'Equipe',
+              });
+
+              await limparVendaAtacadoPendente(supabase, atacadoPendenteReac, jidsReacao);
+              await editarOuResponderMensagemWhatsApp(
+                instanceName,
+                targetDestination,
+                idMensagemReagida,
+                resultadoAtacado.mensagem
+              );
+              if (resultadoAtacado.sucesso && resultadoAtacado.vendaUuid) {
+                const payloadRec = {
+                  vendaUuid: resultadoAtacado.vendaUuid,
+                  vendaCodigo: resultadoAtacado.vendaId || 'OK',
+                  clienteNome: atacadoPendenteReac.vendaAtacado.clienteNome,
+                  custoTotal: resultadoAtacado.custoTotal || 0,
+                  metodo: atacadoPendenteReac.vendaAtacado.formaPagamento || 'pix',
+                  valorAtual: atacadoPendenteReac.vendaAtacado.valor,
+                };
+                await salvarVendaAtacadoRecente(supabase, lojaEfetivaAtac, remoteJid, idMensagemReagida, payloadRec);
+              }
+              return NextResponse.json(
+                { status: resultadoAtacado.sucesso ? 'ok' : 'error', message: 'Venda atacado pendente confirmada via reação.' },
+                { status: 200 }
+              );
+            } else {
+              await limparVendaAtacadoPendente(supabase, atacadoPendenteReac, jidsReacao);
+              await editarOuResponderMensagemWhatsApp(
+                instanceName,
+                targetDestination,
+                idMensagemReagida,
+                `❌ *Venda atacado pendente (${atacadoPendenteReac.vendaAtacado.clienteNome}) cancelada por ${pushName}.*`
+              );
+              return NextResponse.json({ status: 'ok', message: 'Venda atacado pendente cancelada via reação.' }, { status: 200 });
+            }
+          }
+
+          // ── REAÇÃO ✅ / ❌ EM CADASTRO DE APARELHO POR FOTO PENDENTE ──
+          const entradaFotoPendenteReac = await buscarEntradaFotoPendente(supabase, jidsReacao, idMensagemReagida);
+          if (entradaFotoPendenteReac) {
+            const lojaEfetivaEnt = entradaFotoPendenteReac.lojaId || lojaReacaoId || '';
+            if (acaoReacao === 'confirmar' || acaoReacao === 'confirmar_sem_troca') {
+              const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaEfetivaEnt, entradaFotoPendenteReac);
+              await limparEntradaFotoPendente(supabase, entradaFotoPendenteReac, jidsReacao);
+              await editarOuResponderMensagemWhatsApp(
+                instanceName,
+                targetDestination,
+                idMensagemReagida,
+                resEntrada.mensagem
+              );
+              return NextResponse.json(
+                { status: resEntrada.sucesso ? 'ok' : 'warning', message: 'Entrada por foto processada via reação.' },
+                { status: 200 }
+              );
+            } else {
+              await limparEntradaFotoPendente(supabase, entradaFotoPendenteReac, jidsReacao);
+              await editarOuResponderMensagemWhatsApp(
+                instanceName,
+                targetDestination,
+                idMensagemReagida,
+                `❌ *Cadastro por foto (${entradaFotoPendenteReac.modelo}) cancelado.*`
+              );
+              return NextResponse.json({ status: 'ok', message: 'Cadastro por foto cancelado via reação.' }, { status: 200 });
+            }
+          }
+        }
+
         // ── REAÇÃO 🧾 EM QUALQUER MENSAGEM DO HISTÓRICO (FOTO, TEXTO CRU OU FORMULÁRIO) -> ENVIA PRÉVIA NO PV DE QUEM REAGIU ──
         if (emojiReacao === '🧾') {
           const remoteJidOriginal = String(reactionMessage.key?.remoteJid || remoteJid || '');
@@ -3579,13 +3674,20 @@ export async function POST(request: Request) {
         payload.data?.caption ||
         '';
 
-      let vendaAtacadoNaFoto = captionText
-        ? modoChat === 'multiplo'
-          ? detectarVendaAtacadoMultiploComFoto(captionText)
-          : detectarVendaAtacadoComFoto(captionText)
-        : null;
-      const vendaDetectadaNaFoto = !vendaAtacadoNaFoto && captionText ? detectarFormularioOuPedidoVenda(captionText) : null;
-      const ehEntradaNaFoto = captionText ? ehMensagemDeEntradaEstoque(captionText) : false;
+      const ehEntradaFotoDireta = Boolean(captionText && ehLegendaEntradaFotoDireta(captionText));
+      const ehEntradaNaFoto = Boolean(
+        captionText && (ehEntradaFotoDireta || ehMensagemDeEntradaEstoque(captionText))
+      );
+      let vendaAtacadoNaFoto =
+        captionText && modoChat !== 'estoque' && !ehEntradaNaFoto
+          ? modoChat === 'multiplo'
+            ? detectarVendaAtacadoMultiploComFoto(captionText)
+            : detectarVendaAtacadoComFoto(captionText)
+          : null;
+      const vendaDetectadaNaFoto =
+        !vendaAtacadoNaFoto && !ehEntradaNaFoto && captionText
+          ? detectarFormularioOuPedidoVenda(captionText)
+          : null;
 
       if (modoChat === 'vendas' && ehEntradaNaFoto) {
         return NextResponse.json({ status: 'ok', message: 'Entrada de estoque ignorada no modo vendas.' }, { status: 200 });
@@ -3758,6 +3860,8 @@ export async function POST(request: Request) {
                     capacidade: capLida,
                     cor: corLida,
                     bateria: bateriaLida,
+                    observacoes: visionData.observacoes || null,
+                    dataEntrada: visionData.data_entrada || null,
                     pushName,
                     timestamp: Date.now(),
                   }
@@ -3876,21 +3980,76 @@ export async function POST(request: Request) {
                 .order('dataCadastro', { ascending: false })
                 .limit(600);
 
+              const fotosAtacadoCaption: FotoRecenteCache[] = [
+                {
+                  imei: imeiLido,
+                  modelo: modeloLido,
+                  capacidade: capLida,
+                  cor: corLida,
+                  bateria: bateriaLida,
+                  observacoes: visionData.observacoes || null,
+                  dataEntrada: visionData.data_entrada || null,
+                  pushName,
+                  timestamp: Date.now(),
+                },
+              ];
+
+              const avaliacaoEstoque = avaliarEstoqueVendaAtacadoComFoto(fotosAtacadoCaption, apsEstoque || []);
+              if (!avaliacaoEstoque.todosConfirmadosNoEstoque) {
+                const motivoEstoque =
+                  avaliacaoEstoque.itens
+                    .map((it) => it.cruzamento.mensagem)
+                    .filter(Boolean)
+                    .join(' | ') || 'Aparelho não localizado com certeza no estoque';
+
+                const dadosPendente: DadosVendaAtacadoPendente = {
+                  id: `atacado-pend-${Date.now()}`,
+                  lojaId,
+                  vendaAtacado: vendaAtacadoNaFoto,
+                  fotos: fotosAtacadoCaption,
+                  usuarioNome: nomeUsuario || pushName || 'Equipe',
+                  motivoEstoque,
+                  criadoEm: Date.now(),
+                };
+
+                const envioPend = await enviarMensagemWhatsAppComRetorno(
+                  instanceName,
+                  targetDestination,
+                  formatarMensagemAtacadoPendente(dadosPendente)
+                );
+                const jidsAtacadoPend = montarJidsPropostaChat({
+                  remoteJid,
+                  targetDestination,
+                  isGroup,
+                  authorPhone,
+                  senderPhone,
+                  ehModeradorMaster,
+                });
+                await salvarVendaAtacadoPendente(
+                  supabase,
+                  lojaId,
+                  jidsAtacadoPend,
+                  envioPend.messageId || dadosPendente.id,
+                  dadosPendente
+                );
+                await supabase.from('whatsapp_logs').insert({
+                  loja_id: lojaId,
+                  contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                  mensagem: `[FOTO+ATACADO PENDENTE] ${vendaAtacadoNaFoto.clienteNome} (IMEI: ${imeiLido || '-'} | Valor: R$ ${vendaAtacadoNaFoto.valor})`,
+                  created_at: new Date().toISOString(),
+                });
+
+                return NextResponse.json(
+                  { status: 'pending', message: 'Venda atacado aguardando IMEI ou confirmação de estoque.' },
+                  { status: 200 }
+                );
+              }
+
               const resultadoAtacado = await emitirVendaAtacadoComFoto({
                 supabase,
                 lojaId,
                 vendaAtacado: vendaAtacadoNaFoto,
-                fotos: [
-                  {
-                    imei: imeiLido,
-                    modelo: modeloLido,
-                    capacidade: capLida,
-                    cor: corLida,
-                    bateria: bateriaLida,
-                    pushName,
-                    timestamp: Date.now(),
-                  },
-                ],
+                fotos: fotosAtacadoCaption,
                 estoque: apsEstoque || [],
                 usuarioNome: nomeUsuario || pushName || 'Equipe',
               });
@@ -4040,38 +4199,73 @@ export async function POST(request: Request) {
               return NextResponse.json({ status: 'ok', message: 'IMEI da foto vinculado à notinha pendente.' }, { status: 200 });
             }
 
-            // ── CASO 3: A foto veio acompanhada de texto de entrada de estoque ──
-            if (ehEntradaNaFoto && lojaId) {
-              let textoEntradaComImei = captionText;
-              if (imeiLido && !captionText.includes(imeiLido)) {
-                textoEntradaComImei = `${captionText} imei: ${imeiLido}`;
+            // ── CASO 3: A foto veio acompanhada de entrada de estoque OU foi enviada no !modo estoque ──
+            const ehEntradaPorFotoNoModoEstoque =
+              modoChat === 'estoque' && !vendaAtacadoNaFoto && !vendaDetectadaNaFoto && !captionText.trim().startsWith('!');
+            if ((ehEntradaNaFoto || ehEntradaPorFotoNoModoEstoque) && lojaId) {
+              const linhasCaption = String(captionText || '')
+                .split(/\r?\n/)
+                .map((l: string) => l.trim())
+                .filter(Boolean);
+              const ehListaFornecedorMultiLinha =
+                linhasCaption.length >= 2 && ehMensagemDeEntradaEstoque(captionText) && !ehEntradaFotoDireta;
+
+              if (!ehListaFornecedorMultiLinha) {
+                const dadosEntradaFoto = construirDadosEntradaDeVision(
+                  visionData,
+                  lojaId,
+                  captionText,
+                  nomeUsuario || pushName || 'Equipe'
+                );
+                if (dadosEntradaFoto) {
+                  await limparFotoRecente(supabase, remoteJid, authorPhone);
+                  const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaId, dadosEntradaFoto);
+                  await enviarMensagemWhatsApp(instanceName, targetDestination, resEntrada.mensagem);
+                  await supabase.from('whatsapp_logs').insert({
+                    loja_id: lojaId,
+                    contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+                    mensagem: `[FOTO+ENTRADA] ${dadosEntradaFoto.modelo} ${dadosEntradaFoto.capacidade} (IMEI: ${dadosEntradaFoto.imei || '-'} | Obs: ${dadosEntradaFoto.observacoes || '-'})`,
+                    created_at: new Date().toISOString(),
+                  });
+                  return NextResponse.json(
+                    { status: resEntrada.sucesso ? 'ok' : 'warning', message: 'Entrada de aparelho por foto processada.' },
+                    { status: 200 }
+                  );
+                }
               }
 
-              await limparFotoRecente(supabase, remoteJid, authorPhone);
+              if (ehEntradaNaFoto) {
+                let textoEntradaComImei = captionText;
+                if (imeiLido && !captionText.includes(imeiLido)) {
+                  textoEntradaComImei = `${captionText} imei: ${imeiLido}`;
+                }
 
-              const capabilityLote = obterCapability('create_aparelhos_lote');
-              if (capabilityLote) {
-                const planoLojaFoto: TipoPlano = ehModeradorMaster
-                  ? 'avancado'
-                  : lojaId
-                    ? await obterPlanoLoja(lojaId)
-                    : 'entrada';
-                const papelCapFoto: PapelUsuario = (papelUsuario as PapelUsuario) || 'staff';
-                const resultadoLote = await capabilityLote.executar(
-                  {
-                    supabase,
-                    lojaId,
-                    usuarioId: usuarioResolvido?.id || (usuarioResolvido as any)?.usuarioId,
-                    papel: papelCapFoto,
-                    planoLoja: planoLojaFoto,
-                    isGroup,
-                    authorPhone,
-                  },
-                  { texto: textoEntradaComImei }
-                );
-                const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
-                await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
-                return NextResponse.json({ status: 'ok', message: 'Entrada com foto processada com sucesso.' }, { status: 200 });
+                await limparFotoRecente(supabase, remoteJid, authorPhone);
+
+                const capabilityLote = obterCapability('create_aparelhos_lote');
+                if (capabilityLote) {
+                  const planoLojaFoto: TipoPlano = ehModeradorMaster
+                    ? 'avancado'
+                    : lojaId
+                      ? await obterPlanoLoja(lojaId)
+                      : 'entrada';
+                  const papelCapFoto: PapelUsuario = (papelUsuario as PapelUsuario) || 'staff';
+                  const resultadoLote = await capabilityLote.executar(
+                    {
+                      supabase,
+                      lojaId,
+                      usuarioId: usuarioResolvido?.id || (usuarioResolvido as any)?.usuarioId,
+                      papel: papelCapFoto,
+                      planoLoja: planoLojaFoto,
+                      isGroup,
+                      authorPhone,
+                    },
+                    { texto: textoEntradaComImei }
+                  );
+                  const respostaTexto = typeof resultadoLote === 'string' ? resultadoLote : (resultadoLote as any)?.texto || String(resultadoLote || '');
+                  await enviarMensagemWhatsApp(instanceName, targetDestination, respostaTexto);
+                  return NextResponse.json({ status: 'ok', message: 'Entrada com foto processada com sucesso.' }, { status: 200 });
+                }
               }
             }
 
@@ -4083,7 +4277,33 @@ export async function POST(request: Request) {
 
             // ── CASO 4: Foto isolada de etiqueta/estoque (consulta ou novo aparelho) ──
             const respostaEtiqueta = await processarResultadoVisionEtiqueta(visionData, lojaId, pushName);
-            await enviarMensagemWhatsApp(instanceName, targetDestination, respostaEtiqueta);
+            const envioEtiqueta = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, respostaEtiqueta);
+
+            if (lojaId && respostaEtiqueta.includes('APARELHO NÃO ENCONTRADO NO ESTOQUE')) {
+              const dadosEntradaPend = construirDadosEntradaDeVision(
+                visionData,
+                lojaId,
+                captionText,
+                nomeUsuario || pushName || 'Equipe'
+              );
+              if (dadosEntradaPend) {
+                const jidsEntradaFoto = montarJidsPropostaChat({
+                  remoteJid,
+                  targetDestination,
+                  isGroup,
+                  authorPhone,
+                  senderPhone,
+                  ehModeradorMaster,
+                });
+                await salvarEntradaFotoPendente(
+                  supabase,
+                  lojaId,
+                  jidsEntradaFoto,
+                  envioEtiqueta.messageId || dadosEntradaPend.id,
+                  dadosEntradaPend
+                );
+              }
+            }
 
             if (lojaId) {
               await supabase.from('whatsapp_logs').insert({
@@ -4209,15 +4429,19 @@ export async function POST(request: Request) {
       // O bot atende estritamente a:
       // 1. Comando de modo (!modo / !config), !fechamento e !emprestados
       // 2. Formulários de venda / pedidos ou venda atacado por foto + nome (e múltiplos valores no !modo multiplo)
-      // 3. Confirmações, cancelamentos ou correções quando HÁ notinha pendente ou edição de valor de atacado recente
+      // 3. Confirmações, cancelamentos ou correções quando HÁ notinha pendente, atacado pendente ou edição de valor de atacado recente
       // 4. Marcação do bot em mensagens de formulário ou etiquetas de aparelhos
       const ehFormularioVenda = Boolean(detectarFormularioOuPedidoVenda(textContent));
       const ehComandoPendentes = /^!\s*(?:pendentes|cancelar\s+todas|limpar\s+pendentes)\b/i.test(lowerText);
       const ehPossivelConfirmacao = Boolean(interpretarConfirmacaoTextoNotinha(textContent));
       const ehPossivelCorrecao = Boolean(interpretarTextoCorrecaoVenda(textContent));
+      const ehPossivelImeiCorrecao = Boolean(
+        extrairImeiCorrecaoRapida(textContent, Boolean(marcacaoBot.quotedStanzaId))
+      );
 
       let temNotinhaPendente = false;
-      if (lojaId && (ehPossivelConfirmacao || ehPossivelCorrecao)) {
+      let temAtacadoPendente = false;
+      if (lojaId && (ehPossivelConfirmacao || ehPossivelCorrecao || ehPossivelImeiCorrecao)) {
         const jidsModoVenda = montarJidsPropostaChat({
           remoteJid,
           targetDestination,
@@ -4226,14 +4450,24 @@ export async function POST(request: Request) {
           senderPhone,
           ehModeradorMaster,
         });
-        const resolucaoModo = await resolverPropostaAlvoNotinha({
-          supabase,
-          jids: jidsModoVenda,
-          lojaId,
-          quotedStanzaId: marcacaoBot.quotedStanzaId,
-          maxMinutosLegado: 30,
-        });
-        temNotinhaPendente = resolucaoModo.status !== 'nao_encontrada';
+        if (ehPossivelConfirmacao || ehPossivelCorrecao) {
+          const resolucaoModo = await resolverPropostaAlvoNotinha({
+            supabase,
+            jids: jidsModoVenda,
+            lojaId,
+            quotedStanzaId: marcacaoBot.quotedStanzaId,
+            maxMinutosLegado: 30,
+          });
+          temNotinhaPendente = resolucaoModo.status !== 'nao_encontrada';
+        }
+        if (ehPossivelConfirmacao || ehPossivelImeiCorrecao) {
+          const atacadoModo =
+            (await buscarVendaAtacadoPendente(supabase, jidsModoVenda, marcacaoBot.quotedStanzaId)) ||
+            (marcacaoBot.quotedStanzaId
+              ? await buscarVendaAtacadoPendente(supabase, jidsModoVenda, null)
+              : null);
+          temAtacadoPendente = Boolean(atacadoModo);
+        }
       }
 
       const ehOperacaoVendaValida =
@@ -4245,6 +4479,7 @@ export async function POST(request: Request) {
         Boolean(vendaAtacadoDireta) ||
         temFotoAtivaParaAtacado ||
         valorEdicaoRapida !== null ||
+        temAtacadoPendente ||
         (ehPossivelConfirmacao && temNotinhaPendente) ||
         (ehPossivelCorrecao && temNotinhaPendente) ||
         (marcacaoBot.foiMarcado && (
@@ -4252,6 +4487,7 @@ export async function POST(request: Request) {
           Boolean(detectarFormularioOuPedidoVenda(marcacaoBot.textoEfetivo)) ||
           Boolean(marcacaoBot.dadosEtiquetaCitada) ||
           marcacaoBot.tipoCitado === 'imagem' ||
+          temAtacadoPendente ||
           (ehPossivelConfirmacao && temNotinhaPendente) ||
           (ehPossivelCorrecao && temNotinhaPendente)
         ));
@@ -4328,7 +4564,28 @@ export async function POST(request: Request) {
         // 2. Comandos explícitos iniciados com !
         // 3. Entradas inteligentes de estoque, empréstimos e saídas diretas por IMEI
         // 4. Pedidos / formulários de venda para geração de notinha automática (ou atacado com foto + nome)
-        // 5. Correções de dados de notinha pendente ou valor de atacado recente
+        // 5. Correções de dados de notinha pendente, IMEI de atacado pendente ou valor de atacado recente
+        const ehImeiCorrecaoGrupo = Boolean(extrairImeiCorrecaoRapida(textContent, false));
+        const ehConfirmacaoOuCadastroGrupo =
+          Boolean(interpretarConfirmacaoTextoNotinha(textContent)) ||
+          /^!?(?:cadastrar|cadastra|sim\s+cadastrar|pode\s+cadastrar)\b/i.test(lowerText);
+        let temPendenciaFotoGrupo = false;
+        if (isGroup && lojaId && (ehImeiCorrecaoGrupo || ehConfirmacaoOuCadastroGrupo)) {
+          const jidsPadraoGrupo = montarJidsPropostaChat({
+            remoteJid,
+            targetDestination,
+            isGroup,
+            authorPhone,
+            senderPhone,
+            ehModeradorMaster,
+          });
+          const [atacadoG, entradaG] = await Promise.all([
+            buscarVendaAtacadoPendente(supabase, jidsPadraoGrupo, marcacaoBot.quotedStanzaId),
+            buscarEntradaFotoPendente(supabase, jidsPadraoGrupo, marcacaoBot.quotedStanzaId),
+          ]);
+          temPendenciaFotoGrupo = Boolean(atacadoG || entradaG);
+        }
+
         const ehOperacaoLoja =
           marcacaoBot.foiMarcado ||
           ehComandoExplicito ||
@@ -4340,6 +4597,7 @@ export async function POST(request: Request) {
           Boolean(vendaAtacadoDireta) ||
           temFotoAtivaParaAtacado ||
           valorEdicaoRapida !== null ||
+          temPendenciaFotoGrupo ||
           Boolean(detectarFormularioOuPedidoVenda(textContent)) ||
           Boolean(interpretarTextoCorrecaoVenda(textContent));
 
@@ -4432,13 +4690,112 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'ok', message: `Fila de pendentes limpa (${removidas}).` }, { status: 200 });
     }
 
-    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA POR TEXTO (SIM / PODE VENDER / EMITIR SEM TROCA / CANCELAR) ──
+    // ── 3.2d. VÍNCULO RÁPIDO DE IMEI EM VENDA DE ATACADO PENDENTE (EX: "imei 7887" OU "7887" EM REPLY) ──
+    const imeiCorrecaoAtacado = extrairImeiCorrecaoRapida(textContent, Boolean(marcacaoBot.quotedStanzaId));
+    if (imeiCorrecaoAtacado && lojaId) {
+      const jidsAtacadoImei = montarJidsPropostaChat({
+        remoteJid,
+        targetDestination,
+        isGroup,
+        authorPhone,
+        senderPhone,
+        ehModeradorMaster,
+      });
+      const atacadoPend =
+        (await buscarVendaAtacadoPendente(supabase, jidsAtacadoImei, marcacaoBot.quotedStanzaId)) ||
+        (marcacaoBot.quotedStanzaId
+          ? await buscarVendaAtacadoPendente(supabase, jidsAtacadoImei, null)
+          : null);
+
+      if (atacadoPend) {
+        const { data: apsEstoque } = await supabase
+          .from('aparelhos')
+          .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+          .eq('loja_id', lojaId)
+          .order('ativo', { ascending: false })
+          .order('dataCadastro', { ascending: false })
+          .limit(600);
+
+        const { dadosAtualizados, avaliacao } = aplicarImeiEmAtacadoPendente(
+          atacadoPend,
+          imeiCorrecaoAtacado,
+          apsEstoque || []
+        );
+
+        if (avaliacao.todosConfirmadosNoEstoque) {
+          const resultadoAtacado = await emitirVendaAtacadoComFoto({
+            supabase,
+            lojaId,
+            vendaAtacado: dadosAtualizados.vendaAtacado,
+            fotos: dadosAtualizados.fotos,
+            estoque: apsEstoque || [],
+            usuarioNome: nomeUsuario || pushName || dadosAtualizados.usuarioNome || 'Equipe',
+          });
+
+          await limparVendaAtacadoPendente(supabase, atacadoPend, jidsAtacadoImei);
+
+          const envioAtacado = await enviarMensagemWhatsAppComRetorno(
+            instanceName,
+            targetDestination,
+            resultadoAtacado.mensagem
+          );
+          if (resultadoAtacado.sucesso && resultadoAtacado.vendaUuid) {
+            const payloadRecente = {
+              vendaUuid: resultadoAtacado.vendaUuid,
+              vendaCodigo: resultadoAtacado.vendaId || 'OK',
+              clienteNome: dadosAtualizados.vendaAtacado.clienteNome,
+              custoTotal: resultadoAtacado.custoTotal || 0,
+              metodo: dadosAtualizados.vendaAtacado.formaPagamento || 'pix',
+              valorAtual: dadosAtualizados.vendaAtacado.valor,
+            };
+            await salvarVendaAtacadoRecente(supabase, lojaId, remoteJid, envioAtacado.messageId, payloadRecente);
+            if (targetDestination !== remoteJid) {
+              await salvarVendaAtacadoRecente(supabase, lojaId, targetDestination, envioAtacado.messageId, payloadRecente);
+            }
+          }
+
+          await supabase.from('whatsapp_logs').insert({
+            loja_id: lojaId,
+            contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+            mensagem: `[ATACADO_PENDENTE->IMEI] ${dadosAtualizados.vendaAtacado.clienteNome} (IMEI: ${imeiCorrecaoAtacado})`,
+            created_at: new Date().toISOString(),
+          });
+
+          return NextResponse.json(
+            { status: resultadoAtacado.sucesso ? 'ok' : 'error', message: 'IMEI vinculado e venda atacado registrada.' },
+            { status: 200 }
+          );
+        } else {
+          const msgNaoEncontrado =
+            `⚠️ *Não localizei aparelho disponível no estoque com final \`${imeiCorrecaoAtacado}\`.*\n` +
+            `📦 *Detalhe:* ${dadosAtualizados.motivoEstoque}\n\n` +
+            `💡 Envie outro IMEI (ex: \`imei 7887\`), responda *confirmar* / reaja com ✅ para lançar sem vínculo de estoque, ou *cancelar* / ❌ para descartar.`;
+          const envioNovo = await enviarMensagemWhatsAppComRetorno(instanceName, targetDestination, msgNaoEncontrado);
+          await salvarVendaAtacadoPendente(
+            supabase,
+            lojaId,
+            jidsAtacadoImei,
+            envioNovo.messageId || atacadoPend.messageId || dadosAtualizados.id,
+            dadosAtualizados
+          );
+          return NextResponse.json(
+            { status: 'pending', message: 'IMEI informado não localizado no estoque para atacado pendente.' },
+            { status: 200 }
+          );
+        }
+      }
+    }
+
+    // ── 3.3. CONFIRMAÇÃO OU CANCELAMENTO DE NOTINHA / ATACADO PENDENTE / ENTRADA POR FOTO POR TEXTO ──
     const acaoConfirmacaoTexto = interpretarConfirmacaoTextoNotinha(textContent);
     const ehConfirmacaoTexto =
       acaoConfirmacaoTexto === 'confirmar' || acaoConfirmacaoTexto === 'confirmar_sem_troca';
     const ehCancelamentoTexto = acaoConfirmacaoTexto === 'cancelar';
+    const ehComandoCadastrarFoto = /^!?(?:cadastrar|cadastra|sim\s+cadastrar|pode\s+cadastrar|registrar\s+no\s+estoque|colocar\s+no\s+estoque)\b/i.test(
+      lowerText
+    );
 
-    if ((ehConfirmacaoTexto || ehCancelamentoTexto) && lojaId) {
+    if ((ehConfirmacaoTexto || ehCancelamentoTexto || ehComandoCadastrarFoto) && lojaId) {
       const jidsTexto = montarJidsPropostaChat({
         remoteJid,
         targetDestination,
@@ -4448,74 +4805,170 @@ export async function POST(request: Request) {
         ehModeradorMaster,
       });
 
-      const resolucaoTexto = await resolverPropostaAlvoNotinha({
-        supabase,
-        jids: jidsTexto,
-        lojaId,
-        quotedStanzaId: marcacaoBot.quotedStanzaId,
-        maxMinutosLegado: 30,
-      });
+      if (ehConfirmacaoTexto || ehCancelamentoTexto) {
+        const resolucaoTexto = await resolverPropostaAlvoNotinha({
+          supabase,
+          jids: jidsTexto,
+          lojaId,
+          quotedStanzaId: marcacaoBot.quotedStanzaId,
+          maxMinutosLegado: 30,
+        });
 
-      if (resolucaoTexto.status === 'multiplas') {
-        await enviarMensagemWhatsApp(
-          instanceName,
-          targetDestination,
-          mensagemAvisoMultiplasNotinhas(resolucaoTexto.propostas.length)
-        );
-        return NextResponse.json({ status: 'warning', message: 'Múltiplas notinhas pendentes; aguardando reply ou reação específica.' }, { status: 200 });
-      }
-
-      const propostaPendente = resolucaoTexto.status === 'encontrada' ? resolucaoTexto.proposta : null;
-
-      if (propostaPendente) {
-        if (ehConfirmacaoTexto && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
+        if (resolucaoTexto.status === 'multiplas') {
           await enviarMensagemWhatsApp(
             instanceName,
             targetDestination,
-            '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo (dando reply na prévia) ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
+            mensagemAvisoMultiplasNotinhas(resolucaoTexto.propostas.length)
           );
-          return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
+          return NextResponse.json({ status: 'warning', message: 'Múltiplas notinhas pendentes; aguardando reply ou reação específica.' }, { status: 200 });
         }
 
-        if (ehConfirmacaoTexto) {
-          const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
-          const resultadoEmissao = await emitirNotinhaVenda(
-            supabase,
-            lojaEfetivaId,
-            propostaPendente,
-            nomeUsuario || pushName || 'Equipe',
-            { pularCadastroTrocaEstoque: acaoConfirmacaoTexto === 'confirmar_sem_troca' }
-          );
+        const propostaPendente = resolucaoTexto.status === 'encontrada' ? resolucaoTexto.proposta : null;
 
-          await despacharPosEmissaoNotinha({
-            instanceName,
-            targetDestination,
-            lojaEfetivaId,
-            nomeLojaFallback: nomeLoja,
-            proposta: propostaPendente,
-            resultadoEmissao,
-            jidsLimpar: jidsTexto,
-            enviarTexto: enviarMensagemWhatsApp,
+        if (propostaPendente) {
+          if (ehConfirmacaoTexto && (!propostaPendente.valorTotal || propostaPendente.valorTotal <= 0)) {
+            await enviarMensagemWhatsApp(
+              instanceName,
+              targetDestination,
+              '⚠️ *Atenção:* O valor total da venda não foi informado!\nPor favor, informe o valor respondendo (dando reply na prévia) ex: *"o valor é 4800"* antes de confirmar a emissão da notinha.'
+            );
+            return NextResponse.json({ status: 'warning', message: 'Notinha sem valor pendente de informação.' }, { status: 200 });
+          }
+
+          if (ehConfirmacaoTexto) {
+            const lojaEfetivaId = lojaId || usuarioResolvido?.lojaId || '';
+            const resultadoEmissao = await emitirNotinhaVenda(
+              supabase,
+              lojaEfetivaId,
+              propostaPendente,
+              nomeUsuario || pushName || 'Equipe',
+              { pularCadastroTrocaEstoque: acaoConfirmacaoTexto === 'confirmar_sem_troca' }
+            );
+
+            await despacharPosEmissaoNotinha({
+              instanceName,
+              targetDestination,
+              lojaEfetivaId,
+              nomeLojaFallback: nomeLoja,
+              proposta: propostaPendente,
+              resultadoEmissao,
+              jidsLimpar: jidsTexto,
+              enviarTexto: enviarMensagemWhatsApp,
+            });
+
+            return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
+          } else {
+            const restantes = await removerPropostaNotinhaPendente(
+              supabase,
+              propostaPendente,
+              jidsTexto,
+              lojaId
+            );
+            const avisoRestantes =
+              restantes > 0
+                ? `\n\n📌 _Ainda ${restantes === 1 ? 'resta *1 notinha pendente*' : `restam *${restantes} notinhas pendentes*`} neste chat._`
+                : '';
+            await enviarMensagemWhatsApp(
+              instanceName,
+              targetDestination,
+              `❌ *Emissão da notinha de ${propostaPendente.clienteNome} cancelada por ${pushName}.*${avisoRestantes}`
+            );
+            return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via texto.' }, { status: 200 });
+          }
+        }
+      }
+
+      // Se não havia notinha comum pendente, verifica atacado pendente ou entrada de estoque por foto pendente
+      const [atacadoPendTexto, entradaFotoPendTexto] = await Promise.all([
+        ehComandoCadastrarFoto
+          ? Promise.resolve(null)
+          : buscarVendaAtacadoPendente(supabase, jidsTexto, marcacaoBot.quotedStanzaId),
+        buscarEntradaFotoPendente(supabase, jidsTexto, marcacaoBot.quotedStanzaId),
+      ]);
+
+      const escolherEntrada =
+        Boolean(entradaFotoPendTexto) &&
+        (!atacadoPendTexto ||
+          ehComandoCadastrarFoto ||
+          (entradaFotoPendTexto?.criadoEm || 0) >= (atacadoPendTexto?.criadoEm || 0));
+
+      if (escolherEntrada && entradaFotoPendTexto) {
+        if (ehConfirmacaoTexto || ehComandoCadastrarFoto) {
+          const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaId, entradaFotoPendTexto);
+          await limparEntradaFotoPendente(supabase, entradaFotoPendTexto, jidsTexto);
+          await enviarMensagemWhatsApp(instanceName, targetDestination, resEntrada.mensagem);
+          await supabase.from('whatsapp_logs').insert({
+            loja_id: lojaId,
+            contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+            mensagem: `[FOTO+ENTRADA CONF] ${entradaFotoPendTexto.modelo} ${entradaFotoPendTexto.capacidade} (IMEI: ${entradaFotoPendTexto.imei || '-'})`,
+            created_at: new Date().toISOString(),
           });
-
-          return NextResponse.json({ status: 'ok', message: 'Notinha emitida com sucesso via texto.' }, { status: 200 });
-        } else {
-          const restantes = await removerPropostaNotinhaPendente(
-            supabase,
-            propostaPendente,
-            jidsTexto,
-            lojaId
+          return NextResponse.json(
+            { status: resEntrada.sucesso ? 'ok' : 'warning', message: 'Aparelho cadastrado no estoque via confirmação de texto.' },
+            { status: 200 }
           );
-          const avisoRestantes =
-            restantes > 0
-              ? `\n\n📌 _Ainda ${restantes === 1 ? 'resta *1 notinha pendente*' : `restam *${restantes} notinhas pendentes*`} neste chat._`
-              : '';
+        } else if (ehCancelamentoTexto) {
+          await limparEntradaFotoPendente(supabase, entradaFotoPendTexto, jidsTexto);
           await enviarMensagemWhatsApp(
             instanceName,
             targetDestination,
-            `❌ *Emissão da notinha de ${propostaPendente.clienteNome} cancelada por ${pushName}.*${avisoRestantes}`
+            `❌ *Cadastro de ${entradaFotoPendTexto.modelo} pela foto cancelado por ${pushName}.*`
           );
-          return NextResponse.json({ status: 'ok', message: 'Notinha cancelada com sucesso via texto.' }, { status: 200 });
+          return NextResponse.json({ status: 'ok', message: 'Entrada por foto cancelada via texto.' }, { status: 200 });
+        }
+      }
+
+      if (atacadoPendTexto) {
+        if (ehConfirmacaoTexto) {
+          const { data: apsEstoque } = await supabase
+            .from('aparelhos')
+            .select('id, loja_id, modelo, capacidade, cor, imei, codigo, saude_bateria, observacoes, preco, custo, status, ativo, data_saida, cliente, dataCadastro')
+            .eq('loja_id', lojaId)
+            .order('ativo', { ascending: false })
+            .order('dataCadastro', { ascending: false })
+            .limit(600);
+
+          const resultadoAtacado = await emitirVendaAtacadoComFoto({
+            supabase,
+            lojaId,
+            vendaAtacado: atacadoPendTexto.vendaAtacado,
+            fotos: atacadoPendTexto.fotos,
+            estoque: apsEstoque || [],
+            usuarioNome: nomeUsuario || pushName || atacadoPendTexto.usuarioNome || 'Equipe',
+          });
+
+          await limparVendaAtacadoPendente(supabase, atacadoPendTexto, jidsTexto);
+          const envioAtacado = await enviarMensagemWhatsAppComRetorno(
+            instanceName,
+            targetDestination,
+            resultadoAtacado.mensagem
+          );
+          if (resultadoAtacado.sucesso && resultadoAtacado.vendaUuid) {
+            const payloadRecente = {
+              vendaUuid: resultadoAtacado.vendaUuid,
+              vendaCodigo: resultadoAtacado.vendaId || 'OK',
+              clienteNome: atacadoPendTexto.vendaAtacado.clienteNome,
+              custoTotal: resultadoAtacado.custoTotal || 0,
+              metodo: atacadoPendTexto.vendaAtacado.formaPagamento || 'pix',
+              valorAtual: atacadoPendTexto.vendaAtacado.valor,
+            };
+            await salvarVendaAtacadoRecente(supabase, lojaId, remoteJid, envioAtacado.messageId, payloadRecente);
+            if (targetDestination !== remoteJid) {
+              await salvarVendaAtacadoRecente(supabase, lojaId, targetDestination, envioAtacado.messageId, payloadRecente);
+            }
+          }
+          return NextResponse.json(
+            { status: resultadoAtacado.sucesso ? 'ok' : 'error', message: 'Venda atacado pendente confirmada via texto.' },
+            { status: 200 }
+          );
+        } else if (ehCancelamentoTexto) {
+          await limparVendaAtacadoPendente(supabase, atacadoPendTexto, jidsTexto);
+          await enviarMensagemWhatsApp(
+            instanceName,
+            targetDestination,
+            `❌ *Venda atacado pendente de ${atacadoPendTexto.vendaAtacado.clienteNome} cancelada por ${pushName}.*`
+          );
+          return NextResponse.json({ status: 'ok', message: 'Venda atacado pendente cancelada via texto.' }, { status: 200 });
         }
       }
     }
@@ -4540,6 +4993,58 @@ export async function POST(request: Request) {
           .order('ativo', { ascending: false })
           .order('dataCadastro', { ascending: false })
           .limit(600);
+
+        const avaliacaoEstoque = avaliarEstoqueVendaAtacadoComFoto(fotosAtacado, apsEstoque || []);
+        if (!avaliacaoEstoque.todosConfirmadosNoEstoque) {
+          await limparFotoRecente(supabase, remoteJid, authorPhone);
+          const motivoEstoque =
+            avaliacaoEstoque.itens
+              .map((it) => it.cruzamento.mensagem)
+              .filter(Boolean)
+              .join(' | ') || 'Aparelho não localizado com certeza no estoque';
+
+          const dadosPendente: DadosVendaAtacadoPendente = {
+            id: `atacado-pend-${Date.now()}`,
+            lojaId,
+            vendaAtacado: vendaAtacadoTexto,
+            fotos: fotosAtacado,
+            usuarioNome: nomeUsuario || pushName || 'Equipe',
+            motivoEstoque,
+            criadoEm: Date.now(),
+          };
+
+          const envioPend = await enviarMensagemWhatsAppComRetorno(
+            instanceName,
+            targetDestination,
+            formatarMensagemAtacadoPendente(dadosPendente)
+          );
+          const jidsAtacadoPend = montarJidsPropostaChat({
+            remoteJid,
+            targetDestination,
+            isGroup,
+            authorPhone,
+            senderPhone,
+            ehModeradorMaster,
+          });
+          await salvarVendaAtacadoPendente(
+            supabase,
+            lojaId,
+            jidsAtacadoPend,
+            envioPend.messageId || dadosPendente.id,
+            dadosPendente
+          );
+          await supabase.from('whatsapp_logs').insert({
+            loja_id: lojaId,
+            contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+            mensagem: `[ATACADO_FOTO PENDENTE] ${vendaAtacadoTexto.clienteNome} (${fotosAtacado.length} foto(s) | Valor: R$ ${vendaAtacadoTexto.valor})`,
+            created_at: new Date().toISOString(),
+          });
+
+          return NextResponse.json(
+            { status: 'pending', message: 'Venda atacado por foto recente aguardando IMEI ou confirmação de estoque.' },
+            { status: 200 }
+          );
+        }
 
         const resultadoAtacado = await emitirVendaAtacadoComFoto({
           supabase,
