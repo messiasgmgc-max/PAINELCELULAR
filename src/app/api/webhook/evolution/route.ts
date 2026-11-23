@@ -3348,7 +3348,10 @@ export async function POST(request: Request) {
           if (entradaFotoPendenteReac) {
             const lojaEfetivaEnt = entradaFotoPendenteReac.lojaId || lojaReacaoId || '';
             if (acaoReacao === 'confirmar' || acaoReacao === 'confirmar_sem_troca') {
-              const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaEfetivaEnt, entradaFotoPendenteReac);
+              const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaEfetivaEnt, entradaFotoPendenteReac, {
+                origemIsGroup: isGroup,
+                origemRemoteJid: remoteJid,
+              });
               await limparEntradaFotoPendente(supabase, entradaFotoPendenteReac, jidsReacao);
               await editarOuResponderMensagemWhatsApp(
                 instanceName,
@@ -4219,7 +4222,10 @@ export async function POST(request: Request) {
                 );
                 if (dadosEntradaFoto) {
                   await limparFotoRecente(supabase, remoteJid, authorPhone);
-                  const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaId, dadosEntradaFoto);
+                  const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaId, dadosEntradaFoto, {
+                    origemIsGroup: isGroup,
+                    origemRemoteJid: remoteJid,
+                  });
                   await enviarMensagemWhatsApp(instanceName, targetDestination, resEntrada.mensagem);
                   await supabase.from('whatsapp_logs').insert({
                     loja_id: lojaId,
@@ -4255,6 +4261,7 @@ export async function POST(request: Request) {
                       supabase,
                       lojaId,
                       usuarioId: usuarioResolvido?.id || (usuarioResolvido as any)?.usuarioId,
+                      pushName: nomeUsuario || pushName || 'Equipe',
                       papel: papelCapFoto,
                       planoLoja: planoLojaFoto,
                       isGroup,
@@ -4627,6 +4634,7 @@ export async function POST(request: Request) {
             supabase,
             lojaId,
             usuarioId: usuarioResolvido?.id || (usuarioResolvido as any)?.usuarioId,
+            pushName: nomeUsuario || pushName || 'Equipe',
             papel: papelCapability,
             planoLoja,
             isGroup,
@@ -4894,7 +4902,10 @@ export async function POST(request: Request) {
 
       if (escolherEntrada && entradaFotoPendTexto) {
         if (ehConfirmacaoTexto || ehComandoCadastrarFoto) {
-          const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaId, entradaFotoPendTexto);
+          const resEntrada = await executarEntradaEstoquePorFoto(supabase, lojaId, entradaFotoPendTexto, {
+            origemIsGroup: isGroup,
+            origemRemoteJid: remoteJid,
+          });
           await limparEntradaFotoPendente(supabase, entradaFotoPendTexto, jidsTexto);
           await enviarMensagemWhatsApp(instanceName, targetDestination, resEntrada.mensagem);
           await supabase.from('whatsapp_logs').insert({

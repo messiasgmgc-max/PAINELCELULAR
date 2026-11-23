@@ -271,6 +271,121 @@ function normalizarNomeGrupoSemDecoracao(nome: string): string {
 
 const CACHE_GRUPOS_TTL_MS = 5 * 60 * 1000;
 const cacheGruposPorNome = new Map<string, { jid: string; exp: number }>();
+const cacheListaGrupos = new Map<string, { grupos: Array<{ id?: string; subject?: string; name?: string }>; exp: number }>();
+
+async function listarGruposWhatsAppInstancia(
+  lojaId: string | null | undefined
+): Promise<{ instanceName: string; grupos: Array<{ id?: string; subject?: string; name?: string }> }> {
+  const { evolutionUrl, apiKey, instanceName } = await getEvolutionConfig(lojaId);
+  const cached = cacheListaGrupos.get(instanceName);
+  if (cached && Date.now() < cached.exp) {
+    return { instanceName, grupos: cached.grupos };
+  }
+
+  const endpoint = `${evolutionUrl}/group/fetchAllGroups/${instanceName}?getParticipants=false`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: { apikey: apiKey },
+      signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(4000)
+        : undefined,
+    });
+    if (!res.ok) {
+      console.warn(`[Evolution API] Falha ao listar grupos (${res.status}) na instância ${instanceName}`);
+      return { instanceName, grupos: [] };
+    }
+
+    const payload = await res.json();
+    const grupos: Array<{ id?: string; subject?: string; name?: string }> = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.groups)
+        ? payload.groups
+        : [];
+    cacheListaGrupos.set(instanceName, {
+      grupos,
+      exp: Date.now() + CACHE_GRUPOS_TTL_MS,
+    });
+    return { instanceName, grupos };
+  } catch (err: any) {
+    console.warn('[Evolution API] Erro ao listar grupos:', err?.message || err);
+    return { instanceName, grupos: [] };
+  }
+}
+
+function escaparRegex(texto: string): string {
+  return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Busca o JID (`...@g.us`) de um grupo do WhatsApp testando uma lista prioritária de nomes
+ * (case-insensitive, sem acento, tolerando emojis/pontuação e, opcionalmente, match por palavra).
+ */
+export async function buscarGrupoWhatsAppPorNomes(
+  lojaId: string | null | undefined,
+  nomesPrioritarios: string[],
+  opcoes?: { permitirMatchParcial?: boolean }
+): Promise<string | null> {
+  const alvos = nomesPrioritarios
+    .map((n) => ({
+      exato: normalizarNomeGrupo(n),
+      limpo: normalizarNomeGrupoSemDecoracao(n),
+    }))
+    .filter((a) => Boolean(a.exato));
+
+  if (alvos.length === 0) return null;
+
+  const { instanceName, grupos } = await listarGruposWhatsAppInstancia(lojaId);
+  const cacheKey = `${instanceName}:${alvos.map((a) => a.exato).join('|')}:${opcoes?.permitirMatchParcial ? 'p' : 'e'}`;
+  const cached = cacheGruposPorNome.get(cacheKey);
+  if (cached && Date.now() < cached.exp) {
+    return cached.jid;
+  }
+
+  const gruposValidos = grupos.filter(
+    (g): g is { id: string; subject?: string; name?: string } =>
+      typeof g?.id === 'string' && g.id.endsWith('@g.us')
+  );
+
+  // 1. Match exato (com acento/caixa normalizados)
+  for (const alvo of alvos) {
+    const found = gruposValidos.find((g) => normalizarNomeGrupo(g.subject || g.name || '') === alvo.exato);
+    if (found?.id) {
+      cacheGruposPorNome.set(cacheKey, { jid: found.id, exp: Date.now() + CACHE_GRUPOS_TTL_MS });
+      return found.id;
+    }
+  }
+
+  // 2. Match exato ignorando emojis/pontuação ao redor do nome
+  for (const alvo of alvos) {
+    if (!alvo.limpo) continue;
+    const found = gruposValidos.find(
+      (g) => normalizarNomeGrupoSemDecoracao(g.subject || g.name || '') === alvo.limpo
+    );
+    if (found?.id) {
+      cacheGruposPorNome.set(cacheKey, { jid: found.id, exp: Date.now() + CACHE_GRUPOS_TTL_MS });
+      return found.id;
+    }
+  }
+
+  // 3. Match por palavra inteira no nome do grupo (ex: "📦 Entradas Lucas Imports")
+  if (opcoes?.permitirMatchParcial) {
+    for (const alvo of alvos) {
+      if (!alvo.limpo) continue;
+      const rx = new RegExp(`(?:^|\\s)${escaparRegex(alvo.limpo)}(?:\\s|$)`, 'i');
+      const found = gruposValidos.find((g) =>
+        rx.test(normalizarNomeGrupoSemDecoracao(g.subject || g.name || ''))
+      );
+      if (found?.id) {
+        cacheGruposPorNome.set(cacheKey, { jid: found.id, exp: Date.now() + CACHE_GRUPOS_TTL_MS });
+        return found.id;
+      }
+    }
+  }
+
+  return null;
+}
 
 /**
  * Busca o JID (`...@g.us`) de um grupo do WhatsApp pelo nome (case-insensitive, sem acento,
@@ -280,52 +395,5 @@ export async function buscarGrupoWhatsAppPorNome(
   lojaId: string | null | undefined,
   nomeGrupo: string
 ): Promise<string | null> {
-  const alvo = normalizarNomeGrupo(nomeGrupo);
-  const alvoSemDecoracao = normalizarNomeGrupoSemDecoracao(nomeGrupo);
-  if (!alvo) return null;
-
-  const { evolutionUrl, apiKey, instanceName } = await getEvolutionConfig(lojaId);
-  const cacheKey = `${instanceName}:${alvo}`;
-  const cached = cacheGruposPorNome.get(cacheKey);
-  if (cached && Date.now() < cached.exp) {
-    return cached.jid;
-  }
-
-  const endpoint = `${evolutionUrl}/group/fetchAllGroups/${instanceName}?getParticipants=false`;
-
-  try {
-    const res = await fetch(endpoint, {
-      method: 'GET',
-      headers: { apikey: apiKey },
-    });
-    if (!res.ok) {
-      console.warn(`[Evolution API] Falha ao listar grupos (${res.status}) na instância ${instanceName}`);
-      return null;
-    }
-
-    const payload = await res.json();
-    const grupos: any[] = Array.isArray(payload) ? payload : Array.isArray(payload?.groups) ? payload.groups : [];
-    const encontrado =
-      grupos.find((g) => {
-        const subject = normalizarNomeGrupo(g?.subject || g?.name || '');
-        return subject === alvo && typeof g?.id === 'string' && g.id.endsWith('@g.us');
-      }) ||
-      grupos.find((g) => {
-        const subjectLimpo = normalizarNomeGrupoSemDecoracao(g?.subject || g?.name || '');
-        return Boolean(alvoSemDecoracao) && subjectLimpo === alvoSemDecoracao && typeof g?.id === 'string' && g.id.endsWith('@g.us');
-      });
-
-    if (encontrado?.id) {
-      cacheGruposPorNome.set(cacheKey, {
-        jid: encontrado.id,
-        exp: Date.now() + CACHE_GRUPOS_TTL_MS,
-      });
-      return encontrado.id;
-    }
-
-    return null;
-  } catch (err: any) {
-    console.warn('[Evolution API] Erro ao buscar grupo por nome:', err?.message || err);
-    return null;
-  }
+  return buscarGrupoWhatsAppPorNomes(lojaId, [nomeGrupo], { permitirMatchParcial: false });
 }

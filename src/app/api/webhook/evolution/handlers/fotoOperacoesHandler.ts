@@ -3,6 +3,7 @@ import type { VisionEtiquetaResult } from '@/lib/image-vision-ocr';
 import { normalizarResultadoVision } from '@/lib/image-vision-ocr';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
 import { gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
+import { notificarEntradaGrupoEntradas } from '@/lib/whatsapp/notificarEntradaEstoque';
 import { obterDataAtualBrasiliaIso } from '@/lib/vendas/parseVendaTexto';
 import { extrairDataEntradaEstoque } from '../entradaInteligente';
 import {
@@ -452,8 +453,9 @@ export async function limparEntradaFotoPendente(
 export async function executarEntradaEstoquePorFoto(
   supabase: SupabaseClient,
   lojaId: string,
-  dados: DadosEntradaFotoPendente
-): Promise<{ sucesso: boolean; duplicado?: boolean; mensagem: string }> {
+  dados: DadosEntradaFotoPendente,
+  opcoes?: { origemIsGroup?: boolean; origemRemoteJid?: string | null }
+): Promise<{ sucesso: boolean; duplicado?: boolean; notificadoGrupoEntradas?: boolean; mensagem: string }> {
   // Evita duplicar caso o IMEI já exista ativo no estoque da loja
   if (dados.imei && dados.imei.length >= 4) {
     const ultimos4 = dados.imei.slice(-4);
@@ -536,11 +538,41 @@ export async function executarEntradaEstoquePorFoto(
     console.warn('[Estoque] Aparelho cadastrado por foto sem auditoria completa:', entrada.erroAuditoria);
   }
 
+  const notificacaoGrupo = await notificarEntradaGrupoEntradas({
+    supabase,
+    lojaId,
+    itens: [
+      {
+        marca: dados.marca,
+        modelo: dados.modelo,
+        capacidade: dados.capacidade,
+        cor: dados.cor,
+        imei: dados.imei,
+        codigo: codigoGerado,
+        bateria: dados.bateria,
+        observacoes: dados.observacoes,
+        custo: dados.custo,
+        preco: dados.preco,
+        condicao: dados.condicao,
+      },
+    ],
+    usuarioNome: dados.usuarioNome,
+    dataEntrada: dados.dataEntrada,
+    origemIsGroup: opcoes?.origemIsGroup,
+    origemRemoteJid: opcoes?.origemRemoteJid,
+    origemLabel: 'PV • Foto',
+  });
+
+  const rodapeGrupo = notificacaoGrupo.enviado
+    ? '\n📢 _Entrada também registrada no grupo de entradas._'
+    : '';
+
   return {
     sucesso: true,
+    notificadoGrupoEntradas: notificacaoGrupo.enviado,
     mensagem:
       `✅ *Aparelho cadastrado no estoque pela foto!*\n\n` +
       `${formatarResumoDadosEntradaFoto(dados)}\n` +
-      `🏷️ *Código:* \`${codigoGerado}\``,
+      `🏷️ *Código:* \`${codigoGerado}\`${rodapeGrupo}`,
   };
 }

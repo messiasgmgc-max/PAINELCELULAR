@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { estaNoEstoque, patchSaida, type EstadoCicloAparelho } from '@/lib/estoque/ciclo';
 import { aplicarMudancaEstoque, registrarEntradaEstoque, gerarLoteId } from '@/lib/estoque/movimentacoes';
+import { notificarEntradaGrupoEntradas } from '@/lib/whatsapp/notificarEntradaEstoque';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
 import { parseTextoEntradaAparelhos, extrairDataEntradaEstoque, ItemEntradaDetectado, normalizarNomeModelo, obterEmojiDaCor, ehRelatorioOuConferencia } from '../entradaInteligente';
 import { obterDataAtualBrasiliaIso } from '@/lib/vendas/parseVendaTexto';
@@ -223,11 +224,31 @@ export const capabilitiesEstoque: Capability[] = [
         console.warn('[Estoque] Aparelho cadastrado via WhatsApp sem auditoria completa:', entrada.erroAuditoria);
       }
 
+      const notifGrupo = await notificarEntradaGrupoEntradas({
+        supabase: ctx.supabase,
+        lojaId: ctx.lojaId,
+        itens: [
+          {
+            marca: registro.marca,
+            modelo: registro.modelo,
+            capacidade: registro.capacidade,
+            cor: registro.cor,
+            imei: registro.imei,
+            custo: registro.custo,
+            preco: registro.preco,
+            condicao: registro.condicao,
+          },
+        ],
+        usuarioNome: ctx.pushName || 'Equipe',
+        origemIsGroup: ctx.isGroup,
+      });
+
       return (
         `✅ *Aparelho cadastrado!*\n\n` +
         `📱 ${descreverAparelho(registro)}\n` +
         `💰 ${moeda(preco)}\n` +
-        (imei ? `🔢 IMEI: ${imei}\n` : '')
+        (imei ? `🔢 IMEI: ${imei}\n` : '') +
+        (notifGrupo.enviado ? '\n📢 _Entrada também registrada no grupo de entradas._' : '')
       );
     },
   },
@@ -365,12 +386,37 @@ export const capabilitiesEstoque: Capability[] = [
         ? `📅 *Data de entrada:* ${dataEntradaUsada.slice(8, 10)}/${dataEntradaUsada.slice(5, 7)}/${dataEntradaUsada.slice(0, 4)}\n`
         : '';
 
+      const notifGrupo = await notificarEntradaGrupoEntradas({
+        supabase: ctx.supabase,
+        lojaId: ctx.lojaId,
+        itens: registrosParaInserir.map((reg) => ({
+          marca: reg.marca,
+          modelo: reg.modelo,
+          capacidade: reg.capacidade,
+          cor: reg.cor,
+          imei: reg.imei,
+          codigo: reg.codigo,
+          saude_bateria: reg.saude_bateria,
+          observacoes: reg.observacoes,
+          custo: reg.custo,
+          preco: reg.preco,
+          condicao: reg.condicao,
+        })),
+        usuarioNome: ctx.pushName || 'Equipe',
+        dataEntrada: dataEntradaUsada,
+        origemIsGroup: ctx.isGroup,
+      });
+
+      const rodapeGrupo = notifGrupo.enviado
+        ? '\n📢 _Entradas também registradas no grupo de entradas._'
+        : '';
+
       return (
         `📦 *Entrada no estoque realizada com sucesso!*\n\n` +
         linhaDataEntrada +
         `Total: *${registrosParaInserir.length} aparelho(s)* cadastrado(s):\n\n` +
         linhasConfirmacao +
-        `\n\n⚡ _Códigos de etiqueta gerados e estoque atualizado no sistema._`
+        `\n\n⚡ _Códigos de etiqueta gerados e estoque atualizado no sistema._${rodapeGrupo}`
       );
     },
   },
