@@ -597,4 +597,8 @@ Rails.application.config.to_prepare do
   targets.each do |klass, patch_mod|
     klass.prepend(patch_mod) unless klass.ancestors.include?(patch_mod)
   end
+
+  unless Channel::Instagram.validators_on(:access_token).any? { |v| v.kind == :length }
+    Channel::Instagram.validates :access_token, length: { maximum: 4096 }, allow_blank: true
+  end
 end
