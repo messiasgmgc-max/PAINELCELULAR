@@ -362,7 +362,8 @@
       '<div class="pc-suite-head">' +
       '<img src="/phonecenter-logo.png" alt="" style="width:24px;height:24px;border-radius:6px" />' +
       '<input id="pc-suite-search" placeholder="Buscar função do PhoneCenterCRM (Pós-Venda, Rodízio, Telefonia, Campanhas...)" />' +
-      '<button id="pc-suite-close" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:#cbd5e1;border-radius:8px;padding:4px 9px;font-size:11px;cursor:pointer">ESC</button>' +
+      '<button id="pc-suite-theme-btn" type="button" title="Alternar Tema Dark / Light Navy" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:#cbd5e1;border-radius:8px;padding:4px 9px;font-size:11px;cursor:pointer">Tema</button>' +
+      '<button id="pc-suite-close" type="button" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:#cbd5e1;border-radius:8px;padding:4px 9px;font-size:11px;cursor:pointer">ESC</button>' +
       '</div>' +
       '<div class="pc-suite-tabs">' +
       '<button type="button" class="pc-tab-btn active" data-tab="atalhos">⚡ Atalhos Suite</button>' +
@@ -684,6 +685,16 @@
       insertTextIntoChat('Confira nosso catálogo atualizado em tempo real aqui: ' + link);
     });
 
+    const themeBtn = overlay.querySelector('#pc-suite-theme-btn');
+    if (themeBtn) {
+      themeBtn.addEventListener('click', () => {
+        const atual = window.localStorage.getItem(THEME_KEY) || 'dark';
+        const proximo = atual === 'dark' ? 'light-navy' : 'dark';
+        window.localStorage.setItem(THEME_KEY, proximo);
+        applySavedWorkspaceTheme();
+      });
+    }
+
     overlay.querySelector('#pc-suite-close').addEventListener('click', () => {
       overlay.classList.remove('open');
     });
@@ -705,59 +716,60 @@
     });
   }
 
-  // Dock rápido PhoneCenter Suite (retrátil e posicionado acima das barras de rodapé)
-  function ensureQuickDock() {
+  // Integração nativa no Header e na Sidebar do CRM (sem dock flutuante sobre o chat)
+  function ensureNativeSuiteEntry() {
+    const oldDock = document.getElementById('pc-quick-dock');
+    if (oldDock) oldDock.remove();
     if (window.location.pathname.startsWith('/widget')) return;
-    if (document.getElementById('pc-quick-dock')) return;
+    if (/\/(login|auth|sign[-_]?in)/i.test(window.location.pathname)) return;
     if (!document.body) return;
 
-    const status = window.localStorage.getItem(STATUS_KEY) || 'online';
-    const dot = status === 'online' ? '🟢' : status === 'busy' ? '🟡' : '⚫';
-    const collapsed = window.localStorage.getItem(DOCK_COLLAPSED_KEY) === '1';
+    // 1. Botão compacto nativo no cabeçalho superior (ao lado de notificações/perfil)
+    if (!document.getElementById('pc-header-suite-btn')) {
+      const header = document.querySelector('header');
+      if (header) {
+        const rightGroup =
+          header.querySelector('div:last-child') || header;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'pc-header-suite-btn';
+        btn.title = 'PhoneCenter Suite: Taxas, Estoque e Atalhos (Ctrl+K)';
+        btn.innerHTML =
+          '<img src="/phonecenter-logo.png" alt="" style="width:15px;height:15px;border-radius:3px" />' +
+          '<span class="pc-hdr-label">Suite</span>';
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openSuiteTab('atalhos');
+        });
+        if (rightGroup.firstChild) {
+          rightGroup.insertBefore(btn, rightGroup.firstChild);
+        } else {
+          rightGroup.appendChild(btn);
+        }
+      }
+    }
 
-    const dock = document.createElement('div');
-    dock.id = 'pc-quick-dock';
-    if (collapsed) dock.classList.add('pc-dock-collapsed');
+    // 2. Seção nativa dentro da Sidebar (desktop e menu lateral mobile)
+    const sidebar =
+      document.querySelector('[data-sidebar="content"]') ||
+      document.querySelector('aside nav') ||
+      document.querySelector('aside');
+    if (sidebar && !sidebar.querySelector('#pc-sidebar-section')) {
+      const sec = document.createElement('div');
+      sec.id = 'pc-sidebar-section';
+      sec.innerHTML =
+        '<div class="pc-sb-title">PhoneCenter</div>' +
+        '<button type="button" data-pc-sb-tab="taxas"><span>💳</span><span>Taxas & Parcelamento</span></button>' +
+        '<button type="button" data-pc-sb-tab="lojas"><span>🏪</span><span>Lojas & Estoque</span></button>' +
+        '<button type="button" data-pc-sb-tab="atalhos"><span>⚡</span><span>Suite CRM</span></button>' +
+        '<a href="' + ERP_URL + '" target="_blank" rel="noopener noreferrer"><span>🌐</span><span>PhoneCenter ERP</span></a>';
 
-    dock.innerHTML =
-      '<button type="button" id="pc-open-suite-btn" title="Abrir Menu PhoneCenter Suite (Ctrl+K)">' +
-      '<img src="/phonecenter-logo.png" alt="" style="width:14px;height:14px;border-radius:3px" />' +
-      '<span class="pc-dock-expandable">Suite CRM</span></button>' +
-      '<button type="button" id="pc-open-taxas-btn" class="pc-dock-secondary pc-dock-expandable" title="Calculadora de Taxas e Parcelamento">' +
-      '<span>💳 Taxas</span></button>' +
-      '<button type="button" id="pc-open-lojas-btn" class="pc-dock-secondary pc-dock-expandable" title="Estoque e Lojas PhoneCenter">' +
-      '<span>🏪 Lojas</span></button>' +
-      '<button type="button" id="pc-toggle-theme-btn" class="pc-dock-secondary pc-dock-expandable" title="Alternar Tema Dark / Light Navy">' +
-      '<span>Tema</span></button>' +
-      '<a href="' +
-      ERP_URL +
-      '" target="_blank" rel="noopener noreferrer" class="pc-dock-secondary pc-dock-expandable" title="Abrir PhoneCenter ERP">' +
-      '<span>' +
-      dot +
-      ' ERP</span></a>' +
-      '<button type="button" id="pc-dock-collapse-btn" title="Minimizar / Expandir barra PhoneCenter">' +
-      (collapsed ? '+' : '−') +
-      '</button>';
-
-    document.body.appendChild(dock);
-
-    dock.querySelector('#pc-open-suite-btn').addEventListener('click', () => openSuiteTab('atalhos'));
-    dock.querySelector('#pc-open-taxas-btn').addEventListener('click', () => openSuiteTab('taxas'));
-    dock.querySelector('#pc-open-lojas-btn').addEventListener('click', () => openSuiteTab('lojas'));
-
-    dock.querySelector('#pc-toggle-theme-btn').addEventListener('click', () => {
-      const atual = window.localStorage.getItem(THEME_KEY) || 'dark';
-      const proximo = atual === 'dark' ? 'light-navy' : 'dark';
-      window.localStorage.setItem(THEME_KEY, proximo);
-      applySavedWorkspaceTheme();
-    });
-
-    const collapseBtn = dock.querySelector('#pc-dock-collapse-btn');
-    collapseBtn.addEventListener('click', () => {
-      const isNowCollapsed = dock.classList.toggle('pc-dock-collapsed');
-      window.localStorage.setItem(DOCK_COLLAPSED_KEY, isNowCollapsed ? '1' : '0');
-      collapseBtn.textContent = isNowCollapsed ? '+' : '−';
-    });
+      sec.querySelectorAll('[data-pc-sb-tab]').forEach((b) => {
+        b.addEventListener('click', () => openSuiteTab(b.dataset.pcSbTab));
+      });
+      sidebar.appendChild(sec);
+    }
   }
 
   let lastHeavyScan = 0;
@@ -765,7 +777,7 @@
     enforceTitle();
     if (!document.body) return;
     ensureSuiteModal();
-    ensureQuickDock();
+    ensureNativeSuiteEntry();
     enhanceLoginScreen();
     syncAvailabilityAfterLogin();
 
