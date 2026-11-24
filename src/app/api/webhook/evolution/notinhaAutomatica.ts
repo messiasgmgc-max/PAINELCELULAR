@@ -1471,6 +1471,18 @@ export function interpretarTextoCorrecaoVenda(
   if (!texto || typeof texto !== 'string') return null;
   const t = texto.trim();
 
+  // Nunca trata mensagens de nova venda (atacado ou varejo com modelo + verbo de venda)
+  // como correção de campo de uma notinha pendente na fila.
+  const pareceNovaVenda =
+    /\b(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|vendi\s+(?:no\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|saiu\s+(?:no\s+|em\s+)?atacado|nova\s+venda)\b/i.test(
+      t
+    ) ||
+    (/\b(?:vendi|vendido|venda|atacado)\b/i.test(t) &&
+      /\b(?:iphone|ipad|galaxy|samsung|xiaomi|redmi|poco|motorola|moto|realme|(?:1[1-9]|xr|xs)\s*(?:pm|p|pro\s*max|promax|pro|plus|mini|e)?)\b/i.test(
+        t
+      ));
+  if (pareceNovaVenda) return null;
+
   const parseValorFlexivel = (str: string): number => {
     const s = str.trim().replace(/^[^\d]+/, '').replace(/[^\d]+$/, '');
     if (!s) return 0;
@@ -3289,6 +3301,9 @@ export function detectarVendaAtacadoPorTextoOuAudio(
   const limpo = limparMencoesBot(texto)
     .replace(/[\u200B-\u200D\uFEFF\u2060]/g, '')
     .replace(/\r?\n/g, ' ')
+    // Separa capacidade colada na cor (ex: "128gbbranco" -> "128gb branco", "256gbpreto" -> "256gb preto")
+    .replace(/\b(32|64|128|256|512)(gb|gigas?)(?=[a-zà-öø-ÿ])/gi, '$1$2 ')
+    .replace(/\b(1|2)(tb|teras?)(?=[a-zà-öø-ÿ])/gi, '$1$2 ')
     .replace(/\s+/g, ' ')
     .replace(/[.!?;,]+$/g, '')
     .trim();
@@ -3296,12 +3311,19 @@ export function detectarVendaAtacadoPorTextoOuAudio(
   if (limpo.length < 10 || limpo.length > 260 || limpo.startsWith('!')) return null;
   if (/\?/.test(limpo)) return null;
 
-  const temGatilhoAtacado =
-    /\b(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+)?atacado|vendi\s+(?:no\s+|em\s+)?atacado)\b/i.test(
+  const temGatilhoAtacadoExplicito =
+    /\b(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|vendi\s+(?:no\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|saiu\s+(?:no\s+|em\s+)?atacado)\b/i.test(
       limpo
-    ) || /^(?:registrar?\s+)?atacado\b/i.test(limpo);
+    ) || /^(?:registrar?\s+|lan[cç]ar?\s+)?atacado\b/i.test(limpo);
 
-  if (!temGatilhoAtacado) return null;
+  const regexInicioAparelho =
+    /\b(?:iphone|ipad|galaxy|samsung|xiaomi|redmi|poco|motorola|moto|realme|(?:1[1-9]|xr|xs)\s*(?:pm|p|pro\s*max|promax|pro|plus|mini|e))\b/i;
+
+  const temGatilhoAtacadoContextual =
+    /\batacado\b/i.test(limpo) &&
+    (regexInicioAparelho.test(limpo) || /\bimei\s*[:=#-]?\s*\d{4,16}\b/i.test(limpo));
+
+  if (!temGatilhoAtacadoExplicito && !temGatilhoAtacadoContextual) return null;
 
   let trabalho = limpo;
 
@@ -3387,48 +3409,87 @@ export function detectarVendaAtacadoPorTextoOuAudio(
     }
   }
 
-  // 6. Remove gatilho inicial de venda atacado
-  trabalho = trabalho
-    .replace(
-      /^(?:registrar?\s+|fazer?\s+|lan[cç]ar?\s+)?(?:uma\s+)?(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+)?atacado|vendi\s+(?:no\s+|em\s+)?atacado|atacado)\b[\s,:=-]*/i,
-      ''
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const regexInicioAparelho =
-    /\b(?:iphone|ipad|galaxy|samsung|xiaomi|redmi|poco|motorola|moto|realme|(?:1[1-7]|xr|xs)\s*(?:pro\s*max|promax|pro|plus|mini))\b/i;
+  trabalho = trabalho.replace(/\s+/g, ' ').trim();
 
   let trechoCliente = '';
   let trechoAparelho = '';
 
-  const matchAparelho = trabalho.match(regexInicioAparelho);
-  if (matchAparelho && matchAparelho.index !== undefined) {
-    const idx = matchAparelho.index;
-    if (idx > 0) {
-      trechoCliente = trabalho.slice(0, idx).trim();
-      trechoAparelho = trabalho.slice(idx).trim();
-    } else {
-      const matchClienteFinal = trabalho.match(
-        /\b(?:para|pro|pra|cliente|comprador|lojista)\s*[:=-]?\s*([A-Za-zÀ-ÖØ-öø-ÿ0-9.'&-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9.'&-]+){0,4})\s*$/i
-      );
-      if (matchClienteFinal && matchClienteFinal.index !== undefined) {
-        trechoCliente = matchClienteFinal[1].trim();
-        trechoAparelho = trabalho.slice(0, matchClienteFinal.index).trim();
-      }
+  // 6A. Se o gatilho "vendido atacado / atacado" vier no MEIO da frase (ex: "Iphone 16 128gb branco imei 2981 vendido atacado Liscas")
+  const matchGatilhoMeio = trabalho.match(
+    /\b(?:(?:venda|vendido|vendi|saiu)\s+(?:de\s+|no\s+|do\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|atacado)\b/i
+  );
+
+  if (matchGatilhoMeio && matchGatilhoMeio.index !== undefined && matchGatilhoMeio.index > 0) {
+    const antes = trabalho.slice(0, matchGatilhoMeio.index).replace(/[\s,:=-]+$/, '').trim();
+    const depois = trabalho
+      .slice(matchGatilhoMeio.index + matchGatilhoMeio[0].length)
+      .replace(/^[\s,:=-]+/, '')
+      .trim();
+
+    if (regexInicioAparelho.test(antes)) {
+      trechoAparelho = antes;
+      trechoCliente = depois;
+    } else if (regexInicioAparelho.test(depois)) {
+      trechoCliente = antes;
+      trechoAparelho = depois;
+    } else if (imei) {
+      trechoCliente = depois || antes;
     }
-  } else if (imei) {
-    // Caso só tenha informado cliente + IMEI ("venda atacado para GM imei 7896")
-    trechoCliente = trabalho;
+  } else {
+    // 6B. Remove gatilho inicial de venda atacado
+    trabalho = trabalho
+      .replace(
+        /^(?:registrar?\s+|fazer?\s+|lan[cç]ar?\s+)?(?:uma\s+)?(?:venda\s+(?:de\s+|no\s+|do\s+)?atacado|vendido\s+(?:no\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|vendi\s+(?:no\s+|em\s+|para\s+|pro\s+|pra\s+)?atacado|saiu\s+(?:no\s+|em\s+)?atacado|atacado)\b[\s,:=-]*/i,
+        ''
+      )
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const matchAparelho = trabalho.match(regexInicioAparelho);
+    if (matchAparelho && matchAparelho.index !== undefined) {
+      const idx = matchAparelho.index;
+      if (idx > 0) {
+        trechoCliente = trabalho.slice(0, idx).trim();
+        trechoAparelho = trabalho.slice(idx).trim();
+      } else {
+        const matchClienteFinal = trabalho.match(
+          /\b(?:para|pro|pra|cliente|comprador|lojista)\s*[:=-]?\s*([A-Za-zÀ-ÖØ-öø-ÿ0-9.'&-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9.'&-]+){0,4})\s*$/i
+        );
+        if (matchClienteFinal && matchClienteFinal.index !== undefined) {
+          trechoCliente = matchClienteFinal[1].trim();
+          trechoAparelho = trabalho.slice(0, matchClienteFinal.index).trim();
+        } else {
+          trechoAparelho = trabalho;
+        }
+      }
+    } else if (imei) {
+      // Caso só tenha informado cliente + IMEI ("venda atacado para GM imei 7896")
+      trechoCliente = trabalho;
+    }
   }
 
-  const vendaAtacado = finalizarVendaAtacado(trechoCliente, valor, formaPagamento);
-  if (!vendaAtacado) return null;
+  // Remove conectivos residuais no trecho do aparelho
+  const trechoAparelhoLimpo = trechoAparelho
+    .replace(/\b(?:vendido|vendi|venda|saiu)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const cor = trechoAparelho ? extrairCorDeTexto(trechoAparelho) || null : null;
-  const modeloLimpo = trechoAparelho ? limparNomeModelo(trechoAparelho) || null : null;
+  const cor = trechoAparelhoLimpo ? extrairCorDeTexto(trechoAparelhoLimpo) || null : null;
+  const modeloLimpo = trechoAparelhoLimpo ? limparNomeModelo(trechoAparelhoLimpo) || null : null;
 
   if (!imei && !modeloLimpo) return null;
+
+  const vendaAtacado =
+    finalizarVendaAtacado(trechoCliente, valor, formaPagamento) ||
+    (temGatilhoAtacadoExplicito
+      ? {
+          clienteNome: 'Atacado',
+          valor,
+          ...(formaPagamento ? { formaPagamento } : {}),
+        }
+      : null);
+
+  if (!vendaAtacado) return null;
 
   return {
     vendaAtacado,

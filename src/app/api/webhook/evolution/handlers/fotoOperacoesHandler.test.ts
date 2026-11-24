@@ -7,6 +7,8 @@ import {
 } from '@/lib/image-vision-ocr';
 import {
   detectarVendaAtacadoComFoto,
+  detectarVendaAtacadoPorTextoOuAudio,
+  interpretarTextoCorrecaoVenda,
   avaliarEstoqueVendaAtacadoComFoto,
   limparNomeModelo,
   type AparelhoEstoqueConsulta,
@@ -271,3 +273,47 @@ test('Cadastro no estoque pela foto + etiqueta (16PM 256 84% 6147 Desert Traseir
   assert.equal(resDup.duplicado, true);
   assert.equal(insDup.length, 0);
 });
+
+test('detectarVendaAtacadoPorTextoOuAudio reconhece aparelho antes de "vendido atacado", capacidade colada na cor e venda sem nome de comprador', () => {
+  const m1 = detectarVendaAtacadoPorTextoOuAudio(
+    'Iphone 16 128gbbranco imei 2981 vendido atacado Liscas'
+  );
+  assert.ok(m1);
+  assert.equal(m1.vendaAtacado.clienteNome, 'Liscas');
+  assert.equal(m1.vendaAtacado.valor, 0);
+  assert.equal(m1.fotoVirtual.modelo, 'iPhone 16');
+  assert.equal(m1.fotoVirtual.capacidade, '128GB');
+  assert.equal(m1.fotoVirtual.cor, 'Branco');
+  assert.equal(m1.fotoVirtual.imei, '2981');
+
+  const m2 = detectarVendaAtacadoPorTextoOuAudio(
+    'Venda atacado iphone 16 128gb Branco imei 2981'
+  );
+  assert.ok(m2);
+  assert.equal(m2.vendaAtacado.clienteNome, 'Atacado');
+  assert.equal(m2.fotoVirtual.modelo, 'iPhone 16');
+  assert.equal(m2.fotoVirtual.capacidade, '128GB');
+  assert.equal(m2.fotoVirtual.cor, 'Branco');
+  assert.equal(m2.fotoVirtual.imei, '2981');
+});
+
+test('interpretarTextoCorrecaoVenda nunca sequestra novas vendas por texto quando há notinhas pendentes na fila', () => {
+  assert.equal(
+    interpretarTextoCorrecaoVenda('Iphone 16 128gbbranco imei 2981 vendido atacado Liscas'),
+    null
+  );
+  assert.equal(
+    interpretarTextoCorrecaoVenda('Venda atacado iphone 16 128gb Branco imei 2981'),
+    null
+  );
+  assert.equal(
+    interpretarTextoCorrecaoVenda('Vendido iPhone 15 128gb preto imei 1234 para Carlos por 3500'),
+    null
+  );
+  // Edições curtas reais continuam funcionando normalmente
+  assert.deepEqual(interpretarTextoCorrecaoVenda('imei 2981'), {
+    campo: 'imei',
+    valor: '2981',
+  });
+});
+

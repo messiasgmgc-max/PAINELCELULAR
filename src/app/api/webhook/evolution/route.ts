@@ -5108,11 +5108,66 @@ export async function POST(request: Request) {
         .order('dataCadastro', { ascending: false })
         .limit(600);
 
+      const fotosVirtuaisAtacado = [vendaAtacadoDireta.fotoVirtual];
+      const avaliacaoEstoqueDireta = avaliarEstoqueVendaAtacadoComFoto(
+        fotosVirtuaisAtacado,
+        apsEstoque || []
+      );
+      if (!avaliacaoEstoqueDireta.todosConfirmadosNoEstoque) {
+        const motivoEstoque =
+          avaliacaoEstoqueDireta.itens
+            .map((it) => it.cruzamento.mensagem)
+            .filter(Boolean)
+            .join(' | ') || 'Aparelho não localizado com certeza no estoque';
+
+        const dadosPendente: DadosVendaAtacadoPendente = {
+          id: `atacado-pend-${Date.now()}`,
+          lojaId,
+          vendaAtacado: vendaAtacadoDireta.vendaAtacado,
+          fotos: fotosVirtuaisAtacado,
+          usuarioNome: nomeUsuario || pushName || 'Equipe',
+          motivoEstoque,
+          criadoEm: Date.now(),
+        };
+
+        const envioPend = await enviarMensagemWhatsAppComRetorno(
+          instanceName,
+          targetDestination,
+          formatarMensagemAtacadoPendente(dadosPendente)
+        );
+        const jidsAtacadoPend = montarJidsPropostaChat({
+          remoteJid,
+          targetDestination,
+          isGroup,
+          authorPhone,
+          senderPhone,
+          ehModeradorMaster,
+        });
+        await salvarVendaAtacadoPendente(
+          supabase,
+          lojaId,
+          jidsAtacadoPend,
+          envioPend.messageId || dadosPendente.id,
+          dadosPendente
+        );
+        await supabase.from('whatsapp_logs').insert({
+          loja_id: lojaId,
+          contato: `${pushName} (${isGroup ? 'Grupo' : senderPhone})`,
+          mensagem: `[ATACADO_DIRETO PENDENTE] ${vendaAtacadoDireta.vendaAtacado.clienteNome} (IMEI: ${vendaAtacadoDireta.fotoVirtual.imei || '-'} | Valor: R$ ${vendaAtacadoDireta.vendaAtacado.valor})`,
+          created_at: new Date().toISOString(),
+        });
+
+        return NextResponse.json(
+          { status: 'pending', message: 'Venda atacado por texto aguardando IMEI ou confirmação de estoque.' },
+          { status: 200 }
+        );
+      }
+
       const resultadoAtacado = await emitirVendaAtacadoComFoto({
         supabase,
         lojaId,
         vendaAtacado: vendaAtacadoDireta.vendaAtacado,
-        fotos: [vendaAtacadoDireta.fotoVirtual],
+        fotos: fotosVirtuaisAtacado,
         estoque: apsEstoque || [],
         usuarioNome: nomeUsuario || pushName || 'Equipe',
       });
@@ -5150,7 +5205,9 @@ export async function POST(request: Request) {
     }
 
     // ── 3.3. RESPOSTA DE CORREÇÃO DE DADOS DE NOTINHA PENDENTE ──
-    const correcaoDetectada = interpretarTextoCorrecaoVenda(textContent);
+    const ehNovaVendaSemReply =
+      !marcacaoBot.quotedStanzaId && Boolean(detectarFormularioOuPedidoVenda(textContent));
+    const correcaoDetectada = ehNovaVendaSemReply ? null : interpretarTextoCorrecaoVenda(textContent);
     if (correcaoDetectada && lojaId) {
       const jidsCorrecao = montarJidsPropostaChat({
         remoteJid,
