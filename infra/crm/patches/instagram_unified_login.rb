@@ -484,13 +484,18 @@ module PhoneCenter
       redis_get('pc:ig_active_chat').present?
     end
 
+    def warm_chat?
+      redis_get('pc:ig_warm_chat').present?
+    end
+
     def mark_active_chat!(boost_sync: false)
-      redis_set('pc:ig_active_chat', '1', ex: 180)
+      redis_set('pc:ig_active_chat', '1', ex: 90)
+      redis_set('pc:ig_warm_chat', '1', ex: 240)
       return unless boost_sync && defined?(PhoneCenter::InstagramUnifiedSyncJob)
 
-      if redis_set('pc:ig_boost_scheduled', '1', ex: 10, nx: true)
+      if redis_set('pc:ig_boost_scheduled', '1', ex: 6, nx: true)
         redis_del('pc:ig_sync_next_scheduled')
-        PhoneCenter::InstagramUnifiedSyncJob.set(wait: 8.seconds).perform_later('poll')
+        PhoneCenter::InstagramUnifiedSyncJob.set(wait: 4.seconds).perform_later('poll')
       end
     rescue StandardError
       nil
@@ -869,7 +874,7 @@ Rails.application.config.to_prepare do
           return unless has_active
 
           last_run = PhoneCenter::InstagramUnified.redis_get('pc:ig_sync_last_run').to_i
-          if is_initial || (Time.now.to_i - last_run) >= 8
+          if is_initial || (Time.now.to_i - last_run) >= 4
             synced = if is_initial
                        PhoneCenter::InstagramUnified.sync_all_channels(max_conversations: 10, max_messages: 10)
                      else
@@ -879,8 +884,14 @@ Rails.application.config.to_prepare do
             PhoneCenter::InstagramUnified.mark_active_chat!(boost_sync: false) if synced.to_i.positive?
           end
 
-          next_interval = PhoneCenter::InstagramUnified.active_chat? ? 12 : 35
-          if PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_next_scheduled', '1', ex: [next_interval - 2, 5].max, nx: true)
+          next_interval = if PhoneCenter::InstagramUnified.active_chat?
+                            5
+                          elsif PhoneCenter::InstagramUnified.warm_chat?
+                            15
+                          else
+                            45
+                          end
+          if PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_next_scheduled', '1', ex: [next_interval - 1, 3].max, nx: true)
             PhoneCenter::InstagramUnifiedSyncJob.set(wait: next_interval.seconds).perform_later('poll')
           end
         ensure
