@@ -18,6 +18,9 @@ import {
   Clock,
   KeyRound,
   RotateCw,
+  Users,
+  UserPlus,
+  Trash2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -105,6 +108,26 @@ export default function CrmConfigPage() {
   const [rotacionando, setRotacionando] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
   const [copiado, setCopiado] = useState<string | null>(null);
+
+  // Gerenciador de Acessos (Logins do CRM desta loja)
+  const [agentes, setAgentes] = useState<
+    Array<{ id: string; name: string; email: string; role: string; confirmed?: boolean }>
+  >([]);
+  const [loadingAcessos, setLoadingAcessos] = useState(false);
+  const [acessosAviso, setAcessosAviso] = useState<string | null>(null);
+  const [criandoAcesso, setCriandoAcesso] = useState(false);
+  const [novoAcesso, setNovoAcesso] = useState({
+    name: '',
+    email: '',
+    role: 'agent' as 'agent' | 'administrator',
+    password: '',
+  });
+  const [ultimoAcessoCriado, setUltimoAcessoCriado] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    url: string;
+  } | null>(null);
 
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
@@ -201,6 +224,105 @@ export default function CrmConfigPage() {
   useEffect(() => {
     carregarTudo();
   }, [carregarTudo]);
+
+  const carregarAcessos = useCallback(async (targetLojaId?: string) => {
+    const lid = targetLojaId || lojaId;
+    if (!lid) return;
+    setLoadingAcessos(true);
+    setAcessosAviso(null);
+    try {
+      const headers = await buildHeaders();
+      const res = await fetch(`/api/crm-bridge/acessos?loja_id=${encodeURIComponent(lid)}`, {
+        headers,
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setAgentes([]);
+        setAcessosAviso(data.error || 'Não foi possível carregar os acessos do CRM desta loja.');
+        return;
+      }
+      setAgentes(Array.isArray(data.agentes) ? data.agentes : []);
+      if (data.aviso) setAcessosAviso(data.aviso);
+    } catch {
+      setAcessosAviso('Erro de rede ao consultar acessos do CRM.');
+    } finally {
+      setLoadingAcessos(false);
+    }
+  }, [lojaId, buildHeaders]);
+
+  useEffect(() => {
+    if (lojaId && !authFalhou) {
+      carregarAcessos(lojaId);
+    }
+  }, [lojaId, authFalhou, carregarAcessos]);
+
+  const gerarSenhaForte = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#';
+    let s = '';
+    for (let i = 0; i < 10; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    setNovoAcesso((p) => ({ ...p, password: s }));
+  };
+
+  const criarAcessoCrm = async () => {
+    if (!lojaId) return;
+    if (!novoAcesso.name.trim() || !novoAcesso.email.trim()) {
+      setMensagem({ tipo: 'erro', texto: 'Preencha Nome e E-mail para criar o acesso no CRM.' });
+      return;
+    }
+    setCriandoAcesso(true);
+    setMensagem(null);
+    try {
+      const headers = await buildHeaders();
+      const res = await fetch('/api/crm-bridge/acessos', {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ loja_id: lojaId, ...novoAcesso }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setMensagem({ tipo: 'erro', texto: data.error || 'Erro ao criar acesso no CRM.' });
+        return;
+      }
+      const urlCrm = data.crm_frontend_url || form.crm_frontend_url || 'https://crm.phonecenter.tech';
+      setUltimoAcessoCriado({
+        name: novoAcesso.name.trim(),
+        email: novoAcesso.email.trim().toLowerCase(),
+        password: novoAcesso.password.trim(),
+        url: urlCrm,
+      });
+      setNovoAcesso({ name: '', email: '', role: 'agent', password: '' });
+      setMensagem({ tipo: 'ok', texto: 'Acesso criado no CRM da loja com sucesso!' });
+      carregarAcessos(lojaId);
+    } catch {
+      setMensagem({ tipo: 'erro', texto: 'Falha de rede ao criar acesso no CRM.' });
+    } finally {
+      setCriandoAcesso(false);
+    }
+  };
+
+  const removerAcessoCrm = async (agentId: string, agentName: string) => {
+    if (!lojaId || !agentId) return;
+    if (!window.confirm(`Remover o acesso de "${agentName}" do CRM desta loja?`)) return;
+    try {
+      const headers = await buildHeaders();
+      const res = await fetch(
+        `/api/crm-bridge/acessos?loja_id=${encodeURIComponent(lojaId)}&agent_id=${encodeURIComponent(agentId)}`,
+        { method: 'DELETE', headers, credentials: 'include' }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setMensagem({ tipo: 'erro', texto: data.error || 'Erro ao remover acesso.' });
+        return;
+      }
+      setMensagem({ tipo: 'ok', texto: `Acesso de "${agentName}" removido do CRM.` });
+      carregarAcessos(lojaId);
+    } catch {
+      setMensagem({ tipo: 'erro', texto: 'Falha de rede ao remover acesso.' });
+    }
+  };
 
   const salvar = async () => {
     if (!lojaId) return;
@@ -833,6 +955,182 @@ export default function CrmConfigPage() {
                 {salvando ? 'Salvando no Supabase...' : `Salvar Configuração de ${lojaNome || 'Loja'}`}
               </button>
             </div>
+
+            {/* Gerenciador de Acessos (Logins do CRM desta Loja) */}
+            {lojaId && (
+              <section className="p-5 rounded-2xl bg-[#0f172a] border border-emerald-500/30 space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-emerald-400" />
+                      Gerenciador de Acessos do CRM ({lojaNome || 'Loja'})
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Crie, visualize e remova os logins dos vendedores e gestores para acessar{' '}
+                      <span className="text-blue-300 font-mono">
+                        {form.crm_frontend_url || 'https://crm.phonecenter.tech'}
+                      </span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => carregarAcessos(lojaId)}
+                    disabled={loadingAcessos}
+                    className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingAcessos ? 'animate-spin' : ''}`} />
+                    Atualizar Lista
+                  </button>
+                </div>
+
+                {acessosAviso && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                    <span>{acessosAviso}</span>
+                  </div>
+                )}
+
+                {ultimoAcessoCriado && (
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/35 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-emerald-300">
+                        ✅ Acesso criado para {ultimoAcessoCriado.name}! Envie os dados abaixo:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const txt =
+                            `🔐 *Acesso ao PhoneCenterCRM (${lojaNome || 'Loja'})*\n` +
+                            `🌐 Link: ${ultimoAcessoCriado.url}\n` +
+                            `📧 E-mail: ${ultimoAcessoCriado.email}\n` +
+                            (ultimoAcessoCriado.password
+                              ? `🔑 Senha: ${ultimoAcessoCriado.password}\n`
+                              : `📩 Convite enviado para o e-mail para definir a senha.\n`);
+                          copiar('credenciais-crm', txt);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white flex items-center gap-1.5"
+                      >
+                        {copiado === 'credenciais-crm' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" /> Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> Copiar Credenciais
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-200 bg-[#090d16] p-2.5 rounded-lg border border-white/10">
+                      Link: {ultimoAcessoCriado.url} | E-mail: {ultimoAcessoCriado.email}
+                      {ultimoAcessoCriado.password ? ` | Senha: ${ultimoAcessoCriado.password}` : ''}
+                    </div>
+                  </div>
+                )}
+
+                {/* Formulário Criar Novo Acesso */}
+                <div className="p-3.5 rounded-xl bg-[#090d16] border border-white/10 space-y-3">
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5 text-blue-400" />
+                    Criar Novo Login no CRM da Loja
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    <input
+                      value={novoAcesso.name}
+                      onChange={(e) => setNovoAcesso((p) => ({ ...p, name: e.target.value }))}
+                      placeholder="Nome (ex: João Vendedor)"
+                      className="px-3 py-2 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                    />
+                    <input
+                      type="email"
+                      value={novoAcesso.email}
+                      onChange={(e) => setNovoAcesso((p) => ({ ...p, email: e.target.value }))}
+                      placeholder="E-mail de login"
+                      className="px-3 py-2 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                    />
+                    <select
+                      value={novoAcesso.role}
+                      onChange={(e) =>
+                        setNovoAcesso((p) => ({
+                          ...p,
+                          role: e.target.value === 'administrator' ? 'administrator' : 'agent',
+                        }))
+                      }
+                      className="px-3 py-2 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                    >
+                      <option value="agent">Atendente / Vendedor</option>
+                      <option value="administrator">Administrador da Loja</option>
+                    </select>
+                    <div className="flex gap-1.5">
+                      <input
+                        value={novoAcesso.password}
+                        onChange={(e) => setNovoAcesso((p) => ({ ...p, password: e.target.value }))}
+                        placeholder="Senha inicial (opcional)"
+                        className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-[#0f172a] border border-white/10 text-xs text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={gerarSenhaForte}
+                        title="Gerar senha forte"
+                        className="px-2.5 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-slate-200 shrink-0"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={criarAcessoCrm}
+                      disabled={criandoAcesso}
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold text-white flex items-center gap-1.5"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      {criandoAcesso ? 'Criando acesso...' : 'Criar Acesso no CRM'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lista de Acessos Ativos */}
+                <div className="space-y-2">
+                  {agentes.length === 0 && !loadingAcessos && !acessosAviso && (
+                    <div className="text-xs text-slate-400 py-2">
+                      Nenhum usuário listado ainda no CRM desta loja.
+                    </div>
+                  )}
+                  {agentes.map((ag) => (
+                    <div
+                      key={ag.id || ag.email}
+                      className="p-3 rounded-xl bg-[#090d16] border border-white/10 flex items-center justify-between gap-3 flex-wrap"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-white">{ag.name}</span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                              ag.role === 'administrator'
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                : 'bg-slate-700/60 text-slate-300 border border-white/10'
+                            }`}
+                          >
+                            {ag.role === 'administrator' ? 'Admin' : 'Atendente'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 truncate">{ag.email}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removerAcessoCrm(ag.id, ag.name)}
+                        className="px-2.5 py-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-xs text-red-300 flex items-center gap-1 shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Remover
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* Links Prontos para Colar no CRM (usando tokens isolados da loja!) */}
             {lojaId && (
