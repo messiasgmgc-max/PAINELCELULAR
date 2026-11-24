@@ -760,33 +760,41 @@
     });
   }
 
-  function applyAll() {
+  let lastHeavyScan = 0;
+  function applyAll(forceHeavy) {
     enforceTitle();
-    applySavedWorkspaceTheme();
-    if (document.body) {
+    if (!document.body) return;
+    ensureSuiteModal();
+    ensureQuickDock();
+    enhanceLoginScreen();
+    syncAvailabilityAfterLogin();
+
+    const now = Date.now();
+    if (forceHeavy || now - lastHeavyScan >= 1200) {
+      lastHeavyScan = now;
       replaceBrandAssets(document.body);
-      enhanceLoginScreen();
-      syncAvailabilityAfterLogin();
       applySlaVisualBadges();
-      ensureSuiteModal();
-      ensureQuickDock();
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyAll);
-  } else {
-    applyAll();
+  function initBrand() {
+    applySavedWorkspaceTheme();
+    applyAll(true);
   }
 
-  let scheduled = false;
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initBrand);
+  } else {
+    initBrand();
+  }
+
+  let debounceTimer = null;
   const observer = new MutationObserver(() => {
-    if (scheduled) return;
-    scheduled = true;
-    window.requestAnimationFrame(() => {
-      scheduled = false;
-      applyAll();
-    });
+    if (debounceTimer) return;
+    debounceTimer = window.setTimeout(() => {
+      debounceTimer = null;
+      applyAll(false);
+    }, 400);
   });
 
   if (document.documentElement) {

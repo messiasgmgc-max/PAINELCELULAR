@@ -887,9 +887,9 @@ Rails.application.config.to_prepare do
           next_interval = if PhoneCenter::InstagramUnified.active_chat?
                             5
                           elsif PhoneCenter::InstagramUnified.warm_chat?
-                            15
+                            12
                           else
-                            45
+                            20
                           end
           if PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_next_scheduled', '1', ex: [next_interval - 1, 3].max, nx: true)
             PhoneCenter::InstagramUnifiedSyncJob.set(wait: next_interval.seconds).perform_later('poll')
