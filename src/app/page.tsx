@@ -321,89 +321,12 @@ export default function Home() {
                 </kbd>
               </button>
 
-              {/* Botão Rápido de Alternar Tema White / Dark */}
-              <button
-                onClick={() => setColorTheme(colorTheme === 'white-clean' ? 'padrao' : 'white-clean')}
-                className="flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 transition-all text-slate-300 hover:text-white shrink-0 cursor-pointer shadow-sm"
-                title={colorTheme === 'white-clean' ? 'Mudar para Modo Dark' : 'Mudar para Modo White Clean'}
-              >
-                {colorTheme === 'white-clean' ? (
-                  <Moon className="w-4 h-4 text-cyan-500" />
-                ) : (
-                  <Sun className="w-4 h-4 text-amber-400" />
-                )}
-              </button>
-
-              {/* Botão PhoneCenterCRM (exclusivo Plano Avançado / Vitalício / Super Admin) */}
-              {checkIsSuperAdmin(usuario) ||
-              planData.isVitalicio ||
-              verificarPermissaoRecursoPlano(planData.planoTipo, 'crm_omnichannel') ? (
-                <div className="flex items-center gap-1 shrink-0">
-                  <a
-                    href={crmFrontendUrl || 'https://crm.phonecenter.tech'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-[#0066FF]/50 bg-[#0066FF]/15 hover:bg-[#0066FF]/30 text-blue-200 font-semibold transition-all"
-                    title="Abrir PhoneCenterCRM (Atendimento & Vendas)"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="hidden sm:inline">CRM</span>
-                  </a>
-                  <a
-                    href="/crm-hub"
-                    className="hidden sm:inline-flex items-center gap-1 text-xs h-9 sm:h-10 px-2.5 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 text-slate-200 font-semibold transition-all"
-                    title="Central CRM Suite (Pós-Venda IA, Rodízio, Campanhas, Telefonia)"
-                  >
-                    Suite
-                  </a>
-                  <a
-                    href={usuario?.lojaId ? `/crm-config?loja_id=${usuario.lojaId}` : '/crm-config'}
-                    className="inline-flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-2xl border border-white/15 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all"
-                    title="Configurar PhoneCenterCRM & Instâncias"
-                  >
-                    <Settings2 className="w-4 h-4 text-[#007BFF]" />
-                  </a>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowMeuPlanoModal(true)}
-                  className="inline-flex items-center gap-1.5 text-xs sm:text-sm h-9 sm:h-10 px-3 rounded-2xl border border-amber-500/35 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 font-semibold transition-all shrink-0 cursor-pointer"
-                  title="PhoneCenterCRM exclusivo do Plano Avançado — clique para fazer upgrade"
-                >
-                  <Lock className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden sm:inline">CRM</span>
-                </button>
-              )}
-
-              {/* Botão Meu Plano */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowMeuPlanoModal(true)}
-                className="gap-2 text-xs sm:text-sm h-9 sm:h-10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 rounded-2xl font-semibold"
-              >
-                <CreditCard className="w-4 h-4 text-emerald-400" />
-                <span className="hidden sm:inline">Meu Plano</span>
-              </Button>
-
-              {/* Botão Super Admin */}
-              {checkIsSuperAdmin(usuario) && (
-                <Button
-                  variant={currentTab === 'superadmin' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => handleTabChange('superadmin')}
-                  className="hidden sm:flex gap-2 h-9 sm:h-10 rounded-2xl"
-                >
-                  <Shield className="w-4 h-4" />
-                  <span className="hidden lg:inline">Super Admin</span>
-                </Button>
-              )}
-
-              {/* Menu de Usuário Expansível */}
+              {/* Menu de Usuário Expansível (Tema, CRM, Suite, Config, Meu Plano e Super Admin ficam dentro) */}
               <UserAccountMenu
                 onOpenMeuPlano={() => setShowMeuPlanoModal(true)}
                 onNavigateSuperAdmin={() => handleTabChange('superadmin')}
                 currentTab={currentTab}
+                crmFrontendUrl={crmFrontendUrl}
               />
             </div>
           </div>

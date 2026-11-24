@@ -16,14 +16,17 @@ import {
   Sun,
   Moon,
   LifeBuoy,
-  MessageCircle
+  MessageCircle,
+  Settings2,
+  Sparkles,
+  Lock
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useStorePlan } from '@/hooks/useStorePlan';
 import { usePanelMode } from '@/hooks/usePanelMode';
 import { useColorTheme } from '@/components/ThemeProvider';
 import { checkIsSuperAdmin } from '@/lib/utils';
-import { obterPlanoPorTipo } from '@/lib/planos-config';
+import { obterPlanoPorTipo, verificarPermissaoRecursoPlano } from '@/lib/planos-config';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,9 +44,10 @@ interface UserAccountMenuProps {
   onOpenMeuPlano: () => void;
   onNavigateSuperAdmin?: () => void;
   currentTab?: string;
+  crmFrontendUrl?: string;
 }
 
-export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentTab }: UserAccountMenuProps) {
+export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentTab, crmFrontendUrl }: UserAccountMenuProps) {
   const { usuario, logout } = useAuth();
   const { planData } = useStorePlan();
   const { isModoSimples, toggleModoSimples } = usePanelMode();
@@ -117,6 +121,61 @@ export function UserAccountMenu({ onOpenMeuPlano, onNavigateSuperAdmin, currentT
               {obterPlanoPorTipo(planData.planoTipo)?.nome || planData.planoTipo}
             </Badge>
           </DropdownMenuItem>
+
+          {/* Atalhos PhoneCenterCRM (movidos do header para manter o topo limpo) */}
+          {isSuperAdmin || planData.isVitalicio || verificarPermissaoRecursoPlano(planData.planoTipo, 'crm_omnichannel') ? (
+            <>
+              <DropdownMenuItem
+                asChild
+                className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-emerald-300"
+              >
+                <a
+                  href={crmFrontendUrl || 'https://crm.phonecenter.tech'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-1 mr-1" />
+                    <span>Abrir PhoneCenterCRM</span>
+                  </div>
+                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[9px] px-1.5 py-0 h-4">
+                    CRM
+                  </Badge>
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                asChild
+                className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-blue-300"
+              >
+                <a href="/crm-hub">
+                  <Sparkles className="w-4 h-4 text-blue-400" />
+                  <span>Central CRM Suite</span>
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                asChild
+                className="flex items-center gap-2 p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-slate-300"
+              >
+                <a href={usuario?.lojaId ? `/crm-config?loja_id=${usuario.lojaId}` : '/crm-config'}>
+                  <Settings2 className="w-4 h-4 text-blue-400" />
+                  <span>Configurar CRM & Instâncias</span>
+                </a>
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <DropdownMenuItem
+              onClick={onOpenMeuPlano}
+              className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800 focus:bg-slate-800 text-xs font-medium cursor-pointer text-amber-300"
+            >
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-400" />
+                <span>PhoneCenterCRM</span>
+              </div>
+              <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[9px] px-1.5 py-0 h-4">
+                Avançado
+              </Badge>
+            </DropdownMenuItem>
+          )}
 
           {/* Chat de Suporte ao Vivo */}
           <DropdownMenuItem 
