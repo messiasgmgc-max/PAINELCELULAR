@@ -2,6 +2,7 @@
 
 require 'base64'
 require 'json'
+require 'time'
 
 # =============================================================================
 # PhoneCenterCRM — Patch Nativo: Instagram API com Meta Unified Login (v27.0)
@@ -272,6 +273,200 @@ module PhoneCenter
     rescue StandardError
       {}
     end
+
+    def ensure_inbox_members(inbox)
+      return if inbox.blank?
+      return if inbox.members.exists?
+
+      User.find_each do |user|
+        InboxMember.find_or_create_by!(inbox_id: inbox.id, user_id: user.id)
+      end
+      Rails.logger.info("[PhoneCenter::InstagramUnified] Membros vinculados automaticamente na inbox #{inbox.id} (#{inbox.name})")
+    rescue StandardError => e
+      Rails.logger.warn("[PhoneCenter::InstagramUnified] Erro ao vincular membros na inbox: #{e.message}")
+    end
+
+    def sync_all_channels
+      total_synced = 0
+      Channel::Instagram.find_each do |channel|
+        next unless channel.respond_to?(:unified_login?) && channel.unified_login?
+        next if channel.reauthorization_required?
+
+        res = sync_channel_conversations(channel)
+        total_synced += res[:synced].to_i
+      end
+      total_synced
+    end
+
+    def sync_channel_conversations(channel, max_conversations: 10, max_messages: 10, days_back: 14)
+      return { synced: 0, skipped: 'invalid_channel' } unless channel.respond_to?(:unified_login?) && channel.unified_login?
+      return { synced: 0, skipped: 'no_inbox' } if channel.inbox.blank?
+
+      ensure_inbox_members(channel.inbox)
+
+      cooldown_key = "pc:ig_sync_cooldown:#{channel.id}"
+      if redis_get(cooldown_key).present?
+        return { synced: 0, skipped: 'rate_limit_cooldown' }
+      end
+
+      response = HTTParty.get(
+        "#{channel.base_uri}/#{channel.instagram_id}/conversations",
+        query: {
+          platform: 'instagram',
+          fields: "id,updated_time,participants,messages.limit(#{max_messages}){id,message,from,to,created_time,attachments{id,mime_type,image_data,video_data,file_url}}",
+          limit: max_conversations
+        },
+        headers: bearer_headers(channel.access_token),
+        timeout: 25
+      )
+      data = parse_json(response.body)
+
+      unless response.success? && data['error'].blank?
+        err_code = data.dig('error', 'code').to_i
+        err_msg = data.dig('error', 'message') || response.body.to_s[0, 200]
+        if [4, 17, 32, 613].include?(err_code) || response.code == 429
+          redis_set(cooldown_key, '1', ex: 300)
+          Rails.logger.warn("[PhoneCenter::InstagramUnified] Rate limit no sync (#{err_code}), pausa de 5 min: #{err_msg}")
+        else
+          Rails.logger.warn("[PhoneCenter::InstagramUnified] Falha no sync ig_id=#{channel.instagram_id}: #{response.code} #{err_msg}")
+        end
+        return { synced: 0, error: err_msg }
+      end
+
+      cutoff = days_back.days.ago
+      synced = 0
+
+      Array(data['data']).each do |conv|
+        updated_at = parse_meta_time(conv['updated_time'])
+        next if updated_at && updated_at < cutoff
+
+        participants = Array(conv.dig('participants', 'data'))
+        other = participants.find { |p| p['id'].to_s != channel.instagram_id.to_s }
+        next if other.blank? || other['id'].blank?
+
+        other_id = other['id'].to_s
+        other_username = other['username'].to_s.strip
+
+        messages = Array(conv.dig('messages', 'data')).reverse
+        messages.each do |msg|
+          mid = msg['id'].to_s
+          next if mid.blank?
+          next if channel.find_message_by_source_id(mid).present?
+
+          text = msg['message'].to_s
+          mapped_attachments = map_graph_attachments(msg.dig('attachments', 'data'))
+          next if text.blank? && mapped_attachments.empty?
+
+          from_id = msg.dig('from', 'id').to_s
+          next if from_id.blank?
+
+          is_echo = (from_id == channel.instagram_id.to_s)
+          msg_time = parse_meta_time(msg['created_time']) || Time.current
+
+          msg_hash = {
+            mid: mid,
+            text: text.presence,
+            is_echo: is_echo ? true : nil
+          }.compact
+          msg_hash[:attachments] = mapped_attachments if mapped_attachments.any?
+
+          messaging = {
+            sender: { id: is_echo ? channel.instagram_id.to_s : from_id },
+            recipient: { id: is_echo ? other_id : channel.instagram_id.to_s },
+            timestamp: msg_time.to_i * 1000,
+            message: msg_hash
+          }.with_indifferent_access
+
+          begin
+            ::Instagram::MessageText.new(messaging, channel).perform
+            created_msg = channel.find_message_by_source_id(mid)
+            if created_msg.present?
+              synced += 1
+              created_msg.update_column(:created_at, msg_time) if msg_time < Time.current
+              enrich_synced_contact(created_msg.conversation&.contact, other_id, other_username)
+            end
+          rescue StandardError => e
+            Rails.logger.warn("[PhoneCenter::InstagramUnified] Erro ao importar msg #{mid}: #{e.class} #{e.message}")
+          end
+        end
+      end
+
+      Rails.logger.info("[PhoneCenter::InstagramUnified] Sync concluído ig_id=#{channel.instagram_id}: #{synced} nova(s) mensagem(ns)") if synced.positive?
+      { synced: synced }
+    rescue StandardError => e
+      Rails.logger.error("[PhoneCenter::InstagramUnified] Erro inesperado no sync: #{e.class} #{e.message}")
+      { synced: 0, error: e.message }
+    end
+
+    def map_graph_attachments(raw_attachments)
+      Array(raw_attachments).filter_map do |att|
+        next unless att.is_a?(Hash)
+
+        if att.dig('image_data', 'url').present?
+          { type: 'image', payload: { url: att.dig('image_data', 'url') } }
+        elsif att.dig('video_data', 'url').present?
+          { type: 'video', payload: { url: att.dig('video_data', 'url') } }
+        elsif att['file_url'].present?
+          kind = att['mime_type'].to_s.start_with?('audio') ? 'audio' : 'file'
+          { type: kind, payload: { url: att['file_url'] } }
+        end
+      end
+    end
+
+    def enrich_synced_contact(contact, other_id, other_username)
+      return if contact.blank? || other_username.blank?
+
+      attrs = contact.additional_attributes.is_a?(Hash) ? contact.additional_attributes.dup : {}
+      changed = false
+
+      if contact.name.blank? || contact.name.to_s == other_id || contact.name.to_s.start_with?('Instagram')
+        contact.name = other_username
+        changed = true
+      end
+
+      unless attrs['social_instagram_user_name'].present?
+        attrs['social_instagram_user_name'] = other_username
+        attrs['social_profiles'] = (attrs['social_profiles'].is_a?(Hash) ? attrs['social_profiles'] : {}).merge('instagram' => other_username)
+        contact.additional_attributes = attrs
+        changed = true
+      end
+
+      contact.save if changed
+    rescue StandardError
+      nil
+    end
+
+    def parse_meta_time(value)
+      return nil if value.blank?
+
+      Time.parse(value.to_s)
+    rescue StandardError
+      nil
+    end
+
+    def redis_get(key)
+      return nil unless defined?(Sidekiq)
+
+      Sidekiq.redis { |r| r.get(key) }
+    rescue StandardError
+      nil
+    end
+
+    def redis_set(key, value, ex: 60, nx: false)
+      return true unless defined?(Sidekiq)
+
+      Sidekiq.redis do |r|
+        if nx
+          res = r.set(key, value, nx: true, ex: ex)
+          res == true || res == 'OK'
+        else
+          r.set(key, value, ex: ex)
+          true
+        end
+      end
+    rescue StandardError
+      true
+    end
   end
 
   module InstagramPatches
@@ -496,6 +691,10 @@ module PhoneCenter
         end
 
         channel_instagram.reauthorized!
+        PhoneCenter::InstagramUnified.ensure_inbox_members(channel_instagram.inbox)
+        if defined?(PhoneCenter::InstagramUnifiedSyncJob)
+          PhoneCenter::InstagramUnifiedSyncJob.perform_later(false)
+        end
         channel_instagram
       end
     end
@@ -507,11 +706,26 @@ module PhoneCenter
         if channel.respond_to?(:unified_login?) && channel.unified_login? && !MetaBaseUrl.enabled?
           access_token = channel.access_token
           instagram_id = channel.instagram_id.presence || 'me'
+          endpoint = "#{channel.base_uri}/#{instagram_id}/messages"
           response = HTTParty.post(
-            "#{channel.base_uri}/#{instagram_id}/messages",
+            endpoint,
             body: message_content,
             query: { access_token: access_token }
           )
+
+          parsed = response.parsed_response
+          tag_val = message_content.is_a?(Hash) ? (message_content[:tag] || message_content['tag']) : nil
+          if !response.success? && parsed.is_a?(Hash) && parsed.dig('error', 'code').to_i == 10 && tag_val == 'HUMAN_AGENT'
+            Rails.logger.warn('[PhoneCenter::InstagramUnified] Human Agent não aprovado (erro #10) — reenviando dentro da janela padrão de 24h sem tag HUMAN_AGENT')
+            clean_payload = message_content.reject { |k, _| %w[messaging_type tag].include?(k.to_s) }
+            response = HTTParty.post(
+              endpoint,
+              body: clean_payload,
+              query: { access_token: access_token }
+            )
+            return process_response(response, clean_payload)
+          end
+
           return process_response(response, message_content)
         end
 
@@ -600,5 +814,37 @@ Rails.application.config.to_prepare do
 
   unless Channel::Instagram.validators_on(:access_token).any? { |v| v.kind == :length }
     Channel::Instagram.validates :access_token, length: { maximum: 4096 }, allow_blank: true
+  end
+
+  unless defined?(PhoneCenter::InstagramUnifiedSyncJob)
+    class PhoneCenter::InstagramUnifiedSyncJob < ApplicationJob
+      queue_as :scheduled_jobs
+
+      def perform(schedule_followup = true)
+        acquired = PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_lock', '1', ex: 22, nx: true)
+        return unless acquired
+
+        PhoneCenter::InstagramUnified.sync_all_channels
+
+        if schedule_followup
+          has_active = Channel::Instagram.all.any? do |c|
+            c.respond_to?(:unified_login?) && c.unified_login? && !c.reauthorization_required?
+          end
+          if has_active
+            PhoneCenter::InstagramUnifiedSyncJob.set(wait: 30.seconds).perform_later(false)
+          end
+        end
+      end
+    end
+  end
+
+  if defined?(Sidekiq::Cron::Job) && defined?(Sidekiq) && Sidekiq.server?
+    Sidekiq::Cron::Job.create(
+      name: 'phonecenter_instagram_unified_sync',
+      cron: '* * * * *',
+      class: 'PhoneCenter::InstagramUnifiedSyncJob',
+      queue: 'scheduled_jobs',
+      description: 'Sincronização híbrida de DMs Instagram Unified Login (fallback + histórico recente)'
+    )
   end
 end

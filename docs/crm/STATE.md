@@ -32,11 +32,12 @@
 - **Suite ERP + CRM Bridge (`app.phonecenter.tech`):** rotas `/crm-hub`, `/crm-config`, `/crm-sidebar` e `/api/crm-bridge/health` respondendo `HTTP 200` com `configured: true`. Código validado com `npm run typecheck` (0 erros) e `npm test` (586/586 verdes).
 
 ## 4. Ações Rápidas para Ativar 100%
-1. Conectar conta do Instagram em `https://crm.phonecenter.tech/channels/new` e WhatsApp QR Code (Evolution).
+1. Conectar WhatsApp QR Code (Evolution) em `https://crm.phonecenter.tech/channels/new` e testar resposta no Instagram (`@astrogeekbh`).
 2. Aplicar as migrations SQL pendentes no Supabase (especialmente `20261121_phonecenter_crm_completo.sql`).
 3. Abrir `https://app.phonecenter.tech/crm-config`, copiar os links com `bridge_token` e `webhook_token` isolados da loja e cadastrar Dashboard App `/crm-sidebar`, MCP Server e Webhook no `crm.phonecenter.tech`.
 
 ## 5. Log Compacto de Sessões
 - **2026-11-20 (Sessão 1):** Infra EvoCRM 14 containers na VPS, SSL, Evolution API vinculada, White-Label Camada 3A e CRM Bridge inicial (Fases 4, 5 parcial, 6).
 - **2026-11-21 (Sessão 2):** Correções/blindagem multi-loja, funções matadoras (1-clique chat/PDF, Pós-Venda Turbo, 8 tools MCP, IA Vision, IMEI Luhn, Telefonia), Suite `/crm-hub`, SaaS Multi-Loja e patch Instagram Unified Login (`instagram_unified_login.rb`), 586/586 testes verdes.
-- **2026-11-23 (Sessão 3):** Ativado na VPS `13.140.36.50:2222` o patch **Instagram Unified Login** (`CONFIG_ID` `1715746990110674`, smoke-check Rails `enabled=true` + URL `facebook.com/dialog/oauth` OK) e atualizado **White-Label** `/opt/phonecenter-crm/branding/` (`nginx -t` OK + `reload`), além de validação HTTPS `200 OK` em `crm`, `api-crm` e `app.phonecenter.tech` (`/crm-hub`, `/crm-config`, `/crm-sidebar`).
+- **2026-11-23 (Sessão 3):** Ativado na VPS `13.140.36.50:2222` o patch **Instagram Unified Login** (`CONFIG_ID` `1715746990110674`), atualizado **White-Label** `/opt/phonecenter-crm/branding/`, e criadas páginas públicas `/privacidade`, `/termos` e `/exclusao-dados`.
+- **2026-11-24 (Sessão 4):** Diagnosticado webhook Meta pendente + caixa sem agente; implementado em `instagram_unified_login.rb` sync híbrido a cada 30s (`PhoneCenter::InstagramUnifiedSyncJob` via `Sidekiq::Cron`), vínculo automático de agentes na caixa (`@astrogeekbh`) e fallback automático de envio sem tag `HUMAN_AGENT` no erro `#10` — conversas de `@messiasgc_` importadas e validadas ao vivo.
