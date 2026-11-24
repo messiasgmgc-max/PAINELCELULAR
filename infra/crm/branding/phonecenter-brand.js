@@ -134,7 +134,7 @@
   ];
 
   function enforceTitle() {
-    if (!document.title || /evo\s*(crm|ai)/i.test(document.title)) {
+    if (!document.title || /(evo\s*(crm|ai)|evolution\s*(crm|ai))/i.test(document.title)) {
       document.title = BRAND_NAME + ' — Central de Atendimento & Vendas';
     }
   }
@@ -175,7 +175,7 @@
         if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT') {
           return NodeFilter.FILTER_REJECT;
         }
-        return /evo\s*(crm|ai)/i.test(node.nodeValue || '')
+        return /(evo\s*(crm|ai)|evolution\s*(crm|ai))/i.test(node.nodeValue || '')
           ? NodeFilter.FILTER_ACCEPT
           : NodeFilter.FILTER_SKIP;
       },
@@ -186,8 +186,27 @@
     toUpdate.forEach((node) => {
       node.nodeValue = (node.nodeValue || '')
         .replace(/Evo\s*CRM\s*Community/gi, BRAND_NAME)
+        .replace(/Evolution\s*CRM/gi, BRAND_NAME)
+        .replace(/Evolution\s*AI/gi, BRAND_NAME)
         .replace(/Evo\s*CRM/gi, BRAND_NAME)
         .replace(/Evo\s*AI/gi, BRAND_NAME);
+    });
+
+    (root || document).querySelectorAll('[placeholder],[title],[aria-label]').forEach((el) => {
+      ['placeholder', 'title', 'aria-label'].forEach((attr) => {
+        const val = el.getAttribute(attr);
+        if (val && /(evo\s*(crm|ai)|evolution\s*(crm|ai))/i.test(val)) {
+          el.setAttribute(
+            attr,
+            val
+              .replace(/Evo\s*CRM\s*Community/gi, BRAND_NAME)
+              .replace(/Evolution\s*CRM/gi, BRAND_NAME)
+              .replace(/Evolution\s*AI/gi, BRAND_NAME)
+              .replace(/Evo\s*CRM/gi, BRAND_NAME)
+              .replace(/Evo\s*AI/gi, BRAND_NAME)
+          );
+        }
+      });
     });
   }
 
@@ -772,7 +791,7 @@
     }
   }
 
-  let lastHeavyScan = 0;
+  let lastSlaScan = 0;
   function applyAll(forceHeavy) {
     enforceTitle();
     if (!document.body) return;
@@ -780,11 +799,11 @@
     ensureNativeSuiteEntry();
     enhanceLoginScreen();
     syncAvailabilityAfterLogin();
+    replaceBrandAssets(document.body);
 
     const now = Date.now();
-    if (forceHeavy || now - lastHeavyScan >= 1200) {
-      lastHeavyScan = now;
-      replaceBrandAssets(document.body);
+    if (forceHeavy || now - lastSlaScan >= 1200) {
+      lastSlaScan = now;
       applySlaVisualBadges();
     }
   }
@@ -806,7 +825,7 @@
     debounceTimer = window.setTimeout(() => {
       debounceTimer = null;
       applyAll(false);
-    }, 400);
+    }, 150);
   });
 
   if (document.documentElement) {
