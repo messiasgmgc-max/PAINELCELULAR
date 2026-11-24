@@ -25,8 +25,8 @@ export interface Cliente {
   email: string;
   telefone: string;
   cpf?: string;
-  data_nascimento?: string;
-  dataNascimento?: string;
+  data_nascimento?: string | null;
+  dataNascimento?: string | null;
   endereco?: string;
   cidade?: string;
   estado?: string;
