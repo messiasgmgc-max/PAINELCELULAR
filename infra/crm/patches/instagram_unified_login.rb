@@ -286,19 +286,23 @@ module PhoneCenter
       Rails.logger.warn("[PhoneCenter::InstagramUnified] Erro ao vincular membros na inbox: #{e.message}")
     end
 
-    def sync_all_channels
+    def sync_all_channels(max_conversations: 5, max_messages: 5)
       total_synced = 0
       Channel::Instagram.find_each do |channel|
         next unless channel.respond_to?(:unified_login?) && channel.unified_login?
         next if channel.reauthorization_required?
 
-        res = sync_channel_conversations(channel)
+        res = sync_channel_conversations(
+          channel,
+          max_conversations: max_conversations,
+          max_messages: max_messages
+        )
         total_synced += res[:synced].to_i
       end
       total_synced
     end
 
-    def sync_channel_conversations(channel, max_conversations: 10, max_messages: 10, days_back: 14)
+    def sync_channel_conversations(channel, max_conversations: 5, max_messages: 5, days_back: 14)
       return { synced: 0, skipped: 'invalid_channel' } unless channel.respond_to?(:unified_login?) && channel.unified_login?
       return { synced: 0, skipped: 'no_inbox' } if channel.inbox.blank?
 
@@ -313,7 +317,7 @@ module PhoneCenter
         "#{channel.base_uri}/#{channel.instagram_id}/conversations",
         query: {
           platform: 'instagram',
-          fields: "id,updated_time,participants,messages.limit(#{max_messages}){id,message,from,to,created_time,attachments{id,mime_type,image_data,video_data,file_url}}",
+          fields: "id,updated_time,participants,messages.limit(#{max_messages}){id,message,from,created_time,attachments{id,mime_type,image_data,video_data,file_url}}",
           limit: max_conversations
         },
         headers: bearer_headers(channel.access_token),
@@ -382,7 +386,7 @@ module PhoneCenter
             created_msg = channel.find_message_by_source_id(mid)
             if created_msg.present?
               synced += 1
-              created_msg.update_column(:created_at, msg_time) if msg_time < Time.current
+              created_msg.update_column(:created_at, msg_time) if msg_time < 2.minutes.ago
               enrich_synced_contact(created_msg.conversation&.contact, other_id, other_username)
             end
           rescue StandardError => e
@@ -466,6 +470,30 @@ module PhoneCenter
       end
     rescue StandardError
       true
+    end
+
+    def redis_del(key)
+      return nil unless defined?(Sidekiq)
+
+      Sidekiq.redis { |r| r.respond_to?(:del) ? r.del(key) : r.call('DEL', key) }
+    rescue StandardError
+      nil
+    end
+
+    def active_chat?
+      redis_get('pc:ig_active_chat').present?
+    end
+
+    def mark_active_chat!(boost_sync: false)
+      redis_set('pc:ig_active_chat', '1', ex: 180)
+      return unless boost_sync && defined?(PhoneCenter::InstagramUnifiedSyncJob)
+
+      if redis_set('pc:ig_boost_scheduled', '1', ex: 10, nx: true)
+        redis_del('pc:ig_sync_next_scheduled')
+        PhoneCenter::InstagramUnifiedSyncJob.set(wait: 8.seconds).perform_later('poll')
+      end
+    rescue StandardError
+      nil
     end
   end
 
@@ -693,7 +721,7 @@ module PhoneCenter
         channel_instagram.reauthorized!
         PhoneCenter::InstagramUnified.ensure_inbox_members(channel_instagram.inbox)
         if defined?(PhoneCenter::InstagramUnifiedSyncJob)
-          PhoneCenter::InstagramUnifiedSyncJob.perform_later(false)
+          PhoneCenter::InstagramUnifiedSyncJob.perform_later('initial')
         end
         channel_instagram
       end
@@ -723,9 +751,11 @@ module PhoneCenter
               body: clean_payload,
               query: { access_token: access_token }
             )
+            PhoneCenter::InstagramUnified.mark_active_chat!(boost_sync: true) if response.success?
             return process_response(response, clean_payload)
           end
 
+          PhoneCenter::InstagramUnified.mark_active_chat!(boost_sync: true) if response.success?
           return process_response(response, message_content)
         end
 
@@ -820,19 +850,41 @@ Rails.application.config.to_prepare do
     class PhoneCenter::InstagramUnifiedSyncJob < ApplicationJob
       queue_as :scheduled_jobs
 
-      def perform(schedule_followup = true)
-        acquired = PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_lock', '1', ex: 22, nx: true)
+      def perform(mode = 'watchdog')
+        mode_str = mode.to_s
+        is_initial = (mode_str == 'initial')
+        is_watchdog = (mode_str == 'watchdog' || mode == true)
+
+        if is_watchdog && PhoneCenter::InstagramUnified.redis_get('pc:ig_sync_next_scheduled').present?
+          return
+        end
+
+        acquired = PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_lock', '1', ex: 45, nx: true)
         return unless acquired
 
-        PhoneCenter::InstagramUnified.sync_all_channels
-
-        if schedule_followup
+        begin
           has_active = Channel::Instagram.all.any? do |c|
             c.respond_to?(:unified_login?) && c.unified_login? && !c.reauthorization_required?
           end
-          if has_active
-            PhoneCenter::InstagramUnifiedSyncJob.set(wait: 30.seconds).perform_later(false)
+          return unless has_active
+
+          last_run = PhoneCenter::InstagramUnified.redis_get('pc:ig_sync_last_run').to_i
+          if is_initial || (Time.now.to_i - last_run) >= 8
+            synced = if is_initial
+                       PhoneCenter::InstagramUnified.sync_all_channels(max_conversations: 10, max_messages: 10)
+                     else
+                       PhoneCenter::InstagramUnified.sync_all_channels(max_conversations: 5, max_messages: 5)
+                     end
+            PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_last_run', Time.now.to_i.to_s, ex: 120)
+            PhoneCenter::InstagramUnified.mark_active_chat!(boost_sync: false) if synced.to_i.positive?
           end
+
+          next_interval = PhoneCenter::InstagramUnified.active_chat? ? 12 : 35
+          if PhoneCenter::InstagramUnified.redis_set('pc:ig_sync_next_scheduled', '1', ex: [next_interval - 2, 5].max, nx: true)
+            PhoneCenter::InstagramUnifiedSyncJob.set(wait: next_interval.seconds).perform_later('poll')
+          end
+        ensure
+          PhoneCenter::InstagramUnified.redis_del('pc:ig_sync_lock')
         end
       end
     end
