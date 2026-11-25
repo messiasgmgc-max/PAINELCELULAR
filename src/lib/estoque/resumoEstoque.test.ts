@@ -36,7 +36,7 @@ function criarAparelho(overrides: Partial<Aparelho> = {}): Aparelho {
 describe('resumo e classificadores de estoque', () => {
   const agora = new Date('2026-11-25T12:00:00Z');
 
-  it('calcula KPIs consolidados corretamente incluindo sem preço, bateria e parados +30d', () => {
+  it('exclui acessórios da contagem e do valor dos aparelhos por padrão (mesmo com milhares de unidades)', () => {
     const lista: Aparelho[] = [
       criarAparelho({
         id: '1',
@@ -67,24 +67,34 @@ describe('resumo e classificadores de estoque', () => {
         preco: 120,
         custo: 40,
         precoAtacado: 80,
-        quantidade: 5,
+        quantidade: 5000,
         saude_bateria: '',
         dataCadastro: '2026-11-24T10:00:00Z',
       }),
     ];
 
+    // Padrão: acessórios ficam fora da contagem e do valor dos aparelhos
     const resumo = calcularResumoEstoque(lista, agora);
-    assert.equal(resumo.totalRegistros, 3);
-    assert.equal(resumo.totalUnidades, 7);
-    assert.equal(resumo.modelosUnicos, 2);
-    assert.equal(resumo.novos, 2);
+    assert.equal(resumo.totalRegistros, 2);
+    assert.equal(resumo.totalUnidades, 2);
+    assert.equal(resumo.totalAcessoriosTipos, 1);
+    assert.equal(resumo.modelosUnicos, 1);
+    assert.equal(resumo.novos, 1);
     assert.equal(resumo.seminovos, 1);
     assert.equal(resumo.semPreco, 1);
     assert.equal(resumo.bateriaAlta, 1);
     assert.equal(resumo.parados30d, 1);
-    assert.equal(resumo.valorTotalVenda, 7200 + 120 * 5);
-    assert.equal(resumo.valorTotalCusto, 6200 + 4800 + 40 * 5);
-    assert.equal(resumo.valorTotalAtacado, 6700 + 5300 + 80 * 5);
+    assert.equal(resumo.valorTotalVenda, 7200);
+    assert.equal(resumo.valorTotalCusto, 6200 + 4800);
+    assert.equal(resumo.valorTotalAtacado, 6700 + 5300);
+
+    // Quando o usuário entra na aba de Acessórios, pode incluir acessórios explicitamente
+    const resumoComAcessorios = calcularResumoEstoque(lista, agora, {
+      excluirAcessorios: false,
+    });
+    assert.equal(resumoComAcessorios.totalRegistros, 3);
+    assert.equal(resumoComAcessorios.totalUnidades, 5002);
+    assert.equal(resumoComAcessorios.totalAcessoriosTipos, 1);
   });
 
   it('classifica níveis de bateria e dias em estoque', () => {

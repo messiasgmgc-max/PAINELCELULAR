@@ -23,6 +23,7 @@ export type NivelBateria = 'otima' | 'boa' | 'atencao';
 export interface ResumoEstoque {
   totalRegistros: number;
   totalUnidades: number;
+  totalAcessoriosTipos: number;
   modelosUnicos: number;
   novos: number;
   seminovos: number;
@@ -35,6 +36,15 @@ export interface ResumoEstoque {
   valorTotalVenda: number;
   valorTotalCusto: number;
   valorTotalAtacado: number;
+}
+
+export interface OpcoesResumoEstoque {
+  /** Por padrão exclui itens de categoria `acessorio` para que quantidades altas de acessórios não distorçam a contagem e o valor dos aparelhos. */
+  excluirAcessorios?: boolean;
+}
+
+export function ehAcessorioEstoque(aparelho: Aparelho | null | undefined): boolean {
+  return aparelho?.categoria === 'acessorio';
 }
 
 export interface GrupoModeloEstoque {
@@ -145,10 +155,14 @@ function chaveModeloNormalizada(aparelho: Aparelho): { chave: string; titulo: st
 
 export function calcularResumoEstoque(
   aparelhosAtivos: Aparelho[],
-  agora: Date = new Date()
+  agora: Date = new Date(),
+  opcoes: OpcoesResumoEstoque = {}
 ): ResumoEstoque {
+  const excluirAcessorios = opcoes.excluirAcessorios ?? true;
   const modelos = new Set<string>();
+  let totalRegistros = 0;
   let totalUnidades = 0;
+  let totalAcessoriosTipos = 0;
   let novos = 0;
   let seminovos = 0;
   let usados = 0;
@@ -162,6 +176,12 @@ export function calcularResumoEstoque(
 
   for (const ap of aparelhosAtivos) {
     if (!ap) continue;
+    if (ehAcessorioEstoque(ap)) {
+      totalAcessoriosTipos += 1;
+      if (excluirAcessorios) continue;
+    }
+
+    totalRegistros += 1;
     const qtd = obterQuantidadeAparelho(ap);
     totalUnidades += qtd;
     modelos.add(chaveModeloNormalizada(ap).chave);
@@ -189,14 +209,15 @@ export function calcularResumoEstoque(
   }
 
   return {
-    totalRegistros: aparelhosAtivos.length,
+    totalRegistros,
     totalUnidades,
+    totalAcessoriosTipos,
     modelosUnicos: modelos.size,
     novos,
     seminovos,
     usados,
     emManutencao,
-    naLoja: aparelhosAtivos.length - emManutencao,
+    naLoja: totalRegistros - emManutencao,
     semPreco,
     bateriaAlta,
     parados30d,

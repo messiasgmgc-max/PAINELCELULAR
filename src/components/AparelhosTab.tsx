@@ -352,7 +352,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   }, [todosNoEstoque]);
 
   const resumoEstoque = useMemo(
-    () => calcularResumoEstoque(todosNoEstoque),
+    () => calcularResumoEstoque(todosNoEstoque, undefined, { excluirAcessorios: true }),
     [todosNoEstoque]
   );
 
@@ -373,7 +373,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   }, [todosNoEstoque, categoriaFiltro, filtroStatus]);
 
   const resumoCategoria = useMemo(
-    () => calcularResumoEstoque(aparelhosAtivos),
+    () => calcularResumoEstoque(aparelhosAtivos, undefined, { excluirAcessorios: false }),
     [aparelhosAtivos]
   );
 
@@ -1419,9 +1419,16 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">
             {resumoEstoque.totalUnidades}{" "}
-            {resumoEstoque.totalUnidades === 1 ? "unidade" : "unidades"} em{" "}
+            {resumoEstoque.totalUnidades === 1 ? "aparelho" : "aparelhos"} em{" "}
             {resumoEstoque.modelosUnicos}{" "}
             {resumoEstoque.modelosUnicos === 1 ? "modelo" : "modelos"} no estoque
+            {contagens.acessorios > 0 && (
+              <span className="text-slate-400">
+                {" "}
+                • {contagens.acessorios}{" "}
+                {contagens.acessorios === 1 ? "acessório" : "acessórios"} à parte
+              </span>
+            )}
           </p>
         </div>
 
@@ -1726,24 +1733,27 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         </div>
       </div>
 
-      {/* Cards de resumo interativos (KPIs clicáveis) */}
+      {/* Cards de resumo interativos (KPIs clicáveis — acessórios fora da contagem) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <button
           type="button"
           onClick={() => {
             setFiltroStatus("todos");
             setFiltroRapido("todos");
+            if (categoriaFiltro === "acessorio") {
+              setCategoriaFiltro("aparelho");
+            }
           }}
           className={cn(
             "text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer",
-            filtroStatus === "todos" && filtroRapido === "todos"
+            filtroStatus === "todos" && filtroRapido === "todos" && categoriaFiltro !== "acessorio"
               ? "bg-slate-900 border-cyan-500/50 shadow-md shadow-cyan-950/20"
               : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
           )}
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Total em Estoque
+              Aparelhos em Estoque
             </span>
             <div className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center">
               <Smartphone className="w-4 h-4" />
@@ -1810,9 +1820,13 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
         <button
           type="button"
-          onClick={() =>
-            setFiltroRapido((prev) => (prev === "sem_preco" ? "todos" : "sem_preco"))
-          }
+          onClick={() => {
+            const ativando = filtroRapido !== "sem_preco";
+            setFiltroRapido(ativando ? "sem_preco" : "todos");
+            if (ativando && (categoriaFiltro === "acessorio" || (categoriaFiltro === "todos" && contagens.perfumes === 0 && contagens.outros === 0))) {
+              setCategoriaFiltro("aparelho");
+            }
+          }}
           className={cn(
             "text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer",
             filtroRapido === "sem_preco"
@@ -1844,7 +1858,11 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
             if (resumoEstoque.emManutencao > 0 || filtroStatus === "manutencao") {
               setFiltroStatus((prev) => (prev === "manutencao" ? "todos" : "manutencao"));
             } else if (resumoEstoque.parados30d > 0) {
-              setFiltroRapido((prev) => (prev === "parados_30d" ? "todos" : "parados_30d"));
+              const ativando = filtroRapido !== "parados_30d";
+              setFiltroRapido(ativando ? "parados_30d" : "todos");
+              if (ativando && (categoriaFiltro === "acessorio" || (categoriaFiltro === "todos" && contagens.perfumes === 0 && contagens.outros === 0))) {
+                setCategoriaFiltro("aparelho");
+              }
             } else {
               setFiltroStatus((prev) => (prev === "manutencao" ? "todos" : "manutencao"));
             }
