@@ -14,9 +14,18 @@ import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, ShoppingCart, Truck, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, ShoppingCart, Truck, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan, Eye, EyeOff, ArrowUpDown, AlertCircle, DollarSign, LayoutList, Rows3, FolderKanban, Clock } from "lucide-react";
 import { AparelhoCard } from "@/components/aparelhos/AparelhoCard";
+import { AparelhoGrupoCard } from "@/components/aparelhos/AparelhoGrupoCard";
 import { AparelhoFiltros } from "@/components/aparelhos/AparelhoFiltros";
+import {
+  agruparAparelhosPorModelo,
+  aplicarFiltroRapidoEstoque,
+  calcularResumoEstoque,
+  ordenarAparelhosEstoque,
+  type FiltroRapidoEstoque,
+  type OrdenacaoEstoque,
+} from "@/lib/estoque/resumoEstoque";
 import { BarcodeScannerModal } from "@/components/BarcodeScannerModal";
 import { ConferenciaEstoqueModal } from "@/components/ConferenciaEstoqueModal";
 import { EditarValoresAtacadoModal } from "@/components/EditarValoresAtacadoModal";
@@ -111,11 +120,17 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
   const [supplierListText, setSupplierListText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [density, setDensity] = useState<'compact' | 'detailed'>('compact');
+  const [viewMode, setViewMode] = useState<'compact' | 'detailed' | 'grouped'>('compact');
+  const [filtroRapido, setFiltroRapido] = useState<FiltroRapidoEstoque>('todos');
+  const [ordenacao, setOrdenacao] = useState<OrdenacaoEstoque>('recentes');
+  const [modoBalcao, setModoBalcao] = useState(false);
+
+  const podeVerFinanceiro = canViewFinancials(usuario);
+  const ocultarCustos = !podeVerFinanceiro || modoBalcao;
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.innerWidth >= 640) {
-      setDensity('detailed');
+      setViewMode('detailed');
     }
   }, []);
 
@@ -317,10 +332,13 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
     };
   }, [saidas]);
 
+  const todosNoEstoque = useMemo(() => {
+    return (aparelhos || []).filter((a: any) => a && estaNoEstoque(a));
+  }, [aparelhos]);
+
   // Contagens por categoria e status de estoque
   const contagens = useMemo(() => {
-    const lista = aparelhos || [];
-    const ativos = lista.filter((a: any) => a && a.ativo !== false && a.condicao !== 'vendido' && (a as any).status !== 'vendido');
+    const ativos = todosNoEstoque;
     const emManut = ativos.filter((a: any) => isAparelhoEmManutencao(a)).length;
     return {
       todos: ativos.length,
@@ -331,15 +349,16 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       emManutencao: emManut,
       naLoja: ativos.length - emManut,
     };
-  }, [aparelhos]);
+  }, [todosNoEstoque]);
+
+  const resumoEstoque = useMemo(
+    () => calcularResumoEstoque(todosNoEstoque),
+    [todosNoEstoque]
+  );
 
   // Filtrar aparelhos ativos em estoque (excluindo vendidos e baixados)
   const aparelhosAtivos = useMemo(() => {
-    const lista = aparelhos || [];
-    return lista.filter((aparelho: any) => {
-      if (!aparelho) return false;
-      // Exclui vendido e baixado, e tolera o legado condicao='vendido'.
-      if (!estaNoEstoque(aparelho as any)) return false;
+    return todosNoEstoque.filter((aparelho: any) => {
       if (categoriaFiltro !== 'todos') {
         const cat = aparelho.categoria || 'aparelho';
         if (cat !== categoriaFiltro) return false;
@@ -351,11 +370,32 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
       }
       return true;
     });
-  }, [aparelhos, categoriaFiltro, filtroStatus]);
+  }, [todosNoEstoque, categoriaFiltro, filtroStatus]);
+
+  const resumoCategoria = useMemo(
+    () => calcularResumoEstoque(aparelhosAtivos),
+    [aparelhosAtivos]
+  );
 
   const aparelhosFiltrados = useMemo(() => {
-    return filtrarESortearAparelhos(aparelhosAtivos, searchTerm);
-  }, [aparelhosAtivos, searchTerm]);
+    const aposFiltroRapido = aplicarFiltroRapidoEstoque(aparelhosAtivos, filtroRapido);
+    const temBusca = Boolean(searchTerm.trim());
+    const buscados = temBusca
+      ? filtrarESortearAparelhos(aposFiltroRapido, searchTerm)
+      : aposFiltroRapido;
+
+    // Quando há busca e ordenação padrão, mantém a relevância da busca inteligente;
+    // nos demais casos aplica a ordenação escolhida pelo usuário.
+    if (temBusca && ordenacao === 'recentes') {
+      return buscados;
+    }
+    return ordenarAparelhosEstoque(buscados, ordenacao);
+  }, [aparelhosAtivos, filtroRapido, searchTerm, ordenacao]);
+
+  const gruposPorModelo = useMemo(
+    () => agruparAparelhosPorModelo(aparelhosFiltrados),
+    [aparelhosFiltrados]
+  );
 
   const romOptions = ["64GB", "128GB", "256GB", "512GB", "1TB", "2TB"];
 
@@ -1347,378 +1387,709 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
     }
   };
 
+  const temFiltroAplicado =
+    Boolean(searchTerm.trim()) ||
+    categoriaFiltro !== "todos" ||
+    filtroStatus !== "todos" ||
+    filtroRapido !== "todos" ||
+    ordenacao !== "recentes";
+
+  const limparTodosFiltros = () => {
+    setSearchTerm("");
+    setCategoriaFiltro("todos");
+    setFiltroStatus("todos");
+    setFiltroRapido("todos");
+    setOrdenacao("recentes");
+  };
+
+  const formatarMoedaKpi = (valor: number) =>
+    valor.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      maximumFractionDigits: 0,
+    });
+
   return (
-    <div className="panel-shell space-y-4">
-      <GlassCard className="rounded-3xl">
-        <div className="pb-4 border-b border-white/10 mb-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base sm:text-lg font-bold">Estoque Geral & Produtos</h3>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  Gerencie celulares, perfumes, acessórios e produtos gerais ({aparelhosAtivos.length} exibidos / {contagens.todos} no estoque total)
-                </p>
-              </div>
-            </div>
+    <div className="panel-shell space-y-4 pt-2 pb-8 transition-all duration-300">
+      {/* Cabeçalho limpo e unificado */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 mb-1">
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white tracking-tight drop-shadow-sm">
+            Estoque Geral & Produtos
+          </h2>
+          <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">
+            {resumoEstoque.totalUnidades}{" "}
+            {resumoEstoque.totalUnidades === 1 ? "unidade" : "unidades"} em{" "}
+            {resumoEstoque.modelosUnicos}{" "}
+            {resumoEstoque.modelosUnicos === 1 ? "modelo" : "modelos"} no estoque
+          </p>
+        </div>
 
-            {/* Abas / Filtros de Categoria de Estoque */}
-            {/* Abas / Filtros de Categoria de Estoque (Padronizado Azul) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-1 no-scrollbar touch-pan-x overscroll-contain">
-              <button
-                type="button"
-                onClick={() => setCategoriaFiltro('todos')}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
-                  categoriaFiltro === 'todos' 
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
-                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
-                )}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-blue-300" /> Todos ({contagens.todos})
-              </button>
+        {/* Barra de ações enxuta (sem duplicações) */}
+        <div className="scroll-row no-scrollbar w-full lg:w-auto pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
+          {podeVerFinanceiro && (
+            <button
+              type="button"
+              onClick={() => setModoBalcao((prev) => !prev)}
+              title={
+                modoBalcao
+                  ? "Modo Balcão ativo (custos ocultos). Clique para mostrar custos."
+                  : "Ativar Modo Balcão para ocultar custos na frente do cliente"
+              }
+              className={cn(
+                "h-10 px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap cursor-pointer",
+                modoBalcao
+                  ? "bg-amber-500/20 text-amber-500 dark:text-amber-300 border-amber-500/40"
+                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800"
+              )}
+            >
+              {modoBalcao ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              <span className="hidden sm:inline">
+                {modoBalcao ? "Custos Ocultos" : "Modo Balcão"}
+              </span>
+            </button>
+          )}
 
-              <button
-                type="button"
-                onClick={() => setCategoriaFiltro('aparelho')}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
-                  categoriaFiltro === 'aparelho' 
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
-                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
-                )}
-              >
-                <Smartphone className="w-3.5 h-3.5 text-blue-300" /> 📱 Celulares ({contagens.aparelhos})
-              </button>
+          <Button
+            onClick={() => setShowEdicaoMassa(true)}
+            className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-slate-800 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+            title="Mudar cor, capacidade, preço e observação de vários aparelhos de uma vez"
+          >
+            <Edit2 className="h-4 w-4 text-cyan-400" />
+            <span className="hidden sm:inline">Editar em massa</span>
+            <span className="sm:hidden">Em massa</span>
+          </Button>
 
-              <button
-                type="button"
-                onClick={() => setCategoriaFiltro('perfume')}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
-                  categoriaFiltro === 'perfume' 
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
-                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
-                )}
-              >
-                🧴 Perfumes ({contagens.perfumes})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategoriaFiltro('acessorio')}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
-                  categoriaFiltro === 'acessorio' 
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
-                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
-                )}
-              >
-                <Headphones className="w-3.5 h-3.5 text-blue-300" /> 🎧 Acessórios ({contagens.acessorios})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategoriaFiltro('outro')}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
-                  categoriaFiltro === 'outro' 
-                    ? "bg-blue-600 text-white shadow-md shadow-blue-950/40 border border-blue-500" 
-                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800"
-                )}
-              >
-                <Package className="w-3.5 h-3.5 text-blue-300" /> 📦 Outros ({contagens.outros})
-              </button>
-
-              {/* Divisor Visual */}
-              <div className="h-4 w-px bg-slate-800 shrink-0 mx-1" />
-
-              {/* Filtro Específico: Com o Técnico / Manutenção */}
-              <button
-                type="button"
-                onClick={() => setFiltroStatus(filtroStatus === 'manutencao' ? 'todos' : 'manutencao')}
-                className={cn(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer border",
-                  filtroStatus === 'manutencao' 
-                    ? "bg-blue-600 text-white border-blue-400 shadow-md shadow-blue-950/40" 
-                    : contagens.emManutencao > 0
-                      ? "bg-blue-950/40 text-blue-300 border-blue-500/40 hover:bg-blue-900/50"
-                      : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800"
-                )}
-                title="Filtrar aparelhos que estão fora da loja com o técnico para manutenção"
-              >
-                <Wrench className="w-3.5 h-3.5 text-blue-300" /> 🛠️ Com Técnico ({contagens.emManutencao})
-              </button>
-            </div>
-
-            {/* Ações Principais: Grade responsiva para nunca cortar botões no mobile */}
-            <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:items-center">
-              {/* 1. Novo Aparelho (Azul Primário do Sistema) */}
-              <Button 
-                onClick={() => setShowForm(!showForm)} 
-                className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-blue-950/40 flex items-center justify-center gap-2 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                Novo Aparelho
+          {/* Menu Importar */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-slate-800 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer">
+                <Download className="h-4 w-4 text-blue-400" />
+                Importar
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
               </Button>
-
-              {/* 2. Conferir Estoque (Azul Accent do Sistema) */}
-              <Button 
-                onClick={() => setShowConferenciaModal(true)} 
-                className="bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 hover:text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 border border-blue-500/40 transition-all hover:scale-[1.02] active:scale-[0.98] h-10 cursor-pointer"
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-60 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]"
+            >
+              <DropdownMenuItem
+                onClick={() => setShowMercadoPhoneModal(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
               >
-                <ShieldCheck className="h-4 w-4 text-blue-400" />
-                Conferir Estoque
-              </Button>
-            </div>
+                <RefreshCw className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">
+                    Lista Simples (Remontar / Importar)
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Importar lista simples de produtos e atualizar
+                  </div>
+                </div>
+              </DropdownMenuItem>
 
-            {/* Ações Secundárias Padronizadas (Azul Sistema) */}
-            <div className="scroll-row no-scrollbar w-full pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
-              {/* Valores Atacado */}
+              <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+              <DropdownMenuItem
+                onClick={() => setShowSupplierModal(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <List className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Lista Fornecedor</div>
+                  <div className="text-[10px] text-slate-400">
+                    Importar lote simples de fornecedor
+                  </div>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Menu Exportar */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
+                disabled={aparelhosAtivos.length === 0}
+                className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-slate-800 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+              >
+                <ArrowUpRight className="h-4 w-4 text-emerald-400" />
+                Exportar
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-64 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]"
+            >
+              <DropdownMenuItem
+                onClick={() => setShowExportarMPModal(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                    Exportar p/ Mercado Phone
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">
+                      .csv / .xlsx
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Planilha e CSV oficiais para importar no MP
+                  </div>
+                </div>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={async () => {
+                  if (aparelhosAtivos.length === 0) {
+                    toast.error("Nenhum aparelho ativo para exportar!");
+                    return;
+                  }
+                  try {
+                    const nome = await exportarCsvEstoqueParaMercadoPhone(aparelhosAtivos);
+                    toast.success(`CSV Mercado Phone baixado: ${nome}`);
+                  } catch {
+                    toast.error("Erro ao baixar CSV Mercado Phone");
+                  }
+                }}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <Download className="h-4 w-4 text-emerald-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                    Baixar CSV Mercado Phone
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">
+                      .csv direto
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    Download em 1 clique do CSV compatível com MP
+                  </div>
+                </div>
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+              <DropdownMenuItem
+                onClick={handleExportCSV}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Exportar CSV Geral</div>
+                  <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
+                </div>
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+              <DropdownMenuItem
+                onClick={() => handleExportWhatsApp(false)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <MessageCircle className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Lista WhatsApp (Varejo)</div>
+                  <div className="text-[10px] text-slate-400">
+                    Lista sem preços / estoque geral
+                  </div>
+                </div>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                onClick={() => handleExportWhatsApp(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <Package className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Lista WhatsApp (Atacado)</div>
+                  <div className="text-[10px] text-slate-400">
+                    Lista com valores de atacado para lojistas
+                  </div>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Menu Gerenciar */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-slate-800 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer">
+                <Settings className="h-4 w-4 text-slate-400" />
+                Gerenciar
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-64 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]"
+            >
+              <DropdownMenuItem
+                onClick={() => setShowSaidas(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <History className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Saídas / Histórico</div>
+                  <div className="text-[10px] text-slate-400">
+                    Aparelhos vendidos ou em manutenção
+                  </div>
+                </div>
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+              <DropdownMenuItem
                 onClick={() => setShowAtacadoModal(true)}
-                className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-300 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
-                title="Editar valores de atacado em lote para lojistas"
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
               >
-                <Tag className="h-4 w-4 text-blue-400" />
-                Valores Atacado
-              </Button>
+                <Tag className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Editar Valores de Atacado</div>
+                  <div className="text-[10px] text-slate-400">
+                    Ajuste de preços de revenda em lote
+                  </div>
+                </div>
+              </DropdownMenuItem>
 
-              {/* Edição em massa */}
-              <Button
-                onClick={() => setShowEdicaoMassa(true)}
-                className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-300 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
-                title="Mudar cor, capacidade e observação de vários aparelhos de uma vez"
+              <DropdownMenuItem
+                onClick={() => setShowBackupModal(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
               >
-                <Edit2 className="h-4 w-4 text-blue-400" />
-                Editar em massa
-              </Button>
+                <RotateCcw className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Restaurar Ponto de Backup</div>
+                  <div className="text-[10px] text-slate-400">
+                    Prévia e comparação de restauração
+                  </div>
+                </div>
+              </DropdownMenuItem>
 
-              {/* Menu Importar */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
-                  >
-                    <Download className="h-4 w-4 text-blue-400" />
-                    Importar
-                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-60 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
-                  <DropdownMenuItem
-                    onClick={() => setShowMercadoPhoneModal(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <RefreshCw className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Lista Simples (Remontar / Importar)</div>
-                      <div className="text-[10px] text-slate-400">Importar lista simples de produtos e atualizar</div>
-                    </div>
-                  </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleRestaurarEstoqueDesativado}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <PackageCheck className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Reativar Desativados</div>
+                  <div className="text-[10px] text-slate-400">
+                    Mostra a contagem antes de aplicar
+                  </div>
+                </div>
+              </DropdownMenuItem>
 
-                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
+              <DropdownMenuItem
+                onClick={() => setShowDesfazerLote(true)}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
+              >
+                <Undo2 className="h-4 w-4 text-blue-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-white">Desfazer Operação em Massa</div>
+                  <div className="text-[10px] text-slate-400">
+                    Últimas 24 h: remontagem, baixa total, conferência...
+                  </div>
+                </div>
+              </DropdownMenuItem>
 
-                  <DropdownMenuItem
-                    onClick={() => setShowSupplierModal(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <List className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Lista Fornecedor</div>
-                      <div className="text-[10px] text-slate-400">Importar lote simples de fornecedor</div>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <DropdownMenuSeparator className="bg-slate-800 my-1" />
 
-              {/* Menu Exportar */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    disabled={aparelhosAtivos.length === 0}
-                    className="bg-blue-950/30 hover:bg-blue-900/50 text-blue-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-9 shadow-sm cursor-pointer"
-                  >
-                    <ArrowUpRight className="h-4 w-4 text-blue-400" />
-                    Exportar
-                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-60 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
-                  <DropdownMenuItem
-                    onClick={() => setShowExportarMPModal(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <FileSpreadsheet className="h-4 w-4 text-emerald-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white flex items-center gap-1.5">
-                        Exportar p/ Mercado Phone
-                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">.csv / .xlsx</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400">Planilha e CSV oficiais para importar no MP</div>
-                    </div>
-                  </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleDeleteEstoque}
+                className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-rose-950/40 focus:bg-rose-950/40 cursor-pointer text-rose-300"
+              >
+                <Trash2 className="h-4 w-4 text-rose-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs text-rose-300">Baixar Todo o Estoque</div>
+                  <div className="text-[10px] text-rose-400/80">
+                    Sai da tela sem apagar · backup e auditoria
+                  </div>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-                  <DropdownMenuItem
-                    onClick={async () => {
-                      if (aparelhosAtivos.length === 0) {
-                        toast.error("Nenhum aparelho ativo para exportar!");
-                        return;
-                      }
-                      try {
-                        const nome = await exportarCsvEstoqueParaMercadoPhone(aparelhosAtivos);
-                        toast.success(`CSV Mercado Phone baixado: ${nome}`);
-                      } catch (err: any) {
-                        toast.error("Erro ao baixar CSV Mercado Phone");
-                      }
-                    }}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <Download className="h-4 w-4 text-emerald-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white flex items-center gap-1.5">
-                        Baixar CSV Mercado Phone
-                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded-md font-semibold border border-emerald-500/30">.csv direto</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400">Download em 1 clique do CSV compatível com MP</div>
-                    </div>
-                  </DropdownMenuItem>
+          <Button
+            onClick={() => setShowConferenciaModal(true)}
+            className="bg-slate-900/80 hover:bg-slate-800 text-cyan-300 hover:text-white font-bold rounded-xl px-3.5 text-xs sm:text-sm border border-cyan-500/35 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+          >
+            <ShieldCheck className="h-4 w-4 text-cyan-400" />
+            Conferir
+          </Button>
 
-                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
+          <Button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-1.5 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            Novo Aparelho
+          </Button>
+        </div>
+      </div>
 
-                  <DropdownMenuItem
-                    onClick={handleExportCSV}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <FileSpreadsheet className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Exportar CSV Geral</div>
-                      <div className="text-[10px] text-slate-400">Planilha completa do estoque</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
-
-                  <DropdownMenuItem
-                    onClick={() => handleExportWhatsApp(false)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <MessageCircle className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Lista WhatsApp (Varejo)</div>
-                      <div className="text-[10px] text-slate-400">Lista sem preços / estoque geral</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={() => handleExportWhatsApp(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <Package className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Lista WhatsApp (Atacado)</div>
-                      <div className="text-[10px] text-slate-400">Lista com valores de atacado para lojistas</div>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* 4. Menu Gerenciar */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="bg-blue-950/30 hover:bg-blue-900/40 text-blue-300 hover:text-blue-200 font-semibold rounded-xl px-4 text-xs sm:text-sm border border-blue-500/30 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
-                  >
-                    <Settings className="h-4 w-4 text-blue-400" />
-                    Gerenciar
-                    <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]">
-                  
-
-                  <DropdownMenuItem
-                    onClick={() => setShowSaidas(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <History className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Saídas / Histórico</div>
-                      <div className="text-[10px] text-slate-400">Aparelhos vendidos ou em manutenção</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
-
-                  <DropdownMenuItem
-                    onClick={() => setShowAtacadoModal(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <Package className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Editar Valores de Atacado</div>
-                      <div className="text-[10px] text-slate-400">Ajuste de preços de revenda em lote</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={() => setShowBackupModal(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <RotateCcw className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Restaurar Ponto de Backup</div>
-                      <div className="text-[10px] text-slate-400">Prévia e comparação de restauração</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={handleRestaurarEstoqueDesativado}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <PackageCheck className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Reativar Desativados</div>
-                      <div className="text-[10px] text-slate-400">Mostra a contagem antes de aplicar</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={() => setShowDesfazerLote(true)}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
-                  >
-                    <Undo2 className="h-4 w-4 text-blue-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-white">Desfazer Operação em Massa</div>
-                      <div className="text-[10px] text-slate-400">Últimas 24 h: remontagem, baixa total, conferência...</div>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuSeparator className="bg-slate-800 my-1" />
-
-                  <DropdownMenuItem
-                    onClick={handleDeleteEstoque}
-                    className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-rose-950/40 focus:bg-rose-950/40 cursor-pointer text-rose-300"
-                  >
-                    <Trash2 className="h-4 w-4 text-rose-400 shrink-0" />
-                    <div>
-                      <div className="font-bold text-xs text-rose-300">Baixar Todo o Estoque</div>
-                      <div className="text-[10px] text-rose-400/80">Sai da tela sem apagar · backup e auditoria</div>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+      {/* Cards de resumo interativos (KPIs clicáveis) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            setFiltroStatus("todos");
+            setFiltroRapido("todos");
+          }}
+          className={cn(
+            "text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer",
+            filtroStatus === "todos" && filtroRapido === "todos"
+              ? "bg-slate-900 border-cyan-500/50 shadow-md shadow-cyan-950/20"
+              : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
+          )}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Total em Estoque
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center">
+              <Smartphone className="w-4 h-4" />
             </div>
           </div>
-        </div>
+          <p className="text-2xl font-bold text-white tabular-nums">
+            {resumoEstoque.totalUnidades}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {resumoEstoque.novos} novos • {resumoEstoque.seminovos} seminovos
+          </p>
+        </button>
+
+        {!ocultarCustos ? (
+          <div className="text-left rounded-2xl p-4 border bg-slate-900/80 border-slate-800 backdrop-blur-md">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                {resumoEstoque.valorTotalVenda > 0 ? "Valor em Venda" : "Capital em Custo"}
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+                <DollarSign className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-xl sm:text-2xl font-bold text-white tabular-nums truncate">
+              {formatarMoedaKpi(
+                resumoEstoque.valorTotalVenda > 0
+                  ? resumoEstoque.valorTotalVenda
+                  : resumoEstoque.valorTotalCusto
+              )}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5 truncate">
+              {resumoEstoque.valorTotalCusto > 0 && resumoEstoque.valorTotalVenda > 0
+                ? `Custo: ${formatarMoedaKpi(resumoEstoque.valorTotalCusto)}`
+                : resumoEstoque.valorTotalAtacado > 0
+                  ? `Atacado: ${formatarMoedaKpi(resumoEstoque.valorTotalAtacado)}`
+                  : `${resumoEstoque.modelosUnicos} modelos cadastrados`}
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setViewMode("grouped")}
+            className={cn(
+              "text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer",
+              viewMode === "grouped"
+                ? "bg-slate-900 border-emerald-500/50 shadow-md shadow-emerald-950/20"
+                : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
+            )}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Disponíveis na Loja
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+                <FolderKanban className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-2xl font-bold text-white tabular-nums">{resumoEstoque.naLoja}</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {resumoEstoque.modelosUnicos} modelos diferentes
+            </p>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() =>
+            setFiltroRapido((prev) => (prev === "sem_preco" ? "todos" : "sem_preco"))
+          }
+          className={cn(
+            "text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer",
+            filtroRapido === "sem_preco"
+              ? "bg-slate-900 border-amber-500/50 shadow-md shadow-amber-950/20"
+              : resumoEstoque.semPreco > 0
+                ? "bg-slate-900/80 border-amber-500/30 hover:border-amber-500/50"
+                : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
+          )}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Sem Preço
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-white tabular-nums">{resumoEstoque.semPreco}</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {resumoEstoque.semPreco > 0
+              ? "Clique para precificar"
+              : "Todos com preço definido"}
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (resumoEstoque.emManutencao > 0 || filtroStatus === "manutencao") {
+              setFiltroStatus((prev) => (prev === "manutencao" ? "todos" : "manutencao"));
+            } else if (resumoEstoque.parados30d > 0) {
+              setFiltroRapido((prev) => (prev === "parados_30d" ? "todos" : "parados_30d"));
+            } else {
+              setFiltroStatus((prev) => (prev === "manutencao" ? "todos" : "manutencao"));
+            }
+          }}
+          className={cn(
+            "text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer",
+            filtroStatus === "manutencao" || filtroRapido === "parados_30d"
+              ? "bg-slate-900 border-sky-500/50 shadow-md shadow-sky-950/20"
+              : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
+          )}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              {resumoEstoque.emManutencao > 0 || resumoEstoque.parados30d === 0
+                ? "Com Técnico"
+                : "Parados +30d"}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-400 flex items-center justify-center">
+              {resumoEstoque.emManutencao > 0 || resumoEstoque.parados30d === 0 ? (
+                <Wrench className="w-4 h-4" />
+              ) : (
+                <Clock className="w-4 h-4" />
+              )}
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-white tabular-nums">
+            {resumoEstoque.emManutencao > 0 || resumoEstoque.parados30d === 0
+              ? resumoEstoque.emManutencao
+              : resumoEstoque.parados30d}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {resumoEstoque.emManutencao > 0
+              ? `${resumoEstoque.parados30d} parados há +30d`
+              : resumoEstoque.parados30d > 0
+                ? "Itens há mais de 30 dias"
+                : "Nenhum em manutenção"}
+          </p>
+        </button>
+      </div>
+
+      {/* Área Principal do Estoque */}
+      <GlassCard className="rounded-[2rem] p-4 sm:p-6">
         <div className="space-y-4">
-          <AparelhoFiltros 
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-            categoriaFiltro={categoriaFiltro}
-            setCategoriaFiltro={setCategoriaFiltro}
-            contagens={contagens}
-            onOpenScanner={() => setShowScanner(true)}
-          />
+          {/* Abas de Categoria (ícones limpos, sem emojis duplicados) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar touch-pan-x overscroll-contain border-b border-slate-800 pb-3">
+            {(
+              [
+                { id: "todos", label: "Todos", count: contagens.todos, icon: Sparkles },
+                { id: "aparelho", label: "Celulares", count: contagens.aparelhos, icon: Smartphone },
+                { id: "perfume", label: "Perfumes", count: contagens.perfumes, icon: SprayCan },
+                { id: "acessorio", label: "Acessórios", count: contagens.acessorios, icon: Headphones },
+                { id: "outro", label: "Outros", count: contagens.outros, icon: Package },
+              ] as const
+            ).map((cat) => {
+              const Icon = cat.icon;
+              const ativo = categoriaFiltro === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setCategoriaFiltro(cat.id)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer border",
+                    ativo
+                      ? "bg-blue-600 text-white border-blue-500 shadow-sm"
+                      : "bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800"
+                  )}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{cat.label}</span>
+                  <span
+                    className={cn(
+                      "px-1.5 py-0.5 rounded-md text-[10px] tabular-nums",
+                      ativo ? "bg-white/20 text-white" : "bg-slate-800 text-slate-400"
+                    )}
+                  >
+                    {cat.count}
+                  </span>
+                </button>
+              );
+            })}
+
+            <div className="h-5 w-px bg-slate-800 shrink-0 mx-1" />
+
+            <button
+              type="button"
+              onClick={() =>
+                setFiltroStatus(filtroStatus === "manutencao" ? "todos" : "manutencao")
+              }
+              className={cn(
+                "px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer border",
+                filtroStatus === "manutencao"
+                  ? "bg-amber-600 text-white border-amber-500 shadow-sm"
+                  : contagens.emManutencao > 0
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/35 hover:bg-amber-500/25"
+                    : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 border-slate-800"
+              )}
+              title="Filtrar aparelhos que estão fora da loja com o técnico"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              <span>Com Técnico</span>
+              <span
+                className={cn(
+                  "px-1.5 py-0.5 rounded-md text-[10px] tabular-nums",
+                  filtroStatus === "manutencao"
+                    ? "bg-white/20 text-white"
+                    : "bg-slate-800 text-slate-400"
+                )}
+              >
+                {contagens.emManutencao}
+              </span>
+            </button>
+          </div>
+
+          {/* Barra de Busca + Ordenação + Modo de Visualização */}
+          <div className="flex flex-col lg:flex-row gap-2.5">
+            <AparelhoFiltros
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              categoriaFiltro={categoriaFiltro}
+              setCategoriaFiltro={setCategoriaFiltro}
+              contagens={contagens}
+              onOpenScanner={() => setShowScanner(true)}
+            />
+
+            <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+              <div className="relative flex items-center flex-1 sm:flex-none">
+                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+                <select
+                  value={ordenacao}
+                  onChange={(e) => setOrdenacao(e.target.value as OrdenacaoEstoque)}
+                  aria-label="Ordenar estoque"
+                  className="w-full sm:w-auto bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs sm:text-sm text-slate-200 focus:border-cyan-500 outline-none cursor-pointer h-10"
+                >
+                  <option value="recentes">Mais recentes</option>
+                  <option value="modelo_az">Modelo (A–Z)</option>
+                  <option value="menor_preco">Menor preço</option>
+                  <option value="maior_preco">Maior preço</option>
+                  <option value="maior_bateria">Maior bateria</option>
+                  <option value="mais_antigos">Mais antigos no estoque</option>
+                </select>
+              </div>
+
+              {/* Seletor de Modo de Visualização */}
+              <div
+                className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 h-10 shrink-0"
+                role="group"
+                aria-label="Modo de visualização"
+              >
+                {(
+                  [
+                    { id: "detailed", label: "Lista", icon: LayoutList },
+                    { id: "compact", label: "Compacto", icon: Rows3 },
+                    { id: "grouped", label: "Agrupado", icon: FolderKanban },
+                  ] as const
+                ).map((mode) => {
+                  const Icon = mode.icon;
+                  const ativo = viewMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setViewMode(mode.id)}
+                      title={`Visualização: ${mode.label}`}
+                      className={cn(
+                        "px-2.5 h-8 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer",
+                        ativo
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-white"
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">{mode.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Pílulas de filtro rápido + contador */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: "todos", label: "Todos", count: resumoCategoria.totalRegistros },
+                  { id: "novos", label: "Novos", count: resumoCategoria.novos },
+                  { id: "seminovos", label: "Seminovos", count: resumoCategoria.seminovos },
+                  { id: "sem_preco", label: "Sem preço", count: resumoCategoria.semPreco },
+                  { id: "bateria_alta", label: "Bateria ≥ 90%", count: resumoCategoria.bateriaAlta },
+                  { id: "parados_30d", label: "Parados +30d", count: resumoCategoria.parados30d },
+                ] as const
+              ).map((pill) => {
+                const ativo = filtroRapido === pill.id;
+                const alertaSemPreco = pill.id === "sem_preco" && pill.count > 0 && !ativo;
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setFiltroRapido(pill.id)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border cursor-pointer",
+                      ativo
+                        ? "bg-cyan-500/20 text-cyan-600 dark:text-cyan-300 border-cyan-500/40"
+                        : alertaSemPreco
+                          ? "bg-amber-500/10 text-amber-600 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20"
+                          : "bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700"
+                    )}
+                  >
+                    <span>{pill.label}</span>
+                    <span
+                      className={cn(
+                        "px-1.5 py-0.5 rounded-md text-[10px] tabular-nums",
+                        ativo
+                          ? "bg-cyan-500/20 text-cyan-700 dark:text-cyan-200"
+                          : "bg-slate-800 text-slate-400"
+                      )}
+                    >
+                      {pill.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span>
+                Mostrando <strong className="text-slate-200">{aparelhosFiltrados.length}</strong>{" "}
+                {viewMode === "grouped"
+                  ? `itens em ${gruposPorModelo.length} ${
+                      gruposPorModelo.length === 1 ? "modelo" : "modelos"
+                    }`
+                  : `de ${contagens.todos}`}
+              </span>
+              {temFiltroAplicado && (
+                <button
+                  type="button"
+                  onClick={limparTodosFiltros}
+                  className="text-cyan-500 dark:text-cyan-400 hover:text-cyan-300 font-medium underline underline-offset-2 cursor-pointer"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* Popup de Novo Cliente */}
           {showNovoClientePopup && (
@@ -1855,38 +2226,48 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           )}
 
           {/* Lista de Aparelhos / Produtos */}
-          <div className="flex items-center justify-between px-1 mb-2">
-            <span className="text-xs text-slate-400">
-              {aparelhosFiltrados.length} {aparelhosFiltrados.length === 1 ? 'item' : 'itens'} no estoque
-            </span>
-            <button
-              type="button"
-              onClick={() => setDensity(density === 'compact' ? 'detailed' : 'compact')}
-              className="text-[11px] font-bold text-blue-400 hover:text-blue-300 px-2.5 py-1 rounded-xl bg-blue-950/40 border border-blue-500/20 flex items-center gap-1 cursor-pointer transition-all"
-            >
-              <Layers className="w-3 h-3" />
-              {density === 'compact' ? 'Modo Compacto (52px)' : 'Modo Detalhado'}
-            </button>
-          </div>
-
-          <div className={density === 'compact' ? "space-y-1.5" : "space-y-3.5"}>
+          <div className={viewMode === "compact" ? "space-y-1.5" : "space-y-2.5"}>
             {aparelhosFiltrados.length === 0 ? (
-              <div className="p-8 text-center bg-slate-900/40 rounded-3xl border border-dashed border-white/10 space-y-2">
-                <Package className="w-8 h-8 text-slate-500 mx-auto" />
-                <p className="text-sm text-muted-foreground font-medium">
-                  {aparelhos.length === 0
+              <div className="py-12 px-4 text-center bg-slate-950/60 rounded-2xl border border-dashed border-slate-800 space-y-2">
+                <Package className="w-8 h-8 text-slate-400 mx-auto" />
+                <p className="text-sm text-slate-300 font-medium">
+                  {todosNoEstoque.length === 0
                     ? 'Nenhum item cadastrado no estoque geral. Clique em "Novo Aparelho" para começar.'
                     : "Nenhum produto encontrado com os filtros e busca informados."}
                 </p>
+                {temFiltroAplicado && (
+                  <button
+                    type="button"
+                    onClick={limparTodosFiltros}
+                    className="text-xs text-cyan-500 dark:text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
+                  >
+                    Limpar filtros e ver todo o estoque
+                  </button>
+                )}
               </div>
+            ) : viewMode === "grouped" ? (
+              gruposPorModelo.map((grupo) => (
+                <AparelhoGrupoCard
+                  key={grupo.chave}
+                  grupo={grupo}
+                  ocultarCustos={ocultarCustos}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onPDF={handleGenerateCertificate}
+                  onVender={setAparelhoParaVenda}
+                  onManutencao={setAparelhoParaManutencao}
+                  onRetornoManutencao={setAparelhoParaRetorno}
+                />
+              ))
             ) : (
               aparelhosFiltrados
                 .filter(Boolean)
                 .map((aparelho, idx) => (
-                  <AparelhoCard 
+                  <AparelhoCard
                     key={aparelho.id || `ap-${idx}`}
                     aparelho={aparelho}
-                    density={density}
+                    density={viewMode}
+                    ocultarCustos={ocultarCustos}
                     onEdit={handleEdit}
                     onDelete={handleDelete}
                     onPDF={handleGenerateCertificate}
@@ -1899,8 +2280,8 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
           </div>
 
           {loading && !showForm && (
-            <p className="text-sm text-muted-foreground text-center">
-              Carregando...
+            <p className="text-xs text-slate-400 text-center py-2">
+              Carregando estoque...
             </p>
           )}
         </div>

@@ -16,44 +16,43 @@ interface AparelhoFiltrosProps {
 export function AparelhoFiltros({
   searchTerm,
   setSearchTerm,
-  onOpenScanner
+  onOpenScanner,
 }: AparelhoFiltrosProps) {
   return (
-    <div className="w-full">
-      {/* Barra de Busca e Leitor com Design Integrado e Padronizado (Azul do Sistema) */}
-      <div className="flex items-center gap-2 bg-slate-900/60 p-1.5 sm:p-2 rounded-2xl border border-white/10 shadow-inner">
-        <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Buscar por IMEI, modelo, cor, capacidade ou código..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-950/70 border border-slate-800 focus:border-blue-500 rounded-xl pl-9 pr-8 py-2 text-xs sm:text-sm text-white placeholder:text-slate-500 outline-none transition-all shadow-inner"
-          />
-          {searchTerm && (
-            <button
-              type="button"
-              onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer"
-              title="Limpar busca"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {onOpenScanner && (
+    <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="relative flex-1 min-w-0">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+        <input
+          type="text"
+          placeholder="Buscar por modelo, IMEI, cor, capacidade, bateria ou código (ex: 16pm 256)..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="input-glass pl-10 pr-9 w-full h-10 text-xs sm:text-sm"
+        />
+        {searchTerm && (
           <button
             type="button"
-            onClick={onOpenScanner}
-            className="h-9 w-9 sm:h-10 sm:w-10 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 rounded-xl flex items-center justify-center text-blue-300 hover:text-white transition-all shrink-0 cursor-pointer shadow-sm active:scale-95"
-            title="Escanear IMEI ou código de barras com a câmera"
+            onClick={() => setSearchTerm("")}
+            aria-label="Limpar busca"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer transition-colors"
+            title="Limpar busca"
           >
-            <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+            <X className="w-4 h-4" />
           </button>
         )}
       </div>
+
+      {onOpenScanner && (
+        <button
+          type="button"
+          onClick={onOpenScanner}
+          className="h-10 w-10 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/35 rounded-xl flex items-center justify-center text-cyan-500 dark:text-cyan-300 transition-all shrink-0 cursor-pointer active:scale-95"
+          title="Escanear IMEI ou código de barras com a câmera"
+          aria-label="Escanear IMEI ou código de barras"
+        >
+          <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
+        </button>
+      )}
     </div>
   );
 }
