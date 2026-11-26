@@ -26,12 +26,14 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet, Check, ChevronRight, ImagePlus, Send } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, Plus, Search, X, Printer, ShoppingCart, User, Truck, CreditCard, Trash2, Save, Ban, MessageCircle, FileText, Download, Upload, Mail, XCircle, MoreVertical, FileInput, Repeat, ChevronDown, Filter, RotateCcw, Edit, AlertCircle, Loader2, Sparkles, Camera, Smartphone, ShieldCheck, Undo2, PackageCheck, FileSpreadsheet, Check, ChevronRight, ImagePlus, Send, Eye, EyeOff, LayoutList, Rows3, Package, ShoppingBag, Clock, CheckCircle2 } from 'lucide-react';
 import { BarcodeScannerModal } from '@/components/BarcodeScannerModal';
 import { NovoAparelhoRapidoModal } from '@/components/vendas/components/NovoAparelhoRapidoModal';
 import { ProdutoCombobox } from '@/components/vendas/components/ProdutoCombobox';
 import { VendasConfirmacaoModais } from '@/components/vendas/components/VendasConfirmacaoModais';
 import { VendasIaModais } from '@/components/vendas/components/VendasIaModais';
+import { VendaRowCard } from '@/components/vendas/components/VendaRowCard';
+import { calcularResumoVendas } from '@/lib/vendas/resumoVendas';
 import { desfazerCadastroRapido, type PayloadCadastroRapido } from '@/lib/pdv/cadastroRapido';
 import { registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
 import { ModalPortal } from '@/components/ModalPortal';
@@ -164,6 +166,10 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
   const [ordenarPor, setOrdenarPor] = useState<'data' | 'cliente' | 'valor' | 'lucro' | 'status' | 'metodo'>('data');
   const [direcaoOrdenacao, setDirecaoOrdenacao] = useState<'asc' | 'desc'>('desc');
   const [mostrarFiltrosAvancados, setMostrarFiltrosAvancados] = useState(false);
+  const [viewMode, setViewMode] = useState<'detailed' | 'compact'>('detailed');
+  const [modoBalcao, setModoBalcao] = useState(false);
+  const podeVerFinanceiro = canViewFinancials(usuario);
+  const ocultarLucro = !podeVerFinanceiro || modoBalcao;
   const [loading, setLoading] = useState(true);
   const [showPOS, setShowPOS] = useState(false);
   const [closingPOS, setClosingPOS] = useState(false);
@@ -2487,6 +2493,11 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     return { varejo, pendentes, atacado, total };
   }, [vendas, clientes, dentroDoPeriodo]);
 
+  const resumoVendasPeriodo = useMemo(
+    () => calcularResumoVendas(vendas.filter((v) => dentroDoPeriodo(v))),
+    [vendas, dentroDoPeriodo]
+  );
+
   const handleNovoClienteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoClienteData.nome || !novoClienteData.telefone) {
@@ -3412,84 +3423,336 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
     }
   };
 
+  const temFiltroVendaAtivo = Boolean(
+    filtroBusca ||
+      filtroStatus ||
+      filtroMetodo ||
+      filtroVendedor ||
+      filtroDataInicio ||
+      filtroDataFim ||
+      ordenarPor !== 'data' ||
+      direcaoOrdenacao !== 'desc'
+  );
+
+  const limparFiltrosVenda = () => {
+    setFiltroBusca('');
+    setFiltroStatus('');
+    setFiltroMetodo('');
+    setFiltroVendedor('');
+    setFiltroDataInicio('');
+    setFiltroDataFim('');
+    setOrdenarPor('data');
+    setDirecaoOrdenacao('desc');
+  };
+
+  const formatarMoedaVendaKpi = (valor: number) =>
+    Number(valor || 0).toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      maximumFractionDigits: 0,
+    });
+
   return (
-    <div className="panel-shell relative min-h-[calc(100dvh-12.625rem)] sm:min-h-[calc(100dvh-13.125rem)] space-y-4 sm:space-y-6 pb-40 sm:pb-6">
-        {/* Header com Botão */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-4 mb-2">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">Vendas</h1>
-            <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">Controle de vendas e faturamento</p>
-          </div>
-
-          {/* Fica FORA do dropdown de propósito: dentro dele o Radix desmonta o
-              input ao fechar o menu, e importInputRef.current?.click() vira no-op. */}
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".csv,.xls,.xlsx"
-            onChange={handleImportVendas}
-            className="hidden"
-          />
-
-          {/* Antes eram 6 botões numa fileira que não quebrava linha: estourava a
-              largura e só dava para alcançar os últimos rolando de lado. As ações
-              secundárias foram para um menu, como nas outras abas. */}
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end">
-            <Button
-              onClick={() => {
-                openPOSModal();
-                if (editingId) setEditingId(null);
-              }}
-              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 h-9 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-2 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap cursor-pointer"
-            >
-              <Plus className="h-4 w-4" />
-              Nova Venda
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={() => setShowVincularVendidoModal(true)}
-              className="h-9 text-xs sm:text-sm whitespace-nowrap border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 font-bold gap-1.5 cursor-pointer"
-              title="Vincular aparelho já baixado do estoque a um cliente para gerar notinha"
-            >
-              <Repeat className="h-4 w-4 text-blue-400" />
-              Vincular Já Vendido
-            </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="h-9 text-xs sm:text-sm whitespace-nowrap gap-1.5 cursor-pointer">
-                  <FileSpreadsheet className="h-4 w-4" />
-                  Importar / Exportar
-                  <ChevronDown className="h-3.5 w-3.5 opacity-70" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onClick={handleExportVendas}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Exportar vendas
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleOpenImportVendas}>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Importar CSV
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setShowImportarPedidoModal(true)}>
-                  <FileInput className="mr-2 h-4 w-4" />
-                  Importar pedido
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleOpenDeleteAllModal}
-                  disabled={vendas.length === 0}
-                  className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Apagar todas
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+    <div className="panel-shell relative min-h-[calc(100dvh-12.625rem)] sm:min-h-[calc(100dvh-13.125rem)] space-y-4 pt-2 pb-40 sm:pb-8 transition-all duration-300">
+      {/* Cabeçalho limpo e unificado */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 mb-1">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 dark:text-white tracking-tight drop-shadow-sm">
+            Vendas
+          </h1>
+          <p className="text-sm text-slate-600 dark:text-slate-300 font-medium">
+            {resumoVendasPeriodo.totalValidas}{' '}
+            {resumoVendasPeriodo.totalValidas === 1 ? 'venda válida' : 'vendas válidas'}
+            {filtroPeriodo === 'mes' ? ' neste mês' : ' no período'}
+            {filtroPeriodo === 'mes' && vendas.length > contagemCanais.total && (
+              <span className="text-slate-400"> • {vendas.length} no histórico total</span>
+            )}
+          </p>
         </div>
+
+        {/* Fica FORA do dropdown de propósito: dentro dele o Radix desmonta o
+            input ao fechar o menu, e importInputRef.current?.click() vira no-op. */}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".csv,.xls,.xlsx"
+          onChange={handleImportVendas}
+          className="hidden"
+        />
+
+        <div className="scroll-row no-scrollbar w-full lg:w-auto pb-1 flex items-center gap-2 overflow-x-auto touch-pan-x overscroll-contain">
+          {podeVerFinanceiro && (
+            <button
+              type="button"
+              onClick={() => setModoBalcao((prev) => !prev)}
+              title={
+                modoBalcao
+                  ? 'Modo Balcão ativo (lucro e faturamento ocultos). Clique para mostrar.'
+                  : 'Ativar Modo Balcão para ocultar lucro e faturamento na frente do cliente'
+              }
+              className={cn(
+                'h-10 px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap cursor-pointer',
+                modoBalcao
+                  ? 'bg-amber-500/20 text-amber-500 dark:text-amber-300 border-amber-500/40'
+                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+              )}
+            >
+              {modoBalcao ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              <span className="hidden sm:inline">
+                {modoBalcao ? 'Valores Ocultos' : 'Modo Balcão'}
+              </span>
+            </button>
+          )}
+
+          <Button
+            onClick={() => setShowVincularVendidoModal(true)}
+            className="bg-slate-900/80 hover:bg-slate-800 text-cyan-300 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-cyan-500/35 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer"
+            title="Vincular aparelho já baixado do estoque a um cliente para gerar notinha"
+          >
+            <Repeat className="h-4 w-4 text-cyan-400" />
+            <span>Vincular Já Vendido</span>
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white font-semibold rounded-xl px-3.5 text-xs sm:text-sm border border-slate-800 flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap h-10 shadow-sm cursor-pointer">
+                <FileSpreadsheet className="h-4 w-4 text-blue-400" />
+                <span>Importar / Exportar</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-56 bg-slate-900 border border-slate-800 text-slate-100 p-1.5 rounded-2xl shadow-2xl backdrop-blur-xl z-[1000]"
+            >
+              <DropdownMenuItem
+                onClick={handleExportVendas}
+                className="rounded-xl hover:bg-slate-800 cursor-pointer"
+              >
+                <Download className="mr-2 h-4 w-4 text-blue-400" />
+                Exportar vendas
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={handleOpenImportVendas}
+                className="rounded-xl hover:bg-slate-800 cursor-pointer"
+              >
+                <Upload className="mr-2 h-4 w-4 text-cyan-400" />
+                Importar CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setShowImportarPedidoModal(true)}
+                className="rounded-xl hover:bg-slate-800 cursor-pointer"
+              >
+                <FileInput className="mr-2 h-4 w-4 text-emerald-400" />
+                Importar pedido
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-slate-800 my-1" />
+              <DropdownMenuItem
+                onClick={handleOpenDeleteAllModal}
+                disabled={vendas.length === 0}
+                className="rounded-xl text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 cursor-pointer"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Apagar todas
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button
+            onClick={() => {
+              openPOSModal();
+              if (editingId) setEditingId(null);
+            }}
+            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-xl px-4 h-10 text-xs sm:text-sm shadow-md shadow-cyan-950/30 flex items-center gap-1.5 border border-cyan-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 whitespace-nowrap cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            Nova Venda
+          </Button>
+        </div>
+      </div>
+
+      {/* Cards de resumo interativos (KPIs do período selecionado) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            setFiltroCanal('todos');
+            setFiltroStatus('');
+          }}
+          className={cn(
+            'text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer',
+            filtroCanal === 'todos' && !filtroStatus
+              ? 'bg-slate-900 border-cyan-500/50 shadow-md shadow-cyan-950/20'
+              : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+          )}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              {ocultarLucro ? 'Vendas Realizadas' : 'Faturamento'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center">
+              {ocultarLucro ? (
+                <ShoppingBag className="w-4 h-4" />
+              ) : (
+                <DollarSign className="w-4 h-4" />
+              )}
+            </div>
+          </div>
+          <p className="text-xl sm:text-2xl font-bold text-white tabular-nums truncate">
+            {ocultarLucro
+              ? resumoVendasPeriodo.totalValidas
+              : formatarMoedaVendaKpi(resumoVendasPeriodo.faturamentoTotal)}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5 truncate">
+            {ocultarLucro
+              ? `${resumoVendasPeriodo.totalVarejo} varejo • ${resumoVendasPeriodo.totalAtacado} atacado`
+              : `${resumoVendasPeriodo.totalValidas} vendas • Ticket ${formatarMoedaVendaKpi(resumoVendasPeriodo.ticketMedio)}`}
+          </p>
+        </button>
+
+        {!ocultarLucro ? (
+          <div className="text-left rounded-2xl p-4 border bg-slate-900/80 border-slate-800 backdrop-blur-md">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Lucro Líquido
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+                <TrendingUp className="w-4 h-4" />
+              </div>
+            </div>
+            <p
+              className={cn(
+                'text-xl sm:text-2xl font-bold tabular-nums truncate',
+                resumoVendasPeriodo.lucroTotal >= 0
+                  ? 'text-white'
+                  : 'text-rose-500 dark:text-rose-400'
+              )}
+            >
+              {formatarMoedaVendaKpi(resumoVendasPeriodo.lucroTotal)}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Margem média: {resumoVendasPeriodo.margemMedia.toFixed(1)}%
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setFiltroCanal('todos');
+              setFiltroStatus((prev) => (prev === 'pago' ? '' : 'pago'));
+            }}
+            className={cn(
+              'text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer',
+              filtroStatus === 'pago'
+                ? 'bg-slate-900 border-emerald-500/50 shadow-md shadow-emerald-950/20'
+                : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+            )}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Vendas Pagas
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <p className="text-2xl font-bold text-white tabular-nums">
+              {resumoVendasPeriodo.vendasPagas}
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {resumoVendasPeriodo.vendasEmAberto} em aberto
+            </p>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() =>
+            setFiltroCanal((prev) => (prev === 'pendentes' ? 'varejo' : 'pendentes'))
+          }
+          className={cn(
+            'text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer',
+            filtroCanal === 'pendentes'
+              ? 'bg-slate-900 border-amber-500/50 shadow-md shadow-amber-950/20'
+              : contagemCanais.pendentes > 0
+                ? 'bg-slate-900/80 border-amber-500/30 hover:border-amber-500/50'
+                : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+          )}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Dados Pendentes
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-white tabular-nums">
+            {contagemCanais.pendentes}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {contagemCanais.pendentes > 0
+              ? 'Notinhas para completar'
+              : 'Todas as notinhas completas'}
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (resumoVendasPeriodo.vendasEmAberto > 0 || filtroStatus === 'pendente') {
+              setFiltroCanal('todos');
+              setFiltroStatus((prev) => (prev === 'pendente' ? '' : 'pendente'));
+            } else if (resumoVendasPeriodo.totalCanceladas > 0) {
+              setFiltroCanal('todos');
+              setFiltroStatus((prev) => (prev === 'cancelado' ? '' : 'cancelado'));
+            } else {
+              setFiltroCanal('atacado');
+            }
+          }}
+          className={cn(
+            'text-left rounded-2xl p-4 border transition-all duration-200 backdrop-blur-md cursor-pointer',
+            filtroStatus === 'pendente' || filtroStatus === 'cancelado'
+              ? 'bg-slate-900 border-sky-500/50 shadow-md shadow-sky-950/20'
+              : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+          )}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              {resumoVendasPeriodo.vendasEmAberto > 0
+                ? 'Em Aberto'
+                : resumoVendasPeriodo.totalCanceladas > 0
+                  ? 'Canceladas'
+                  : 'Vendas Atacado'}
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-sky-500/15 text-sky-400 flex items-center justify-center">
+              {resumoVendasPeriodo.vendasEmAberto > 0 ? (
+                <Clock className="w-4 h-4" />
+              ) : resumoVendasPeriodo.totalCanceladas > 0 ? (
+                <XCircle className="w-4 h-4" />
+              ) : (
+                <Package className="w-4 h-4" />
+              )}
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-white tabular-nums">
+            {resumoVendasPeriodo.vendasEmAberto > 0
+              ? resumoVendasPeriodo.vendasEmAberto
+              : resumoVendasPeriodo.totalCanceladas > 0
+                ? resumoVendasPeriodo.totalCanceladas
+                : resumoVendasPeriodo.totalAtacado}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5 truncate">
+            {resumoVendasPeriodo.vendasEmAberto > 0
+              ? !ocultarLucro && resumoVendasPeriodo.valorEmAberto > 0
+                ? `A receber: ${formatarMoedaVendaKpi(resumoVendasPeriodo.valorEmAberto)}`
+                : 'Pagamentos pendentes'
+              : resumoVendasPeriodo.totalCanceladas > 0
+                ? 'Fora do faturamento'
+                : 'Lojistas no período'}
+          </p>
+        </button>
+      </div>
 
         {/* Modal PDV Completo */}
         {isClient && (showPOS || closingPOS) && createPortal(
@@ -4269,25 +4532,61 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
           document.body
         )}
 
-        {/* Tabela de Vendas e Filtros Integrados */}
-        <GlassCard className="rounded-3xl p-4 sm:p-6 space-y-4">
-          {/* Cabeçalho + Barra de Filtros Resumida */}
-          <div className="flex flex-col gap-3 pb-4 border-b border-white/10">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base sm:text-lg font-bold">Vendas Registradas</h3>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  {vendasFiltradas.length} de {contagemCanais.total} vendas
-                  {filtroPeriodo === 'mes' ? ' neste mês' : ' registradas'}
-                  {filtroPeriodo === 'mes' && vendas.length > contagemCanais.total && (
-                    <span className="text-slate-500"> · {vendas.length} no total</span>
-                  )}
-                </p>
+        {/* Área Principal de Vendas e Filtros Integrados */}
+        <GlassCard className="rounded-[2rem] p-4 sm:p-6">
+          <div className="space-y-4">
+            {/* Abas de Canal (ícones limpos, sem emojis) + Seletor de Período */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar touch-pan-x overscroll-contain">
+                {(
+                  [
+                    { id: 'varejo', label: 'Varejo', count: contagemCanais.varejo, icon: Smartphone, isAlert: false },
+                    { id: 'pendentes', label: 'Dados Pendentes', count: contagemCanais.pendentes, icon: AlertCircle, isAlert: true },
+                    { id: 'atacado', label: 'Atacado', count: contagemCanais.atacado, icon: Package, isAlert: false },
+                    { id: 'todos', label: 'Todas', count: contagemCanais.total, icon: ShoppingBag, isAlert: false },
+                  ] as const
+                ).map((tab) => {
+                  const Icon = tab.icon;
+                  const ativo = filtroCanal === tab.id;
+                  const alertaPendente = tab.isAlert && tab.count > 0 && !ativo;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setFiltroCanal(tab.id)}
+                      className={cn(
+                        'shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border',
+                        ativo
+                          ? tab.isAlert
+                            ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
+                            : 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                          : alertaPendente
+                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/35 hover:bg-amber-500/25'
+                            : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{tab.label}</span>
+                      <span
+                        className={cn(
+                          'px-1.5 py-0.5 rounded-md text-[10px] tabular-nums',
+                          ativo
+                            ? 'bg-white/20 text-white'
+                            : alertaPendente
+                              ? 'bg-amber-500/25 text-amber-700 dark:text-amber-200'
+                              : 'bg-slate-800 text-slate-400'
+                        )}
+                      >
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Ações Rápidas de Filtro */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1 p-1 bg-slate-900/90 border border-slate-800 rounded-xl">
+              {/* Período + Modo de visualização */}
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 h-9">
                   {[
                     { id: 'mes' as const, label: 'Este mês' },
                     { id: 'todos' as const, label: 'Todo o período' },
@@ -4297,125 +4596,128 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                       type="button"
                       onClick={() => setFiltroPeriodo(opcao.id)}
                       className={cn(
-                        'px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer',
+                        'px-2.5 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
                         filtroPeriodo === opcao.id
-                          ? 'bg-cyan-500 text-slate-950'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
                       )}
                     >
                       {opcao.label}
                     </button>
                   ))}
                 </div>
-                {(filtroBusca || filtroStatus || filtroMetodo || filtroVendedor || filtroDataInicio || filtroDataFim || ordenarPor !== 'data' || direcaoOrdenacao !== 'desc') && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setFiltroBusca('');
-                      setFiltroStatus('');
-                      setFiltroMetodo('');
-                      setFiltroVendedor('');
-                      setFiltroDataInicio('');
-                      setFiltroDataFim('');
-                      setOrdenarPor('data');
-                      setDirecaoOrdenacao('desc');
-                    }}
-                    className="text-xs text-red-400 hover:text-red-300 h-8 px-2.5"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                    Limpar
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant={mostrarFiltrosAvancados ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setMostrarFiltrosAvancados(!mostrarFiltrosAvancados)}
-                  className="text-xs h-8"
+
+                <div
+                  className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 h-9"
+                  role="group"
+                  aria-label="Modo de visualização"
                 >
-                  <Filter className="w-3.5 h-3.5 mr-1" />
-                  {mostrarFiltrosAvancados ? 'Ocultar Filtros' : 'Filtros Avançados'}
-                </Button>
+                  {(
+                    [
+                      { id: 'detailed', label: 'Lista', icon: LayoutList },
+                      { id: 'compact', label: 'Compacto', icon: Rows3 },
+                    ] as const
+                  ).map((mode) => {
+                    const Icon = mode.icon;
+                    const ativo = viewMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setViewMode(mode.id)}
+                        title={`Visualização: ${mode.label}`}
+                        className={cn(
+                          'px-2.5 h-7 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer',
+                          ativo
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        )}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">{mode.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* SUB-ABAS DE CANAIS DE VENDA */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-900/90 border border-slate-800 rounded-2xl w-full sm:w-fit overflow-x-auto no-scrollbar sm:flex-wrap">
-              {[
-                { id: 'varejo', label: '📱 Varejo', count: contagemCanais.varejo, color: 'text-emerald-400' },
-                { id: 'pendentes', label: '⚠️ Dados Pendentes', count: contagemCanais.pendentes, color: 'text-amber-400', isAlert: true },
-                { id: 'atacado', label: '📦 Atacado (Lojistas)', count: contagemCanais.atacado, color: 'text-cyan-400' },
-                { id: 'todos', label: '📋 Todas as Vendas', count: contagemCanais.total, color: 'text-slate-300' },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setFiltroCanal(tab.id as any)}
-                  className={cn(
-                    "shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer",
-                    filtroCanal === tab.id
-                      ? "bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-950/40"
-                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-                  )}
-                >
-                  <span>{tab.label}</span>
-                  <span className={cn(
-                    "px-1.5 py-0.5 rounded-full text-[10px] font-black",
-                    filtroCanal === tab.id
-                      ? "bg-slate-950/20 text-slate-950"
-                      : tab.isAlert && tab.count > 0 ? "bg-amber-500/20 text-amber-300 animate-pulse" : "bg-slate-800 text-slate-400"
-                  )}>
-                    {tab.count}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {/* Linha Principal de Filtros Rápidos */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-              <div className="relative lg:col-span-2">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" />
+            {/* Barra de Busca + Status + Método + Filtros Avançados */}
+            <div className="flex flex-col lg:flex-row gap-2.5">
+              <div className="relative flex-1 min-w-0">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="Buscar cliente, IMEI, item, vendedor ou valor..."
+                  placeholder="Buscar por cliente, IMEI, aparelho, vendedor ou valor..."
                   value={filtroBusca}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroBusca(e.target.value)}
-                  className="input-glass pl-9 text-xs h-9 w-full"
+                  className="input-glass pl-10 pr-9 text-xs sm:text-sm h-10 w-full"
                 />
+                {filtroBusca && (
+                  <button
+                    type="button"
+                    onClick={() => setFiltroBusca('')}
+                    aria-label="Limpar busca"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
-              <select
-                className="input-glass text-xs h-9 w-full"
-                value={filtroStatus}
-                onChange={(e) => setFiltroStatus(e.target.value)}
-              >
-                <option value="">Todos os status</option>
-                <option value="pago">Pago</option>
-                <option value="pendente">Pendente</option>
-                <option value="cancelado">Cancelado</option>
-              </select>
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 shrink-0">
+                <select
+                  aria-label="Filtrar por status"
+                  className="bg-slate-900 border border-slate-800 rounded-xl px-3 text-xs sm:text-sm text-slate-200 focus:border-cyan-500 outline-none cursor-pointer h-10"
+                  value={filtroStatus}
+                  onChange={(e) => setFiltroStatus(e.target.value)}
+                >
+                  <option value="">Todos os status</option>
+                  <option value="pago">Pago</option>
+                  <option value="parcial">Parcial</option>
+                  <option value="pendente">Pendente</option>
+                  <option value="cancelado">Cancelado</option>
+                </select>
 
-              <select
-                className="input-glass text-xs h-9 w-full"
-                value={filtroMetodo}
-                onChange={(e) => setFiltroMetodo(e.target.value)}
-              >
-                <option value="">Todos os métodos</option>
-                <option value="dinheiro">Dinheiro</option>
-                <option value="cartao_credito">Cartão Crédito</option>
-                <option value="cartao_debito">Cartão Débito</option>
-                <option value="pix">PIX</option>
-                <option value="boleto">Boleto</option>
-              </select>
+                <select
+                  aria-label="Filtrar por método de pagamento"
+                  className="bg-slate-900 border border-slate-800 rounded-xl px-3 text-xs sm:text-sm text-slate-200 focus:border-cyan-500 outline-none cursor-pointer h-10"
+                  value={filtroMetodo}
+                  onChange={(e) => setFiltroMetodo(e.target.value)}
+                >
+                  <option value="">Todos os métodos</option>
+                  <option value="pix">PIX</option>
+                  <option value="cartao_credito">Cartão Crédito</option>
+                  <option value="cartao_debito">Cartão Débito</option>
+                  <option value="dinheiro">Dinheiro</option>
+                  <option value="boleto">Boleto</option>
+                  <option value="fiado">Fiado</option>
+                  <option value="trade_in">Troca</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setMostrarFiltrosAvancados(!mostrarFiltrosAvancados)}
+                  className={cn(
+                    'col-span-2 sm:col-span-1 h-10 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap',
+                    mostrarFiltrosAvancados
+                      ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-300 border-cyan-500/40'
+                      : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-800'
+                  )}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span>{mostrarFiltrosAvancados ? 'Ocultar filtros' : 'Mais filtros'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Painel Expansível de Filtros Avançados */}
             {mostrarFiltrosAvancados && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-white/5 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 animate-in fade-in slide-in-from-top-1 duration-200">
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Vendedor</label>
+                  <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                    Vendedor
+                  </label>
                   <input
                     type="text"
                     placeholder="Nome do vendedor..."
@@ -4426,42 +4728,48 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Período De</label>
+                  <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                    Período De
+                  </label>
                   <input
                     type="date"
                     value={filtroDataInicio}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataInicio(e.target.value)}
-                    className="input-glass text-xs h-9 w-full"
+                    className="input-glass text-xs h-9 w-full [color-scheme:dark]"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Até</label>
+                  <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                    Até
+                  </label>
                   <input
                     type="date"
                     value={filtroDataFim}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFiltroDataFim(e.target.value)}
-                    className="input-glass text-xs h-9 w-full"
+                    className="input-glass text-xs h-9 w-full [color-scheme:dark]"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Ordenar por</label>
-                  <div className="flex gap-1">
+                  <label className="text-[11px] font-semibold text-slate-400 block mb-1">
+                    Ordenar por
+                  </label>
+                  <div className="flex gap-1.5">
                     <select
-                      className="input-glass text-xs h-9 flex-1"
+                      className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 text-xs text-slate-200 h-9 flex-1 outline-none cursor-pointer"
                       value={ordenarPor}
                       onChange={(e) => setOrdenarPor(e.target.value as any)}
                     >
                       <option value="data">Data</option>
                       <option value="cliente">Cliente</option>
                       <option value="valor">Valor</option>
-                      <option value="lucro">Lucro</option>
+                      {!ocultarLucro && <option value="lucro">Lucro</option>}
                       <option value="status">Status</option>
                       <option value="metodo">Método</option>
                     </select>
                     <select
-                      className="input-glass text-xs h-9 shrink-0 w-24"
+                      className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 text-xs text-slate-200 h-9 shrink-0 w-24 outline-none cursor-pointer"
                       value={direcaoOrdenacao}
                       onChange={(e) => setDirecaoOrdenacao(e.target.value as any)}
                     >
@@ -4472,323 +4780,89 @@ export function VendasTab({ isSidebarCollapsed = false, setSidebarCollapsed }: V
                 </div>
               </div>
             )}
-          </div>
-          <div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-white/10">
-                  <tr className="text-xs sm:text-sm text-left">
-                    <th className="py-3 px-2">ID</th>
-                    <th className="py-3 px-2 hidden md:table-cell">Data & Horário</th>
-                    <th className="py-3 px-2">Canal</th>
-                    <th className="py-3 px-2">Cliente / Lojista</th>
-                    <th className="text-left py-3 px-2 hidden sm:table-cell">Aparelho</th>
-                    <th className="text-right py-3 px-2">Valor</th>
-                    <th className="text-right py-3 px-2 hidden sm:table-cell">Lucro</th>
-                    <th className="py-3 px-2 hidden sm:table-cell">Método</th>
-                    <th className="py-3 px-2">Status</th>
-                    <th className="text-right py-3 px-2">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vendasFiltradas.map((venda) => {
-                    const isAtacado = isAtacadoVenda(venda);
-                    const diagnostico = !isAtacado ? diagnosticarVendaPendente(venda, clientes, aparelhos) : null;
-                    const isPendente = Boolean(diagnostico?.isPendente);
-                    const complementaresCliente = (diagnostico?.camposComplementares || []).filter(
-                      (c) => c === 'E-mail' || c === 'CPF / CNPJ'
-                    );
 
-                    return (
-                    <tr key={venda.id} className={cn("border-b border-white/10 last:border-0 text-xs sm:text-sm hover:bg-white/5 transition-colors", isPendente && "bg-amber-500/5", vendaCancelada(venda) && "opacity-60")}>
-                      <td className="py-3 px-2 font-mono text-xs text-blue-400 font-bold">#{venda.id ? venda.id.slice(-6).toUpperCase() : 'N/A'}</td>
-                      <td className="py-3 px-2 hidden md:table-cell text-xs text-muted-foreground whitespace-nowrap">
-                        {getVendaDataExibicao(venda).toLocaleString('pt-BR', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center gap-1">
-                          {isAtacado ? (
-                            <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[10px] font-bold">
-                              Atacado
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-bold">
-                              Varejo
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 font-medium">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={isPendente ? "text-amber-300 font-bold" : ""}>{venda.clienteNome}</span>
-                          {isPendente && (
-                            <button
-                              type="button"
-                              onClick={() => abrirModalEdicaoRapidaVenda(venda, true)}
-                              className="text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/40 cursor-pointer flex items-center gap-1 shadow-sm"
-                              title={`Completar dados faltantes: ${diagnostico?.motivosObrigatorios.join(', ')}`}
-                            >
-                              <Edit className="w-3 h-3" /> Completar Notinha
-                            </button>
-                          )}
-                        </div>
-                        {isPendente && diagnostico && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {diagnostico.motivosObrigatorios.map((motivo) => (
-                              <span
-                                key={motivo}
-                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30"
-                              >
-                                Falta: {motivo}
-                              </span>
-                            ))}
-                            {complementaresCliente.map((campo) => (
-                              <span
-                                key={campo}
-                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-800/80 text-slate-400 border border-slate-700/80"
-                              >
-                                Sem {campo}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {/* Exibição compacta do aparelho e IMEI em telas móveis */}
-                        <div className="sm:hidden mt-1 flex flex-col gap-0.5 text-[11px]">
-                          {(() => {
-                            const apInfo = extrairAparelhoEImeiDaVenda(venda, aparelhos);
-                            return (
-                              <>
-                                <span className="truncate max-w-[170px] font-semibold text-slate-300" title={apInfo.nomeAparelho}>
-                                  {apInfo.nomeAparelho}
-                                </span>
-                                {apInfo.imei && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-cyan-400">
-                                    <Smartphone className="w-2.5 h-2.5" /> IMEI: {apInfo.imei.length > 8 ? `...${apInfo.imei.slice(-6)}` : apInfo.imei}
-                                  </span>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 hidden sm:table-cell">
-                        {(() => {
-                          const apInfo = extrairAparelhoEImeiDaVenda(venda, aparelhos);
-                          return (
-                            <div className="flex flex-col gap-1 max-w-[280px]">
-                              <span className="font-semibold text-slate-200 text-xs truncate leading-snug" title={apInfo.nomeAparelho}>
-                                {apInfo.nomeAparelho}
-                              </span>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {apInfo.imei ? (
-                                  <span
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-xs"
-                                    title={`IMEI Completo: ${apInfo.imei}`}
-                                  >
-                                    <Smartphone className="w-2.5 h-2.5 shrink-0 text-cyan-400" />
-                                    <span>IMEI: {apInfo.imei.length > 8 ? `...${apInfo.imei.slice(-6)}` : apInfo.imei}</span>
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-slate-500 italic">
-                                    Sem IMEI
-                                  </span>
-                                )}
-                                {apInfo.outrosItensCount > 0 && (
-                                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-slate-800 text-slate-400 border-slate-700">
-                                    +{apInfo.outrosItensCount} {apInfo.outrosItensCount === 1 ? 'outro' : 'outros'}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="py-3 px-2 text-right font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.valor)}</td>
-                      <td className="py-3 px-2 text-right hidden sm:table-cell text-green-600 font-medium">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(venda.lucro)}</td>
-                      <td className="py-3 px-2 hidden sm:table-cell text-xs">{metodoLabel(venda.metodo)}</td>
-                      <td className="py-3 px-2">
-                        <Badge variant={venda.status === 'pago' ? 'default' : venda.status === 'pendente' ? 'secondary' : 'outline'} className="text-xs">
-                          {venda.status === 'pago' ? 'Pago' : venda.status === 'pendente' ? 'Pendente' : venda.status === 'parcial' ? 'Parcial' : 'Cancelado'}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2 text-right">
-                        <div className="flex gap-1 justify-end">
-                          {vendaCancelada(venda) ? (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                title="Reativar / Descancelar venda"
-                                onClick={() => setVendaParaDescancelar(venda)}
-                                className="h-8 w-8 p-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
-                              >
-                                <RotateCcw className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                title="Excluir venda cancelada permanentemente"
-                                onClick={() => setVendaParaExcluirCancelada(venda)}
-                                className="h-8 w-8 p-0 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title="Desfazer venda e devolver ao estoque"
-                              onClick={() => setVendaParaDesfazer(venda)}
-                              className="h-8 w-8 p-0 text-amber-500 hover:text-amber-400 hover:bg-amber-500/10"
-                            >
-                              <Undo2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56 space-y-0.5">
-                              <DropdownMenuItem
-                                onClick={() => abrirModalEdicaoRapidaVenda(venda, false)}
-                              >
-                                <Edit className="mr-2 h-4 w-4 text-amber-400" />
-                                Editar Venda / Cliente / Custos
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleEdit(venda)} disabled={vendaCancelada(venda)}>
-                                <Repeat className="mr-2 h-4 w-4 text-blue-400" />
-                                Reabrir no PDV
-                              </DropdownMenuItem>
-                              {isPendente && (
-                                <DropdownMenuItem onClick={() => abrirCompletarFormulario(venda)}>
-                                  <Sparkles className="mr-2 h-4 w-4 text-orange-400" />
-                                  Completar c/ Formulário
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem onClick={() => { const c = clientes.find(cl => cl.nome === venda.clienteNome); if(c) window.open(`https://wa.me/55${c.telefone.replace(/\D/g, '')}`, '_blank'); }}>
-                                <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
-                                Chamar no WhatsApp
-                              </DropdownMenuItem>
-                              <DropdownMenuSub>
-                                <DropdownMenuSubTrigger className="font-normal">
-                                  <Printer className="mr-2 h-4 w-4" />
-                                  Imprimir Recibo
-                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
-                                </DropdownMenuSubTrigger>
-                                <DropdownMenuPortal>
-                                  <DropdownMenuSubContent className="w-44">
-                                    <DropdownMenuItem onClick={() => handleGerarCupomTermico(venda)}>
-                                      <Printer className="mr-2 h-4 w-4" />
-                                      Cupom Térmico
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleGerarReciboA4(venda)}>
-                                      <FileText className="mr-2 h-4 w-4" />
-                                      Recibo A4
-                                    </DropdownMenuItem>
-                                  </DropdownMenuSubContent>
-                                </DropdownMenuPortal>
-                              </DropdownMenuSub>
-                              <DropdownMenuSub>
-                                <DropdownMenuSubTrigger className="font-normal">
-                                  <Mail className="mr-2 h-4 w-4" />
-                                  Reenviar Recibo
-                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
-                                </DropdownMenuSubTrigger>
-                                <DropdownMenuPortal>
-                                  <DropdownMenuSubContent className="w-44">
-                                    <DropdownMenuItem onClick={() => handleReenviarRecibo(venda, 'todos')}>
-                                      <Send className="mr-2 h-4 w-4 text-blue-400" />
-                                      Todos
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleReenviarRecibo(venda, 'email')}>
-                                      <Mail className="mr-2 h-4 w-4" />
-                                      E-mail
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleReenviarRecibo(venda, 'whatsapp')}>
-                                      <MessageCircle className="mr-2 h-4 w-4 text-emerald-400" />
-                                      WhatsApp
-                                    </DropdownMenuItem>
-                                  </DropdownMenuSubContent>
-                                </DropdownMenuPortal>
-                              </DropdownMenuSub>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuSub>
-                                <DropdownMenuSubTrigger className="font-normal">
-                                  <FileText className="mr-2 h-4 w-4 text-blue-400" />
-                                  Nota Fiscal
-                                  <ChevronRight className="ml-auto h-4 w-4 opacity-60" />
-                                </DropdownMenuSubTrigger>
-                                <DropdownMenuPortal>
-                                  <DropdownMenuSubContent className="w-48">
-                                    <DropdownMenuItem onClick={() => handleEmitirFiscalManual(venda, 'nfce')}>
-                                      <FileText className="mr-2 h-4 w-4 text-blue-400" />
-                                      Emitir NFC-e (Fiscal)
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleConsultarFiscalManual(venda)}>
-                                      <ShieldCheck className="mr-2 h-4 w-4 text-emerald-400" />
-                                      Ver / Consultar DANFE
-                                    </DropdownMenuItem>
-                                  </DropdownMenuSubContent>
-                                </DropdownMenuPortal>
-                              </DropdownMenuSub>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleTrocarItem(venda)}>
-                                <Repeat className="mr-2 h-4 w-4" />
-                                Trocar Item
-                              </DropdownMenuItem>
-                              {vendaCancelada(venda) ? (
-                                <>
-                                  <DropdownMenuItem
-                                    onClick={() => setVendaParaDescancelar(venda)}
-                                    className="text-emerald-400 focus:bg-emerald-500/10 focus:text-emerald-300 font-semibold"
-                                  >
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                    Reativar Venda (Descancelar)
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => setVendaParaExcluirCancelada(venda)}
-                                    className="text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 font-semibold"
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" />
-                                    Excluir Venda Cancelada
-                                  </DropdownMenuItem>
-                                </>
-                              ) : (
-                                <DropdownMenuItem
-                                  onClick={() => handleCancelarVenda(venda)}
-                                  className="text-red-600 focus:bg-red-500/10 focus:text-red-600"
-                                >
-                                  <Undo2 className="mr-2 h-4 w-4" />
-                                  Desfazer Venda
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                </tbody>
-              </table>
-              {loading && vendas.length === 0 && (
-                <div className="text-center py-8 text-blue-500 font-medium">
-                  Carregando dados das vendas...
-                </div>
+            {/* Barra de contagem e limpeza */}
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-400 px-0.5">
+              <span>
+                Mostrando <strong className="text-slate-200">{vendasFiltradas.length}</strong> de{' '}
+                {contagemCanais.total} vendas
+                {filtroPeriodo === 'mes' ? ' neste mês' : ' registradas'}
+              </span>
+              {temFiltroVendaAtivo && (
+                <button
+                  type="button"
+                  onClick={limparFiltrosVenda}
+                  className="text-cyan-500 dark:text-cyan-400 hover:text-cyan-300 font-medium underline underline-offset-2 cursor-pointer inline-flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Limpar filtros
+                </button>
               )}
-              {!loading && vendasFiltradas.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  Nenhuma venda encontrada com os critérios atuais.
+            </div>
+            {/* Lista de Vendas (Cards Estruturados / Compactos) */}
+            <div className={viewMode === 'compact' ? 'space-y-1.5' : 'space-y-2.5'}>
+              {loading && vendas.length === 0 ? (
+                <div className="py-12 px-4 text-center bg-slate-950/60 rounded-2xl border border-slate-800 space-y-2">
+                  <Loader2 className="w-7 h-7 text-cyan-400 mx-auto animate-spin" />
+                  <p className="text-sm text-slate-300 font-medium">
+                    Carregando dados das vendas...
+                  </p>
                 </div>
+              ) : vendasFiltradas.length === 0 ? (
+                <div className="py-12 px-4 text-center bg-slate-950/60 rounded-2xl border border-dashed border-slate-800 space-y-2">
+                  <ShoppingBag className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-sm text-slate-300 font-medium">
+                    {vendas.length === 0
+                      ? 'Nenhuma venda registrada ainda. Clique em "Nova Venda" para começar.'
+                      : 'Nenhuma venda encontrada com os filtros atuais.'}
+                  </p>
+                  <div className="flex items-center justify-center gap-3 pt-1">
+                    {temFiltroVendaAtivo && (
+                      <button
+                        type="button"
+                        onClick={limparFiltrosVenda}
+                        className="text-xs text-cyan-500 dark:text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
+                      >
+                        Limpar filtros
+                      </button>
+                    )}
+                    {filtroPeriodo === 'mes' && vendas.length > contagemCanais.total && (
+                      <button
+                        type="button"
+                        onClick={() => setFiltroPeriodo('todos')}
+                        className="text-xs text-blue-500 dark:text-blue-400 hover:text-blue-300 font-semibold cursor-pointer"
+                      >
+                        Ver todo o período ({vendas.length})
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                vendasFiltradas.map((venda) => (
+                  <VendaRowCard
+                    key={venda.id}
+                    venda={venda}
+                    isAtacado={isAtacadoVenda(venda)}
+                    clientes={clientes}
+                    aparelhos={aparelhos}
+                    density={viewMode}
+                    ocultarLucro={ocultarLucro}
+                    metodoLabel={metodoLabel}
+                    onAbrirEdicaoRapida={abrirModalEdicaoRapidaVenda}
+                    onReabrirPDV={handleEdit}
+                    onCompletarFormulario={abrirCompletarFormulario}
+                    onImprimirCupom={handleGerarCupomTermico}
+                    onImprimirA4={handleGerarReciboA4}
+                    onReenviarRecibo={handleReenviarRecibo}
+                    onEmitirFiscal={(v) => handleEmitirFiscalManual(v, 'nfce')}
+                    onConsultarFiscal={handleConsultarFiscalManual}
+                    onTrocarItem={handleTrocarItem}
+                    onDesfazer={setVendaParaDesfazer}
+                    onCancelarMenu={handleCancelarVenda}
+                    onDescancelar={setVendaParaDescancelar}
+                    onExcluirCancelada={setVendaParaExcluirCancelada}
+                  />
+                ))
               )}
             </div>
           </div>
