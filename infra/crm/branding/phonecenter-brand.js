@@ -13,7 +13,21 @@
   const RATES_KEY = 'pc_crm_installment_rates_v1';
   const STORE_CFG_KEY = 'pc_crm_store_cfg_v1';
   const GEMINI_CFG_KEY = 'pc_crm_gemini_cfg_v1';
+  const TROCA_TPL_KEY = 'pc_crm_troca_template_v1';
   const LUCAS_IMPORTS_LOJA_ID = 'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
+  const DEFAULT_TROCA_TEMPLATE = [
+    '📱 *Orçamento de Troca*',
+    '',
+    'Pegamos o seu *{{modelo_usado}}* com *{{valor_volta}}* de volta no *{{modelo_novo}}* (valor à vista {{valor_novo}}).',
+    '',
+    '💳 *No cartão:* 12x de {{parcela_12x}}',
+    '',
+    '✅ *6 meses de garantia*',
+    '🎁 *Brindes inclusos:* capa, película e carregador',
+    '',
+    '_Avaliação sujeita à conferência presencial do aparelho._',
+    'Bora fechar? 🚀',
+  ].join('\n');
 
   const DEFAULT_RATES = {
     debito: 1.99,
@@ -417,17 +431,27 @@
       '</div>' +
       '<div class="pc-suite-pane" data-pane="troca">' +
       '<div class="pc-form-row">' +
+      '<div class="pc-field"><label>Modelo Usado (Cliente)</label><input id="pc-troca-usado" placeholder="Ex: iPhone 13 128GB" /></div>' +
+      '<div class="pc-field"><label>Valor Avaliado do Usado (R$)</label><input id="pc-troca-valor" type="number" step="0.01" min="0" placeholder="2100" /></div>' +
+      '<div class="pc-field"><label>Modelo Novo (Loja)</label><input id="pc-troca-novo" placeholder="Ex: iPhone 15 Pro 256GB" /></div>' +
+      '<div class="pc-field"><label>Valor do Modelo Novo (R$)</label><input id="pc-troca-valor-novo" type="number" step="0.01" min="0" placeholder="5490" /></div>' +
+      '</div>' +
+      '<div class="pc-form-row" style="margin-top:6px">' +
+      '<div class="pc-field"><label>Ou Valor da Volta Direto (R$ — opcional)</label><input id="pc-troca-volta" type="number" step="0.01" min="0" placeholder="Calcula automático se vazio" /></div>' +
       '<div class="pc-field"><label>Nome do Cliente (opcional)</label><input id="pc-troca-cliente" placeholder="Ex: João" /></div>' +
-      '<div class="pc-field"><label>Aparelho Novo Desejado (opcional)</label><input id="pc-troca-novo" placeholder="Ex: iPhone 15 Pro 256GB" /></div>' +
-      '<div class="pc-field"><label>Aparelho Usado do Cliente</label><input id="pc-troca-usado" placeholder="Ex: iPhone 13 128GB" /></div>' +
-      '<div class="pc-field"><label>Valor Avaliado na Troca (R$)</label><input id="pc-troca-valor" type="number" step="0.01" min="0" placeholder="2100" /></div>' +
       '</div>' +
       '<div class="pc-actions-row">' +
-      '<button type="button" class="pc-btn pc-btn-primary" id="pc-troca-pedir">📋 Pedir Dados da Volta (Checklist)</button>' +
-      '<button type="button" class="pc-btn pc-btn-green" id="pc-troca-enviar-avaliacao">🔄 Enviar Pré-Avaliação</button>' +
+      '<button type="button" class="pc-btn pc-btn-green" id="pc-troca-enviar-avaliacao">🔄 Gerar Orçamento de Troca</button>' +
+      '<button type="button" class="pc-btn pc-btn-primary" id="pc-troca-pedir">📋 Pedir Dados da Volta</button>' +
       '<button type="button" class="pc-btn" id="pc-troca-agendar">📍 Agendar Conferência</button>' +
+      '<button type="button" class="pc-btn" id="pc-troca-edit-tpl">✏️ Editar Texto Fixo</button>' +
       '</div>' +
-      '<textarea id="pc-troca-preview" rows="9" style="width:100%;margin-top:8px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#e2e8f0;font-size:12px;line-height:1.45" placeholder="A prévia da mensagem pronta aparecerá aqui..."></textarea>' +
+      '<div id="pc-troca-tpl-box" style="display:none;margin-top:8px;padding:8px;border-radius:9px;border:1px solid rgba(59,130,246,0.35);background:rgba(15,23,42,0.85)">' +
+      '<div style="font-size:11px;color:#93c5fd;margin-bottom:4px">Variáveis: <code>{{modelo_usado}}</code>, <code>{{valor_volta}}</code>, <code>{{modelo_novo}}</code>, <code>{{valor_novo}}</code>, <code>{{valor_troca}}</code>, <code>{{parcela_12x}}</code></div>' +
+      '<textarea id="pc-troca-tpl-input" rows="6" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#fff;font-size:12px"></textarea>' +
+      '<div class="pc-actions-row" style="margin-top:5px"><button type="button" class="pc-btn pc-btn-primary" id="pc-troca-save-tpl">💾 Salvar Texto Fixo</button><button type="button" class="pc-btn" id="pc-troca-reset-tpl">↺ Restaurar Padrão</button></div>' +
+      '</div>' +
+      '<textarea id="pc-troca-preview" rows="8" style="width:100%;margin-top:8px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#e2e8f0;font-size:12px;line-height:1.45" placeholder="A prévia da mensagem pronta aparecerá aqui..."></textarea>' +
       '<div class="pc-actions-row" style="margin-top:6px">' +
       '<button type="button" class="pc-btn pc-btn-primary" id="pc-troca-colar-preview">💬 Colar no Chat</button>' +
       '<button type="button" class="pc-btn" id="pc-troca-copiar-preview">📋 Copiar</button>' +
@@ -663,12 +687,34 @@
     });
     renderCalc();
 
-    // --- Mensagens Prontas de Avaliação de Troca (Volta) ---
+    // --- Mensagens Prontas de Avaliação de Troca (Volta) com Texto Fixo + Variáveis ---
     const trocaCliente = overlay.querySelector('#pc-troca-cliente');
     const trocaNovo = overlay.querySelector('#pc-troca-novo');
+    const trocaValorNovo = overlay.querySelector('#pc-troca-valor-novo');
     const trocaUsado = overlay.querySelector('#pc-troca-usado');
     const trocaValor = overlay.querySelector('#pc-troca-valor');
+    const trocaVolta = overlay.querySelector('#pc-troca-volta');
     const trocaPreview = overlay.querySelector('#pc-troca-preview');
+    const trocaTplBox = overlay.querySelector('#pc-troca-tpl-box');
+    const trocaTplInput = overlay.querySelector('#pc-troca-tpl-input');
+
+    function loadTrocaTemplate() {
+      try {
+        return window.localStorage.getItem(TROCA_TPL_KEY) || DEFAULT_TROCA_TEMPLATE;
+      } catch {
+        return DEFAULT_TROCA_TEMPLATE;
+      }
+    }
+
+    function saveTrocaTemplate(tpl) {
+      try {
+        window.localStorage.setItem(TROCA_TPL_KEY, tpl);
+      } catch {
+        // ignora
+      }
+    }
+
+    if (trocaTplInput) trocaTplInput.value = loadTrocaTemplate();
 
     function buildPedirTrocaMsg() {
       const cli = (trocaCliente.value || '').trim();
@@ -698,31 +744,26 @@
 
     function buildPreAvaliacaoMsg() {
       const cli = (trocaCliente.value || '').trim();
-      const novo = (trocaNovo.value || '').trim();
-      const usado = (trocaUsado.value || '').trim() || 'Seu aparelho';
+      const novo = (trocaNovo.value || '').trim() || 'iPhone escolhido';
+      const usado = (trocaUsado.value || '').trim() || 'seu aparelho';
       const valTroca = Math.max(0, Number(trocaValor.value) || 0);
-      const valNovo = Math.max(0, Number(calcValor.value) || 0);
-      const cfg = loadStoreCfg();
-      const lojaNome = cfg.lojaNome || 'Lucas Imports';
-      const lines = ['🔄 *PRÉ-AVALIAÇÃO DE TROCA — ' + lojaNome.toUpperCase() + '*', ''];
+      const valNovo = Math.max(0, Number(trocaValorNovo.value || calcValor.value) || 0);
+      const voltaManual = Number(trocaVolta.value || 0);
+      const valVolta = voltaManual > 0 ? voltaManual : Math.max(0, valNovo - valTroca);
+      const res12 = computeRow(valVolta, rates[12], 12, calcModo.value);
+
+      let txt = loadTrocaTemplate()
+        .replace(/\{\{modelo_usado\}\}/gi, usado)
+        .replace(/\{\{valor_troca\}\}/gi, formatBRL(valTroca))
+        .replace(/\{\{modelo_novo\}\}/gi, novo)
+        .replace(/\{\{valor_novo\}\}/gi, formatBRL(valNovo))
+        .replace(/\{\{valor_volta\}\}/gi, formatBRL(valVolta))
+        .replace(/\{\{parcela_12x\}\}/gi, formatBRL(res12.parcela));
+
       if (cli) {
-        lines.push('Olá, *' + cli + '*! Segue sua pré-avaliação:');
-        lines.push('');
+        txt = 'Olá, *' + cli + '*!\n\n' + txt;
       }
-      lines.push('📱 Seu aparelho: *' + usado + '*');
-      lines.push('✅ Valor estimado na troca: *' + formatBRL(valTroca) + '*');
-      if (novo && valNovo > 0) {
-        const diff = Math.max(0, valNovo - valTroca);
-        const res12 = computeRow(diff, rates[12], 12, calcModo.value);
-        lines.push('');
-        lines.push('✨ Aparelho escolhido: *' + novo + '* (' + formatBRL(valNovo) + ')');
-        lines.push('⚡ *Volta no Pix:* ' + formatBRL(diff));
-        lines.push('💳 *Ou em 12x no cartão:* 12x de ' + formatBRL(res12.parcela));
-      }
-      lines.push('');
-      lines.push('_*Pré-avaliação sujeita à conferência presencial do aparelho na loja._');
-      lines.push('Quer que eu reserve o aparelho ou agende sua visita hoje? 🚀');
-      return lines.join('\n');
+      return txt;
     }
 
     function buildAgendarConferenciaMsg() {
@@ -738,7 +779,10 @@
       ].join('\n');
     }
 
-    trocaPreview.value = buildPedirTrocaMsg();
+    trocaPreview.value = buildPreAvaliacaoMsg();
+    [trocaCliente, trocaNovo, trocaValorNovo, trocaUsado, trocaValor, trocaVolta].forEach((el) => {
+      if (el) el.addEventListener('input', () => { trocaPreview.value = buildPreAvaliacaoMsg(); });
+    });
     overlay.querySelector('#pc-troca-pedir').addEventListener('click', () => {
       trocaPreview.value = buildPedirTrocaMsg();
     });
@@ -747,6 +791,24 @@
     });
     overlay.querySelector('#pc-troca-agendar').addEventListener('click', () => {
       trocaPreview.value = buildAgendarConferenciaMsg();
+    });
+    overlay.querySelector('#pc-troca-edit-tpl').addEventListener('click', () => {
+      if (trocaTplBox) {
+        trocaTplBox.style.display = trocaTplBox.style.display === 'none' ? 'block' : 'none';
+      }
+    });
+    overlay.querySelector('#pc-troca-save-tpl').addEventListener('click', () => {
+      const novoTpl = (trocaTplInput.value || '').trim() || DEFAULT_TROCA_TEMPLATE;
+      saveTrocaTemplate(novoTpl);
+      trocaPreview.value = buildPreAvaliacaoMsg();
+      if (trocaTplBox) trocaTplBox.style.display = 'none';
+      showToast('Texto fixo de troca salvo!');
+    });
+    overlay.querySelector('#pc-troca-reset-tpl').addEventListener('click', () => {
+      saveTrocaTemplate(DEFAULT_TROCA_TEMPLATE);
+      if (trocaTplInput) trocaTplInput.value = DEFAULT_TROCA_TEMPLATE;
+      trocaPreview.value = buildPreAvaliacaoMsg();
+      showToast('Texto padrão restaurado!');
     });
     overlay.querySelector('#pc-troca-colar-preview').addEventListener('click', () => {
       if (trocaPreview.value.trim()) insertTextIntoChat(trocaPreview.value.trim());
@@ -1113,7 +1175,7 @@
       }
     }
 
-    // 2. Seção nativa dentro da Sidebar (desktop e menu lateral mobile)
+    // 2. Seção limpa dentro da Sidebar (ações de venda agora ficam no "+" da conversa)
     const sidebar =
       document.querySelector('[data-sidebar="content"]') ||
       document.querySelector('aside nav') ||
@@ -1123,10 +1185,6 @@
       sec.id = 'pc-sidebar-section';
       sec.innerHTML =
         '<div class="pc-sb-title">PhoneCenter</div>' +
-        '<button type="button" data-pc-sb-tab="taxas"><span>💳</span><span>Taxas & Parcelamento</span></button>' +
-        '<button type="button" data-pc-sb-tab="troca"><span>🔄</span><span>Avaliação Troca</span></button>' +
-        '<button type="button" data-pc-sb-tab="gemini"><span>🤖</span><span>IA Google Gemini</span></button>' +
-        '<button type="button" data-pc-sb-tab="lojas"><span>🏪</span><span>Lojas & Estoque</span></button>' +
         '<button type="button" data-pc-sb-tab="atalhos"><span>⚡</span><span>Suite CRM</span></button>' +
         '<a href="' + ERP_URL + '" target="_blank" rel="noopener noreferrer"><span>🌐</span><span>PhoneCenter ERP</span></a>';
 
@@ -1135,6 +1193,63 @@
       });
       sidebar.appendChild(sec);
     }
+
+    // 3. Injeta as ações de venda dentro do menu "+" da conversa (Radix/popover [role="menu"])
+    injectActionsIntoChatPlusMenu();
+  }
+
+  function injectActionsIntoChatPlusMenu() {
+    const menus = document.querySelectorAll('[role="menu"], [data-radix-menu-content]');
+    menus.forEach((menu) => {
+      if (menu.dataset.pcPlusInjected) return;
+      const txt = (menu.textContent || '').toLowerCase();
+      // Identifica o menu do botão "+" da conversa (anexo, foto, documento, áudio, template, etc.)
+      const ehMenuConversa =
+        /(imagem|image|foto|photo|documento|document|arquivo|file|áudio|audio|vídeo|video|contato|contact|anex|attach|template|modelo|resposta)/i.test(
+          txt
+        );
+      if (!ehMenuConversa) return;
+
+      menu.dataset.pcPlusInjected = '1';
+      const sep = document.createElement('div');
+      sep.style.cssText =
+        'height:1px;margin:6px 4px;background:rgba(255,255,255,0.12)';
+      const title = document.createElement('div');
+      title.style.cssText =
+        'padding:4px 8px 2px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#60a5fa';
+      title.textContent = 'PhoneCenter Vendas';
+
+      const items = [
+        { tab: 'taxas', icon: '💳', label: 'Taxas & Parcelamento' },
+        { tab: 'lojas', icon: '🏪', label: 'Itens Disponíveis (Estoque)' },
+        { tab: 'troca', icon: '🔄', label: 'Orçamento de Troca (Volta)' },
+        { tab: 'gemini', icon: '🤖', label: 'IA Google Gemini' },
+      ];
+
+      menu.appendChild(sep);
+      menu.appendChild(title);
+      items.forEach((it) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('role', 'menuitem');
+        btn.style.cssText =
+          'width:100%;display:flex;align-items:center;gap:8px;padding:7px 10px;border:none;background:transparent;color:inherit;font-size:13px;border-radius:6px;cursor:pointer;text-align:left';
+        btn.innerHTML = '<span>' + it.icon + '</span><span>' + it.label + '</span>';
+        btn.addEventListener('mouseenter', () => {
+          btn.style.background = 'rgba(0,102,255,0.18)';
+        });
+        btn.addEventListener('mouseleave', () => {
+          btn.style.background = 'transparent';
+        });
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          openSuiteTab(it.tab);
+        });
+        menu.appendChild(btn);
+      });
+    });
   }
 
   let lastSlaScan = 0;

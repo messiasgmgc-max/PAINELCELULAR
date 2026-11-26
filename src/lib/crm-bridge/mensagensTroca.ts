@@ -44,37 +44,59 @@ export function mensagemPedirAvaliacaoTroca(opts?: {
 }
 
 /**
- * Mensagem pronta com o resultado da pré-avaliação da troca + volta.
+ * Template fixo padrão para orçamento de troca (volta do telefone).
+ * Variáveis suportadas:
+ *  - {{modelo_usado}}
+ *  - {{valor_troca}}
+ *  - {{modelo_novo}}
+ *  - {{valor_novo}}
+ *  - {{valor_volta}}
+ *  - {{parcela_12x}}
  */
-export function mensagemResultadoAvaliacaoTroca(dados: DadosPreAvaliacaoTroca): string {
-  const usado = [dados.modeloUsado, dados.capacidadeUsado].filter(Boolean).join(' ');
-  const linhas: string[] = [
-    `🔄 *PRÉ-AVALIAÇÃO DE TROCA${dados.nomeLoja ? ` — ${dados.nomeLoja.toUpperCase()}` : ''}*`,
-    '',
-  ];
+export const TEMPLATE_ORCAMENTO_TROCA_PADRAO = [
+  '📱 *Orçamento de Troca*',
+  '',
+  'Pegamos o seu *{{modelo_usado}}* com *{{valor_volta}}* de volta no *{{modelo_novo}}* (valor à vista {{valor_novo}}).',
+  '',
+  '💳 *No cartão:* 12x de {{parcela_12x}}',
+  '',
+  '✅ *6 meses de garantia*',
+  '🎁 *Brindes inclusos:* capa, película e carregador',
+  '',
+  '_Avaliação sujeita à conferência presencial do aparelho._',
+  'Bora fechar? 🚀',
+].join('\n');
+
+/**
+ * Mensagem pronta com o resultado da pré-avaliação da troca + volta usando template fixo com variáveis.
+ */
+export function mensagemResultadoAvaliacaoTroca(
+  dados: DadosPreAvaliacaoTroca,
+  templateCustom?: string
+): string {
+  const usado = [dados.modeloUsado, dados.capacidadeUsado].filter(Boolean).join(' ') || 'seu aparelho';
+  const novo = dados.modeloNovo || 'aparelho escolhido';
+  const valorNovo = Number(dados.valorNovo || 0);
+  const valorTroca = Number(dados.valorAvaliado || 0);
+  const valorVolta =
+    dados.diferencaPix != null ? Number(dados.diferencaPix) : Math.max(0, valorNovo - valorTroca);
+
+  const tpl = (templateCustom || TEMPLATE_ORCAMENTO_TROCA_PADRAO).trim();
+  let texto = tpl
+    .replace(/\{\{modelo_usado\}\}/gi, usado)
+    .replace(/\{\{valor_troca\}\}/gi, fmtBRL(valorTroca))
+    .replace(/\{\{modelo_novo\}\}/gi, novo)
+    .replace(/\{\{valor_novo\}\}/gi, fmtBRL(valorNovo))
+    .replace(/\{\{valor_volta\}\}/gi, fmtBRL(valorVolta))
+    .replace(
+      /\{\{parcela_12x\}\}/gi,
+      dados.parcela12x && dados.parcela12x > 0 ? fmtBRL(dados.parcela12x) : fmtBRL(valorVolta / 12)
+    );
 
   if (dados.nomeCliente) {
-    linhas.push(`Olá, *${dados.nomeCliente}*! Segue sua pré-avaliação:`);
-    linhas.push('');
+    texto = `Olá, *${dados.nomeCliente}*!\n\n${texto}`;
   }
-
-  linhas.push(`📱 Seu aparelho: *${usado}*`);
-  linhas.push(`✅ Valor estimado na troca: *${fmtBRL(dados.valorAvaliado)}*`);
-
-  if (dados.modeloNovo && dados.valorNovo && dados.valorNovo > 0) {
-    const diff = dados.diferencaPix ?? Math.max(0, dados.valorNovo - dados.valorAvaliado);
-    linhas.push('');
-    linhas.push(`✨ Aparelho escolhido: *${dados.modeloNovo}* (${fmtBRL(dados.valorNovo)})`);
-    linhas.push(`⚡ *Volta no Pix:* ${fmtBRL(diff)}`);
-    if (dados.parcela12x && dados.parcela12x > 0) {
-      linhas.push(`💳 *Ou em 12x no cartão:* 12x de ${fmtBRL(dados.parcela12x)}`);
-    }
-  }
-
-  linhas.push('');
-  linhas.push('_*Pré-avaliação sujeita à conferência presencial do aparelho na loja._');
-  linhas.push('Quer que eu reserve o aparelho ou agende sua visita hoje? 🚀');
-  return linhas.join('\n');
+  return texto;
 }
 
 /**
