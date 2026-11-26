@@ -1199,48 +1199,57 @@
   }
 
   function injectActionsIntoChatPlusMenu() {
-    const menus = document.querySelectorAll('[role="menu"], [data-radix-menu-content]');
-    menus.forEach((menu) => {
-      if (menu.dataset.pcPlusInjected) return;
+    // Procura tanto menus Radix quanto popovers customizados do botão "+" da conversa
+    const candidates = new Set();
+    document
+      .querySelectorAll('[role="menu"], [data-radix-menu-content], [data-radix-popper-content-wrapper] > div, [role="dialog"]')
+      .forEach((el) => candidates.add(el));
+
+    // Fallback: encontra pelo texto "Mensagens Rápidas" + "Fotos e Vídeos" (menu real do "+" do EvoCRM)
+    document.querySelectorAll('button, [role="menuitem"], div').forEach((el) => {
+      if (el.children.length > 0) return;
+      const t = (el.textContent || '').trim();
+      if (t === 'Mensagens Rápidas' || t === 'Agendar Mensagem') {
+        let p = el.parentElement;
+        for (let depth = 0; depth < 5 && p; depth++) {
+          const pt = (p.textContent || '');
+          if (pt.includes('Mensagens Rápidas') && (pt.includes('Documentos') || pt.includes('Fotos e Vídeos'))) {
+            candidates.add(p);
+            break;
+          }
+          p = p.parentElement;
+        }
+      }
+    });
+
+    candidates.forEach((menu) => {
+      if (!menu || menu.dataset.pcPlusInjected) return;
       const txt = (menu.textContent || '').toLowerCase();
-      // Identifica o menu do botão "+" da conversa (anexo, foto, documento, áudio, template, etc.)
       const ehMenuConversa =
-        /(imagem|image|foto|photo|documento|document|arquivo|file|áudio|audio|vídeo|video|contato|contact|anex|attach|template|modelo|resposta)/i.test(
-          txt
-        );
+        txt.includes('mensagens rápidas') ||
+        (txt.includes('documentos') && txt.includes('fotos e vídeos'));
       if (!ehMenuConversa) return;
 
       menu.dataset.pcPlusInjected = '1';
       const sep = document.createElement('div');
-      sep.style.cssText =
-        'height:1px;margin:6px 4px;background:rgba(255,255,255,0.12)';
-      const title = document.createElement('div');
-      title.style.cssText =
-        'padding:4px 8px 2px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#60a5fa';
-      title.textContent = 'PhoneCenter Vendas';
+      sep.style.cssText = 'height:1px;margin:6px 8px;background:rgba(148,163,184,0.25)';
 
       const items = [
         { tab: 'taxas', icon: '💳', label: 'Taxas & Parcelamento' },
-        { tab: 'lojas', icon: '🏪', label: 'Itens Disponíveis (Estoque)' },
-        { tab: 'troca', icon: '🔄', label: 'Orçamento de Troca (Volta)' },
-        { tab: 'gemini', icon: '🤖', label: 'IA Google Gemini' },
+        { tab: 'lojas', icon: '🏪', label: 'Itens Disponíveis' },
+        { tab: 'troca', icon: '🔄', label: 'Orçamento de Troca' },
+        { tab: 'gemini', icon: '✨', label: 'IA Google Gemini' },
       ];
 
       menu.appendChild(sep);
-      menu.appendChild(title);
       items.forEach((it) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.setAttribute('role', 'menuitem');
-        btn.style.cssText =
-          'width:100%;display:flex;align-items:center;gap:8px;padding:7px 10px;border:none;background:transparent;color:inherit;font-size:13px;border-radius:6px;cursor:pointer;text-align:left';
-        btn.innerHTML = '<span>' + it.icon + '</span><span>' + it.label + '</span>';
-        btn.addEventListener('mouseenter', () => {
-          btn.style.background = 'rgba(0,102,255,0.18)';
-        });
-        btn.addEventListener('mouseleave', () => {
-          btn.style.background = 'transparent';
-        });
+        btn.className = 'pc-plus-menuitem';
+        btn.innerHTML =
+          '<span class="pc-plus-ico">' + it.icon + '</span>' +
+          '<span>' + it.label + '</span>';
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
