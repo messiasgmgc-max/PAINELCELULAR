@@ -8,16 +8,20 @@ import { validarCadastroManual } from '@/lib/estoque/cadastroManual';
 import { gerarCodigoEtiqueta } from '@/lib/pdv/cadastroRapido';
 import { bateriaParaLista, observacaoParaLista, gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { idsParaEtiquetar } from '@/lib/etiquetas/pendentes';
-import { ehAparelhoDeCliente } from '@/lib/estoque/ciclo';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { Button } from "@/components/ui/button";
 import { GlassCard } from "@/components/GlassCard";
 import { ModalPortal } from "@/components/ModalPortal";
 import { Badge } from "@/components/ui/badge";
-import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, ShoppingCart, Truck, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan, Eye, EyeOff, ArrowUpDown, AlertCircle, DollarSign, LayoutList, Rows3, FolderKanban, Clock } from "lucide-react";
+import { Smartphone, X, Plus, Download, Edit2, Search, FileText, History, ArrowUpRight, List, Trash2, ChevronDown, ChevronUp, FileSpreadsheet, MessageCircle, RotateCcw, RefreshCw, ShieldCheck, Package, ShoppingBag, Sparkles, Layers, Headphones, Tag, Settings, Wrench, Check, Undo2, PackageCheck, Loader2, SprayCan, Eye, EyeOff, ArrowUpDown, AlertCircle, DollarSign, LayoutList, Rows3, FolderKanban, Clock } from "lucide-react";
 import { AparelhoCard } from "@/components/aparelhos/AparelhoCard";
 import { AparelhoGrupoCard } from "@/components/aparelhos/AparelhoGrupoCard";
 import { AparelhoFiltros } from "@/components/aparelhos/AparelhoFiltros";
+import { HistoricoSaidasModal } from "@/components/aparelhos/HistoricoSaidasModal";
+import {
+  construirHistoricoSaidas,
+  type ItemSaidaHistorico,
+} from "@/lib/estoque/historicoSaidas";
 import {
   agruparAparelhosPorModelo,
   aplicarFiltroRapidoEstoque,
@@ -42,7 +46,7 @@ import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
-import { getAparelhoCodigo, cn, canViewFinancials, parseMonetaryValue, formatarSaudeBateria } from "@/lib/utils";
+import { getAparelhoCodigo, cn, canViewFinancials } from "@/lib/utils";
 import { devolverAparelhoAoEstoque } from "@/lib/devolucaoEstoque";
 import { filtrarESortearAparelhos } from "@/lib/buscaEstoque";
 import { ConfirmarAcaoEstoqueModal, type AcaoConfirmacao, type LinhaResumo } from "@/components/ConfirmarAcaoEstoqueModal";
@@ -191,12 +195,9 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
     cep: "",
   });
 
-  const [saidas, setSaidas] = useState<any[]>([]);
-  const [saidaParaDevolver, setSaidaParaDevolver] = useState<any | null>(null);
+  const [saidaParaDevolver, setSaidaParaDevolver] = useState<ItemSaidaHistorico | null>(null);
   const [cancelarVendaAoDevolver, setCancelarVendaAoDevolver] = useState(false);
   const [devolvendoSaida, setDevolvendoSaida] = useState(false);
-  const [filtroSaidaTipo, setFiltroSaidaTipo] = useState<'todos' | 'varejo' | 'atacado' | 'outro'>('todos');
-  const [buscaSaida, setBuscaSaida] = useState('');
 
   // Carregar dados ao montar
   useEffect(() => {
@@ -225,6 +226,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
       toast.success(resultado.mensagem);
       setSaidaParaDevolver(null);
+      setCancelarVendaAoDevolver(false);
       await fetchAparelhos();
     } catch (erro: any) {
       console.error('Erro ao devolver aparelho ao estoque:', erro);
@@ -234,103 +236,10 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
     }
   };
 
-  useEffect(() => {
-    const historicoSaidas = (aparelhos || [])
-      // Tudo que não está no estoque. Antes filtrava só ativo=false, e aparelho marcado como
-      // vendido mas ainda ativo (conferência antiga) sumia do estoque E das saídas, sem como
-      // devolver. Celular de cliente da OS nunca foi estoque: não é saída nem baixa.
-      .filter((aparelho: any) => aparelho && !estaNoEstoque(aparelho) && !ehAparelhoDeCliente(aparelho))
-      .map((aparelho: any) => {
-        const obs = String(aparelho.observacoes || '');
-        const matchBaixa = obs.match(/BAIXA_ESTOQUE:(\d{4}-\d{2}-\d{2}(?:T[\d:.]+Z?)?):([\s\S]*)$/i)
-          || obs.match(/BAIXA_ESTOQUE:([^:]+(?::\d{2}(?::\d{2})?(?:\.\d+)?(?:Z)?)?):([\s\S]*)$/i)
-          || obs.match(/BAIXA_ESTOQUE:([^:]+):([\s\S]*)$/i);
-
-        // A data de saída utiliza a marca BAIXA_ESTOQUE das observações ou a coluna data_saida gravada no banco.
-        let dataSaida: string | null = matchBaixa?.[1] || aparelho.data_saida || (aparelho as any).dataSaida || null;
-        if (dataSaida && /^\d{4}-\d{2}-\d{2}T\d{1,2}$/.test(dataSaida)) {
-          dataSaida += ':00:00';
-        }
-        if (dataSaida && Number.isNaN(new Date(dataSaida).getTime())) {
-          dataSaida = null;
-        }
-
-        const motivoLower = (matchBaixa?.[2] || '').toLowerCase();
-        const obsLower = obs.toLowerCase();
-        let tipoSaida: 'varejo' | 'atacado' | 'outro' = 'outro';
-        if (motivoLower.includes('atacado') || obsLower.includes('venda atacado') || obsLower.includes('atacado')) {
-          tipoSaida = 'atacado';
-        } else if (
-          motivoLower.includes('varejo') ||
-          obsLower.includes('venda varejo') ||
-          aparelho.condicao === 'vendido' ||
-          aparelho.status === 'vendido' ||
-          aparelho.motivo_saida === 'venda'
-        ) {
-          tipoSaida = 'varejo';
-        }
-
-        return {
-          ...aparelho,
-          dataSaida,
-          dataEntrada: aparelho.dataCadastro || null,
-          motivoSaida: matchBaixa?.[2] || (aparelho.condicao === 'vendido' || aparelho.status === 'vendido' ? 'Venda de Aparelho' : 'Baixa de estoque'),
-          tipoSaida,
-        };
-      })
-      .sort((a, b) => {
-        // Sem data de saída conhecida, usa a de entrada só para ordenar —
-        // nunca para exibir.
-        const chave = (x: any) => new Date(x.dataSaida || x.dataEntrada || 0).getTime();
-        return chave(b) - chave(a);
-      });
-
-    setSaidas(historicoSaidas);
-  }, [aparelhos]);
-
-  // Contagens e filtro de saídas
-  const saidasFiltradas = useMemo(() => {
-    return saidas.filter((item) => {
-      if (filtroSaidaTipo !== 'todos' && item.tipoSaida !== filtroSaidaTipo) {
-        return false;
-      }
-      if (buscaSaida.trim()) {
-        const b = buscaSaida.toLowerCase().trim();
-        const mod = (item.modelo || '').toLowerCase();
-        const mar = (item.marca || '').toLowerCase();
-        const imei = (item.imei || '').toLowerCase();
-        const cli = (item.cliente || '').toLowerCase();
-        const mot = (item.motivoSaida || '').toLowerCase();
-        const cor = (item.cor || '').toLowerCase();
-        const cod = (item.codigo || '').toLowerCase();
-        const num = (item.numeroSerie || '').toLowerCase();
-        const cap = (item.capacidade || '').toLowerCase();
-        const obs = (item.observacoes || '').toLowerCase();
-        return (
-          mod.includes(b) ||
-          mar.includes(b) ||
-          imei.includes(b) ||
-          cli.includes(b) ||
-          mot.includes(b) ||
-          cor.includes(b) ||
-          cod.includes(b) ||
-          num.includes(b) ||
-          cap.includes(b) ||
-          obs.includes(b)
-        );
-      }
-      return true;
-    });
-  }, [saidas, filtroSaidaTipo, buscaSaida]);
-
-  const contagensSaidas = useMemo(() => {
-    return {
-      todos: saidas.length,
-      varejo: saidas.filter(s => s.tipoSaida === 'varejo').length,
-      atacado: saidas.filter(s => s.tipoSaida === 'atacado').length,
-      outro: saidas.filter(s => s.tipoSaida === 'outro').length,
-    };
-  }, [saidas]);
+  const saidas = useMemo(
+    () => construirHistoricoSaidas(aparelhos || []),
+    [aparelhos]
+  );
 
   const todosNoEstoque = useMemo(() => {
     return (aparelhos || []).filter((a: any) => a && estaNoEstoque(a));
@@ -1636,10 +1545,17 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
                 className="flex items-center gap-2.5 p-3 rounded-xl hover:bg-slate-800 focus:bg-slate-800 cursor-pointer text-slate-200"
               >
                 <History className="h-4 w-4 text-blue-400 shrink-0" />
-                <div>
-                  <div className="font-bold text-xs text-white">Saídas / Histórico</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-xs text-white flex items-center justify-between gap-2">
+                    <span>Saídas / Histórico</span>
+                    {saidas.length > 0 && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 tabular-nums">
+                        {saidas.length}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[10px] text-slate-400">
-                    Aparelhos vendidos ou em manutenção
+                    Vendas, baixas e histórico detalhado de saídas
                   </div>
                 </div>
               </DropdownMenuItem>
@@ -3294,274 +3210,34 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
         </ModalPortal>
       )}
 
-      {/* Modal de Saídas */}
-      {showSaidas && (
-        <ModalPortal>
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 text-white max-h-[92dvh] overflow-y-auto my-auto flex flex-col">
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <ArrowUpRight className="h-5 w-5 text-red-400" />
-                  <div>
-                    <h3 className="text-lg font-bold text-white leading-tight">Histórico de Saídas do Estoque</h3>
-                    <p className="text-xs text-slate-400">Controle completo de baixas, vendas de varejo e vendas de atacado</p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setShowSaidas(false)} className="text-slate-400 hover:text-white rounded-full">
-                  <X className="h-5 w-5" />
-                </Button>
-              </div>
-
-              {/* FILTROS E BUSCA */}
-              <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between pb-1">
-                {/* Abas de filtro */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scroll-row">
-                  <button
-                    onClick={() => setFiltroSaidaTipo('todos')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer",
-                      filtroSaidaTipo === 'todos'
-                        ? "bg-white text-slate-950 shadow-md"
-                        : "bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white"
-                    )}
-                  >
-                    Todas ({contagensSaidas.todos})
-                  </button>
-
-                  <button
-                    onClick={() => setFiltroSaidaTipo('varejo')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5",
-                      filtroSaidaTipo === 'varejo'
-                        ? "bg-emerald-500 text-slate-950 font-extrabold shadow-md shadow-emerald-500/20"
-                        : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30"
-                    )}
-                  >
-                    🛒 Saídas Varejo ({contagensSaidas.varejo})
-                  </button>
-
-                  <button
-                    onClick={() => setFiltroSaidaTipo('atacado')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5",
-                      filtroSaidaTipo === 'atacado'
-                        ? "bg-amber-400 text-slate-950 font-extrabold shadow-md shadow-amber-400/20"
-                        : "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30"
-                    )}
-                  >
-                    📦 Saídas Atacado ({contagensSaidas.atacado})
-                  </button>
-
-                  <button
-                    onClick={() => setFiltroSaidaTipo('outro')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5",
-                      filtroSaidaTipo === 'outro'
-                        ? "bg-slate-300 text-slate-950 shadow-md"
-                        : "bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-white"
-                    )}
-                  >
-                    🔧 Outras Baixas ({contagensSaidas.outro})
-                  </button>
-                </div>
-
-                {/* Campo de Busca Rápida */}
-                <div className="relative min-w-[200px] sm:w-64">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Buscar modelo, comprador, IMEI..."
-                    value={buscaSaida}
-                    onChange={(e) => setBuscaSaida(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500 transition-colors"
-                  />
-                  {buscaSaida && (
-                    <button
-                      onClick={() => setBuscaSaida('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="overflow-x-auto space-y-2.5">
-                {saidasFiltradas.length === 0 ? (
-                  <div className="p-12 text-center text-slate-500 rounded-2xl bg-slate-950/40 border border-slate-800 space-y-2">
-                    <PackageCheck className="w-10 h-10 mx-auto text-slate-600 opacity-60" />
-                    <p className="font-semibold text-sm text-slate-300">Nenhuma saída encontrada.</p>
-                    <p className="text-xs text-slate-500">Verifique o filtro selecionado ou ajuste o termo digitado.</p>
-                  </div>
-                ) : (
-                  saidasFiltradas.map((item, idx) => {
-                    const diasEstoque = item.dataEntrada && item.dataSaida
-                      ? Math.max(0, Math.round((new Date(item.dataSaida).getTime() - new Date(item.dataEntrada).getTime()) / 86400000))
-                      : null;
-                    const bat = formatarSaudeBateria(item);
-                    const cod = getAparelhoCodigo(item);
-
-                    return (
-                      <div
-                        key={item.id || idx}
-                        className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 hover:border-slate-700/80 hover:bg-slate-900/60 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 group"
-                      >
-                        <div className="flex items-start gap-3.5 min-w-0 flex-1">
-                          {/* Ícone de Tipo de Saída */}
-                          <div
-                            className={cn(
-                              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border mt-0.5",
-                              item.tipoSaida === 'varejo'
-                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                : item.tipoSaida === 'atacado'
-                                ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
-                                : "bg-slate-800 border-slate-700 text-slate-400"
-                            )}
-                          >
-                            {item.tipoSaida === 'varejo' ? (
-                              <ShoppingCart className="w-5 h-5" />
-                            ) : item.tipoSaida === 'atacado' ? (
-                              <Truck className="w-5 h-5" />
-                            ) : (
-                              <PackageCheck className="w-5 h-5" />
-                            )}
-                          </div>
-
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-bold text-white text-sm tracking-tight">
-                                {item.marca} {item.modelo}
-                              </h4>
-                              {item.capacidade && (
-                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-bold border border-slate-700">
-                                  {item.capacidade}
-                                </span>
-                              )}
-                              {item.cor && (
-                                <span className="text-[11px] text-slate-400 font-medium">
-                                  {item.cor}
-                                </span>
-                              )}
-                              <Badge variant="outline" className="text-[10px] capitalize py-0 border-slate-700 text-slate-400">
-                                {item.condicao}
-                              </Badge>
-
-                              {item.tipoSaida === 'varejo' && (
-                                <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                  🛒 Varejo
-                                </span>
-                              )}
-                              {item.tipoSaida === 'atacado' && (
-                                <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                                  📦 Atacado
-                                </span>
-                              )}
-                              {item.tipoSaida === 'outro' && (
-                                <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-800 text-slate-400 border border-slate-700">
-                                  🔧 Baixa Manual
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-xs text-slate-400">
-                              {cod && (
-                                <span className="font-mono text-slate-400">ID: #{cod}</span>
-                              )}
-                              {item.imei && (
-                                <span className="font-mono text-slate-300">
-                                  IMEI: <strong className="text-white">{item.imei}</strong>
-                                </span>
-                              )}
-                              {bat && (
-                                <span className="font-bold text-cyan-400 flex items-center gap-1">
-                                  🔋 {bat}
-                                </span>
-                              )}
-                              {item.cliente && (
-                                <span className="text-slate-300">
-                                  Destino: <strong className="text-emerald-400">{item.cliente}</strong>
-                                </span>
-                              )}
-                            </div>
-
-                            {item.motivoSaida && (
-                              <p className="text-[11px] text-slate-400 line-clamp-1 italic">
-                                {item.motivoSaida}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Coluna da Direita: Datas, Valores e Ações */}
-                        <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto shrink-0 gap-2 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800">
-                          <div className="text-left sm:text-right text-[11px] space-y-0.5">
-                            <p className="text-slate-400">
-                              Saída:{' '}
-                              <strong className="text-slate-200">
-                                {item.dataSaida
-                                  ? `${new Date(item.dataSaida).toLocaleDateString('pt-BR')} ${new Date(item.dataSaida).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-                                  : '—'}
-                              </strong>
-                            </p>
-                            {diasEstoque !== null && (
-                              <p className="text-slate-500">
-                                Ficou <span className="text-sky-400 font-semibold">{diasEstoque}d</span> em estoque
-                              </p>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-1.5">
-                            {canViewFinancials(usuario) && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setSaidaParaDevolver(item)}
-                                className="h-7 text-xs px-2.5 border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 cursor-pointer font-semibold gap-1 rounded-lg"
-                                title="Devolver este aparelho para o estoque"
-                              >
-                                <Undo2 className="w-3 h-3" /> Devolver
-                              </Button>
-                            )}
-                            {canViewFinancials(usuario) && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  const matchValObs = String(item.observacoes || '').match(/(?:Valor:\s*R\$|por\s*R\$)\s*([\d.,]+)/i);
-                                  const valVendaFinal = matchValObs ? parseMonetaryValue(matchValObs[1]) : (item.preco || item.preco_atacado || 0);
-
-                                  setSaidaParaEditar({
-                                    aparelhoId: item.id,
-                                    data: item.dataSaida || item.dataCadastro,
-                                    comprador: item.cliente || '',
-                                    modelo: item.modelo,
-                                    marca: item.marca,
-                                    cor: item.cor,
-                                    capacidade: item.capacidade,
-                                    imei: item.imei,
-                                    codigo: getAparelhoCodigo(item),
-                                    valorVenda: valVendaFinal,
-                                    custo: item.custo || 0,
-                                    observacoes: item.observacoes || '',
-                                  });
-                                }}
-                                className="h-7 text-xs px-2.5 border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 cursor-pointer font-semibold gap-1 rounded-lg"
-                                title="Editar custo ou dados da saída"
-                              >
-                                <Edit2 className="w-3 h-3" /> Editar Custo
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-        </ModalPortal>
-      )}
+      {/* Modal de Saídas / Histórico */}
+      <HistoricoSaidasModal
+        isOpen={showSaidas}
+        onClose={() => setShowSaidas(false)}
+        saidas={saidas}
+        podeVerFinanceiro={canViewFinancials(usuario)}
+        modalSecundarioAberto={Boolean(saidaParaDevolver || saidaParaEditar)}
+        onDevolverSaida={(item) => {
+          setCancelarVendaAoDevolver(false);
+          setSaidaParaDevolver(item);
+        }}
+        onEditarSaida={(item) => {
+          setSaidaParaEditar({
+            aparelhoId: item.id,
+            data: item.dataSaida || item.dataEntrada || new Date().toISOString(),
+            comprador: item.comprador || '',
+            modelo: item.modelo,
+            marca: item.marca,
+            cor: item.cor,
+            capacidade: item.capacidade,
+            imei: item.imei,
+            codigo: item.codigo,
+            valorVenda: item.valorSaida ?? (item.aparelho.preco || (item.aparelho as any).preco_atacado || 0),
+            custo: item.custo || 0,
+            observacoes: item.aparelho.observacoes || '',
+          });
+        }}
+      />
 
       {/* MODAL — DEVOLVER AO ESTOQUE (a partir do Histórico de Saídas) */}
       {saidaParaDevolver && (
@@ -3575,18 +3251,19 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
               <div className="rounded-xl border border-white/10 bg-white/5 p-3 space-y-1">
                 <p className="text-sm font-bold">
-                  {saidaParaDevolver.marca} {saidaParaDevolver.modelo}
+                  {saidaParaDevolver.tituloModelo}
                   {saidaParaDevolver.capacidade ? ` ${saidaParaDevolver.capacidade}` : ''}
                 </p>
-                <p className="text-xs text-slate-400">
-                  IMEI: {saidaParaDevolver.imei || 'N/A'}
-                  {formatarSaudeBateria(saidaParaDevolver) && (
-                    <span className="ml-2 text-cyan-400 font-bold">🔋 {formatarSaudeBateria(saidaParaDevolver)}</span>
+                <p className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                  <span className="font-mono">IMEI: {saidaParaDevolver.imei || 'N/A'}</span>
+                  {saidaParaDevolver.cor && <span>• {saidaParaDevolver.cor}</span>}
+                  {saidaParaDevolver.bateriaTexto && (
+                    <span className="text-cyan-400 font-bold">• Bateria {saidaParaDevolver.bateriaTexto}</span>
                   )}
                 </p>
-                {saidaParaDevolver.cliente && (
+                {saidaParaDevolver.comprador && (
                   <p className="text-xs text-slate-400">
-                    Havia saído para: <strong className="text-slate-200">{saidaParaDevolver.cliente}</strong>
+                    Havia saído para: <strong className="text-slate-200">{saidaParaDevolver.comprador}</strong>
                   </p>
                 )}
               </div>
