@@ -25,6 +25,11 @@ import {
   Lock,
 } from 'lucide-react';
 import CrmOpsPanel from '@/components/crm/CrmOpsPanel';
+import {
+  mensagemAgendarConferenciaTroca,
+  mensagemPedirAvaliacaoTroca,
+  mensagemResultadoAvaliacaoTroca,
+} from '@/lib/crm-bridge/mensagensTroca';
 import { supabase } from '@/lib/supabaseClient';
 
 interface EstoqueItem {
@@ -188,6 +193,9 @@ export default function CrmSidebarPage() {
   const [trocaFaceId, setTrocaFaceId] = useState(true);
   const [valorTrocaManual, setValorTrocaManual] = useState('');
   const [simulacao, setSimulacao] = useState<SimulacaoResult | null>(null);
+  const [modoTabelaParcela, setModoTabelaParcela] = useState<'resumo' | 'completa' | 'selecionadas'>('resumo');
+  const [mostrarTotalParcela, setMostrarTotalParcela] = useState(false);
+  const [parcelasSelecionadas, setParcelasSelecionadas] = useState<number[]>([6, 10, 12, 18]);
   const [loadingSim, setLoadingSim] = useState(false);
   const [avaliandoFoto, setAvaliandoFoto] = useState(false);
   const [obsFotoIa, setObsFotoIa] = useState<string | null>(null);
@@ -1089,20 +1097,38 @@ export default function CrmSidebarPage() {
                 <div className="font-semibold text-white text-[12px]">
                   Simulador Troca &amp; Fechamento
                 </div>
-                <label className="px-2 py-1 rounded-lg bg-[#0066FF]/20 hover:bg-[#0066FF]/35 border border-[#0066FF]/40 text-blue-200 text-[10px] font-semibold flex items-center gap-1 cursor-pointer">
-                  <Camera className="w-3 h-3" />
-                  {avaliandoFoto ? 'Analisando...' : 'Avaliar Foto IA'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    disabled={avaliandoFoto}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) avaliarFotoTroca(f);
-                    }}
-                  />
-                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      enviarDiretoNoChat(
+                        mensagemPedirAvaliacaoTroca({
+                          nomeCliente: contatoCtx.nome || cliente360?.cliente?.nome || undefined,
+                          nomeLoja: lojaNome,
+                          modeloInteresse: modeloNovo || undefined,
+                        })
+                      )
+                    }
+                    className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/40 text-amber-200 text-[10px] font-semibold flex items-center gap-1"
+                    title="Envia checklist pronto pedindo dados e fotos do aparelho usado para avaliação de volta"
+                  >
+                    🔄 Pedir Volta
+                  </button>
+                  <label className="px-2 py-1 rounded-lg bg-[#0066FF]/20 hover:bg-[#0066FF]/35 border border-[#0066FF]/40 text-blue-200 text-[10px] font-semibold flex items-center gap-1 cursor-pointer">
+                    <Camera className="w-3 h-3" />
+                    {avaliandoFoto ? 'Analisando...' : 'Foto IA'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={avaliandoFoto}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) avaliarFotoTroca(f);
+                      }}
+                    />
+                  </label>
+                </div>
               </div>
 
               {obsFotoIa && (
@@ -1238,7 +1264,43 @@ export default function CrmSidebarPage() {
               </button>
             </div>
 
-            {simulacao && (
+            {simulacao && (() => {
+              const montarTextoSimulacao = () => {
+                let lista = simulacao.parcelamento;
+                if (modoTabelaParcela === 'resumo') {
+                  const dest = lista.filter((p) => [6, 10, 12, 18].includes(p.parcelas));
+                  lista = dest.length ? dest : lista.slice(0, 4);
+                } else if (modoTabelaParcela === 'selecionadas') {
+                  const sel = lista.filter((p) => parcelasSelecionadas.includes(p.parcelas));
+                  lista = sel.length ? sel : lista.slice(0, 4);
+                }
+                const linhas: string[] = [
+                  `📋 *ORÇAMENTO — ${(lojaNome || 'PhoneCenter').toUpperCase()}*`,
+                ];
+                if (modeloNovo) linhas.push(`📱 Aparelho: *${modeloNovo}*`);
+                linhas.push(`💰 Valor à vista: *${formatBRL(simulacao.valorAparelho)}*`);
+                if (simulacao.valorTroca > 0) {
+                  const descTroca = usarTroca ? `${trocaModelo} ${trocaCapacidade}`.trim() : 'Aparelho usado';
+                  linhas.push(`🔄 Troca (${descTroca}): *-${formatBRL(simulacao.valorTroca)}*`);
+                }
+                if (simulacao.entradaPix > 0) {
+                  linhas.push(`⚡ Entrada Pix: *-${formatBRL(simulacao.entradaPix)}*`);
+                }
+                linhas.push(`✅ *Saldo restante: ${formatBRL(simulacao.saldoFinanciar)}*`);
+                if (lista.length) {
+                  linhas.push('', '*Opções no Cartão:*');
+                  lista.forEach((p) => {
+                    const base = `💳 ${p.parcelas}x de *${formatBRL(p.valorParcela)}*`;
+                    linhas.push(mostrarTotalParcela ? `${base} (total ${formatBRL(p.totalComTaxa)})` : base);
+                  });
+                }
+                linhas.push('', '_Simulação sujeita à conferência presencial do aparelho._');
+                return linhas.join('\n');
+              };
+              const textoSimAtual = montarTextoSimulacao();
+              const parcela12 = simulacao.parcelamento.find((p) => p.parcelas === 12);
+
+              return (
               <div className="p-2.5 rounded-xl bg-[#0f172a] border border-[#0066FF]/40 space-y-2">
                 <div className="flex justify-between text-slate-300">
                   <span>Troca avaliada:</span>
@@ -1251,29 +1313,97 @@ export default function CrmSidebarPage() {
                   </strong>
                 </div>
 
-                <div className="max-h-40 overflow-y-auto divide-y divide-white/5 border-t border-white/10 pt-1">
-                  {simulacao.parcelamento.map((p) => (
-                    <div key={p.parcelas} className="py-1 flex justify-between text-[11px]">
-                      <span className="text-slate-300">{p.parcelas}x no cartão</span>
-                      <span className="font-semibold text-white">
-                        {formatBRL(p.valorParcela)}{' '}
-                        <span className="text-[10px] text-slate-500">
-                          ({formatBRL(p.totalComTaxa)})
-                        </span>
-                      </span>
-                    </div>
-                  ))}
+                {/* Controles de envio da tabela de parcelamento */}
+                <div className="pt-1 border-t border-white/10 space-y-1.5">
+                  <div className="grid grid-cols-3 gap-1">
+                    {(
+                      [
+                        { id: 'resumo', label: 'Resumo' },
+                        { id: 'completa', label: 'Completa' },
+                        { id: 'selecionadas', label: 'Selecionadas' },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setModoTabelaParcela(m.id)}
+                        className={`py-1 px-1.5 rounded text-[10px] font-semibold border ${
+                          modoTabelaParcela === m.id
+                            ? 'bg-[#0066FF]/30 border-[#0066FF] text-white'
+                            : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={mostrarTotalParcela}
+                      onChange={(e) => setMostrarTotalParcela(e.target.checked)}
+                      className="accent-[#0066FF]"
+                    />
+                    Mostrar total com juros na mensagem
+                  </label>
+                </div>
+
+                <div className="max-h-44 overflow-y-auto divide-y divide-white/5 border-t border-white/10 pt-1">
+                  {simulacao.parcelamento.map((p) => {
+                    const marcada = parcelasSelecionadas.includes(p.parcelas);
+                    return (
+                      <div key={p.parcelas} className="py-1 flex items-center justify-between gap-1 text-[11px]">
+                        <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                          {modoTabelaParcela === 'selecionadas' && (
+                            <input
+                              type="checkbox"
+                              checked={marcada}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setParcelasSelecionadas((prev) => [...prev, p.parcelas]);
+                                } else {
+                                  setParcelasSelecionadas((prev) => prev.filter((x) => x !== p.parcelas));
+                                }
+                              }}
+                              className="accent-[#0066FF]"
+                            />
+                          )}
+                          <span>{p.parcelas}x no cartão</span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-white">
+                            {formatBRL(p.valorParcela)}{' '}
+                            <span className="text-[10px] text-slate-500">
+                              ({formatBRL(p.totalComTaxa)})
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              enviarDiretoNoChat(
+                                `💳 *${modeloNovo || 'Simulação'}* em *${p.parcelas}x de ${formatBRL(p.valorParcela)}*${mostrarTotalParcela ? ` (total ${formatBRL(p.totalComTaxa)})` : ''}`
+                              )
+                            }
+                            className="px-1.5 py-0.5 rounded bg-emerald-600/25 hover:bg-emerald-600/45 text-emerald-200 text-[10px]"
+                            title={`Enviar apenas ${p.parcelas}x no chat`}
+                          >
+                            💬
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="grid grid-cols-3 gap-1 pt-1">
                   <button
-                    onClick={() => enviarDiretoNoChat(simulacao.textoWhatsapp)}
+                    onClick={() => enviarDiretoNoChat(textoSimAtual)}
                     className="py-1.5 px-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center justify-center gap-1"
                   >
                     <Send className="w-3 h-3" /> Enviar
                   </button>
                   <button
-                    onClick={() => copiarTexto(simulacao.textoWhatsapp, 'sim-wa')}
+                    onClick={() => copiarTexto(textoSimAtual, 'sim-wa')}
                     className="py-1.5 px-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white font-semibold flex items-center justify-center gap-1"
                   >
                     {copiadoId === 'sim-wa' ? (
@@ -1294,6 +1424,48 @@ export default function CrmSidebarPage() {
                     <Printer className="w-3 h-3" /> PDF
                   </button>
                 </div>
+
+                {/* Mensagens prontas de avaliação de volta (troca) */}
+                {simulacao.valorTroca > 0 && (
+                  <div className="grid grid-cols-2 gap-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        enviarDiretoNoChat(
+                          mensagemResultadoAvaliacaoTroca({
+                            nomeLoja: lojaNome,
+                            nomeCliente: contatoCtx.nome || cliente360?.cliente?.nome || undefined,
+                            modeloUsado: usarTroca ? trocaModelo : 'Seu aparelho',
+                            capacidadeUsado: usarTroca ? trocaCapacidade : undefined,
+                            valorAvaliado: simulacao.valorTroca,
+                            modeloNovo: modeloNovo || undefined,
+                            valorNovo: simulacao.valorAparelho,
+                            diferencaPix: simulacao.saldoFinanciar,
+                            parcela12x: parcela12?.valorParcela,
+                          })
+                        )
+                      }
+                      className="py-1.5 px-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/40 text-amber-200 text-[10px] font-semibold"
+                    >
+                      🔄 Enviar Pré-Avaliação
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        enviarDiretoNoChat(
+                          mensagemAgendarConferenciaTroca({
+                            nomeLoja: lojaNome,
+                            nomeCliente: contatoCtx.nome || cliente360?.cliente?.nome || undefined,
+                            modeloNovo: modeloNovo || undefined,
+                          })
+                        )
+                      }
+                      className="py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-[10px] font-semibold"
+                    >
+                      📍 Agendar Conferência
+                    </button>
+                  </div>
+                )}
 
                 <button
                   disabled={gerandoProposta}
@@ -1398,7 +1570,8 @@ export default function CrmSidebarPage() {
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
           </div>
         )}
 

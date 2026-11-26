@@ -12,6 +12,8 @@
   const DOCK_COLLAPSED_KEY = 'pc_crm_dock_collapsed';
   const RATES_KEY = 'pc_crm_installment_rates_v1';
   const STORE_CFG_KEY = 'pc_crm_store_cfg_v1';
+  const GEMINI_CFG_KEY = 'pc_crm_gemini_cfg_v1';
+  const LUCAS_IMPORTS_LOJA_ID = 'e2858e7b-3046-4211-ac06-3ad45e3ea6af';
 
   const DEFAULT_RATES = {
     debito: 1.99,
@@ -385,9 +387,11 @@
       '<button id="pc-suite-close" type="button" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:#cbd5e1;border-radius:8px;padding:4px 9px;font-size:11px;cursor:pointer">ESC</button>' +
       '</div>' +
       '<div class="pc-suite-tabs">' +
-      '<button type="button" class="pc-tab-btn active" data-tab="atalhos">⚡ Atalhos Suite</button>' +
-      '<button type="button" class="pc-tab-btn" data-tab="taxas">💳 Taxas & Parcelamento</button>' +
-      '<button type="button" class="pc-tab-btn" data-tab="lojas">🏪 Lojas & Estoque</button>' +
+      '<button type="button" class="pc-tab-btn active" data-tab="atalhos">⚡ Atalhos</button>' +
+      '<button type="button" class="pc-tab-btn" data-tab="taxas">💳 Parcelamento</button>' +
+      '<button type="button" class="pc-tab-btn" data-tab="troca">🔄 Avaliação Troca</button>' +
+      '<button type="button" class="pc-tab-btn" data-tab="gemini">🤖 IA Google Gemini</button>' +
+      '<button type="button" class="pc-tab-btn" data-tab="lojas">🏪 Estoque</button>' +
       '</div>' +
       '<div class="pc-suite-pane active" data-pane="atalhos">' +
       '<div class="pc-suite-grid" id="pc-suite-grid"></div>' +
@@ -399,12 +403,50 @@
       '<div class="pc-field"><label>Entrada / Troca (R$)</label><input id="pc-calc-entrada" type="number" step="0.01" min="0" value="0" /></div>' +
       '<div class="pc-field"><label>Modo da Taxa</label><select id="pc-calc-modo"><option value="repassar">Repassar ao cliente (loja recebe 100%)</option><option value="absorver">Absorver taxa (desconta do lojista)</option></select></div>' +
       '</div>' +
+      '<div class="pc-form-row" style="margin-top:6px">' +
+      '<div class="pc-field"><label>Formato de Envio</label><select id="pc-calc-formato"><option value="resumo">Resumo (6x, 10x, 12x, 18x)</option><option value="completa">Tabela Completa (1x até 18x)</option><option value="selecionadas">Apenas Parcelas Marcadas</option></select></div>' +
+      '<div class="pc-field" style="display:flex;align-items:flex-end;gap:8px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:#cbd5e1"><input id="pc-calc-show-total" type="checkbox" /> Mostrar total com juros</label></div>' +
+      '</div>' +
       '<div class="pc-actions-row">' +
       '<button type="button" class="pc-btn pc-btn-primary" id="pc-calc-insert">💬 Colar Simulação no Chat</button>' +
       '<button type="button" class="pc-btn" id="pc-calc-copy">📋 Copiar Texto</button>' +
-      '<button type="button" class="pc-btn" id="pc-calc-reset">↺ Restaurar Taxas Padrão</button>' +
+      '<button type="button" class="pc-btn" id="pc-calc-sync-loja">🔄 Taxas da Loja</button>' +
+      '<button type="button" class="pc-btn" id="pc-calc-reset">↺ Padrão</button>' +
       '</div>' +
-      '<table class="pc-calc-table"><thead><tr><th>Forma</th><th>Taxa (%)</th><th>Parcela</th><th>Total Cliente</th><th>Líquido Loja</th></tr></thead><tbody id="pc-calc-tbody"></tbody></table>' +
+      '<table class="pc-calc-table"><thead><tr><th>Sel</th><th>Forma</th><th>Taxa (%)</th><th>Parcela</th><th>Total</th><th>Líquido</th><th>Enviar</th></tr></thead><tbody id="pc-calc-tbody"></tbody></table>' +
+      '</div>' +
+      '<div class="pc-suite-pane" data-pane="troca">' +
+      '<div class="pc-form-row">' +
+      '<div class="pc-field"><label>Nome do Cliente (opcional)</label><input id="pc-troca-cliente" placeholder="Ex: João" /></div>' +
+      '<div class="pc-field"><label>Aparelho Novo Desejado (opcional)</label><input id="pc-troca-novo" placeholder="Ex: iPhone 15 Pro 256GB" /></div>' +
+      '<div class="pc-field"><label>Aparelho Usado do Cliente</label><input id="pc-troca-usado" placeholder="Ex: iPhone 13 128GB" /></div>' +
+      '<div class="pc-field"><label>Valor Avaliado na Troca (R$)</label><input id="pc-troca-valor" type="number" step="0.01" min="0" placeholder="2100" /></div>' +
+      '</div>' +
+      '<div class="pc-actions-row">' +
+      '<button type="button" class="pc-btn pc-btn-primary" id="pc-troca-pedir">📋 Pedir Dados da Volta (Checklist)</button>' +
+      '<button type="button" class="pc-btn pc-btn-green" id="pc-troca-enviar-avaliacao">🔄 Enviar Pré-Avaliação</button>' +
+      '<button type="button" class="pc-btn" id="pc-troca-agendar">📍 Agendar Conferência</button>' +
+      '</div>' +
+      '<textarea id="pc-troca-preview" rows="9" style="width:100%;margin-top:8px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#e2e8f0;font-size:12px;line-height:1.45" placeholder="A prévia da mensagem pronta aparecerá aqui..."></textarea>' +
+      '<div class="pc-actions-row" style="margin-top:6px">' +
+      '<button type="button" class="pc-btn pc-btn-primary" id="pc-troca-colar-preview">💬 Colar no Chat</button>' +
+      '<button type="button" class="pc-btn" id="pc-troca-copiar-preview">📋 Copiar</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="pc-suite-pane" data-pane="gemini">' +
+      '<div class="pc-form-row">' +
+      '<div class="pc-field"><label>Ação Google Gemini</label><select id="pc-gem-acao"><option value="responder">💬 Responder Cliente</option><option value="melhorar">✨ Melhorar / Corrigir Texto</option><option value="objecao">🛡️ Quebrar Objeção de Preço</option><option value="avaliar_troca_texto">🔄 Analisar Descrição de Troca</option><option value="livre">🧠 Prompt Livre</option></select></div>' +
+      '<div class="pc-field"><label>Modelo Google IA</label><select id="pc-gem-modelo"><option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</option><option value="gemini-2.5-pro">Gemini 2.5 Pro (Avançado)</option><option value="gemini-2.0-flash">Gemini 2.0 Flash</option></select></div>' +
+      '<div class="pc-field"><label>Chave Google AI Studio (opcional — vazio usa servidor)</label><input id="pc-gem-key" type="password" placeholder="AIza... (opcional)" /></div>' +
+      '</div>' +
+      '<textarea id="pc-gem-input" rows="4" style="width:100%;margin-top:6px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#fff;font-size:12px" placeholder="Cole aqui a mensagem do cliente ou seu rascunho..."></textarea>' +
+      '<div class="pc-actions-row" style="margin-top:6px">' +
+      '<button type="button" class="pc-btn pc-btn-primary" id="pc-gem-run">✨ Gerar com Google Gemini</button>' +
+      '<button type="button" class="pc-btn pc-btn-green" id="pc-gem-insert">💬 Colar Resposta no Chat</button>' +
+      '<button type="button" class="pc-btn" id="pc-gem-copy">📋 Copiar</button>' +
+      '</div>' +
+      '<div id="pc-gem-status" style="font-size:11px;color:#94a3b8;margin-top:6px">IA Google Gemini pronta (alternativa nativa ao ChatGPT).</div>' +
+      '<textarea id="pc-gem-output" rows="6" style="width:100%;margin-top:6px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#d1fae5;font-size:12px;line-height:1.45" placeholder="A resposta gerada pelo Google Gemini aparecerá aqui..."></textarea>' +
       '</div>' +
       '<div class="pc-suite-pane" data-pane="lojas">' +
       '<div class="pc-form-row">' +
@@ -468,8 +510,11 @@
     const calcValor = overlay.querySelector('#pc-calc-valor');
     const calcEntrada = overlay.querySelector('#pc-calc-entrada');
     const calcModo = overlay.querySelector('#pc-calc-modo');
+    const calcFormato = overlay.querySelector('#pc-calc-formato');
+    const calcShowTotal = overlay.querySelector('#pc-calc-show-total');
     const calcTbody = overlay.querySelector('#pc-calc-tbody');
     let rates = loadRates();
+    let selectedInstallments = new Set([6, 10, 12, 18]);
 
     function computeRow(base, ratePct, parcelas, modo) {
       const taxa = Math.max(0, Number(ratePct) || 0) / 100;
@@ -495,11 +540,11 @@
       const financiar = Math.max(0, valor - entrada);
       const modo = calcModo.value;
       const rows = [
-        { key: 'pix', label: 'Pix / Dinheiro', parcelas: 1, editable: false, rate: 0 },
-        { key: 'debito', label: 'Débito', parcelas: 1, editable: true, rate: rates.debito },
+        { key: 'pix', label: 'Pix / Dinheiro', parcelas: 1, editable: false, selectable: false, rate: 0 },
+        { key: 'debito', label: 'Débito', parcelas: 1, editable: true, selectable: false, rate: rates.debito },
       ];
-      [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18].forEach((n) => {
-        rows.push({ key: String(n), label: n + 'x Crédito', parcelas: n, editable: true, rate: rates[n] });
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 18].forEach((n) => {
+        rows.push({ key: String(n), label: n + 'x Crédito', parcelas: n, editable: true, selectable: true, rate: rates[n] });
       });
 
       calcTbody.innerHTML = rows
@@ -508,13 +553,18 @@
           const rateCell = r.editable
             ? '<input class="pc-rate-inp" data-rate-key="' + r.key + '" type="number" step="0.01" min="0" max="60" value="' + Number(r.rate || 0).toFixed(2) + '" />'
             : '0.00%';
+          const selCell = r.selectable
+            ? '<input type="checkbox" class="pc-inst-sel" data-inst-n="' + r.parcelas + '"' + (selectedInstallments.has(r.parcelas) ? ' checked' : '') + ' />'
+            : '—';
           return (
             '<tr>' +
+            '<td>' + selCell + '</td>' +
             '<td><strong>' + r.label + '</strong></td>' +
             '<td>' + rateCell + '</td>' +
             '<td>' + (r.parcelas > 1 ? r.parcelas + 'x de ' + formatBRL(res.parcela) : formatBRL(res.totalCliente)) + '</td>' +
             '<td>' + formatBRL(res.totalCliente) + '</td>' +
             '<td style="color:#34d399">' + formatBRL(res.liquido) + '</td>' +
+            '<td><button type="button" class="pc-btn" style="padding:2px 6px;font-size:11px" data-send-single="' + r.key + '" title="Enviar só esta opção no chat">💬</button></td>' +
             '</tr>'
           );
         })
@@ -528,6 +578,31 @@
           renderCalc();
         });
       });
+
+      calcTbody.querySelectorAll('input.pc-inst-sel').forEach((chk) => {
+        chk.addEventListener('change', (e) => {
+          const n = Number(e.target.dataset.instN);
+          if (e.target.checked) selectedInstallments.add(n);
+          else selectedInstallments.delete(n);
+        });
+      });
+
+      calcTbody.querySelectorAll('[data-send-single]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const k = btn.dataset.sendSingle;
+          const prod = (calcProduto.value || '').trim();
+          const showTotal = Boolean(calcShowTotal && calcShowTotal.checked);
+          const row = rows.find((r) => r.key === k);
+          if (!row) return;
+          const res = computeRow(financiar, row.rate, row.parcelas, modo);
+          const header = prod ? '📱 *' + prod + '*\n' : '';
+          const msg =
+            row.parcelas > 1
+              ? header + '💳 *' + row.parcelas + 'x de ' + formatBRL(res.parcela) + '*' + (showTotal ? ' (total ' + formatBRL(res.totalCliente) + ')' : '')
+              : header + '⚡ *' + row.label + ':* ' + formatBRL(res.totalCliente);
+          insertTextIntoChat(msg);
+        });
+      });
     }
 
     function buildCalcMessage() {
@@ -536,20 +611,34 @@
       const entrada = Math.max(0, Math.min(valor, Number(calcEntrada.value) || 0));
       const financiar = Math.max(0, valor - entrada);
       const modo = calcModo.value;
+      const formato = calcFormato ? calcFormato.value : 'resumo';
+      const showTotal = Boolean(calcShowTotal && calcShowTotal.checked);
+      const cfg = loadStoreCfg();
+      const nomeLoja = cfg.lojaNome || 'Lucas Imports';
       const lines = [];
-      lines.push(prod ? '📱 *' + prod + '*' : '💳 *Simulação de Pagamento — PhoneCenter*');
+      lines.push(prod ? '📱 *' + prod + '* — ' + nomeLoja : '💳 *Simulação de Pagamento — ' + nomeLoja + '*');
       if (entrada > 0) {
-        lines.push('💰 Valor total: ' + formatBRL(valor));
-        lines.push('🔄 Entrada / Troca: ' + formatBRL(entrada));
+        lines.push('💰 Valor à vista: ' + formatBRL(valor));
+        lines.push('🔄 Entrada / Troca: -' + formatBRL(entrada));
         lines.push('📌 Restante a pagar: *' + formatBRL(financiar) + '*');
       } else {
         lines.push('⚡ *No Pix / À vista:* ' + formatBRL(financiar));
       }
       lines.push('');
       lines.push('💳 *Opções no Cartão:*');
-      [1, 3, 6, 10, 12, 18].forEach((n) => {
+
+      let listaParcelas = [6, 10, 12, 18];
+      if (formato === 'completa') {
+        listaParcelas = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 18];
+      } else if (formato === 'selecionadas') {
+        const arr = Array.from(selectedInstallments).sort((a, b) => a - b);
+        listaParcelas = arr.length ? arr : [6, 10, 12, 18];
+      }
+
+      listaParcelas.forEach((n) => {
         const res = computeRow(financiar, rates[n], n, modo);
-        lines.push('• ' + n + 'x de ' + formatBRL(res.parcela) + ' (total ' + formatBRL(res.totalCliente) + ')');
+        const base = '• ' + n + 'x de *' + formatBRL(res.parcela) + '*';
+        lines.push(showTotal ? base + ' (total ' + formatBRL(res.totalCliente) + ')' : base);
       });
       lines.push('');
       lines.push('Qual opção fica melhor para você? 🚀');
@@ -574,6 +663,174 @@
     });
     renderCalc();
 
+    // --- Mensagens Prontas de Avaliação de Troca (Volta) ---
+    const trocaCliente = overlay.querySelector('#pc-troca-cliente');
+    const trocaNovo = overlay.querySelector('#pc-troca-novo');
+    const trocaUsado = overlay.querySelector('#pc-troca-usado');
+    const trocaValor = overlay.querySelector('#pc-troca-valor');
+    const trocaPreview = overlay.querySelector('#pc-troca-preview');
+
+    function buildPedirTrocaMsg() {
+      const cli = (trocaCliente.value || '').trim();
+      const novo = (trocaNovo.value || '').trim();
+      const cfg = loadStoreCfg();
+      const lojaNome = cfg.lojaNome || 'Lucas Imports';
+      const saudacao = cli ? 'Olá, *' + cli + '*! ' : 'Olá! ';
+      const interesse = novo
+        ? 'Para calcular a volta no *' + novo + '*, '
+        : 'Para agilizar a avaliação do seu aparelho na troca, ';
+      return [
+        '📱 *Avaliação do seu aparelho na troca — ' + lojaNome + '*',
+        '',
+        saudacao + interesse + 'me envie por favor:',
+        '',
+        '1️⃣ *Modelo e armazenamento* (ex: iPhone 13 128GB)',
+        '2️⃣ *Saúde da bateria (%)* — Ajustes > Bateria > Saúde',
+        '3️⃣ *Já teve alguma peça trocada?* (tela, bateria, tampa)',
+        '4️⃣ *Face ID, câmeras e botões* funcionam 100%?',
+        '5️⃣ *Tem marcas de uso, riscos ou trincados?*',
+        '6️⃣ *Possui caixa e cabo original?*',
+        '',
+        '📸 Se puder, mande *fotos da frente, traseira* e um *print da saúde da bateria*!',
+        'Assim já te passo o valor certinho da avaliação e a simulação da volta 🚀',
+      ].join('\n');
+    }
+
+    function buildPreAvaliacaoMsg() {
+      const cli = (trocaCliente.value || '').trim();
+      const novo = (trocaNovo.value || '').trim();
+      const usado = (trocaUsado.value || '').trim() || 'Seu aparelho';
+      const valTroca = Math.max(0, Number(trocaValor.value) || 0);
+      const valNovo = Math.max(0, Number(calcValor.value) || 0);
+      const cfg = loadStoreCfg();
+      const lojaNome = cfg.lojaNome || 'Lucas Imports';
+      const lines = ['🔄 *PRÉ-AVALIAÇÃO DE TROCA — ' + lojaNome.toUpperCase() + '*', ''];
+      if (cli) {
+        lines.push('Olá, *' + cli + '*! Segue sua pré-avaliação:');
+        lines.push('');
+      }
+      lines.push('📱 Seu aparelho: *' + usado + '*');
+      lines.push('✅ Valor estimado na troca: *' + formatBRL(valTroca) + '*');
+      if (novo && valNovo > 0) {
+        const diff = Math.max(0, valNovo - valTroca);
+        const res12 = computeRow(diff, rates[12], 12, calcModo.value);
+        lines.push('');
+        lines.push('✨ Aparelho escolhido: *' + novo + '* (' + formatBRL(valNovo) + ')');
+        lines.push('⚡ *Volta no Pix:* ' + formatBRL(diff));
+        lines.push('💳 *Ou em 12x no cartão:* 12x de ' + formatBRL(res12.parcela));
+      }
+      lines.push('');
+      lines.push('_*Pré-avaliação sujeita à conferência presencial do aparelho na loja._');
+      lines.push('Quer que eu reserve o aparelho ou agende sua visita hoje? 🚀');
+      return lines.join('\n');
+    }
+
+    function buildAgendarConferenciaMsg() {
+      const cli = (trocaCliente.value || '').trim();
+      const novo = (trocaNovo.value || '').trim();
+      const saudacao = cli ? 'Perfeito, *' + cli + '*! ' : 'Perfeito! ';
+      const prod = novo ? ' do *' + novo + '*' : '';
+      return [
+        saudacao + 'Para fecharmos a troca' + prod + ', fazemos uma conferência rápida do seu aparelho presencialmente (leva cerca de 5 minutinhos).',
+        '',
+        '✅ Já transferimos todos os seus dados na hora com segurança.',
+        '📍 Qual horário fica melhor para você passar hoje ou amanhã?',
+      ].join('\n');
+    }
+
+    trocaPreview.value = buildPedirTrocaMsg();
+    overlay.querySelector('#pc-troca-pedir').addEventListener('click', () => {
+      trocaPreview.value = buildPedirTrocaMsg();
+    });
+    overlay.querySelector('#pc-troca-enviar-avaliacao').addEventListener('click', () => {
+      trocaPreview.value = buildPreAvaliacaoMsg();
+    });
+    overlay.querySelector('#pc-troca-agendar').addEventListener('click', () => {
+      trocaPreview.value = buildAgendarConferenciaMsg();
+    });
+    overlay.querySelector('#pc-troca-colar-preview').addEventListener('click', () => {
+      if (trocaPreview.value.trim()) insertTextIntoChat(trocaPreview.value.trim());
+    });
+    overlay.querySelector('#pc-troca-copiar-preview').addEventListener('click', () => {
+      if (navigator.clipboard && trocaPreview.value.trim()) {
+        navigator.clipboard.writeText(trocaPreview.value.trim()).then(() => showToast('Mensagem de troca copiada!'));
+      }
+    });
+
+    // --- Integração IA Google Gemini ---
+    const gemAcao = overlay.querySelector('#pc-gem-acao');
+    const gemModelo = overlay.querySelector('#pc-gem-modelo');
+    const gemKey = overlay.querySelector('#pc-gem-key');
+    const gemInput = overlay.querySelector('#pc-gem-input');
+    const gemOutput = overlay.querySelector('#pc-gem-output');
+    const gemStatus = overlay.querySelector('#pc-gem-status');
+
+    try {
+      const savedGem = JSON.parse(window.localStorage.getItem(GEMINI_CFG_KEY) || '{}');
+      if (savedGem.modelo) gemModelo.value = savedGem.modelo;
+      if (savedGem.apiKey) gemKey.value = savedGem.apiKey;
+    } catch {
+      // ignora
+    }
+
+    const persistGem = () => {
+      try {
+        window.localStorage.setItem(
+          GEMINI_CFG_KEY,
+          JSON.stringify({ modelo: gemModelo.value, apiKey: gemKey.value.trim() })
+        );
+      } catch {
+        // ignora
+      }
+    };
+    gemModelo.addEventListener('change', persistGem);
+    gemKey.addEventListener('change', persistGem);
+
+    overlay.querySelector('#pc-gem-run').addEventListener('click', async () => {
+      const texto = (gemInput.value || '').trim();
+      if (!texto) {
+        gemStatus.textContent = 'Digite ou cole um texto para o Google Gemini analisar.';
+        return;
+      }
+      persistGem();
+      const cfg = loadStoreCfg();
+      gemStatus.textContent = 'Consultando Google Gemini (' + gemModelo.value + ')...';
+      gemOutput.value = '';
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (cfg.token) headers['X-PhoneCenter-CRM-Key'] = cfg.token;
+        if (cfg.lojaId) headers['x-phonecenter-loja-id'] = cfg.lojaId;
+        const resp = await fetch(ERP_URL + '/api/crm-bridge/ia-gemini', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            acao: gemAcao.value,
+            modelo: gemModelo.value,
+            texto,
+            geminiApiKey: gemKey.value.trim() || undefined,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          gemStatus.textContent = 'Erro Gemini: ' + (data.error || resp.status);
+          return;
+        }
+        gemOutput.value = data.resposta || '';
+        gemStatus.textContent = '✅ Gerado com Google ' + (data.modelo || gemModelo.value) + ' (' + (data.loja || 'Lucas Imports') + ')';
+      } catch (err) {
+        gemStatus.textContent = 'Erro de rede ao conectar no Google Gemini.';
+      }
+    });
+
+    overlay.querySelector('#pc-gem-insert').addEventListener('click', () => {
+      if (gemOutput.value.trim()) insertTextIntoChat(gemOutput.value.trim());
+    });
+    overlay.querySelector('#pc-gem-copy').addEventListener('click', () => {
+      if (navigator.clipboard && gemOutput.value.trim()) {
+        navigator.clipboard.writeText(gemOutput.value.trim()).then(() => showToast('Resposta Gemini copiada!'));
+      }
+    });
+
     // --- Integração Direta com Lojas & Estoque PhoneCenter ---
     const storeIdInp = overlay.querySelector('#pc-store-id');
     const storeTokenInp = overlay.querySelector('#pc-store-token');
@@ -584,6 +841,93 @@
     const savedStore = loadStoreCfg();
     storeIdInp.value = savedStore.lojaId;
     storeTokenInp.value = savedStore.token;
+
+    function detectLoggedCrmEmail() {
+      try {
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          if (!k || k.startsWith('pc_')) continue;
+          const raw = window.localStorage.getItem(k) || '';
+          if (raw.includes('messiasgmgc')) return 'messiasgmgc@gmail.com';
+          if (raw.startsWith('{') && raw.includes('@')) {
+            const obj = JSON.parse(raw);
+            const email = obj?.email || obj?.user?.email || obj?.profile?.email;
+            if (typeof email === 'string' && email.includes('@')) return email.trim().toLowerCase();
+          }
+        }
+      } catch {
+        // ignora
+      }
+      return '';
+    }
+
+    async function bootstrapAgentStore(showFeedback) {
+      let email = detectLoggedCrmEmail();
+      if (!email) {
+        try {
+          const authToken = extractCrmAuthToken();
+          const hdrs = { Accept: 'application/json' };
+          if (authToken) hdrs.Authorization = 'Bearer ' + authToken;
+          const r = await fetch(API_BASE + '/api/v1/profile', { headers: hdrs, credentials: 'include' });
+          if (r.ok) {
+            const p = await r.json();
+            email = String(p?.email || p?.payload?.email || p?.user?.email || '').trim().toLowerCase();
+          }
+        } catch {
+          // ignora
+        }
+      }
+
+      const cfgAtual = loadStoreCfg();
+      const params = new URLSearchParams();
+      if (email) params.set('email', email);
+      else if (cfgAtual.lojaId) params.set('loja_id', cfgAtual.lojaId);
+      else params.set('loja_id', LUCAS_IMPORTS_LOJA_ID);
+
+      try {
+        const resp = await fetch(ERP_URL + '/api/crm-bridge/bootstrap-agente?' + params.toString(), {
+          headers: { Accept: 'application/json' },
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          if (showFeedback) showToast('Não foi possível sincronizar taxas da loja.');
+          return;
+        }
+        const cfg = loadStoreCfg();
+        if (data.loja && data.loja.id) {
+          cfg.lojaId = data.loja.id;
+          cfg.lojaNome = data.loja.nome || 'Lucas Imports';
+          storeIdInp.value = cfg.lojaId;
+        }
+        if (data.bridgeToken) {
+          cfg.token = data.bridgeToken;
+          storeTokenInp.value = cfg.token;
+        }
+        saveStoreCfg(cfg);
+
+        if (Array.isArray(data.taxas) && data.taxas.length) {
+          data.taxas.forEach((t) => {
+            if (t && t.parcelas) rates[String(t.parcelas)] = Number(t.porcentagem || 0);
+          });
+          saveRates(rates);
+          renderCalc();
+        }
+        if (storeStatus && data.loja) {
+          storeStatus.textContent = '🏪 Vinculado automaticamente à loja: ' + data.loja.nome;
+        }
+        if (showFeedback) {
+          showToast('Taxas e loja ' + (data.loja?.nome || 'Lucas Imports') + ' sincronizadas!');
+        }
+      } catch {
+        if (showFeedback) showToast('Erro ao sincronizar loja.');
+      }
+    }
+
+    const syncLojaBtn = overlay.querySelector('#pc-calc-sync-loja');
+    if (syncLojaBtn) {
+      syncLojaBtn.addEventListener('click', () => bootstrapAgentStore(true));
+    }
+    bootstrapAgentStore(false);
 
     function persistStoreInputs() {
       const cfg = loadStoreCfg();
@@ -780,6 +1124,8 @@
       sec.innerHTML =
         '<div class="pc-sb-title">PhoneCenter</div>' +
         '<button type="button" data-pc-sb-tab="taxas"><span>💳</span><span>Taxas & Parcelamento</span></button>' +
+        '<button type="button" data-pc-sb-tab="troca"><span>🔄</span><span>Avaliação Troca</span></button>' +
+        '<button type="button" data-pc-sb-tab="gemini"><span>🤖</span><span>IA Google Gemini</span></button>' +
         '<button type="button" data-pc-sb-tab="lojas"><span>🏪</span><span>Lojas & Estoque</span></button>' +
         '<button type="button" data-pc-sb-tab="atalhos"><span>⚡</span><span>Suite CRM</span></button>' +
         '<a href="' + ERP_URL + '" target="_blank" rel="noopener noreferrer"><span>🌐</span><span>PhoneCenter ERP</span></a>';

@@ -396,6 +396,77 @@ export function calcularTabelaParcelamento(
   });
 }
 
+export type ModoTabelaParcelamento = 'resumo' | 'completa' | 'selecionadas';
+
+export function formatarTabelaParcelamentoWhatsapp(
+  parcelamento: ParcelaSimulada[],
+  opts?: {
+    nomeLoja?: string;
+    modeloNovo?: string;
+    valorAparelho?: number;
+    valorTroca?: number;
+    modeloTroca?: string;
+    entradaPix?: number;
+    saldoFinanciar?: number;
+    modoTabela?: ModoTabelaParcelamento;
+    parcelasSelecionadas?: number[];
+    mostrarTotal?: boolean;
+  }
+): string {
+  const modo = opts?.modoTabela || 'resumo';
+  const mostrarTotal = Boolean(opts?.mostrarTotal);
+  const valorAparelho = Number(opts?.valorAparelho || 0);
+  const valorTroca = Number(opts?.valorTroca || 0);
+  const entradaPix = Number(opts?.entradaPix || 0);
+  const saldoFinanciar =
+    opts?.saldoFinanciar != null
+      ? Number(opts.saldoFinanciar)
+      : Math.max(0, valorAparelho - valorTroca - entradaPix);
+
+  let selecionadas: ParcelaSimulada[];
+  if (modo === 'completa') {
+    selecionadas = parcelamento;
+  } else if (modo === 'selecionadas' && opts?.parcelasSelecionadas?.length) {
+    const setSel = new Set(opts.parcelasSelecionadas);
+    selecionadas = parcelamento.filter((p) => setSel.has(p.parcelas));
+    if (!selecionadas.length) selecionadas = parcelamento.slice(0, 4);
+  } else {
+    const destaques = parcelamento.filter((p) => [6, 10, 12, 18].includes(p.parcelas));
+    selecionadas = destaques.length ? destaques : parcelamento.slice(0, 4);
+  }
+
+  const listaParcelasTexto = selecionadas
+    .map((p) => {
+      const base = `💳 ${p.parcelas}x de *${formatarBRL(p.valorParcela)}*`;
+      return mostrarTotal ? `${base} (total ${formatarBRL(p.totalComTaxa)})` : base;
+    })
+    .join('\n');
+
+  const linhas: string[] = [
+    `📋 *ORÇAMENTO — ${(opts?.nomeLoja || 'PhoneCenter').toUpperCase()}*`,
+  ];
+  if (opts?.modeloNovo) {
+    linhas.push(`📱 Aparelho: *${opts.modeloNovo}*`);
+  }
+  if (valorAparelho > 0) {
+    linhas.push(`💰 Valor à vista: *${formatarBRL(valorAparelho)}*`);
+  }
+  if (valorTroca > 0) {
+    const descTroca = opts?.modeloTroca ? opts.modeloTroca.trim() : 'Aparelho usado';
+    linhas.push(`🔄 Troca (${descTroca}): *-${formatarBRL(valorTroca)}*`);
+  }
+  if (entradaPix > 0) {
+    linhas.push(`⚡ Entrada Pix: *-${formatarBRL(entradaPix)}*`);
+  }
+  linhas.push(`✅ *Saldo restante: ${formatarBRL(saldoFinanciar)}*`);
+  if (listaParcelasTexto) {
+    linhas.push('', '*Opções no Cartão:*', listaParcelasTexto);
+  }
+  linhas.push('', '_Simulação sujeita à conferência presencial do aparelho._');
+
+  return linhas.join('\n');
+}
+
 export async function simularPropostaBridge(
   lojaId: string,
   input: {
@@ -454,32 +525,21 @@ export async function simularPropostaBridge(
       : TAXAS_PADRAO_FALLBACK;
 
   const parcelamento = calcularTabelaParcelamento(saldoFinanciar, taxas);
-  const destaques = parcelamento.filter((p) => [6, 10, 12, 18].includes(p.parcelas));
-  const listaParcelasTexto = (destaques.length ? destaques : parcelamento.slice(0, 4))
-    .map((p) => `💳 ${p.parcelas}x de *${formatarBRL(p.valorParcela)}*`)
-    .join('\n');
+  const descTroca = input.troca?.modelo
+    ? `${input.troca.modelo} ${input.troca.capacidade || ''}`.trim()
+    : 'Aparelho usado';
 
-  const linhas: string[] = [
-    `📋 *ORÇAMENTO — ${(input.nomeLoja || 'PhoneCenter').toUpperCase()}*`,
-  ];
-  if (input.modeloNovo) {
-    linhas.push(`📱 Aparelho: *${input.modeloNovo}*`);
-  }
-  linhas.push(`💰 Valor à vista: *${formatarBRL(valorAparelho)}*`);
-  if (valorTroca > 0) {
-    const descTroca = input.troca?.modelo
-      ? `${input.troca.modelo} ${input.troca.capacidade || ''}`.trim()
-      : 'Aparelho usado';
-    linhas.push(`🔄 Troca (${descTroca}): *-${formatarBRL(valorTroca)}*`);
-  }
-  if (entradaPix > 0) {
-    linhas.push(`⚡ Entrada Pix: *-${formatarBRL(entradaPix)}*`);
-  }
-  linhas.push(`✅ *Saldo restante: ${formatarBRL(saldoFinanciar)}*`);
-  if (listaParcelasTexto) {
-    linhas.push('', '*Opções no Cartão:*', listaParcelasTexto);
-  }
-  linhas.push('', '_Simulação sujeita à conferência presencial do aparelho._');
+  const textoWhatsapp = formatarTabelaParcelamentoWhatsapp(parcelamento, {
+    nomeLoja: input.nomeLoja,
+    modeloNovo: input.modeloNovo,
+    valorAparelho,
+    valorTroca,
+    modeloTroca: descTroca,
+    entradaPix,
+    saldoFinanciar,
+    modoTabela: 'resumo',
+    mostrarTotal: false,
+  });
 
   return {
     valorAparelho,
@@ -488,7 +548,7 @@ export async function simularPropostaBridge(
     saldoFinanciar,
     avaliacaoTroca,
     parcelamento,
-    textoWhatsapp: linhas.join('\n'),
+    textoWhatsapp,
   };
 }
 
