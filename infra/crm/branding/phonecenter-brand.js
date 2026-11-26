@@ -446,13 +446,13 @@
       '<button type="button" class="pc-btn" id="pc-troca-agendar">📍 Agendar Conferência</button>' +
       '<button type="button" class="pc-btn" id="pc-troca-edit-tpl">✏️ Editar Texto Fixo</button>' +
       '</div>' +
-      '<div id="pc-troca-tpl-box" style="display:none;margin-top:8px;padding:8px;border-radius:9px;border:1px solid rgba(59,130,246,0.35);background:rgba(15,23,42,0.85)">' +
-      '<div style="font-size:11px;color:#93c5fd;margin-bottom:4px">Variáveis: <code>{{modelo_usado}}</code>, <code>{{valor_volta}}</code>, <code>{{modelo_novo}}</code>, <code>{{valor_novo}}</code>, <code>{{valor_troca}}</code>, <code>{{parcela_12x}}</code></div>' +
-      '<textarea id="pc-troca-tpl-input" rows="6" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#fff;font-size:12px"></textarea>' +
-      '<div class="pc-actions-row" style="margin-top:5px"><button type="button" class="pc-btn pc-btn-primary" id="pc-troca-save-tpl">💾 Salvar Texto Fixo</button><button type="button" class="pc-btn" id="pc-troca-reset-tpl">↺ Restaurar Padrão</button></div>' +
+      '<div id="pc-troca-tpl-box" style="display:none;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--muted)">' +
+      '<div style="font-size:11px;color:var(--muted-foreground);margin-bottom:6px">Variáveis: <code>{{modelo_usado}}</code>, <code>{{valor_volta}}</code>, <code>{{modelo_novo}}</code>, <code>{{valor_novo}}</code>, <code>{{valor_troca}}</code>, <code>{{parcela_12x}}</code></div>' +
+      '<textarea id="pc-troca-tpl-input" rows="6" style="width:100%"></textarea>' +
+      '<div class="pc-actions-row" style="margin-top:6px;margin-bottom:0"><button type="button" class="pc-btn pc-btn-primary" id="pc-troca-save-tpl">💾 Salvar Texto Fixo</button><button type="button" class="pc-btn" id="pc-troca-reset-tpl">↺ Restaurar Padrão</button></div>' +
       '</div>' +
-      '<textarea id="pc-troca-preview" rows="8" style="width:100%;margin-top:8px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#e2e8f0;font-size:12px;line-height:1.45" placeholder="A prévia da mensagem pronta aparecerá aqui..."></textarea>' +
-      '<div class="pc-actions-row" style="margin-top:6px">' +
+      '<textarea id="pc-troca-preview" rows="8" style="width:100%;margin-top:8px;line-height:1.45" placeholder="A prévia da mensagem pronta aparecerá aqui..."></textarea>' +
+      '<div class="pc-actions-row" style="margin-top:6px;margin-bottom:0">' +
       '<button type="button" class="pc-btn pc-btn-primary" id="pc-troca-colar-preview">💬 Colar no Chat</button>' +
       '<button type="button" class="pc-btn" id="pc-troca-copiar-preview">📋 Copiar</button>' +
       '</div>' +
@@ -463,14 +463,14 @@
       '<div class="pc-field"><label>Modelo Google IA</label><select id="pc-gem-modelo"><option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</option><option value="gemini-2.5-pro">Gemini 2.5 Pro (Avançado)</option><option value="gemini-2.0-flash">Gemini 2.0 Flash</option></select></div>' +
       '<div class="pc-field"><label>Chave Google AI Studio (opcional — vazio usa servidor)</label><input id="pc-gem-key" type="password" placeholder="AIza... (opcional)" /></div>' +
       '</div>' +
-      '<textarea id="pc-gem-input" rows="4" style="width:100%;margin-top:6px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#fff;font-size:12px" placeholder="Cole aqui a mensagem do cliente ou seu rascunho..."></textarea>' +
-      '<div class="pc-actions-row" style="margin-top:6px">' +
+      '<textarea id="pc-gem-input" rows="4" style="width:100%;margin-top:4px" placeholder="Cole aqui a mensagem do cliente ou seu rascunho..."></textarea>' +
+      '<div class="pc-actions-row" style="margin-top:8px">' +
       '<button type="button" class="pc-btn pc-btn-primary" id="pc-gem-run">✨ Gerar com Google Gemini</button>' +
       '<button type="button" class="pc-btn pc-btn-green" id="pc-gem-insert">💬 Colar Resposta no Chat</button>' +
       '<button type="button" class="pc-btn" id="pc-gem-copy">📋 Copiar</button>' +
       '</div>' +
-      '<div id="pc-gem-status" style="font-size:11px;color:#94a3b8;margin-top:6px">IA Google Gemini pronta (alternativa nativa ao ChatGPT).</div>' +
-      '<textarea id="pc-gem-output" rows="6" style="width:100%;margin-top:6px;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,0.14);background:#090d16;color:#d1fae5;font-size:12px;line-height:1.45" placeholder="A resposta gerada pelo Google Gemini aparecerá aqui..."></textarea>' +
+      '<div id="pc-gem-status" style="font-size:11.5px;color:var(--muted-foreground);margin-bottom:6px">IA Google Gemini pronta (alternativa nativa ao ChatGPT).</div>' +
+      '<textarea id="pc-gem-output" rows="6" style="width:100%;line-height:1.45" placeholder="A resposta gerada pelo Google Gemini aparecerá aqui..."></textarea>' +
       '</div>' +
       '<div class="pc-suite-pane" data-pane="lojas">' +
       '<div class="pc-form-row">' +

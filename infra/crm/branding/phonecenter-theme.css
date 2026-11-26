@@ -256,33 +256,39 @@ nav a[aria-current="page"] {
   color: #ffffff;
 }
 
-/* Drawer / Modal Ctrl+K PhoneCenter Suite */
+/* Drawer / Modal Ctrl+K PhoneCenter Suite — Padrão Nativo CRM (Shadcn/Radix) */
 #pc-suite-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(2, 6, 23, 0.74);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
   display: none;
   align-items: flex-start;
   justify-content: center;
-  padding: 36px 16px;
+  padding: 40px 16px;
 }
 
 #pc-suite-overlay.open {
   display: flex;
+  animation: pcFadeIn 0.14s ease-out;
+}
+
+@keyframes pcFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 #pc-suite-modal {
   width: 100%;
-  max-width: 760px;
-  background: #0f172a;
-  border: 1px solid rgba(0, 102, 255, 0.45);
-  border-radius: 18px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.68);
+  max-width: 720px;
+  background: var(--card, #0f172a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
   overflow: hidden;
-  color: #f8fafc;
-  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--card-foreground, var(--foreground, #f8fafc));
+  font-family: inherit;
 }
 
 #pc-suite-modal .pc-suite-head {
@@ -290,8 +296,8 @@ nav a[aria-current="page"] {
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  background: #090d16;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--card, #0f172a);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
 }
 
 #pc-suite-modal .pc-suite-head input {
@@ -299,42 +305,70 @@ nav a[aria-current="page"] {
   background: transparent;
   border: none;
   outline: none;
-  color: #ffffff;
-  font-size: 14px;
+  color: var(--foreground, #f8fafc);
+  font-size: 13.5px;
+}
+
+#pc-suite-modal .pc-suite-head input::placeholder {
+  color: var(--muted-foreground, #94a3b8);
+}
+
+#pc-suite-modal .pc-suite-head button {
+  background: var(--muted, rgba(255, 255, 255, 0.06)) !important;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1)) !important;
+  color: var(--muted-foreground, #94a3b8) !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#pc-suite-modal .pc-suite-head button:hover {
+  background: var(--accent, rgba(255, 255, 255, 0.12)) !important;
+  color: var(--foreground, #ffffff) !important;
 }
 
 #pc-suite-modal .pc-suite-tabs {
   display: flex;
-  gap: 6px;
-  padding: 8px 14px;
-  background: #0b1120;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 4px;
+  padding: 8px 16px;
+  background: var(--muted, #111827);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   flex-wrap: wrap;
 }
 
 #pc-suite-modal .pc-tab-btn {
-  padding: 6px 12px;
-  border-radius: 9999px;
+  padding: 6px 11px;
+  border-radius: 7px;
   font-size: 12px;
-  font-weight: 600;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(15, 23, 42, 0.8);
-  color: #94a3b8;
+  font-weight: 500;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground, #94a3b8);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#pc-suite-modal .pc-tab-btn:hover {
+  color: var(--foreground, #f8fafc);
+  background: var(--accent, rgba(255, 255, 255, 0.06));
 }
 
 #pc-suite-modal .pc-tab-btn.active {
-  background: linear-gradient(135deg, #0066ff, #0044cc);
-  border-color: rgba(96, 165, 250, 0.5);
-  color: #ffffff;
+  background: var(--card, #0f172a);
+  border-color: var(--border, rgba(255, 255, 255, 0.12));
+  color: var(--foreground, #ffffff);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 #pc-suite-modal .pc-suite-pane {
   display: none;
-  max-height: 64vh;
+  max-height: 68vh;
   overflow-y: auto;
-  padding: 14px;
+  padding: 16px;
 }
 
 #pc-suite-modal .pc-suite-pane.active {
@@ -352,23 +386,23 @@ nav a[aria-current="page"] {
   flex-direction: column;
   gap: 2px;
   padding: 10px 12px;
-  border-radius: 12px;
-  background: #090d16;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: var(--background, #090d16);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   text-decoration: none;
-  color: #e2e8f0;
+  color: var(--foreground, #e2e8f0);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 #pc-suite-modal .pc-suite-item:hover {
-  border-color: #0066ff;
-  background: rgba(0, 102, 255, 0.15);
+  border-color: var(--primary, #0066ff);
+  background: var(--accent, rgba(0, 102, 255, 0.1));
 }
 
 #pc-suite-modal .pc-suite-sec {
   font-size: 10px;
-  font-weight: 700;
-  color: #60a5fa;
+  font-weight: 600;
+  color: var(--primary, #3b82f6);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -376,19 +410,19 @@ nav a[aria-current="page"] {
 #pc-suite-modal .pc-suite-title {
   font-size: 13px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--foreground, #ffffff);
 }
 
 #pc-suite-modal .pc-suite-desc {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--muted-foreground, #94a3b8);
 }
 
-/* Estilos da Calculadora de Taxas & Lojas PhoneCenter */
+/* Formulários, Inputs, Botões e Tabelas no padrão nativo do CRM */
 .pc-form-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 10px;
 }
 
@@ -399,25 +433,39 @@ nav a[aria-current="page"] {
 }
 
 .pc-field label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted-foreground, #94a3b8);
 }
 
 .pc-field input,
-.pc-field select {
+.pc-field select,
+#pc-suite-modal textarea,
+#pc-store-search {
   padding: 7px 10px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #090d16;
-  color: #ffffff;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--background, #090d16);
+  color: var(--foreground, #f8fafc);
   font-size: 13px;
+  font-family: inherit;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pc-field input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  accent-color: var(--primary, #0066ff);
 }
 
 .pc-field input:focus,
-.pc-field select:focus {
-  border-color: #007bff;
+.pc-field select:focus,
+#pc-suite-modal textarea:focus,
+#pc-store-search:focus {
+  border-color: var(--primary, #0066ff);
+  box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.2);
 }
 
 .pc-actions-row {
@@ -431,70 +479,86 @@ nav a[aria-current="page"] {
 .pc-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 6px 12px;
-  border-radius: 9px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
+  font-family: inherit;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #1e293b;
-  color: #f8fafc;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--secondary, #1e293b);
+  color: var(--secondary-foreground, var(--foreground, #f8fafc));
   text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
 }
 
 .pc-btn:hover {
-  border-color: #3b82f6;
-  background: #273549;
+  background: var(--accent, #273549);
+  border-color: var(--primary, #3b82f6);
 }
 
 .pc-btn-primary {
-  background: linear-gradient(135deg, #0066ff, #0044cc);
-  border-color: rgba(96, 165, 250, 0.45);
-  color: #ffffff;
+  background: var(--primary, #0066ff);
+  border-color: var(--primary, #0066ff);
+  color: var(--primary-foreground, #ffffff);
 }
 
 .pc-btn-primary:hover {
-  background: linear-gradient(135deg, #007bff, #0052cc);
+  opacity: 0.92;
+  background: var(--primary, #0066ff);
 }
 
 .pc-btn-green {
-  background: rgba(16, 185, 129, 0.2);
-  border-color: rgba(16, 185, 129, 0.5);
-  color: #6ee7b7;
+  background: #10b981;
+  border-color: #10b981;
+  color: #ffffff;
+}
+
+.pc-btn-green:hover {
+  background: #059669;
+  border-color: #059669;
 }
 
 .pc-calc-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  background: #090d16;
-  border-radius: 10px;
+  background: var(--background, #090d16);
+  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
 }
 
 .pc-calc-table th,
 .pc-calc-table td {
-  padding: 6px 8px;
+  padding: 7px 8px;
   text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  color: var(--foreground, #f8fafc);
+}
+
+.pc-calc-table tbody tr:hover {
+  background: var(--accent, rgba(255, 255, 255, 0.04));
 }
 
 .pc-calc-table th {
-  color: #94a3b8;
+  color: var(--muted-foreground, #94a3b8);
   font-weight: 600;
-  background: rgba(15, 23, 42, 0.9);
+  font-size: 11px;
+  background: var(--muted, rgba(15, 23, 42, 0.9));
 }
 
 .pc-calc-table input.pc-rate-inp {
   width: 58px;
-  padding: 3px 5px;
+  padding: 3px 6px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: #0f172a;
-  color: #ffffff;
-  font-size: 11px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  background: var(--card, #0f172a);
+  color: var(--foreground, #ffffff);
+  font-size: 11.5px;
   text-align: right;
 }
 
@@ -510,10 +574,15 @@ nav a[aria-current="page"] {
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 12px;
-  background: #090d16;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: var(--background, #090d16);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   flex-wrap: wrap;
+  transition: border-color 0.15s ease;
+}
+
+.pc-stock-card:hover {
+  border-color: var(--primary, #0066ff);
 }
 
 .pc-stock-meta {
@@ -523,22 +592,22 @@ nav a[aria-current="page"] {
 }
 
 .pc-stock-price {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
-  color: #34d399;
+  color: #10b981;
 }
 
 .pc-toast {
   position: fixed;
   right: 20px;
-  top: 20px;
+  bottom: 20px;
   z-index: 10001;
-  padding: 9px 14px;
-  border-radius: 10px;
-  background: #0f172a;
-  border: 1px solid rgba(16, 185, 129, 0.55);
-  color: #6ee7b7;
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--card, #0f172a);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  color: var(--foreground, #f8fafc);
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
