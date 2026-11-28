@@ -44,6 +44,7 @@ import { extrairDadosManutencao, isAparelhoEmManutencao } from "@/lib/manutencao
 import { useAparelhos } from "@/hooks/useAparelhos";
 import { useClientes } from "@/hooks/useClientes";
 import { useAuth } from "@/hooks/useAuth";
+import { useStoreConfig } from "@/hooks/useStoreConfig";
 import { Aparelho } from "@/lib/db/types";
 import { supabase } from "@/lib/supabaseClient";
 import { getAparelhoCodigo, cn, canViewFinancials } from "@/lib/utils";
@@ -73,6 +74,7 @@ import {
 
 export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: string[]) => void } = {}) {
   const { usuario } = useAuth();
+  const { config: storeConfig } = useStoreConfig(usuario?.lojaId);
   const {
     aparelhos,
     loading,
@@ -772,7 +774,7 @@ export function AparelhosTab({ onGerarEtiquetas }: { onGerarEtiquetas?: (ids: st
 
     const texto = gerarListaEstoqueWhatsApp(aparelhosAtivos, {
       modoAtacado,
-      nomeLoja: 'PHONE CENTER',
+      nomeLoja: storeConfig?.nomeLoja || 'PHONE CENTER',
     });
 
     // Copia para clipboard

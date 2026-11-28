@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { bateriaParaLista } from '@/lib/estoque/listaWhatsapp';
+import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { FILTRO_VENDA_VALIDA, montarCancelamento, vendaConta } from '@/lib/vendas/situacao';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { 
@@ -1059,52 +1059,28 @@ export function AtacadoTab() {
 
   // Exportar Lista Zap
   const handleExportWhatsAppAtacado = () => {
-    const dataCurta = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    
-    const grupos: Record<string, Aparelho[]> = {};
-    aparelhosEstoqueAtivo.forEach((a) => {
-      const modeloClean = a.modelo ? a.modelo.replace(/^Apple\s+/i, '').trim() : 'Outros';
-      if (!grupos[modeloClean]) grupos[modeloClean] = [];
-      grupos[modeloClean].push(a);
-    });
+    if (aparelhosEstoqueAtivo.length === 0) {
+      toast.error('Nenhum aparelho em estoque para exportar!');
+      return;
+    }
 
-    let texto = `📦 *ESTOQUE ATACADO (${dataCurta})*\n\n`;
-
-    Object.entries(grupos).forEach(([modeloHeader, itens]) => {
-      texto += `*${modeloHeader}*\n`;
-      itens.forEach((a) => {
-        const valAtacado = (a as any).precoAtacado || a.preco || 0;
-        const precoStr = valAtacado > 0 
-          ? `*R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}*` 
-          : '';
-
-        let imeiReal = (a.imei || '').trim();
-        if (!imeiReal && a.observacoes) {
-          const matchImei = a.observacoes.match(/IMEI:\s*([A-Za-z0-9]+)/i);
-          if (matchImei) imeiReal = matchImei[1];
-        }
-        const codigoDisplay = imeiReal ? imeiReal : (getAparelhoCodigo(a) || '');
-
-        // Coluna saude_bateria ou, se faltar, "Bateria: 89%" da observação.
-        const bateriaStr = bateriaParaLista(a);
-
-        const partes = [];
-        if (a.capacidade) partes.push(a.capacidade);
-        if (a.cor) partes.push(a.cor);
-        if (bateriaStr) partes.push(bateriaStr);
-
-        const detalhe = partes.join(' ');
-        const tag = codigoDisplay ? ` (${codigoDisplay})` : '';
-        const precoTag = precoStr ? ` ➔ ${precoStr}` : '';
-
-        texto += `🔘 ${detalhe}${precoTag}${tag}\n`;
-      });
-      texto += '\n';
+    const texto = gerarListaEstoqueWhatsApp(aparelhosEstoqueAtivo, {
+      modoAtacado: true,
+      nomeLoja: config?.nomeLoja || 'PHONE CENTER',
     });
 
     navigator.clipboard.writeText(texto)
       .then(() => toast.success('Lista de Atacado copiada para o WhatsApp! 📋'))
-      .catch(() => toast.error('Erro ao copiar lista.'));
+      .catch(() => {
+        const blob = new Blob([texto], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `estoque_atacado_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success('Lista de Atacado baixada como arquivo .txt!');
+      });
   };
 
   // Exportar CSV

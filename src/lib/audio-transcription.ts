@@ -21,7 +21,7 @@ export interface AudioTranscriptionResult {
 const GROQ_AUDIO_MODELS = ['whisper-large-v3-turbo', 'whisper-large-v3'] as const;
 
 const GROQ_AUDIO_PROMPT =
-  'Phone Center, Lucas Imports, iPhone, Pro Max, Plus, Mini, Galaxy, Xiaomi, Poco, Redmi, Motorola, GB, TB, IMEI, Pix, Fiado, Atacado, Varejo, Ordem de Serviço, Notinha, !fechamento, !emprestados, !estoque, !modo, !vendas, !abater, !ajuda.';
+  'Phone Center, Lucas Imports, iPhone, Pro Max, Plus, Mini, Galaxy, Xiaomi, Poco, Redmi, Motorola, GB, TB, IMEI, Pix, Fiado, Atacado, Varejo, Ordem de Serviço, Notinha, !fechamento, !emprestados, !estoque, !lista atacado, !modo, !vendas, !abater, !ajuda.';
 
 const GEMINI_AUDIO_PROMPT = `Transcreva com máxima fidelidade o áudio em português do Brasil para um sistema de gestão de loja de celulares (Phone Center).
 Termos comuns do contexto: iPhone, Pro Max, Plus, Mini, Galaxy, Xiaomi, Poco, Redmi, Motorola, 64GB, 128GB, 256GB, 512GB, 1TB, IMEI, Pix, Fiado, Atacado, Varejo, Notinha, fechamento, emprestados, estoque, modo vendas.
@@ -364,15 +364,21 @@ export function normalizarComandoFaladoParaBot(textoBruto: string): {
     return { textoLimpo, comandoNormalizado: '!modo' };
   }
 
-  // 6. Lista de estoque / cardápio (`!estoque` / `!estoque completo`)
+  // 6. Lista de estoque / cardápio (`!estoque` / `!lista atacado` / `!estoque completo`)
   const matchListaEstoque = semPontuacaoFinal.match(
-    /^(?:(?:manda(?:r)?|envia(?:r)?|gera(?:r)?|passa(?:r)?|ver|mostra(?:r)?|quero)\s+(?:o\s+|a\s+)?)?(?:lista\s+(?:atualizada|de\s+estoque|do\s+estoque)|estoque(?:\s+atualizado)?|card[aá]pio|tabela)(?:\s+(complet[ao]|(?:no\s+|de\s+)?atacado|detalhad[ao]))?$/i
+    /^(?:(?:manda(?:r)?|envia(?:r)?|gera(?:r)?|passa(?:r)?|ver|mostra(?:r)?|quero)\s+(?:o\s+|a\s+)?)?(?:lista(?:\s+(?:atualizada|de\s+estoque|do\s+estoque))?|estoque(?:\s+atualizado)?|card[aá]pio|tabela)(?:\s+(complet[ao]|(?:no\s+|de\s+|do\s+)?atacado|detalhad[ao]))?$/i
   );
   if (matchListaEstoque) {
-    const completo = Boolean(matchListaEstoque[1]);
+    const qualificador = (matchListaEstoque[1] || '').toLowerCase();
+    const isAtacado = qualificador.includes('atacado');
+    const isCompleto = Boolean(qualificador) && !isAtacado;
     return {
       textoLimpo,
-      comandoNormalizado: completo ? '!estoque completo' : '!estoque',
+      comandoNormalizado: isAtacado
+        ? '!lista atacado'
+        : isCompleto
+          ? '!estoque completo'
+          : '!estoque',
     };
   }
 

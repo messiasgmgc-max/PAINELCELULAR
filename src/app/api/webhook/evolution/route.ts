@@ -29,7 +29,7 @@ import {
   type PapelUsuario,
 } from './capabilities';
 import { estaNoEstoque, patchSaida, patchRestauracao } from '@/lib/estoque/ciclo';
-import { gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
+import { detectarComandoListaEstoque, gerarListaEstoqueWhatsApp } from '@/lib/estoque/listaWhatsapp';
 import { buscarTodasPaginas } from '@/lib/supabase/paginar';
 import { aplicarMudancaEstoque, gerarLoteId, registrarEntradaEstoque } from '@/lib/estoque/movimentacoes';
 import { ErroVenda, registrarVendaAtomica } from '@/lib/vendas/vendaAtomica';
@@ -4523,7 +4523,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const comandoEstoquePermitido = /^!(?:modo|config|ajuda|menu|estoque|lista|entradas?|importar|checarimei|etiquetas?|manutencao|manuten[cç][aã]o|baixa|emprestados?|emprestar|devolver|devolvido|fechamento|fechamentodia|resumodia|limparestoque|conferencia|buscar|modelo)(?=\s|$)/i.test(
+      const comandoEstoquePermitido = /^!(?:modo|config|ajuda|menu|estoque|lista(?:atacado)?|entradas?|importar|checarimei|etiquetas?|manutencao|manuten[cç][aã]o|baixa|emprestados?|emprestar|devolver|devolvido|fechamento|fechamentodia|resumodia|limparestoque|conferencia|buscar|modelo)(?=\s|$)/i.test(
         lowerText
       );
       if (ehComandoExplicito && !comandoEstoquePermitido) {
@@ -4533,9 +4533,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const ehPedidoLista = /^(?:manda|envia|gera|passa|ver|quero)?\s*(?:a\s+)?lista(?:\s+atualizada|\s+de\s+estoque|\s+do\s+estoque)?$/i.test(
-        lowerText
-      );
+      const ehPedidoLista = detectarComandoListaEstoque(lowerText) !== null;
       const ehOperacaoEstoque =
         ehComandoModo ||
         ehComandoFechamento ||
@@ -6218,23 +6216,16 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       }
     }
 
-    // ── 10. COMANDO: !estoque, !lista e !estoque completo ──
-    const ehPedidoListaEstoque =
-      /^!\s*estoque\b/i.test(lowerText) ||
-      /^!\s*lista\b/i.test(lowerText) ||
-      lowerText === 'estoque' ||
-      lowerText === 'cardapio' ||
-      lowerText === 'tabela' ||
-      /^(?:manda|envia|gera|passa|ver|quero)?\s*(?:a\s+)?lista(?:\s+atualizada|\s+de\s+estoque|\s+do\s+estoque)?$/i.test(
-        lowerText
-      );
-    if (ehPedidoListaEstoque) {
+    // ── 10. COMANDO: !estoque, !lista, !lista atacado e !estoque completo ──
+    const modoListaEstoque = detectarComandoListaEstoque(lowerText);
+    if (modoListaEstoque) {
       const resolvedLojaId = lojaId || (await resolverLojaId(instanceName));
       if (!resolvedLojaId) {
         await enviarMensagemWhatsApp(instanceName, targetDestination, "❌ Não consegui identificar sua loja para executar este comando, contate o suporte");
         return NextResponse.json({ status: 'error', message: 'Loja não identificada' }, { status: 200 });
       }
-      const isCompleto = lowerText.includes('completo') || lowerText.includes('atacado') || lowerText.includes('detalhe');
+      const isAtacado = modoListaEstoque === 'atacado';
+      const isCompleto = modoListaEstoque === 'completo';
 
       const { data: loja } = await supabase
         .from('lojas')
@@ -6244,7 +6235,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
 
       const isLucas = await verificarSeLojaLucasImports(resolvedLojaId, instanceName);
 
-      // Em grupos: se NÃO for a Lucas Imports, apenas o próprio cliente/dono da loja pode disparar o comando !estoque
+      // Em grupos: se NÃO for a Lucas Imports, apenas o próprio cliente/dono da loja pode disparar o comando !estoque / !lista atacado
       if (isGroup && !isLucas) {
         const lojaTelefone = (loja?.telefone || '').replace(/\D/g, '');
 
@@ -6271,23 +6262,30 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
       const aparelhos = (aparelhosBrutos || []).filter(estaNoEstoque);
 
       if (!aparelhos || aparelhos.length === 0) {
-        const nomeLoja = (loja?.nome || 'PHONE CENTER').trim();
-        await enviarMensagemWhatsApp(instanceName, targetDestination, `📋 *ESTOQUE - ${nomeLoja}*\n\nNenhum aparelho disponível em estoque no momento.`);
+        const nomeLoja = (loja?.nome || 'PHONE CENTER').trim().toUpperCase();
+        const tituloVazio = isAtacado
+          ? `📦 *ESTOQUE ATACADO - ${nomeLoja}*`
+          : `📋 *ESTOQUE - ${nomeLoja}*`;
+        await enviarMensagemWhatsApp(instanceName, targetDestination, `${tituloVazio}\n\nNenhum aparelho disponível em estoque no momento.`);
         return NextResponse.json({ status: 'ok', message: 'Estoque vazio.' }, { status: 200 });
       }
 
       const mensagemBase = gerarListaEstoqueWhatsApp(aparelhos, {
-        modoAtacado: isCompleto,
+        modoAtacado: isAtacado || isCompleto,
+        incluirCodigo: isCompleto,
+        incluirManutencao: isCompleto,
         nomeLoja: loja?.nome || 'PHONE CENTER',
       });
 
-      const rodape = isCompleto
-        ? `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`
-        : `\n\n💡 _Para ver códigos e preços de atacado envie:_ *!estoque completo*`;
+      const rodape = isAtacado
+        ? ''
+        : isCompleto
+          ? `\n\n💡 _Para vender um aparelho envie:_ *!vender [CÓDIGO/IMEI] [VALOR]*`
+          : `\n\n💡 _Para lista de atacado envie:_ *!lista atacado*`;
 
       const mensagemEstoque = mensagemBase + rodape;
       await enviarMensagemWhatsApp(instanceName, targetDestination, mensagemEstoque);
-      return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens).` }, { status: 200 });
+      return NextResponse.json({ status: 'ok', message: `Estoque enviado (${aparelhos.length} itens, modo=${modoListaEstoque}).` }, { status: 200 });
     }
 
     // ── 10.1. COMANDO: !buscar [modelo / termo] ──
@@ -6572,7 +6570,7 @@ Envie o modelo que deseja consultar no estoque:
 🎯 *Neste modo, o bot opera exclusivamente com o estoque (separado de vendas):*
 • Registra *entradas* de aparelhos (usando o mesmo padrão do *Importar > Lista Simples*).
 • Consulta *saídas*, IMEIs, datas de entrada/saída e dúvidas sobre aparelhos.
-• Envia a *lista atualizada* de estoque (*!estoque*, *!lista* ou *"manda a lista atualizada"*).
+• Envia a *lista atualizada* de estoque (*!estoque*, *!lista*, *!lista atacado* ou *"manda a lista atualizada"*).
 • 🤫 *Ignora formulários de venda (reservados ao !modo vendas) e conversas paralelas.*
 
 💡 _Para voltar ou trocar envie:_ *!modo completo* ou *!modo vendas*`;
@@ -7690,7 +7688,8 @@ ${respostaConversaIA.erroLog || 'Nenhum modelo Gemini respondeu com sucesso.'}
 \`\`\`
 
 💡 *Dica:* Enquanto nossa equipe técnica analisa, você pode utilizar os comandos operacionais do robô:
-• *!estoque* - Ver aparelhos disponíveis e valores
+• *!estoque* - Ver aparelhos disponíveis com IMEI
+• *!lista atacado* - Ver lista de atacado com valores e obs
 • *!buscar [modelo]* - Localizar aparelho por modelo (ex: !buscar 15pm)
 • *!vender* - Registrar venda na hora
 • *!fiado* ou *!saldo* - Consultar devedores e recebíveis

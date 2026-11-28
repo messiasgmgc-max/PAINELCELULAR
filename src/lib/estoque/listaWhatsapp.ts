@@ -17,7 +17,9 @@ function tirarParentesesDeFora(texto: string): string {
 export function observacaoParaLista(observacoes: unknown): string {
   if (typeof observacoes !== 'string' || !observacoes.trim()) return '';
 
-  for (const bruto of observacoes.split('|')) {
+  const semTagsManutencao = observacoes.replace(/\[MANUTENCAO:[^\]]*\]/gi, '');
+
+  for (const bruto of semTagsManutencao.split('|')) {
     const segmento = bruto.replace(EMOJI, '').trim();
     if (!segmento || SEGMENTO_TECNICO.test(segmento)) continue;
     if (/^\d{1,3}\s*%(\s*bat[a-z]*)?$/i.test(segmento)) continue;
@@ -270,17 +272,66 @@ export function classificarTipoEstoque(a: any): TipoSecaoEstoque {
 export interface OpcoesListaEstoque {
   modoAtacado?: boolean;
   nomeLoja?: string;
+  /** Inclui IMEI/código no modo atacado (usado em `!estoque completo`). Padrão: false no atacado, true no estoque normal. */
+  incluirCodigo?: boolean;
+  /** Inclui aparelhos em manutenção na lista (usado em `!estoque completo`). Padrão: false. */
+  incluirManutencao?: boolean;
+}
+
+export type ModoComandoListaEstoque = 'estoque' | 'atacado' | 'completo';
+
+/**
+ * Identifica se uma mensagem do WhatsApp pede a lista de estoque
+ * (`!estoque`, `!lista`, `!lista atacado`, `!estoque completo`, etc.)
+ * e retorna o modo correspondente, ou `null` se não for um pedido de lista.
+ */
+export function detectarComandoListaEstoque(texto: string): ModoComandoListaEstoque | null {
+  const lower = String(texto || '').trim().toLowerCase();
+  if (!lower) return null;
+
+  const ehPedido =
+    /^!\s*estoque\b/i.test(lower) ||
+    /^!\s*lista(?:\s*atacado)?\b/i.test(lower) ||
+    lower === 'estoque' ||
+    lower === 'cardapio' ||
+    lower === 'cardápio' ||
+    lower === 'tabela' ||
+    /^(?:manda|envia|gera|passa|ver|quero)?\s*(?:a\s+)?lista(?:\s+(?:atualizada|de\s+estoque|do\s+estoque|(?:de\s+|do\s+|no\s+)?atacado))?$/i.test(
+      lower
+    );
+
+  if (!ehPedido) return null;
+
+  if (/\batacado\b/i.test(lower) || /^!\s*listaatacado\b/i.test(lower)) {
+    return 'atacado';
+  }
+  if (lower.includes('complet') || lower.includes('detalhe')) {
+    return 'completo';
+  }
+  return 'estoque';
+}
+
+function valorAtacadoItem(a: any): number {
+  const candidatos = [a?.precoAtacado, a?.preco_atacado, a?.preco];
+  for (const c of candidatos) {
+    const num = Number(c);
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+  return 0;
 }
 
 /**
- * Gera a mensagem formatada de estoque para WhatsApp (Varejo ou Atacado).
- * Aparelhos com técnico / em manutenção são automaticamente EXCLUÍDOS do varejo.
+ * Gera a mensagem formatada de estoque para WhatsApp (Estoque geral ou Atacado).
+ * Aparelhos com técnico / em manutenção são excluídos por padrão (exceto quando `incluirManutencao: true`).
+ * No modo atacado, substitui o IMEI/código ao lado do aparelho pelo valor de atacado + observação.
  */
 export function gerarListaEstoqueWhatsApp(
   aparelhos: any[],
   opcoes: OpcoesListaEstoque = {}
 ): string {
   const modoAtacado = Boolean(opcoes.modoAtacado);
+  const incluirCodigo = opcoes.incluirCodigo ?? !modoAtacado;
+  const incluirManutencao = Boolean(opcoes.incluirManutencao);
   const nomeLoja = (opcoes.nomeLoja || 'PHONE CENTER').trim().toUpperCase();
 
   // 1. Filtra aparelhos ativos no estoque
@@ -290,8 +341,8 @@ export function gerarListaEstoqueWhatsApp(
     if (a.status === 'vendido' || a.status === 'baixado' || a.condicao === 'vendido') return false;
     if (typeof estaNoEstoque === 'function' && !estaNoEstoque(a)) return false;
 
-    // REGRA SOLICITADA: Aparelhos com técnicos / em manutenção NÃO aparecem na lista de varejo!
-    if (!modoAtacado && isAparelhoEmManutencao(a)) {
+    // Aparelhos com técnicos / em manutenção não entram na lista de venda (varejo nem atacado)
+    if (!incluirManutencao && isAparelhoEmManutencao(a)) {
       return false;
     }
     return true;
@@ -377,7 +428,7 @@ export function gerarListaEstoqueWhatsApp(
           const capacidadeStr = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
 
           let corLimpa = String(a.cor || '')
-            .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '')
+            .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]/gu, '')
             .trim();
           if (corLimpa.toLowerCase() === 'padrão' || corLimpa.toLowerCase() === 'padrao') {
             corLimpa = '';
@@ -385,9 +436,9 @@ export function gerarListaEstoqueWhatsApp(
 
           const bateriaStr = bateriaParaLista(a);
 
-          const valAtacado = (a as any).precoAtacado || a.preco_atacado || a.preco || 0;
+          const valAtacado = valorAtacadoItem(a);
           const precoAtacadoStr = valAtacado > 0
-            ? `*R$ ${Number(valAtacado).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}*`
+            ? `*R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}*`
             : '';
 
           const obsCurta = observacaoParaLista(a.observacoes);
@@ -404,11 +455,11 @@ export function gerarListaEstoqueWhatsApp(
 
           let linhaItem = '';
           if (modoAtacado) {
-            const tagCodigo = codigoDisplay ? ` (${codigoDisplay})` : '';
-            const precoTag = precoAtacadoStr ? ` ➔ ${precoAtacadoStr}` : '';
+            const precoTag = precoAtacadoStr ? ` - ${precoAtacadoStr}` : '';
+            const tagCodigo = incluirCodigo && codigoDisplay ? ` (${codigoDisplay})` : '';
             linhaItem = `${emoji}${detalheItem}${qtdTag}${precoTag}${tagCodigo}${obsExtra}`;
           } else {
-            const tagCodigo = codigoDisplay ? ` - ${codigoDisplay}` : '';
+            const tagCodigo = incluirCodigo && codigoDisplay ? ` - ${codigoDisplay}` : '';
             linhaItem = `${emoji}${detalheItem}${qtdTag}${tagCodigo}${obsExtra}`;
           }
 

@@ -138,6 +138,14 @@ test('normalizarComandoFaladoParaBot converte modos, estoque, ajuda e confirmaç
     '!estoque completo'
   );
   assert.equal(
+    normalizarComandoFaladoParaBot('Manda a lista de atacado.').comandoNormalizado,
+    '!lista atacado'
+  );
+  assert.equal(
+    normalizarComandoFaladoParaBot('Manda o estoque no atacado.').comandoNormalizado,
+    '!lista atacado'
+  );
+  assert.equal(
     normalizarComandoFaladoParaBot('Mostra o menu de ajuda.').comandoNormalizado,
     '!ajuda'
   );

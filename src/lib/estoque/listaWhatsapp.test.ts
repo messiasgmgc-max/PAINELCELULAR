@@ -5,6 +5,7 @@ import {
   observacaoParaLista,
   gerarListaEstoqueWhatsApp,
   sortGruposModelos,
+  detectarComandoListaEstoque,
 } from './listaWhatsapp';
 
 describe('Lista de estoque para WhatsApp', () => {
@@ -112,5 +113,120 @@ describe('Lista de estoque para WhatsApp', () => {
     const idxSemi15p = blocoSeminovos.indexOf('*iPhone 15 Pro (1)*');
     assert.ok(idxSemi16 !== -1 && idxSemi16e !== -1 && idxSemi15p !== -1);
     assert.ok(idxSemi16 < idxSemi16e && idxSemi16e < idxSemi15p);
+  });
+
+  it('lista de atacado segue o mesmo padrão da lista de estoque, trocando IMEI por valor de atacado e obs', () => {
+    const estoque = [
+      {
+        id: '1',
+        modelo: 'iPhone 16 Pro Max',
+        capacidade: '256GB',
+        cor: 'Natural',
+        condicao: 'novo',
+        status: 'disponivel',
+        ativo: true,
+        imei: '351111111111111',
+        codigo: '11112222',
+        preco: 7500,
+        precoAtacado: 6800,
+      },
+      {
+        id: '2',
+        modelo: 'iPhone 15 Pro',
+        capacidade: '256GB',
+        cor: 'Azul',
+        condicao: 'seminovo',
+        saude_bateria: '90%',
+        status: 'disponivel',
+        ativo: true,
+        imei: '352222222222222',
+        codigo: '33334444',
+        preco: 5200,
+        preco_atacado: 4800,
+        observacoes: 'Obs: (CAM USADA) | ID: 33334444 | Bateria: 90% | IMEI: 352222222222222',
+      },
+      {
+        id: '3',
+        modelo: 'iPhone 14',
+        capacidade: '128GB',
+        cor: 'Preto',
+        condicao: 'seminovo',
+        saude_bateria: '88%',
+        status: 'disponivel',
+        ativo: true,
+        imei: '353333333333333',
+        preco: 2900,
+        observacoes: 'Obs: TELA TROCADA | IMEI: 353333333333333',
+      },
+      // Em manutenção não deve aparecer nem no varejo nem no atacado
+      {
+        id: '4',
+        modelo: 'iPhone 13',
+        capacidade: '128GB',
+        cor: 'Branco',
+        condicao: 'seminovo',
+        status: 'manutencao',
+        ativo: true,
+        imei: '354444444444444',
+        precoAtacado: 2100,
+        observacoes: '[MANUTENCAO:Tecnico:Joao]',
+      },
+    ];
+
+    const listaEstoque = gerarListaEstoqueWhatsApp(estoque, { nomeLoja: 'LUCAS IMPORTS' });
+    const listaAtacado = gerarListaEstoqueWhatsApp(estoque, { modoAtacado: true, nomeLoja: 'LUCAS IMPORTS' });
+
+    // Mesmo total e mesmas seções do !estoque (sem manutenção)
+    assert.match(listaEstoque, /Total: \*3 aparelhos\* em estoque/);
+    assert.match(listaAtacado, /Total: \*3 aparelhos\* em estoque/);
+    assert.match(listaAtacado, /🆕 Lacrados\/Novos: \*1\* \| 📱 Seminovos: \*2\*/);
+    assert.match(listaAtacado, /🆕 \*LACRADOS \/ NOVOS \(1\)\*/);
+    assert.match(listaAtacado, /📱 \*SEMINOVOS \(2\)\*/);
+    assert.ok(!listaAtacado.includes('MANUTENÇÃO'));
+    assert.ok(!listaAtacado.includes('iPhone 13'));
+
+    // No estoque normal aparece IMEI + obs
+    assert.ok(listaEstoque.includes('🔘 256GB Natural - 351111111111111'));
+    assert.ok(listaEstoque.includes('🔵 256GB Azul 90% - 352222222222222 (CAM USADA)'));
+
+    // Na lista de atacado NÃO aparece nenhum IMEI nem código, e aparece valor de atacado + obs
+    assert.ok(!listaAtacado.includes('351111111111111'));
+    assert.ok(!listaAtacado.includes('352222222222222'));
+    assert.ok(!listaAtacado.includes('353333333333333'));
+    assert.ok(!listaAtacado.includes('11112222'));
+    assert.ok(!listaAtacado.includes('33334444'));
+    assert.ok(listaAtacado.includes('🔘 256GB Natural - *R$ 6.800*'));
+    assert.ok(listaAtacado.includes('🔵 256GB Azul 90% - *R$ 4.800* (CAM USADA)'));
+    assert.ok(listaAtacado.includes('⚫️ 128GB Preto 88% - *R$ 2.900* (TELA TROCADA)'));
+
+    // No modo completo (interno), inclui código e manutenção quando solicitado
+    const listaCompleta = gerarListaEstoqueWhatsApp(estoque, {
+      modoAtacado: true,
+      incluirCodigo: true,
+      incluirManutencao: true,
+      nomeLoja: 'LUCAS IMPORTS',
+    });
+    assert.ok(listaCompleta.includes('🔵 256GB Azul 90% - *R$ 4.800* (352222222222222) (CAM USADA)'));
+    assert.ok(listaCompleta.includes('EM MANUTENÇÃO'));
+  });
+
+  it('detectarComandoListaEstoque diferencia !estoque, !lista atacado e !estoque completo', () => {
+    assert.equal(detectarComandoListaEstoque('!lista atacado'), 'atacado');
+    assert.equal(detectarComandoListaEstoque('!lista de atacado'), 'atacado');
+    assert.equal(detectarComandoListaEstoque('!listaatacado'), 'atacado');
+    assert.equal(detectarComandoListaEstoque('!estoque atacado'), 'atacado');
+    assert.equal(detectarComandoListaEstoque('manda a lista de atacado'), 'atacado');
+    assert.equal(detectarComandoListaEstoque('lista atacado'), 'atacado');
+
+    assert.equal(detectarComandoListaEstoque('!estoque'), 'estoque');
+    assert.equal(detectarComandoListaEstoque('!lista'), 'estoque');
+    assert.equal(detectarComandoListaEstoque('manda a lista atualizada'), 'estoque');
+    assert.equal(detectarComandoListaEstoque('estoque'), 'estoque');
+
+    assert.equal(detectarComandoListaEstoque('!estoque completo'), 'completo');
+    assert.equal(detectarComandoListaEstoque('!lista completa'), 'completo');
+
+    assert.equal(detectarComandoListaEstoque('!vender 1234 2500'), null);
+    assert.equal(detectarComandoListaEstoque('vendi um iphone atacado por 2500'), null);
   });
 });
