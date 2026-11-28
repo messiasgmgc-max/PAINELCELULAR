@@ -3,8 +3,15 @@ import { isAparelhoEmManutencao } from '@/lib/manutencao';
 import { estaNoEstoque } from '@/lib/estoque/ciclo';
 
 const LIMITE_OBSERVACAO = 40;
-const SEGMENTO_TECNICO = /^(ID|IMEI|Bateria|Saúde|Saude|BAIXA_ESTOQUE)\s*:/i;
+const SEGMENTO_TECNICO =
+  /^(?:(?:ID|IMEI|SN|S\/N|Serial|C[oó]d(?:igo)?|Bateria|Sa[uú]de|BAIXA_ESTOQUE|Origem)\s*:|(?:ID|IMEI|SN|S\/N|Serial|C[oó]d(?:igo)?)\s+[#A-Za-z0-9]*\d[A-Za-z0-9]*$)/i;
+const ORIGEM_SISTEMA =
+  /^(?:(?:Entrada|Cadastrad[oa]|Importad[oa])\b.*\bWhatsApp\b|Entrada\s+(?:via|por)\s+(?:WhatsApp|Upgrade|foto|lista|sistema|bot)\b|Cadastrad[oa]\s+via\s+WhatsApp\b|Importad[oa]\s+(?:de\s+lista|via)\s+WhatsApp\b)/i;
 const EMOJI = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
+
+function escapeRegex(valor: string): string {
+  return valor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function tirarParentesesDeFora(texto: string): string {
   let atual = texto.trim();
@@ -14,18 +21,88 @@ function tirarParentesesDeFora(texto: string): string {
   return atual;
 }
 
-export function observacaoParaLista(observacoes: unknown): string {
+function limparPontuacaoSobra(texto: string): string {
+  return texto
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s*[-–—|/:]+\s*$/g, '')
+    .replace(/^\s*[-–—|/:]+\s*/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+const CAPACIDADES_COMUNS = new Set(['32', '64', '128', '256', '512', '1024']);
+
+/**
+ * Remove IMEIs, códigos de etiqueta e números de série que possam estar
+ * misturados em campos de texto (`cor`, `observacoes`, `capacidade`) quando
+ * a lista não deve exibir identificadores (ex.: lista de atacado).
+ */
+export function removerIdentificadoresDeTexto(
+  texto: string,
+  codigosDoItem: Array<string | null | undefined> = []
+): string {
+  let atual = String(texto || '');
+  if (!atual.trim()) return '';
+
+  // 1. Remove menções explícitas a IMEI / ID / Serial / Código
+  atual = atual.replace(
+    /\b(?:imei|sn|s\/n|serial|n[º°]?\s*s[eé]rie|c[oó]d(?:igo)?|id)\s*[:#=-]?\s*[A-Za-z0-9]{3,20}\b/gi,
+    ' '
+  );
+
+  // 2. Remove códigos/IMEIs conhecidos deste aparelho
+  const codigosUnicos = new Set<string>();
+  for (const bruto of codigosDoItem) {
+    const limpo = String(bruto || '').trim();
+    if (limpo.length >= 4 && !CAPACIDADES_COMUNS.has(limpo)) {
+      codigosUnicos.add(limpo);
+    }
+    const apenasDigitos = limpo.replace(/\D/g, '');
+    if (apenasDigitos.length >= 4 && !CAPACIDADES_COMUNS.has(apenasDigitos)) {
+      codigosUnicos.add(apenasDigitos);
+    }
+  }
+
+  for (const codigo of codigosUnicos) {
+    const escaped = escapeRegex(codigo);
+    atual = atual
+      .replace(new RegExp(`\\(\\s*${escaped}\\s*\\)`, 'gi'), ' ')
+      .replace(new RegExp(`(?:^|[\\s\\-–—:/|#(])${escaped}(?=$|[\\s\\-–—:/|#),.])`, 'gi'), ' ');
+  }
+
+  // 3. Remove qualquer sequência numérica longa (8 a 17 dígitos: IMEI completo ou código de etiqueta)
+  atual = atual.replace(/(?:^|[\s\-–—:/|#(])\d{8,17}(?=$|[\s\-–—:/|#),.])/g, ' ');
+
+  // 4. Remove sufixo "- 2275" / "- F2L9922" no fim do texto (padrão de IMEI curto colado na cor/obs)
+  atual = atual.replace(/\s*[-–—]\s*(?=[A-Za-z0-9]*\d{3,})[A-Za-z0-9]{4,16}\s*$/g, ' ');
+
+  return limparPontuacaoSobra(atual);
+}
+
+export function observacaoParaLista(
+  observacoes: unknown,
+  opcoes: { ocultarIdentificadores?: boolean; codigosDoItem?: Array<string | null | undefined> } = {}
+): string {
   if (typeof observacoes !== 'string' || !observacoes.trim()) return '';
 
   const semTagsManutencao = observacoes.replace(/\[MANUTENCAO:[^\]]*\]/gi, '');
 
   for (const bruto of semTagsManutencao.split('|')) {
     const segmento = bruto.replace(EMOJI, '').trim();
-    if (!segmento || SEGMENTO_TECNICO.test(segmento)) continue;
+    if (!segmento || SEGMENTO_TECNICO.test(segmento) || ORIGEM_SISTEMA.test(segmento)) continue;
     if (/^\d{1,3}\s*%(\s*bat[a-z]*)?$/i.test(segmento)) continue;
 
     const semRotulo = segmento.replace(/^(obs|observa[cç][aã]o|observa[cç][oõ]es)\s*:\s*/i, '');
-    const limpo = tirarParentesesDeFora(semRotulo);
+    let limpo = tirarParentesesDeFora(semRotulo);
+    if (!limpo || SEGMENTO_TECNICO.test(limpo) || ORIGEM_SISTEMA.test(limpo)) continue;
+    // Um número puro de 4+ dígitos (ex.: "2275", "351234567890123") é IMEI/código, não observação
+    if (/^\d{4,}$/.test(limpo)) continue;
+
+    if (opcoes.ocultarIdentificadores) {
+      limpo = tirarParentesesDeFora(removerIdentificadoresDeTexto(limpo, opcoes.codigosDoItem));
+      if (!limpo || ORIGEM_SISTEMA.test(limpo) || /^\d{4,}$/.test(limpo)) continue;
+    }
+
     if (limpo && limpo.length <= LIMITE_OBSERVACAO) return limpo;
   }
   return '';
@@ -276,6 +353,8 @@ export interface OpcoesListaEstoque {
   incluirCodigo?: boolean;
   /** Inclui aparelhos em manutenção na lista (usado em `!estoque completo`). Padrão: false. */
   incluirManutencao?: boolean;
+  /** Exibe quantidades no cabeçalho, seções, modelos e itens. Padrão: false no atacado, true no estoque normal. */
+  mostrarQuantidade?: boolean;
 }
 
 export type ModoComandoListaEstoque = 'estoque' | 'atacado' | 'completo';
@@ -323,7 +402,7 @@ function valorAtacadoItem(a: any): number {
 /**
  * Gera a mensagem formatada de estoque para WhatsApp (Estoque geral ou Atacado).
  * Aparelhos com técnico / em manutenção são excluídos por padrão (exceto quando `incluirManutencao: true`).
- * No modo atacado, substitui o IMEI/código ao lado do aparelho pelo valor de atacado + observação.
+ * No modo atacado, oculta IMEI/código e quantidades, exibindo o valor de atacado + observação.
  */
 export function gerarListaEstoqueWhatsApp(
   aparelhos: any[],
@@ -332,6 +411,7 @@ export function gerarListaEstoqueWhatsApp(
   const modoAtacado = Boolean(opcoes.modoAtacado);
   const incluirCodigo = opcoes.incluirCodigo ?? !modoAtacado;
   const incluirManutencao = Boolean(opcoes.incluirManutencao);
+  const mostrarQuantidade = opcoes.mostrarQuantidade ?? !modoAtacado;
   const nomeLoja = (opcoes.nomeLoja || 'PHONE CENTER').trim().toUpperCase();
 
   // 1. Filtra aparelhos ativos no estoque
@@ -384,12 +464,18 @@ export function gerarListaEstoqueWhatsApp(
     .map((s) => `${s.def.emoji} ${s.def.rotuloResumo}: *${s.qtd}*`)
     .join(' | ');
 
-  let texto = modoAtacado
-    ? `📦 *ESTOQUE ATACADO - ${nomeLoja} (${dataCurta})*\nTotal: *${totalUnidades} ${labelUnidade}* em estoque\n${resumoTipos}\n\n`
-    : `🔄 *ESTOQUE DISPONÍVEL - ${nomeLoja} (${dataCurta})*\nTotal: *${totalUnidades} ${labelUnidade}* em estoque\n${resumoTipos}\n\n`;
+  const tituloPrincipal = modoAtacado
+    ? `📦 *ESTOQUE ATACADO - ${nomeLoja} (${dataCurta})*`
+    : `🔄 *ESTOQUE DISPONÍVEL - ${nomeLoja} (${dataCurta})*`;
+
+  let texto = mostrarQuantidade
+    ? `${tituloPrincipal}\nTotal: *${totalUnidades} ${labelUnidade}* em estoque\n${resumoTipos}\n\n`
+    : `${tituloPrincipal}\n\n`;
 
   secoesAtivas.forEach(({ def, itens: itensSecao, qtd: qtdSecao }) => {
-    texto += `${def.emoji} *${def.tituloSecao} (${qtdSecao})*\n\n`;
+    texto += mostrarQuantidade
+      ? `${def.emoji} *${def.tituloSecao} (${qtdSecao})*\n\n`
+      : `${def.emoji} *${def.tituloSecao}*\n\n`;
 
     // Agrupa por modelo normalizado dentro de cada tipo
     const grupos = new Map<string, { titulo: string; itens: any[] }>();
@@ -404,7 +490,9 @@ export function gerarListaEstoqueWhatsApp(
       .sort((a, b) => sortGruposModelos(a.titulo, b.titulo))
       .forEach(({ titulo: modeloHeader, itens }) => {
         const qtdModelo = itens.reduce((acc, item) => acc + quantidadeItem(item), 0);
-        texto += `*${modeloHeader} (${qtdModelo})*\n`;
+        texto += mostrarQuantidade
+          ? `*${modeloHeader} (${qtdModelo})*\n`
+          : `*${modeloHeader}*\n`;
 
         // Ordena itens dentro do modelo por capacidade, cor e bateria (maior primeiro)
         const itensOrdenados = [...itens].sort((a, b) => {
@@ -424,12 +512,28 @@ export function gerarListaEstoqueWhatsApp(
             if (matchImei) imeiReal = matchImei[1];
           }
 
-          const codigoDisplay = imeiReal ? imeiReal : (getAparelhoCodigo(a) || '');
-          const capacidadeStr = a.capacidade && a.capacidade !== 'N/A' ? `${a.capacidade}` : '';
+          const codigoEtiqueta = getAparelhoCodigo(a) || '';
+          const codigoDisplay = imeiReal ? imeiReal : codigoEtiqueta;
+          const codigosDoItem = [
+            imeiReal,
+            a.imei,
+            a.codigo,
+            a.numeroSerie,
+            a.numero_serie,
+            codigoEtiqueta,
+          ];
+
+          let capacidadeStr = a.capacidade && a.capacidade !== 'N/A' ? String(a.capacidade).trim() : '';
+          if (!incluirCodigo && capacidadeStr) {
+            capacidadeStr = removerIdentificadoresDeTexto(capacidadeStr, codigosDoItem);
+          }
 
           let corLimpa = String(a.cor || '')
             .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]/gu, '')
             .trim();
+          if (!incluirCodigo && corLimpa) {
+            corLimpa = removerIdentificadoresDeTexto(corLimpa, codigosDoItem);
+          }
           if (corLimpa.toLowerCase() === 'padrão' || corLimpa.toLowerCase() === 'padrao') {
             corLimpa = '';
           }
@@ -441,10 +545,13 @@ export function gerarListaEstoqueWhatsApp(
             ? `*R$ ${valAtacado.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}*`
             : '';
 
-          const obsCurta = observacaoParaLista(a.observacoes);
+          const obsCurta = observacaoParaLista(a.observacoes, {
+            ocultarIdentificadores: !incluirCodigo,
+            codigosDoItem,
+          });
           const obsExtra = obsCurta ? ` (${obsCurta})` : '';
           const qtdUnit = quantidadeItem(a);
-          const qtdTag = qtdUnit > 1 ? ` (x${qtdUnit})` : '';
+          const qtdTag = mostrarQuantidade && qtdUnit > 1 ? ` (x${qtdUnit})` : '';
 
           const partes = [];
           if (capacidadeStr) partes.push(capacidadeStr);

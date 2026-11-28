@@ -115,13 +115,25 @@ describe('Lista de estoque para WhatsApp', () => {
     assert.ok(idxSemi16 < idxSemi16e && idxSemi16e < idxSemi15p);
   });
 
-  it('lista de atacado segue o mesmo padrão da lista de estoque, trocando IMEI por valor de atacado e obs', () => {
+  it('descarta textos internos de origem (Entrada via WhatsApp, etc.) e preserva observação real do aparelho', () => {
+    assert.equal(observacaoParaLista('ID: 16464341 | Bateria: 83% | IMEI: 3305 | Entrada via WhatsApp por Messias'), '');
+    assert.equal(observacaoParaLista('Entrada por foto WhatsApp'), '');
+    assert.equal(observacaoParaLista('Cadastrado via WhatsApp por Lucas'), '');
+    assert.equal(observacaoParaLista('Cadastrado via WhatsApp IA (Lucas)'), '');
+    assert.equal(observacaoParaLista('Importado de lista WhatsApp (Lucas)'), '');
+    assert.equal(observacaoParaLista('Entrada via WhatsApp por Messias | Obs: CAM USADA | IMEI: 3305'), 'CAM USADA');
+    assert.equal(observacaoParaLista('Obs: Bateria trocada | Entrada via WhatsApp por Messias'), 'Bateria trocada');
+    assert.equal(observacaoParaLista('Obs: 2275 | ID: 16464341'), '');
+    assert.equal(observacaoParaLista('IMEI 351234567890123 | Bateria: 90%'), '');
+  });
+
+  it('lista de atacado não exibe IMEI (mesmo se estiver na cor/obs), não exibe quantidades e não exibe "Entrada via WhatsApp"', () => {
     const estoque = [
       {
         id: '1',
         modelo: 'iPhone 16 Pro Max',
         capacidade: '256GB',
-        cor: 'Natural',
+        cor: 'Natural - 351111111111111',
         condicao: 'novo',
         status: 'disponivel',
         ativo: true,
@@ -129,6 +141,7 @@ describe('Lista de estoque para WhatsApp', () => {
         codigo: '11112222',
         preco: 7500,
         precoAtacado: 6800,
+        observacoes: 'ID: 11112222 | IMEI: 351111111111111 | Entrada via WhatsApp por Messias',
       },
       {
         id: '2',
@@ -143,20 +156,31 @@ describe('Lista de estoque para WhatsApp', () => {
         codigo: '33334444',
         preco: 5200,
         preco_atacado: 4800,
-        observacoes: 'Obs: (CAM USADA) | ID: 33334444 | Bateria: 90% | IMEI: 352222222222222',
+        observacoes: 'Obs: (CAM USADA - 352222222222222) | ID: 33334444 | Bateria: 90% | IMEI: 352222222222222 | Entrada via WhatsApp por Messias',
       },
       {
         id: '3',
         modelo: 'iPhone 14',
         capacidade: '128GB',
-        cor: 'Preto',
+        cor: 'Preto 2275',
         condicao: 'seminovo',
         saude_bateria: '88%',
         status: 'disponivel',
         ativo: true,
-        imei: '353333333333333',
+        imei: '2275',
         preco: 2900,
-        observacoes: 'Obs: TELA TROCADA | IMEI: 353333333333333',
+        observacoes: 'Obs: TELA TROCADA | IMEI 2275',
+      },
+      {
+        id: '5',
+        modelo: 'AirPods Pro 2',
+        categoria: 'acessorio',
+        cor: 'Branco',
+        condicao: 'novo',
+        quantidade: 3,
+        status: 'disponivel',
+        ativo: true,
+        precoAtacado: 950,
       },
       // Em manutenção não deve aparecer nem no varejo nem no atacado
       {
@@ -176,38 +200,49 @@ describe('Lista de estoque para WhatsApp', () => {
     const listaEstoque = gerarListaEstoqueWhatsApp(estoque, { nomeLoja: 'LUCAS IMPORTS' });
     const listaAtacado = gerarListaEstoqueWhatsApp(estoque, { modoAtacado: true, nomeLoja: 'LUCAS IMPORTS' });
 
-    // Mesmo total e mesmas seções do !estoque (sem manutenção)
-    assert.match(listaEstoque, /Total: \*3 aparelhos\* em estoque/);
-    assert.match(listaAtacado, /Total: \*3 aparelhos\* em estoque/);
-    assert.match(listaAtacado, /🆕 Lacrados\/Novos: \*1\* \| 📱 Seminovos: \*2\*/);
-    assert.match(listaAtacado, /🆕 \*LACRADOS \/ NOVOS \(1\)\*/);
-    assert.match(listaAtacado, /📱 \*SEMINOVOS \(2\)\*/);
+    // No !estoque normal mantém quantidades e IMEI, mas SEM "Entrada via WhatsApp"
+    assert.match(listaEstoque, /Total: \*6 aparelhos\* em estoque/);
+    assert.ok(!listaEstoque.includes('Entrada via WhatsApp'));
+    assert.ok(listaEstoque.includes('351111111111111'));
+
+    // Na lista de atacado NÃO aparece quantidade em lugar nenhum (nem Total, nem resumo, nem seções, nem modelos, nem x3)
+    assert.ok(!listaAtacado.includes('Total:'));
+    assert.ok(!listaAtacado.includes('Lacrados/Novos:'));
+    assert.ok(listaAtacado.includes('🆕 *LACRADOS / NOVOS*\n'));
+    assert.ok(listaAtacado.includes('📱 *SEMINOVOS*\n'));
+    assert.ok(listaAtacado.includes('🎧 *ACESSÓRIOS*\n'));
+    assert.ok(listaAtacado.includes('*iPhone 16 Pro Max*\n'));
+    assert.ok(listaAtacado.includes('*iPhone 15 Pro*\n'));
+    assert.ok(!listaAtacado.includes('(1)'));
+    assert.ok(!listaAtacado.includes('(2)'));
+    assert.ok(!listaAtacado.includes('(3)'));
+    assert.ok(!listaAtacado.includes('(x3)'));
     assert.ok(!listaAtacado.includes('MANUTENÇÃO'));
     assert.ok(!listaAtacado.includes('iPhone 13'));
+    assert.ok(!listaAtacado.includes('Entrada via WhatsApp'));
 
-    // No estoque normal aparece IMEI + obs
-    assert.ok(listaEstoque.includes('🔘 256GB Natural - 351111111111111'));
-    assert.ok(listaEstoque.includes('🔵 256GB Azul 90% - 352222222222222 (CAM USADA)'));
-
-    // Na lista de atacado NÃO aparece nenhum IMEI nem código, e aparece valor de atacado + obs
+    // Na lista de atacado NÃO aparece nenhum IMEI nem código (nem quando estavam sujos em cor/obs)
     assert.ok(!listaAtacado.includes('351111111111111'));
     assert.ok(!listaAtacado.includes('352222222222222'));
-    assert.ok(!listaAtacado.includes('353333333333333'));
+    assert.ok(!listaAtacado.includes('2275'));
     assert.ok(!listaAtacado.includes('11112222'));
     assert.ok(!listaAtacado.includes('33334444'));
     assert.ok(listaAtacado.includes('🔘 256GB Natural - *R$ 6.800*'));
     assert.ok(listaAtacado.includes('🔵 256GB Azul 90% - *R$ 4.800* (CAM USADA)'));
     assert.ok(listaAtacado.includes('⚫️ 128GB Preto 88% - *R$ 2.900* (TELA TROCADA)'));
+    assert.ok(listaAtacado.includes('🎧 Branco - *R$ 950*'));
 
-    // No modo completo (interno), inclui código e manutenção quando solicitado
+    // No modo completo (interno), inclui código, quantidade e manutenção quando solicitado
     const listaCompleta = gerarListaEstoqueWhatsApp(estoque, {
       modoAtacado: true,
       incluirCodigo: true,
       incluirManutencao: true,
+      mostrarQuantidade: true,
       nomeLoja: 'LUCAS IMPORTS',
     });
-    assert.ok(listaCompleta.includes('🔵 256GB Azul 90% - *R$ 4.800* (352222222222222) (CAM USADA)'));
+    assert.ok(listaCompleta.includes('Total: *7 aparelhos* em estoque'));
     assert.ok(listaCompleta.includes('EM MANUTENÇÃO'));
+    assert.ok(listaCompleta.includes('(352222222222222)'));
   });
 
   it('detectarComandoListaEstoque diferencia !estoque, !lista atacado e !estoque completo', () => {

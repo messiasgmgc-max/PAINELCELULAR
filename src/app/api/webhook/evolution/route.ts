@@ -1949,7 +1949,7 @@ async function processarListaPrecos(lines: string[], senderName: string, lojaId:
         status: 'disponivel',
         preco: basePrice,
         ativo: true,
-        observacoes: `Importado de lista WhatsApp (${senderName})`,
+        observacoes: null,
       }).select('id, loja_id, ativo, status, condicao').single();
 
       if (erroCadastro) {
@@ -4523,7 +4523,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const comandoEstoquePermitido = /^!(?:modo|config|ajuda|menu|estoque|lista(?:atacado)?|entradas?|importar|checarimei|etiquetas?|manutencao|manuten[cç][aã]o|baixa|emprestados?|emprestar|devolver|devolvido|fechamento|fechamentodia|resumodia|limparestoque|conferencia|buscar|modelo)(?=\s|$)/i.test(
+      const comandoEstoquePermitido = /^!\s*(?:modo|config|ajuda|menu|estoque|lista(?:atacado)?|entradas?|importar|checarimei|etiquetas?|manutencao|manuten[cç][aã]o|baixa|emprestados?|emprestar|devolver|devolvido|fechamento|fechamentodia|resumodia|limparestoque|conferencia|buscar|modelo)(?=\s|$)/i.test(
         lowerText
       );
       if (ehComandoExplicito && !comandoEstoquePermitido) {
@@ -5842,7 +5842,7 @@ Os relatórios de vendas e auditoria da loja já foram atualizados. 🚀`;
         status: 'disponivel',
         ativo: true,
         dataCadastro: new Date().toISOString(),
-        observacoes: `Cadastrado via WhatsApp IA (${pushName})`,
+        observacoes: null,
       };
 
       // estoque-guard: auditado
@@ -6274,6 +6274,7 @@ ID do Sistema: \`${inserido?.id?.slice(0, 8) || 'Criado'}\` ✨`;
         modoAtacado: isAtacado || isCompleto,
         incluirCodigo: isCompleto,
         incluirManutencao: isCompleto,
+        mostrarQuantidade: !isAtacado,
         nomeLoja: loja?.nome || 'PHONE CENTER',
       });
 

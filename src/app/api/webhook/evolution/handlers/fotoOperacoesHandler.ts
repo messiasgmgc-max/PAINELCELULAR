@@ -507,7 +507,7 @@ export async function executarEntradaEstoquePorFoto(
     ativo: true,
     custo: dados.custo || 0,
     preco: dados.preco || 0,
-    observacoes: partesObs.length > 0 ? partesObs.join(' | ') : 'Entrada por foto WhatsApp',
+    observacoes: partesObs.length > 0 ? partesObs.join(' | ') : null,
     dataCadastro: dataCadastroIso,
   };
 

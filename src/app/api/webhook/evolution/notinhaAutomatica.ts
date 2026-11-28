@@ -2264,7 +2264,7 @@ export async function emitirNotinhaVenda(
         status: 'disponivel',
         origem: 'upgrade_venda',
         dataCadastro: dataPagamentoIso,
-        observacoes: `Entrada via Upgrade (Venda WhatsApp - Cliente: ${proposta.clienteNome})`,
+        observacoes: primeiraTroca.observacoes || null,
       };
     }
 
@@ -2300,7 +2300,7 @@ export async function emitirNotinhaVenda(
               ativo: true,
               status: 'disponivel',
               dataCadastro: dataPagamentoIso,
-              observacoes: `Entrada via Upgrade (2º Aparelho - Venda WhatsApp - Cliente: ${proposta.clienteNome})`,
+              observacoes: trocaExtra.observacoes || null,
             })
             .select('*')
             .single();

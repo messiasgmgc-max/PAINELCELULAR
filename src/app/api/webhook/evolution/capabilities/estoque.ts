@@ -152,6 +152,7 @@ export const capabilitiesEstoque: Capability[] = [
       { nome: 'imei', descricao: 'IMEI' },
       { nome: 'custo', descricao: 'custo de aquisição' },
       { nome: 'condicao', descricao: 'novo | seminovo | usado' },
+      { nome: 'observacoes', descricao: 'observação do aparelho (opcional)' },
     ],
     exemplos: [
       '"cadastra um iphone 12 128gb preto por 1800" -> {"marca":"Apple","modelo":"iPhone 12","capacidade":"128gb","cor":"preto","preco":1800}',
@@ -206,7 +207,7 @@ export const capabilitiesEstoque: Capability[] = [
         status: 'disponivel',
         ativo: true,
         dataCadastro: new Date().toISOString(),
-        observacoes: `Cadastrado via WhatsApp por ${ctx.pushName}`,
+        observacoes: texto(params, 'observacoes', 'observacao', 'obs') || null,
       };
 
       // estoque-guard: auditado
@@ -321,7 +322,6 @@ export const capabilitiesEstoque: Capability[] = [
           `ID: ${codigoEtiqueta}`,
           item.bateria ? `Bateria: ${item.bateria}` : '',
           item.imei ? `IMEI: ${item.imei}` : '',
-          `Entrada via WhatsApp por ${ctx.pushName}`,
         ].filter(Boolean);
 
         const dataItemIso = item.dataEntrada || dataEntradaTexto;
@@ -346,7 +346,7 @@ export const capabilitiesEstoque: Capability[] = [
           ativo: true,
           codigo: codigoEtiqueta,
           dataCadastro: dataCadastroRegistro,
-          observacoes: obsPartes.join(' | '),
+          observacoes: obsPartes.length > 0 ? obsPartes.join(' | ') : null,
         });
       }
 
